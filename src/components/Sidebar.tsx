@@ -1,4 +1,5 @@
-import { Session } from '../../store/sessionsSlice';
+import logodark from '../../public/logodark.png';
+import logolight from '../../public/logolight.png';
 import React, { useEffect, useState } from 'react';
 import { FaTumblrSquare, FaBlog, FaUserCircle } from 'react-icons/fa';
 import { FaTrashAlt, FaEdit } from 'react-icons/fa';
@@ -57,14 +58,20 @@ const Sidebar: React.FC<SidebarProps> = ({ darkmode, onToggleTheme }) => {
     >
       <div className='flex  flex-col gap-[16px] sideContainer w-full'>
         <div className='flex items-center gap-3 '>
-          <img
-            src={`${
-              darkmode
-                ? 'https://chat.rc.nbox.ai/NimbleBox.svg'
-                : 'https://chat.nbox.ai/NimbleBox-light.svg'
-            }`}
-            alt=''
-          />
+          {darkmode ? (
+            <Image
+              src={logodark}
+              className='w-[30px] h-[30px] rounded-[120px]'
+              alt=''
+            />
+          ) : (
+            <Image
+              src={logolight}
+              className='w-[30px] h-[30px] rounded-[120px]'
+              alt=''
+            />
+          )}
+          DEV.chat
         </div>
         <div
           onClick={newSession}
@@ -81,7 +88,7 @@ const Sidebar: React.FC<SidebarProps> = ({ darkmode, onToggleTheme }) => {
           `}
           />
         </div>
-        <div className='flex flex-col gap-2 '>
+        <div className='flex flex-col overflow-y-scroll max-h-[calc(90vh-200px)] gap-2 '>
           {sessionList?.map((session: any) => (
             <div
               className='p-3 rounded-lg bg-white dark:bg-purple-900 shadow-md cursor-pointer '
