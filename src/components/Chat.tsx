@@ -9,6 +9,7 @@ import { v4 } from 'uuid';
 import ModelSelect from './ModelSelect';
 import { useChat, useSessions } from '../../store/hooks/hook';
 import axios from 'axios';
+import { sessionId } from '../app/page';
 
 export type MessageType = {
   id: string;
@@ -192,7 +193,6 @@ const ChatMessages = ({
   const theme = useSelector((state: any) => state.theme);
   const { saveChatMessage } = useSessions();
   const { messages, clearChatMessages } = useChat();
-  const sessionId = localStorage.getItem('sessionId');
 
   useEffect(() => {
     if (sessionId && messages) {

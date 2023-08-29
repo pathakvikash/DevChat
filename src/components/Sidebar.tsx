@@ -7,6 +7,7 @@ import Image from 'next/image';
 import { v4 } from 'uuid';
 import { useDispatch, useSelector } from 'react-redux';
 import { useChat, useSessions } from '../../store/hooks/hook';
+import { sessionId } from '../app/page';
 
 type SidebarProps = {
   darkmode: boolean;
@@ -15,7 +16,7 @@ type SidebarProps = {
 
 const Sidebar: React.FC<SidebarProps> = ({ darkmode, onToggleTheme }) => {
   const dispatch = useDispatch();
-  const sessionId = localStorage?.getItem('sessionId') as string;
+
   const { addChatSession, saveChatMessage, deleteChatSession, sessions } =
     useSessions();
   const messages = useSelector((state: any) => state.root.chat.messages);

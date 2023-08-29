@@ -33,7 +33,6 @@ export const useChat = () => {
 
   const clearChatMessages = () => {
     dispatch(clearChat());
-    console.log('clear');
   };
 
   return {

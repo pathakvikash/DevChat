@@ -18,6 +18,11 @@ export type SessionType = {
   messages: MessageType[];
 };
 
+export const sessionId =
+  typeof window !== 'undefined'
+    ? window.localStorage.getItem('sessionId')
+    : null;
+
 const Home = () => {
   const theme = useSelector((state: any) => state.theme);
   const dispatch = useDispatch();
@@ -26,13 +31,12 @@ const Home = () => {
     dispatch(setTheme(newTheme));
   };
   useEffect(() => {
-    const sessionId = localStorage.getItem('sessionId');
     if (sessionId) {
       dispatch(setCurrentSession(sessionId));
     } else {
       const newId = v4();
       dispatch(addSession({ id: newId, messages: [], name: 'New Chat' }));
-      localStorage.setItem('sessionId', newId);
+      window.localStorage.setItem('sessionId', newId);
     }
   }, []);
   return (
