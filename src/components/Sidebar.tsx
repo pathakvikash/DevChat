@@ -1,13 +1,11 @@
-// Sidebar.tsx
+import { Session } from '../../store/sessionsSlice';
 import React, { useEffect, useState } from 'react';
 import { FaTumblrSquare, FaBlog, FaUserCircle } from 'react-icons/fa';
 import { FaTrashAlt, FaEdit } from 'react-icons/fa';
 import Image from 'next/image';
-import SessionList from './SessionList';
 import { v4 } from 'uuid';
-import { addSession, setCurrentSession } from '../../store/sessionsSlice';
 import { useDispatch, useSelector } from 'react-redux';
-import internal from 'stream';
+import { useChat, useSessions } from '../../store/hooks/hook';
 
 type SidebarProps = {
   darkmode: boolean;
@@ -15,36 +13,40 @@ type SidebarProps = {
 };
 
 const Sidebar: React.FC<SidebarProps> = ({ darkmode, onToggleTheme }) => {
-  const sessionId = localStorage.getItem('sessionId');
-  const chatSessions = localStorage.getItem(`${sessionId}`);
   const dispatch = useDispatch();
+  const sessionId = localStorage?.getItem('sessionId') as string;
+  const { addChatSession, saveChatMessage, deleteChatSession, sessions } =
+    useSessions();
+  const messages = useSelector((state: any) => state.root.chat.messages);
+  const sessionList = Object.values(sessions).map((session: any) => ({
+    id: session.id,
+    name: session.name,
+  }));
 
-  function newSession() {
+  const newSession = () => {
     const newSessionId = v4();
-    dispatch(
-      addSession({
-        sessions: {
-          id: newSessionId?.valueOf(),
-          messages: [],
-          name: 'New Chat',
-        },
-      })
-    );
-    dispatch(setCurrentSession(sessionId));
+
+    addChatSession({
+      id: newSessionId,
+      messages: [],
+      name: 'New Chat',
+    });
+
     localStorage.setItem('sessionId', newSessionId);
-  }
-  useEffect(() => {}, [sessionId?.valueOf()]);
+  };
 
-  const allSessions = useSelector(
-    (state: any) => state.root.sessions?.sessions
-  );
-  const mappedSessions = allSessions.map((session: any) => {
-    return {
-      id: session.sessions.id,
-      name: session.sessions.name,
-    };
-  });
+  useEffect(() => {
+    newSession();
+    if (sessionId) {
+      saveChatMessage(sessionId, messages);
+    } else {
+      localStorage.setItem('sessionId', v4());
+    }
+  }, []);
 
+  const handleDeleteSession = (sessionId: string) => {
+    deleteChatSession(sessionId);
+  };
   return (
     <div
       className={`sidebar overflow-visible  justify-between p-[8px] w-[250px] flex flex-col ${
@@ -79,14 +81,23 @@ const Sidebar: React.FC<SidebarProps> = ({ darkmode, onToggleTheme }) => {
           `}
           />
         </div>
-        <SessionList />
         <div className='flex flex-col gap-2 '>
-          {mappedSessions?.map((session: any) => (
+          {sessionList?.map((session: any) => (
             <div
-              className='p-3 rounded-lg bg-white shadow-md cursor-pointer '
+              className='p-3 rounded-lg bg-white dark:bg-purple-900 shadow-md cursor-pointer '
               key={session.id}
             >
-              {session.name}
+              <div className='flex justify-between items-center'>
+                <div className='flex-col'>
+                  <p className=''>ID: {session.id.split('-')[0]}</p>
+                </div>
+                <div className='delete'>
+                  <FaTrashAlt
+                    onClick={() => handleDeleteSession(session.id)}
+                    className='cursor-pointer text-gray-500 hover:text-red-500 transition-colors'
+                  />
+                </div>
+              </div>
             </div>
           ))}
         </div>

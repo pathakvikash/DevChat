@@ -1,14 +1,13 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, use, useRef } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
-import { addMessage } from '../../store/chatSlice';
+import { addMessage, deleteMessage, editMessage } from '../../store/chatSlice';
 import { FaUserAstronaut, FaTrash, FaEdit, FaCopy } from 'react-icons/fa';
 import { AiOutlineSend } from 'react-icons/ai';
 import { CgBot } from 'react-icons/cg';
 import { MdDeleteForever } from 'react-icons/md';
 import { v4 } from 'uuid';
-import { SessionType } from '../app/page';
 import ModelSelect from './ModelSelect';
-import { saveMessage } from '../../store/sessionsSlice';
+import { useChat, useSessions } from '../../store/hooks/hook';
 
 export type MessageType = {
   id: string;
@@ -23,103 +22,75 @@ const models = [
 ];
 
 const Chat = () => {
-  const [chat, setChat] = useState('');
-  const dispatch = useDispatch();
   const [showChatInput, setShowChatInput] = useState(true);
+  const dispatch = useDispatch();
   const theme = useSelector((state: any) => state.theme);
-  const currentSessionId = useSelector(
-    (state: any) => state.root.sessions.sessions.currentSessionId
-  );
-  const sessionId: any = localStorage.getItem('sessionId')?.valueOf();
-  const currentSession = useSelector((state: any) =>
-    state.root.sessions.sessions.find(
-      (session: any) => session.id === currentSessionId
-    )
-  );
+  const [chat, setChat] = useState('');
+  const [selectedModel, setSelectedModel] = useState(models[0]);
+  const { addChatMessage } = useChat();
+  const [botResponded, setBotResponded] = useState(false); // Track bot response
 
-  const sessionData = useSelector((state: any) => {
-    const chat = state.root.chat;
-    return chat ? chat.messages : [];
-  });
-
-  const updateSession = (session: SessionType) => {
-    if (sessionId) {
-      localStorage.setItem(
-        sessionId,
-        JSON.stringify(session) || (session as any)
-      );
-    }
-  };
-
-  const [messages, setMessages] = useState<MessageType[]>(sessionData);
-  const handleAddMessage = (role: 'user' | 'bot', message: string) => {
-    if (currentSession && currentSession.sessions.messages) {
-      const newMessage: MessageType = {
+  const handleSendMessage = (role: 'user' | 'bot', message: string) => {
+    if (message.trim() !== '') {
+      addChatMessage({
         id: v4(),
         role,
         message,
-      };
-
-      const updatedSession = {
-        ...currentSession,
-        messages: [...currentSession.sessions.messages, newMessage],
-      };
-
-      updateSession(updatedSession);
-      setMessages(updatedSession.messages);
-      dispatch(addMessage(newMessage));
-      dispatch(saveMessage({ sessionId, newMessage }));
-    }
-  };
-
-  const handleSubmit = () => {
-    if (chat.trim() !== '') {
-      handleAddMessage('user', chat);
-      setTimeout(() => {
-        handleAddMessage('bot', `Bot: ${chat}`);
-      }, 1000);
-
+      });
       setChat('');
     }
   };
+
+  useEffect(() => {
+    const greetMessages = ['Hello!', 'Hi there!', 'Welcome!', 'Greetings!'];
+    const helpMessage = ['help', 'kill', 'love', 'assist'];
+    const funnyJokes = [
+      "Why don't scientists trust atoms? Because they make up everything!",
+      "Why don't skeletons fight each other? They don't have the guts!",
+      'Why did the scarecrow win an award? Because he was outstanding in his field!',
+      'Why did the bicycle fall over? Because it was two-tired!',
+      "Why couldn't the leopard play hide and seek? Because he was always spotted!",
+      'Why did the tomato turn red? Because it saw the salad dressing!',
+      'Why did the golfer bring two pairs of pants? In case he got a hole in one!',
+      'Why did the math book look sad? Because it had too many problems!',
+      "Why don't some couples go to the gym? Because some relationships don't work out!",
+    ];
+
+    const randomGreet =
+      greetMessages[Math.floor(Math.random() * greetMessages.length)];
+    const randomHelp =
+      helpMessage[Math.floor(Math.random() * helpMessage.length)];
+    const randomJoke =
+      funnyJokes[Math.floor(Math.random() * funnyJokes.length)];
+
+    if (chat === '') {
+      setTimeout(() => {
+        const botMessage = `${randomGreet} I'm the bot. How can I ${randomHelp} you?`;
+
+        if (Math.random() < 0.5) {
+          handleSendMessage('bot', botMessage);
+        } else {
+          handleSendMessage('bot', `Here's a joke for you: ${randomJoke}`);
+        }
+      }, 1000);
+    }
+  }, [chat]);
 
   const handleActionMessage = (
     messageId: string,
     action: 'delete' | 'edit',
     editedMessage?: string
   ) => {
-    const sessionData = localStorage.getItem(sessionId);
-    if (sessionData) {
-      const session: SessionType = JSON.parse(sessionData);
-      const updatedMessages = session.messages.filter(
-        (message) => message.id !== messageId
-      );
-
-      if (action === 'edit' && editedMessage) {
-        session.messages = session.messages.map((message) =>
-          message.id === messageId
-            ? { ...message, message: editedMessage }
-            : message
-        );
-      }
-
-      session.messages = updatedMessages;
-      updateSession(session);
-      setMessages([...session.messages]);
+    if (action === 'delete') {
+      dispatch(deleteMessage(messageId));
+    }
+    if (action === 'edit') {
     }
   };
 
-  useEffect(() => {
-    const sessionData = localStorage.getItem(sessionId);
-    if (sessionData) {
-      const session: SessionType = JSON.parse(sessionData);
-      setMessages(session.messages);
-    }
-  }, [sessionId]);
-
   return (
     <div
-      className={`frame ${theme} flex text-black justify-between flex-col w-full p-6`}
+      className={`frame ${theme} flex text-black dark:bg-black justify-between flex-col w-full p-6`}
     >
       <div>
         <div className='flex justify-center mt-4'>
@@ -135,10 +106,7 @@ const Chat = () => {
             theme === 'dark' ? 'bg-[#282828]' : 'bg-[white]'
           } rounded-[6px] p-[8px]`}
         >
-          <ChatMessages
-            // messages={messages}
-            handleActionMessage={handleActionMessage}
-          />
+          <ChatMessages handleActionMessage={handleActionMessage} />
         </div>
       </div>
       {showChatInput && (
@@ -163,13 +131,18 @@ const Chat = () => {
               value={chat}
               onKeyPress={(e) => {
                 if (e.key === 'Enter') {
-                  handleSubmit();
+                  handleSendMessage('user', chat);
                 }
               }}
             />
-
-            <div className='absolute right-[10px]' onClick={handleSubmit}>
-              <AiOutlineSend />
+            <div
+              className='absolute right-[10px]'
+              onClick={() => handleSendMessage('user', chat)}
+            >
+              <AiOutlineSend
+                size={20}
+                className={`${theme === 'dark' ? 'text-white' : 'text-black'}`}
+              />
             </div>
           </div>
         </div>
@@ -189,18 +162,28 @@ const ChatMessages = ({
   ) => void;
 }) => {
   const theme = useSelector((state: any) => state.theme);
-  const messages = useSelector((state: any) => {
-    const chat = state.root.chat;
-    return chat ? chat.messages : [];
-  });
+  const { saveChatMessage } = useSessions();
+  const { messages, clearChatMessages } = useChat();
+  const sessionId = localStorage.getItem('sessionId');
 
+  useEffect(() => {
+    if (sessionId && messages) {
+      saveChatMessage(sessionId, messages);
+    }
+  }, [messages, sessionId]);
+
+  const messagesList = Object.values(messages).map((message: any) => ({
+    id: message.id,
+    role: message.role,
+    message: message.message,
+  }));
   return (
     <div className={`chat-messages`}>
-      {messages.length > 0 ? (
-        messages.map((message: MessageType) => (
+      {messages ? (
+        messagesList.map((message: MessageType) => (
           <div
             key={message.id}
-            className={`message p-[8px] mt-[12px] rounded-[6px] ${
+            className={`message p-[8px] justify-between mt-[12px] rounded-[6px] ${
               message.role
             } ${
               theme === 'dark' ? 'bg-[#2E2E2E]' : 'bg-[#dee1ea]'
@@ -210,31 +193,19 @@ const ChatMessages = ({
               animation: 'fadeInUp 0.5s ease-in-out',
             }}
           >
-            {message.role === 'user' ? (
-              <div className='user-message flex items-center'>
+            <div className={`${message.role}-message gap-3 flex items-center`}>
+              {message.role === 'user' ? (
                 <FaUserAstronaut size={24} />
-                <div className='message-text'>{message.message}</div>
-                <div className='message-actions'>
-                  <MdDeleteForever
-                    onClick={() => handleActionMessage(message.id, 'delete')}
-                    size={20}
-                  />
-                </div>
-              </div>
-            ) : (
-              <div>
-                <div className='bot-message flex items-center'>
-                  <CgBot size={24} />
-                  <div className='message-text'>{message.message}</div>
-                  <div className='message-actions'>
-                    <MdDeleteForever
-                      onClick={() => handleActionMessage(message.id, 'delete')}
-                      size={20}
-                    />
-                  </div>
-                </div>
-              </div>
-            )}
+              ) : (
+                <CgBot size={24} />
+              )}
+              <div className='message-text'>{message.message}</div>
+              <div className='message-actions'></div>
+            </div>
+            <MdDeleteForever
+              onClick={() => handleActionMessage(message.id, 'delete')}
+              size={20}
+            />
           </div>
         ))
       ) : (
@@ -258,6 +229,14 @@ const ChatMessages = ({
 
         .bot-message {
           justify-content: flex-end;
+        }
+
+        .flex.items-center > *:not(:last-child) {
+          margin-right: 8px;
+        }
+
+        .message-actions {
+          margin-left: auto;
         }
       `}</style>
     </div>

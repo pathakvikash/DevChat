@@ -7,11 +7,11 @@ export type MessageType = {
 };
 
 interface ChatState {
-  messages: MessageType[];
+  messages: Record<string, MessageType>;
 }
 
 const initialState: ChatState = {
-  messages: [],
+  messages: {},
 };
 
 const chatSlice = createSlice({
@@ -19,26 +19,27 @@ const chatSlice = createSlice({
   initialState,
   reducers: {
     addMessage: (state, action: PayloadAction<MessageType>) => {
-      state.messages.push(action.payload);
+      state.messages[action.payload.id] = action.payload;
     },
     deleteMessage: (state, action: PayloadAction<string>) => {
-      state.messages = state.messages.filter(
-        (message) => message.id !== action.payload
-      );
+      delete state.messages[action.payload];
+    },
+    clearChat: (state) => {
+      state.messages = {};
     },
     editMessage: (
       state,
       action: PayloadAction<{ id: string; editedMessage: string }>
     ) => {
       const { id, editedMessage } = action.payload;
-      const message = state.messages.find((message) => message.id === id);
-      if (message) {
-        message.message = editedMessage;
+      if (state.messages[id]) {
+        state.messages[id].message = editedMessage;
       }
     },
   },
 });
 
-export const { addMessage, deleteMessage, editMessage } = chatSlice.actions;
+export const { addMessage, deleteMessage, editMessage, clearChat } =
+  chatSlice.actions;
 
 export default chatSlice.reducer;

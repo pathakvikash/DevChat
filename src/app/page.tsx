@@ -25,43 +25,16 @@ const Home = () => {
     const newTheme = theme === 'light' ? 'dark' : 'light';
     dispatch(setTheme(newTheme));
   };
-
-  const sessionId = localStorage.getItem('sessionId');
-  const currentMsgs = useSelector((state: any) => state.root.chat.messages);
-
-  function helper() {
+  useEffect(() => {
+    const sessionId = localStorage.getItem('sessionId');
     if (sessionId) {
-      dispatch(
-        addSession({
-          sessions: {
-            id: sessionId?.valueOf(),
-            messages: currentMsgs || [],
-            name: 'New Chat',
-          },
-        })
-      );
       dispatch(setCurrentSession(sessionId));
     } else {
-      const newSessionId = v4();
-      localStorage.setItem('sessionId', newSessionId);
-      if (newSessionId) {
-        dispatch(
-          addSession({
-            sessions: {
-              id: newSessionId?.valueOf(),
-              messages: [],
-              name: 'New Chat',
-            },
-          })
-        );
-        dispatch(setCurrentSession(newSessionId?.valueOf()));
-      }
+      const newId = v4();
+      dispatch(addSession({ id: newId, messages: [], name: 'New Chat' }));
+      localStorage.setItem('sessionId', newId);
     }
-  }
-  useEffect(() => {
-    helper();
   }, []);
-
   return (
     <div className={`${theme} flex h-[100vh] `}>
       <Sidebar darkmode={theme === 'dark'} onToggleTheme={toggleTheme} />{' '}
