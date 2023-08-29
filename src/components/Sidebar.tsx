@@ -7,7 +7,7 @@ import Image from 'next/image';
 import { v4 } from 'uuid';
 import { useDispatch, useSelector } from 'react-redux';
 import { useChat, useSessions } from '../../store/hooks/hook';
-import { sessionId } from '../app/page';
+import { sessionId } from '../utils/localstorage';
 
 type SidebarProps = {
   darkmode: boolean;

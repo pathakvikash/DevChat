@@ -12,16 +12,12 @@ import {
   addSession,
   clearCurrentSession,
 } from '../../store/sessionsSlice';
+import { sessionId } from '../utils/localstorage';
 
 export type SessionType = {
   id: string;
   messages: MessageType[];
 };
-
-export const sessionId =
-  typeof window !== 'undefined'
-    ? window.localStorage.getItem('sessionId')
-    : null;
 
 const Home = () => {
   const theme = useSelector((state: any) => state.theme);

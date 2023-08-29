@@ -9,7 +9,7 @@ import { v4 } from 'uuid';
 import ModelSelect from './ModelSelect';
 import { useChat, useSessions } from '../../store/hooks/hook';
 import axios from 'axios';
-import { sessionId } from '../app/page';
+import { sessionId } from '../utils/localstorage';
 
 export type MessageType = {
   id: string;
