@@ -8,6 +8,7 @@ import { MdDeleteForever } from 'react-icons/md';
 import { v4 } from 'uuid';
 import ModelSelect from './ModelSelect';
 import { useChat, useSessions } from '../../store/hooks/hook';
+import axios from 'axios';
 
 export type MessageType = {
   id: string;
@@ -28,9 +29,13 @@ const Chat = () => {
   const [chat, setChat] = useState('');
   const [selectedModel, setSelectedModel] = useState(models[0]);
   const { addChatMessage } = useChat();
-  const [botResponded, setBotResponded] = useState(false); // Track bot response
+  const [showPrompt, setShowPrompt] = useState(false);
+  const prompts = [
+    'create a landing page for a new business',
+    'write a blog post',
+  ];
 
-  const handleSendMessage = (role: 'user' | 'bot', message: string) => {
+  const handleSendMessage = async (role: 'user' | 'bot', message: string) => {
     if (message.trim() !== '') {
       addChatMessage({
         id: v4(),
@@ -38,12 +43,27 @@ const Chat = () => {
         message,
       });
       setChat('');
+
+      try {
+        const response = await axios.post(
+          'http://localhost:5000/api/chat/completions' ||
+            `${process.env.BASEURL}`,
+          {
+            message,
+          }
+        );
+        // Handle the response
+        console.log(response.data.message);
+      } catch (error) {
+        // Handle errors
+        console.error(error);
+      }
     }
   };
 
   useEffect(() => {
     const greetMessages = ['Hello!', 'Hi there!', 'Welcome!', 'Greetings!'];
-    const helpMessage = ['help', 'kill', 'love', 'assist'];
+    const helpMessage = ['help', 'kill', 'teach', 'assist'];
     const funnyJokes = [
       "Why don't scientists trust atoms? Because they make up everything!",
       "Why don't skeletons fight each other? They don't have the guts!",
@@ -96,16 +116,24 @@ const Chat = () => {
         <div className='flex justify-center mt-4'>
           <button
             className='toggleChatInput'
-            onClick={() => setShowChatInput(!showChatInput)}
+            onClick={() => setShowPrompt(!showPrompt)}
           >
-            {showChatInput ? 'Hide Chat Input' : 'Show Chat Input'}
+            {showPrompt ? 'Hide Prompts' : 'Show Prompts'}
           </button>
         </div>
         <div
-          className={`w-full ${
+          className={`w-full flex flex-col items-center ${
             theme === 'dark' ? 'bg-[#282828]' : 'bg-[white]'
           } rounded-[6px] p-[8px]`}
         >
+          {showPrompt && (
+            <div className='flex justify-center mt-4 w-[50%] items-center border-[1px] border-[#5299cc] rounded-md h-9 '>
+              <p className='text-[12px] cursor-pointer'>
+                {prompts[Math.floor(Math.random() * prompts.length)]}
+              </p>
+            </div>
+          )}
+
           <ChatMessages handleActionMessage={handleActionMessage} />
         </div>
       </div>
@@ -178,7 +206,7 @@ const ChatMessages = ({
     message: message.message,
   }));
   return (
-    <div className={`chat-messages`}>
+    <div className='chat-messages overflow-y-scroll max-h-[calc(100vh-200px)] w-full'>
       {messages ? (
         messagesList.map((message: MessageType) => (
           <div
