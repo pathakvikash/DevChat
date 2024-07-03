@@ -59,8 +59,10 @@ const ModelSelect: React.FC = () => {
       <div className={`modelSelection flex `} onClick={toggleModelDialog}>
         <p>
           Models:{' '}
-          {selectedModel &&
-            models.find((model) => model.id === selectedModel)?.name}
+          <div className='dark:bg-[#3f4a6b] rounded-md px-1 flex'>
+            {selectedModel &&
+              models.find((model) => model.id === selectedModel)?.name}
+          </div>
         </p>
       </div>
     </div>
