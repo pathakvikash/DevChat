@@ -23,7 +23,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
       <div className='text-lg font-bold mb-4 hidden md:block'>
         Chat Area {currentSessionId && `- Session ${currentSessionId}`}
       </div>
-      <div className='flex flex-col overflow-y-auto flex-grow'>
+      <div className='flex flex-col overflow-y-auto sm:mt-12 md:mt-6 mt-16 flex-grow'>
         {currentSessionId &&
           sessions[currentSessionId - 1]?.messages.map((message) => (
             <div
