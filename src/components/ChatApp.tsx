@@ -50,7 +50,7 @@ const ChatApp: React.FC = () => {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: process.env.NEXT_PUBLIC_TUNE || '',
+          Authorization: process.env.NEXT_PRIVATE_TUNE || '',
         },
         body: JSON.stringify({
           temperature: 0.8,
