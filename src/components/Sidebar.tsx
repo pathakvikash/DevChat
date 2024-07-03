@@ -1,114 +1,52 @@
-// Sidebar.tsx
-import React, { useEffect, useState } from 'react';
-import { FaTumblrSquare, FaBlog, FaUserCircle } from 'react-icons/fa';
-import { FaTrashAlt, FaEdit } from 'react-icons/fa';
-import Image from 'next/image';
-import SessionList from './SessionList';
-import { v4 } from 'uuid';
-import { addSession, setCurrentSession } from '../../store/sessionsSlice';
-import { useDispatch, useSelector } from 'react-redux';
-import internal from 'stream';
+import { Session } from '../store/slice/chatSlice';
+import DeleteSvg from './svgComp/DeleteSvg';
+interface SidebarProps {
+  sessions: Session[];
+  currentSessionId: number | null;
+  handleSelectSession: (sessionId: number) => void;
+  handleDeleteSession: (sessionId: number) => void;
+  sidebarOpen: boolean;
+}
 
-type SidebarProps = {
-  darkmode: boolean;
-  onToggleTheme: () => void;
-};
-
-const Sidebar: React.FC<SidebarProps> = ({ darkmode, onToggleTheme }) => {
-  const sessionId = localStorage.getItem('sessionId');
-  const chatSessions = localStorage.getItem(`${sessionId}`);
-  const dispatch = useDispatch();
-
-  function newSession() {
-    const newSessionId = v4();
-    dispatch(
-      addSession({
-        sessions: {
-          id: newSessionId?.valueOf(),
-          messages: [],
-          name: 'New Chat',
-        },
-      })
-    );
-    dispatch(setCurrentSession(sessionId));
-    localStorage.setItem('sessionId', newSessionId);
-  }
-  useEffect(() => {}, [sessionId?.valueOf()]);
-
-  const allSessions = useSelector(
-    (state: any) => state.root.sessions?.sessions
-  );
-  const mappedSessions = allSessions.map((session: any) => {
-    return {
-      id: session.sessions.id,
-      name: session.sessions.name,
-    };
-  });
-
+const Sidebar: React.FC<SidebarProps> = ({
+  sessions,
+  currentSessionId,
+  handleSelectSession,
+  handleDeleteSession,
+  sidebarOpen,
+}) => {
   return (
     <div
-      className={`sidebar overflow-visible  justify-between p-[8px] w-[250px] flex flex-col ${
-        darkmode
-          ? 'bg-black text-white'
-          : 'bg-white-dark border-1 shadow-md border-x-slate-700'
-      }`}
+      className={`bg-gray-800 sm:fixed md:relative fixed sm:w-1/3 w-[250px] h-screen text-white md:w-1/5 p-4
+      `}
     >
-      <div className='flex  flex-col gap-[16px] sideContainer w-full'>
-        <div className='flex items-center gap-3 '>
-          <img
-            src={`${
-              darkmode
-                ? 'https://chat.rc.nbox.ai/NimbleBox.svg'
-                : 'https://chat.nbox.ai/NimbleBox-light.svg'
-            }`}
-            alt=''
-          />
-        </div>
-        <div
-          onClick={newSession}
-          className='px-[12px] h-[32px] items-center border-[black] rounded-[6px] gap-[6px] border-1 flex bg-[#6025E1] text-white w-full cursor-pointer'
-        >
-          <div>+</div>
-          <button>New Chat</button>
-        </div>
-        <div className='flex mt-[20px] items-center justify-center gap-3 '>
+      <div className='p-4'>
+        <div className='flex mt-[20px] items-center justify-center gap-3 py-6'>
           <p className='text-[12px]'>RECENT CHATS</p>
-          <hr
-            className={`w-20
-          ${darkmode ? 'border-white' : 'border-black'}
-          `}
-          />
+          <hr className={`w-20 border border-white`} />
         </div>
-        <SessionList />
-        <div className='flex flex-col gap-2 '>
-          {mappedSessions?.map((session: any) => (
-            <div
-              className='p-3 rounded-lg bg-white shadow-md cursor-pointer '
-              key={session.id}
-            >
-              {session.name}
+        <div className={`flex flex-col ${sidebarOpen ? '' : 'hidden md:flex'}`}>
+          {sessions.map((session, index) => (
+            <div className='flex items-center' key={index}>
+              <button
+                key={session.id}
+                className={`text-white text-sm p-2 w-10/12 rounded justify-center items-center hover:bg-gray-700 ${
+                  session.id === currentSessionId ? 'bg-gray-700' : ''
+                }`}
+                onClick={() => handleSelectSession(session.id)}
+              >
+                {session.name}
+              </button>
+              {currentSessionId && (
+                <button
+                  className='text-white text-sm p-2 rounded hover:bg-gray-700'
+                  onClick={() => handleDeleteSession(currentSessionId)}
+                >
+                  <DeleteSvg />
+                </button>
+              )}
             </div>
           ))}
-        </div>
-      </div>
-
-      <div
-        className={`flex flex-col p-[6px] my-6 gap-[6px] items-start
-      ${darkmode ? 'bg-[#1D1D1D]' : ' text-black bg-[#F6F8FA]'}
-       border-neutral-700 rounded-[6px] `}
-      >
-        <div
-          onClick={onToggleTheme}
-          className='flex cursor-pointer items-center p-1 justify-center gap-2'
-        >
-          <button className='themeToggle'>{darkmode ? '🌙' : '☀️'}</button>
-          <p>Switch Theme</p>
-        </div>
-        <div className='flex items-center p-1 justify-center gap-2'>
-          <button className='logout' onClick={onToggleTheme}>
-            {darkmode ? <FaTumblrSquare /> : <FaUserCircle />}
-          </button>
-          <p>{darkmode ? 'Logout' : 'Login'}</p>
         </div>
       </div>
     </div>

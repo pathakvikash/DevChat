@@ -1,6 +1,6 @@
 import React, { useState, useCallback } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
-import { setTheme } from '../../store/themeSlice';
+import { setTheme } from '../store/slice/themeSlice';
 
 export function useTheme() {
   const theme = useSelector((state) => state.theme);
@@ -11,7 +11,6 @@ export function useTheme() {
     dispatch(setTheme(newTheme));
   }, [theme]);
 
-  // return theme and toggleTheme as an object
   return { theme, toggleTheme };
 }
 

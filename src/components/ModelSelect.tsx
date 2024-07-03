@@ -1,16 +1,17 @@
 'use client';
 import { useState } from 'react';
-import { PiToggleRightFill } from 'react-icons/pi';
 interface Model {
   id: number;
   name: string;
 }
 
-interface Props {
-  theme: 'dark' | 'light';
-  models: Model[];
-}
-const ModelSelect: React.FC<Props> = ({ theme, models }) => {
+const models: Model[] = [
+  { id: 1, name: 'Open AI' },
+  { id: 2, name: 'LLama' },
+  { id: 3, name: 'vicuna' },
+];
+
+const ModelSelect: React.FC = () => {
   const [selectedModel, setSelectedModel] = useState<number | undefined>(
     models[0]?.id
   );
@@ -18,20 +19,26 @@ const ModelSelect: React.FC<Props> = ({ theme, models }) => {
   const [show, setShow] = useState(false);
   const toggleModelDialog = () => {
     setShow(!show);
+    if (show) {
+      setSelectedModel(undefined);
+    }
   };
 
   return (
     <div className={`flex p-3 justify-between items-center flex-wrap`}>
       {show && (
-        <div className='flex dark:bg-black fixed flex-col cursor-pointer  items-start p-4 right-0 transform -translate-x-[12%] -translate-y-[60%] min-w-[200px] max-w-md bg-white rounded-lg shadow-lg mt-[-8px]'>
+        <div className='flex dark:bg-black fixed flex-col cursor-pointer  items-start p-4 right-0 transform -translate-x-[12%] -translate-y-[60%] min-w-[200px] max-w-md bg-gray-700 rounded-lg shadow-lg mt-[-8px]'>
           <p className=''>+ Add a Model</p>
           {models.map((model) => (
             <div
               key={model.id}
-              className={`flex items-center justify-between w-full py-1 hover:bg-gray-100 cursor-pointer ${
-                selectedModel === model.id ? 'bg-blue-200' : ''
+              className={`flex items-center justify-between w-full py-1 p-3 rounded-sm hover:bg-gray-600 cursor-pointer ${
+                selectedModel === model.id ? 'bg-blue-600' : ''
               }`}
-              onClick={() => setSelectedModel(model.id)}
+              onClick={() => {
+                setSelectedModel(model.id);
+                setShow(false);
+              }}
             >
               <p>{model.name}</p>
               {selectedModel === model.id && (
@@ -41,16 +48,15 @@ const ModelSelect: React.FC<Props> = ({ theme, models }) => {
           ))}
         </div>
       )}
-      <div className='web flex items-center gap-1'>
+      <div className='web flex items-center justify-center gap-1'>
         <p>Search Web</p>
-        <PiToggleRightFill />
+        <input
+          type='radio'
+          name='web'
+          className='w-4 h-4 hover:cursor-pointer'
+        />
       </div>
-      <div
-        className={`modelSelection flex ${
-          theme === 'dark' ? 'text-white bg-[#232323]' : 'bg-[#dee1ea]'
-        }`}
-        onClick={toggleModelDialog}
-      >
+      <div className={`modelSelection flex `} onClick={toggleModelDialog}>
         <p>
           Models:{' '}
           {selectedModel &&
