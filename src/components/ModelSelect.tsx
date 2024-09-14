@@ -3,12 +3,18 @@ import { useState } from 'react';
 
 interface ModelSelectProps {
   setSelectedTag: React.Dispatch<React.SetStateAction<string>>;
-  tags: { name: string; [key: string]: any }[];
+  tags: (string | { [key: string]: any; name: string })[];
   selectedTag: string;
 }
 
-const ModelSelect: React.FC<ModelSelectProps> = ({ setSelectedTag, tags, selectedTag }) => {
-  const [selectedModel, setSelectedModel] = useState<string | undefined>(selectedTag);
+const ModelSelect: React.FC<ModelSelectProps> = ({
+  setSelectedTag,
+  tags,
+  selectedTag,
+}) => {
+  const [selectedModel, setSelectedModel] = useState<string | undefined>(
+    selectedTag
+  );
   const [show, setShow] = useState(false);
   const [isWebSearch, setIsWebSearch] = useState(false);
 
@@ -28,10 +34,10 @@ const ModelSelect: React.FC<ModelSelectProps> = ({ setSelectedTag, tags, selecte
   };
 
   return (
-    <div className="flex p-3 justify-between items-center flex-wrap">
+    <div className='flex p-3 justify-between items-center flex-wrap'>
       {show && (
-        <div className="flex dark:bg-black fixed flex-col cursor-pointer items-start p-4 right-0 transform -translate-x-[12%] -translate-y-[60%] min-w-[200px] max-w-md bg-gray-700 rounded-lg shadow-lg mt-[-8px] z-10">
-          <p className="">+ Add a Model</p>
+        <div className='flex dark:bg-black fixed flex-col cursor-pointer items-start p-4 right-0 transform -translate-x-[12%] -translate-y-[60%] min-w-[200px] max-w-md bg-gray-700 rounded-lg shadow-lg mt-[-8px] z-10'>
+          <p className=''>+ Add a Model</p>
           {tags.map((model: any) => (
             <div
               key={model.name}
@@ -42,24 +48,24 @@ const ModelSelect: React.FC<ModelSelectProps> = ({ setSelectedTag, tags, selecte
             >
               <p>{model.name}</p>
               {selectedModel === model.name && (
-                <span className="text-green-500">&#10003;</span>
+                <span className='text-green-500'>&#10003;</span>
               )}
             </div>
           ))}
         </div>
       )}
-      <div className="web flex items-center justify-center gap-1">
+      <div className='web flex items-center justify-center gap-1'>
         <p>Search Web</p>
         <input
-          type="checkbox"
+          type='checkbox'
           checked={isWebSearch}
           onChange={toggleWebSearch}
-          className="w-4 h-4 hover:cursor-pointer"
+          className='w-4 h-4 hover:cursor-pointer'
         />
       </div>
-      <div className="modelSelection flex" onClick={toggleModelDialog}>
+      <div className='modelSelection flex' onClick={toggleModelDialog}>
         Models:{' '}
-        <div className="dark:bg-[#3f4a6b] rounded-md px-1 flex ml-2">
+        <div className='dark:bg-[#3f4a6b] rounded-md px-1 flex ml-2'>
           {selectedModel || 'Select a model'}
         </div>
       </div>
