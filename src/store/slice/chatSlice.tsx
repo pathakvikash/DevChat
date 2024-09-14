@@ -5,6 +5,7 @@ interface Message {
   id: number;
   text: string;
   sender: string;
+  isComplete: boolean;
 }
 
 export interface Session {
@@ -57,6 +58,22 @@ const chatSlice = createSlice({
     setCurrentSessionId: (state, action: PayloadAction<number | null>) => {
       state.currentSessionId = action.payload;
     },
+    updateLastMessage: (
+      state,
+      action: PayloadAction<{ sessionId: number; text?: string; isComplete: boolean }>
+    ) => {
+      const { sessionId, text, isComplete } = action.payload;
+      const session = state.sessions.find((s) => s.id === sessionId);
+      if (session) {
+        const lastMessage = session.messages[session.messages.length - 1];
+        if (lastMessage && lastMessage.sender === 'server') {
+          if (text !== undefined) {
+            lastMessage.text = text;
+          }
+          lastMessage.isComplete = isComplete;
+        }
+      }
+    },
   },
 });
 
@@ -65,6 +82,7 @@ export const {
   deleteSession,
   sendMessage,
   setCurrentSessionId,
+  updateLastMessage,
 } = chatSlice.actions;
 
 export const selectSessions = (state: RootState) => state.chat.sessions;
