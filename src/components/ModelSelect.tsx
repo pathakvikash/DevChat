@@ -4,17 +4,13 @@ import { useState } from 'react';
 interface ModelSelectProps {
   setSelectedTag: React.Dispatch<React.SetStateAction<string>>;
   tags: (string | { [key: string]: any; name: string })[];
-  selectedTag: string;
 }
 
 const ModelSelect: React.FC<ModelSelectProps> = ({
   setSelectedTag,
   tags,
-  selectedTag,
 }) => {
-  const [selectedModel, setSelectedModel] = useState<string | undefined>(
-    selectedTag
-  );
+  const [selectedModel, setSelectedModel] = useState<string>('');
   const [show, setShow] = useState(false);
   const [isWebSearch, setIsWebSearch] = useState(false);
 

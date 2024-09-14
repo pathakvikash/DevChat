@@ -53,6 +53,7 @@ const chatSlice = createSlice({
         id: newMessageId,
         text,
         sender: role,
+        isComplete: role === 'user',
       });
     },
     setCurrentSessionId: (state, action: PayloadAction<number | null>) => {
@@ -60,7 +61,11 @@ const chatSlice = createSlice({
     },
     updateLastMessage: (
       state,
-      action: PayloadAction<{ sessionId: number; text?: string; isComplete: boolean }>
+      action: PayloadAction<{
+        sessionId: number;
+        text?: string;
+        isComplete: boolean;
+      }>
     ) => {
       const { sessionId, text, isComplete } = action.payload;
       const session = state.sessions.find((s) => s.id === sessionId);
