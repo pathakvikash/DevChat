@@ -6,10 +6,7 @@ interface ModelSelectProps {
   tags: (string | { [key: string]: any; name: string })[];
 }
 
-const ModelSelect: React.FC<ModelSelectProps> = ({
-  setSelectedTag,
-  tags,
-}) => {
+const ModelSelect: React.FC<ModelSelectProps> = ({ setSelectedTag, tags }) => {
   const [selectedModel, setSelectedModel] = useState<string>('');
   const [show, setShow] = useState(false);
   const [isWebSearch, setIsWebSearch] = useState(false);
@@ -26,7 +23,7 @@ const ModelSelect: React.FC<ModelSelectProps> = ({
 
   const toggleWebSearch = () => {
     setIsWebSearch(!isWebSearch);
-    // Here you can add logic to handle web search activation
+    // logic to handle web search activation
   };
 
   return (

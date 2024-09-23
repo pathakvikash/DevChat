@@ -1,5 +1,7 @@
 import { Session } from '../store/slice/chatSlice';
 import DeleteSvg from './svgComp/DeleteSvg';
+import { ThemeToggle, useTheme } from './ThemeToggle';
+
 interface SidebarProps {
   sessions: Session[];
   currentSessionId: number | null;
@@ -15,10 +17,15 @@ const Sidebar: React.FC<SidebarProps> = ({
   handleDeleteSession,
   sidebarOpen,
 }) => {
+  const { theme } = useTheme();
+
   return (
     <div
-      className={`bg-gray-800 sm:fixed md:relative fixed sm:w-1/3 w-[250px] h-screen text-white md:w-1/5 p-4
-      `}
+      className={`bg-${theme}-800 flex flex-col justify-between sm:fixed md:relative fixed sm:w-1/3 w-[250px] h-screen text-white md:w-1/5 p-4 ${
+        theme === 'light'
+          ? 'bg-gray-400 text-gray-800'
+          : 'bg-gray-800 text-gray-200'
+      }`}
     >
       <div className='p-4'>
         <div className='flex mt-[20px] items-center justify-center gap-3 py-6'>
@@ -49,6 +56,7 @@ const Sidebar: React.FC<SidebarProps> = ({
           ))}
         </div>
       </div>
+      <ThemeToggle />
     </div>
   );
 };
