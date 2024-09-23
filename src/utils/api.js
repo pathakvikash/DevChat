@@ -4,6 +4,19 @@ export async function fetchTags() {
   return data.models;
 }
 
+/**
+ * Send a request to the LLaMA server to generate text given a prompt, model,
+ * system message, and context. The `signal` parameter can be used to abort the
+ * request.
+ *
+ * @param {Object} options - Request options
+ * @param {string} options.model - Model identifier
+ * @param {string} options.prompt - Prompt to generate text for
+ * @param {string} options.system - System message to provide to the model
+ * @param {string[]} options.context - Array of context messages to provide to the model
+ * @param {AbortSignal} options.signal - Abort signal for the request
+ * @return {Promise<Response>} - Response from the server
+ */
 export async function sendPromptRequest({
   model,
   prompt,
