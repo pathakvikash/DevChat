@@ -27,7 +27,7 @@
     "class-variance-authority": "^0.7.0",
     "jest": "^29.5.0",
     "jsdom": "^25.0.0",
-    "lucide-react": "^0.441.0",
+    "lucide-react": "^0.445.0",
     "monaco-editor": "^0.51.0",
     "next": "13.4.12",
     "postcss": "8.4.27",
