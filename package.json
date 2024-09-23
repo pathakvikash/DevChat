@@ -38,6 +38,7 @@
     "uuidv4": "^6.2.13"
   },
   "devDependencies": {
+    "@babel/core": "^7.25.2",
     "@babel/preset-env": "^7.25.4"
   }
 }
