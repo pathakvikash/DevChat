@@ -1,4 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
+import CodeBlock from './ui/CodeBlock';
+import CopyButton from './ui/CopyButton';
+import './textEffect.css';
 
 interface TextEffectProps {
   text: string;
@@ -22,7 +25,6 @@ const TextEffect: React.FC<TextEffectProps> = ({
     } else if (effect === 'typewriter' && !isComplete) {
       indexRef.current = 0;
       setDisplayedText('');
-
       const intervalId = setInterval(() => {
         if (indexRef.current < text.length) {
           setDisplayedText((prev) => prev + text[indexRef.current]);
@@ -31,12 +33,30 @@ const TextEffect: React.FC<TextEffectProps> = ({
           clearInterval(intervalId);
         }
       }, speed);
-
       return () => clearInterval(intervalId);
     }
   }, [text, isComplete, effect, speed]);
 
-  return <span>{displayedText}</span>;
+  const formatText = (text: string) => {
+    const codeBlockRegex = /```(.*?)\n([\s\S]*?)```/gs;
+    return text.split(codeBlockRegex).map((part, index) => {
+      if (index % 3 === 2) {
+        const language = part.trim();
+        const code = part;
+        return <CodeBlock key={index} language={language} code={code} />;
+      }
+      return <span key={index}>{part}</span>;
+    });
+  };
+
+  return (
+    <div>
+      <span className='flex flex-col gap-3 max-w-[900px]'>
+        {formatText(displayedText)}
+      </span>
+      <CopyButton content={displayedText} />
+    </div>
+  );
 };
 
 export default React.memo(TextEffect);

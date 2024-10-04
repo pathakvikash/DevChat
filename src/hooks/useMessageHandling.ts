@@ -70,7 +70,8 @@ export const useMessageHandling = (currentSessionId: number | null) => {
       try {
         const { response, done } = JSON.parse(line);
         if (response) {
-          serverResponse += response;
+          const formattedResponse = formatResponse(response);
+          serverResponse += formattedResponse;
           updateServerResponse(serverResponse, false);
         }
         if (done) {
@@ -83,6 +84,10 @@ export const useMessageHandling = (currentSessionId: number | null) => {
     }
 
     return serverResponse;
+  };
+
+  const formatResponse = (response: string): string => {
+    return response;
   };
 
   const updateServerResponse = (text: string, isComplete: boolean) => {
