@@ -42,6 +42,16 @@ const ChatApp: React.FC = () => {
       }
     }
   };
+  const handleChatCreateSession = () => {
+    handleCreateSession();
+    setTimeout(() => {
+      const userInput = document.getElementById(
+        'user-message-input'
+      ) as HTMLInputElement;
+      userInput.value = '';
+      userInput.focus();
+    }, 100);
+  };
 
   return (
     <div {...handlers} className='flex md:flex-row min-w-full min-h-screen'>
@@ -60,7 +70,7 @@ const ChatApp: React.FC = () => {
             </div>
 
             <button
-              onClick={handleCreateSession}
+              onClick={handleChatCreateSession}
               className='text-white lg:block flex justify-end hover:scale-150 md:hidden'
             >
               <NewChatSvg />
