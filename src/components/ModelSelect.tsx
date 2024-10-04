@@ -59,7 +59,8 @@ const ModelSelect: React.FC<ModelSelectProps> = ({ setSelectedTag, tags }) => {
       <div className='modelSelection flex' onClick={toggleModelDialog}>
         Models:{' '}
         <div className='dark:bg-[#3f4a6b] rounded-md px-1 flex ml-2'>
-          {selectedModel || 'Select a model'}
+          {selectedModel ||
+            (tags.length > 0 ? (tags[0] as { name: string }).name : '')}
         </div>
       </div>
     </div>

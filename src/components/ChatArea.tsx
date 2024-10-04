@@ -2,6 +2,7 @@ import { Session } from '../store/slice/chatSlice';
 import React, { useRef, useState, useEffect } from 'react';
 import ModelSelect from './ModelSelect';
 import TextEffect from './TextEffect';
+import CopyButton from './ui/CopyButton';
 
 interface ChatAreaProps {
   currentSessionId: number | null;
@@ -106,16 +107,19 @@ const ChatArea = React.forwardRef<{ resetState: () => void }, ChatAreaProps>(
               >
                 <div className='text-sm'>
                   <strong>{message.sender}: </strong>
-                  {message.sender === 'server' &&
-                  index ===
-                    sessions[currentSessionId - 1].messages.length - 1 ? (
+                  {message.sender === 'server' ? (
                     <TextEffect
                       text={message.text}
                       isComplete={message.isComplete}
                       effect='streaming'
                     />
                   ) : (
-                    message.text
+                    <span>
+                      {message.text}
+                      <div className='flex m-2'>
+                        <CopyButton content={message.text} />
+                      </div>
+                    </span>
                   )}
                 </div>
               </div>
@@ -123,11 +127,14 @@ const ChatArea = React.forwardRef<{ resetState: () => void }, ChatAreaProps>(
           <div ref={messagesEndRef} />
         </div>
         <div className='mt-6 w-full'>
-          <ModelSelect setSelectedTag={setSelectedTag} tags={tags} />
+          {tags.length > 0 && (
+            <ModelSelect setSelectedTag={setSelectedTag} tags={tags} />
+          )}
           {currentSessionId && (
             <div className='flex flex-col sm:flex-row mt-4 gap-2'>
               <input
                 type='text'
+                id='user-message-input'
                 className='flex-grow bg-gray-800 text-white p-2 rounded-lg sm:rounded-r-none'
                 placeholder='Type a message...'
                 value={newMessage}
