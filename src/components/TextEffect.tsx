@@ -2,12 +2,14 @@ import React, { useState, useEffect, useRef } from 'react';
 import CodeBlock from './ui/CodeBlock';
 import CopyButton from './ui/CopyButton';
 import './textEffect.css';
+import { LoaderPinwheel } from 'lucide-react';
 
 interface TextEffectProps {
   text: string;
   isComplete: boolean;
   effect: 'streaming' | 'typewriter';
   speed?: number;
+  onRegenerate?: () => void;
 }
 
 const TextEffect: React.FC<TextEffectProps> = ({
@@ -15,6 +17,7 @@ const TextEffect: React.FC<TextEffectProps> = ({
   isComplete,
   effect,
   speed = 20,
+  onRegenerate,
 }) => {
   const [displayedText, setDisplayedText] = useState('');
   const indexRef = useRef(0);
@@ -54,7 +57,18 @@ const TextEffect: React.FC<TextEffectProps> = ({
       <span className='flex flex-col gap-3 max-w-[900px]'>
         {formatText(displayedText)}
       </span>
-      <CopyButton content={displayedText} />
+      {isComplete && onRegenerate && (
+        <div className='mt-2 flex justify-between'>
+          <CopyButton content={displayedText} />
+          <button
+            className='p-1  rounded-full hover:bg-gray-700'
+            onClick={onRegenerate}
+            title='Regenerate'
+          >
+            <LoaderPinwheel />
+          </button>
+        </div>
+      )}
     </div>
   );
 };

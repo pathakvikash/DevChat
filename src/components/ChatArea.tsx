@@ -201,23 +201,13 @@ const ChatArea = React.forwardRef<{ resetState: () => void }, ChatAreaProps>(
                   ) : (
                     <>
                       {message.sender === 'server' ? (
-                        <div className='flex items-center'>
+                        <div className='flex flex-col'>
                           <TextEffect
                             text={message.text}
                             isComplete={message.isComplete}
                             effect='streaming'
+                            onRegenerate={() => handleRegenerateResponse(message.id)}
                           />
-                          {message.isComplete && (
-                            <button
-                              className='ml-2 p-1 rounded-full hover:bg-gray-700'
-                              onClick={() =>
-                                handleRegenerateResponse(message.id)
-                              }
-                              title='Regenerate'
-                            >
-                              <LoaderPinwheel />
-                            </button>
-                          )}
                         </div>
                       ) : (
                         <span>

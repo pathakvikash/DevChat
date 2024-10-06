@@ -15,7 +15,7 @@ const CopyButton: React.FC<CopyButtonProps> = ({ content }) => {
 
   return (
     <div style={{ position: 'relative', display: 'inline-block' }}>
-      <button className='' onClick={handleCopy}>
+      <button className='p-1' onClick={handleCopy}>
         <Copy />
       </button>
       {copied && (

@@ -11,8 +11,10 @@ interface CodeBlockProps {
 const CodeBlock: React.FC<CodeBlockProps> = ({ language, code }) => {
   return (
     <div style={{ margin: '1em 0', position: 'relative' }}>
+      <div style={{ position: 'absolute', top: '0.5em', right: '0.5em', zIndex: 10 }}>
+        <CopyButton content={code} />
+      </div>
       <Highlight language={language}>{code}</Highlight>
-      <CopyButton content={code} />
     </div>
   );
 };
