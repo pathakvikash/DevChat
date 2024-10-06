@@ -4,6 +4,7 @@ import {
   selectCurrentSessionId,
   createSession,
   deleteSession,
+  setSessionName,
   setCurrentSessionId,
 } from '../store/slice/chatSlice';
 
@@ -14,6 +15,16 @@ export const useSessionManagement = () => {
 
   const handleCreateSession = () => {
     dispatch(createSession());
+  };
+  const updateSessionName = (sessionName: string) => {
+    if (currentSessionId) {
+      dispatch(
+        setSessionName({
+          sessionId: currentSessionId,
+          name: sessionName,
+        })
+      );
+    }
   };
 
   const handleDeleteSession = (sessionId: number) => {
@@ -30,5 +41,6 @@ export const useSessionManagement = () => {
     handleCreateSession,
     handleDeleteSession,
     handleSelectSession,
+    updateSessionName,
   };
 };

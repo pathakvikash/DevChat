@@ -21,7 +21,7 @@ const ChatApp: React.FC = () => {
     handleDeleteSession,
     handleSelectSession,
   } = useSessionManagement();
-  const { newMessage, setNewMessage, handleSendMessage } =
+  const { newMessage, setNewMessage, handleSendMessage, setSelectedModel } =
     useMessageHandling(currentSessionId);
   const { tags, selectedTag, setSelectedTag } = useTagManagement();
   const { isWorkspaceVisible, handlers } = useWorkspaceVisibility();
@@ -94,7 +94,7 @@ const ChatApp: React.FC = () => {
             handleSendMessage={handleSendMessage}
             handleStopResponse={handleStopResponse}
             tags={tags}
-            setSelectedTag={setSelectedTag}
+            setSelectedTag={setSelectedModel}
           />
         </>
       )}

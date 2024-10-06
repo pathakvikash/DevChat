@@ -2,14 +2,22 @@ import { Session } from '../store/slice/chatSlice';
 import React, { useRef, useState, useEffect } from 'react';
 import ModelSelect from './ModelSelect';
 import TextEffect from './TextEffect';
+import { Edit, LoaderPinwheel } from 'lucide-react';
 import CopyButton from './ui/CopyButton';
+import { useMessageHandling } from '../hooks/useMessageHandling';
+import { useDispatch } from 'react-redux';
+import { editMessage } from '../store/slice/chatSlice';
 
 interface ChatAreaProps {
   currentSessionId: number | null;
   sessions: Session[];
   newMessage: string;
   setNewMessage: React.Dispatch<React.SetStateAction<string>>;
-  handleSendMessage: () => Promise<{
+  handleSendMessage: (
+    messageText?: string,
+    isRegenerate?: boolean,
+    regenerateMessageId?: number
+  ) => Promise<{
     controller: AbortController | null;
     promise: Promise<void>;
   }>;
@@ -42,11 +50,20 @@ const ChatArea = React.forwardRef<{ resetState: () => void }, ChatAreaProps>(
       null
     );
     const [isGenerating, setIsGenerating] = useState(false);
+    const [tokenCount, setTokenCount] = useState(0);
+    const [wordCount, setWordCount] = useState(0);
+    const [editingMessageId, setEditingMessageId] = useState<number | null>(
+      null
+    );
+    const editedMessageRef = useRef<HTMLDivElement>(null);
+    const { handleEditMessage }: any = useMessageHandling(currentSessionId);
+    const dispatch = useDispatch();
 
     const resetState = () => {
       setActiveController(null);
       setActivePromise(null);
       setIsGenerating(false);
+      setEditingMessageId(null);
     };
 
     React.useImperativeHandle(ref, () => ({
@@ -75,6 +92,48 @@ const ChatArea = React.forwardRef<{ resetState: () => void }, ChatAreaProps>(
       }
     };
 
+    const handleClientEditMessage = (messageId: number) => {
+      setEditingMessageId(messageId);
+    };
+
+    const handleRegenerateResponse = async (messageId: number) => {
+      if (currentSessionId) {
+        const session = sessions[currentSessionId - 1];
+        const messageIndex = session.messages.findIndex(
+          (m) => m.id === messageId
+        );
+        if (messageIndex > 0) {
+          const previousUserMessage = session.messages[messageIndex - 1];
+          if (previousUserMessage && previousUserMessage.sender === 'user') {
+            await handleSendMessage(previousUserMessage.text, true, messageId);
+          }
+        }
+      }
+    };
+
+    const handleSaveEdit = async (messageId: number, newText: string) => {
+      if (currentSessionId) {
+        dispatch(
+          editMessage({
+            sessionId: currentSessionId,
+            messageId,
+            text: newText,
+          })
+        );
+        const session = sessions[currentSessionId - 1];
+        const messageIndex = session.messages.findIndex(
+          (m) => m.id === messageId
+        );
+        if (messageIndex >= 0 && messageIndex < session.messages.length - 1) {
+          const nextMessage = session.messages[messageIndex + 1];
+          if (nextMessage.sender === 'server') {
+            await handleSendMessage(newText, true, nextMessage.id);
+          }
+        }
+      }
+      setEditingMessageId(null);
+    };
+
     useEffect(() => {
       if (currentSessionId && sessions[currentSessionId - 1]) {
         const lastMessage =
@@ -91,6 +150,15 @@ const ChatArea = React.forwardRef<{ resetState: () => void }, ChatAreaProps>(
         }
       }
     }, [currentSessionId, sessions]);
+
+    const countWords = (text: string): number => {
+      const words = text
+        .trim()
+        .split(/\s+/g)
+        .filter((word) => word.length > 0);
+      return words.length;
+    };
+
     return (
       <div className='bg-gray-900 text-white w-full p-6 flex flex-col justify-between h-full'>
         <div className='text-lg font-bold mb-4 hidden md:block'>
@@ -98,7 +166,7 @@ const ChatArea = React.forwardRef<{ resetState: () => void }, ChatAreaProps>(
         </div>
         <div className='flex flex-col overflow-y-auto sm:mt-12 md:mt-6 mt-16 flex-grow'>
           {currentSessionId &&
-            sessions[currentSessionId - 1]?.messages.map((message, index) => (
+            sessions[currentSessionId - 1]?.messages.map((message) => (
               <div
                 key={message.id}
                 className={`bg-gray-800 p-2 mb-2 rounded ${
@@ -107,19 +175,71 @@ const ChatArea = React.forwardRef<{ resetState: () => void }, ChatAreaProps>(
               >
                 <div className='text-sm'>
                   <strong>{message.sender}: </strong>
-                  {message.sender === 'server' ? (
-                    <TextEffect
-                      text={message.text}
-                      isComplete={message.isComplete}
-                      effect='streaming'
+                  {editingMessageId === message.id ? (
+                    <div
+                      ref={editedMessageRef}
+                      className='text-white'
+                      contentEditable='true'
+                      suppressContentEditableWarning={true}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' && !e.shiftKey) {
+                          e.preventDefault();
+                          handleSaveEdit(
+                            message.id,
+                            editedMessageRef.current?.innerHTML || ''
+                          );
+                        }
+                      }}
+                      onBlur={() =>
+                        handleSaveEdit(
+                          message.id,
+                          editedMessageRef.current?.innerHTML || ''
+                        )
+                      }
+                      dangerouslySetInnerHTML={{ __html: message.text }}
                     />
                   ) : (
-                    <span>
-                      {message.text}
-                      <div className='flex m-2'>
-                        <CopyButton content={message.text} />
-                      </div>
-                    </span>
+                    <>
+                      {message.sender === 'server' ? (
+                        <div className='flex items-center'>
+                          <TextEffect
+                            text={message.text}
+                            isComplete={message.isComplete}
+                            effect='streaming'
+                          />
+                          {message.isComplete && (
+                            <button
+                              className='ml-2 p-1 rounded-full hover:bg-gray-700'
+                              onClick={() =>
+                                handleRegenerateResponse(message.id)
+                              }
+                              title='Regenerate'
+                            >
+                              <LoaderPinwheel />
+                            </button>
+                          )}
+                        </div>
+                      ) : (
+                        <span>
+                          {message.text.split('<br>').map((line, index) => (
+                            <React.Fragment key={index}>
+                              {line}
+                              {index <
+                                message.text.split('<br>').length - 1 && <br />}
+                            </React.Fragment>
+                          ))}
+                          <div className='flex m-2 gap-2 justify-between'>
+                            <CopyButton content={message.text} />
+                            <Edit
+                              className='hover:scale-50 hover:bg-gray-700 rounded-full'
+                              onClick={() =>
+                                handleClientEditMessage(message.id)
+                              }
+                            />
+                          </div>
+                        </span>
+                      )}
+                    </>
                   )}
                 </div>
               </div>
@@ -131,20 +251,38 @@ const ChatArea = React.forwardRef<{ resetState: () => void }, ChatAreaProps>(
             <ModelSelect setSelectedTag={setSelectedTag} tags={tags} />
           )}
           {currentSessionId && (
-            <div className='flex flex-col sm:flex-row mt-4 gap-2'>
+            <div className='flex flex-col sm:flex-row mt-4 gap-2 relative'>
+              <span className='absolute top-[-1.75rem] right-2 text-sm text-gray-400'>
+                {tokenCount} tokens
+              </span>
+              <span>
+                <span className='absolute top-[-1.75rem] left-2 text-sm text-gray-400'>
+                  {wordCount} words
+                </span>
+              </span>
               <input
                 type='text'
                 id='user-message-input'
                 className='flex-grow bg-gray-800 text-white p-2 rounded-lg sm:rounded-r-none'
                 placeholder='Type a message...'
                 value={newMessage}
-                onChange={(e) => setNewMessage(e.target.value)}
+                onChange={(e) => {
+                  const message = e.target.value;
+                  setNewMessage(message);
+
+                  const wordCount = countWords(message);
+                  setWordCount(wordCount);
+
+                  const tokenCount = e.target.value.split(' ').length;
+                  setTokenCount(tokenCount);
+                }}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter' && !isGenerating) {
                     handleSend();
                   }
                 }}
               />
+
               <div className='flex'>
                 {isGenerating ? (
                   <button

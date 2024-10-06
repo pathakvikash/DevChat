@@ -59,23 +59,76 @@ const chatSlice = createSlice({
     setCurrentSessionId: (state, action: PayloadAction<number | null>) => {
       state.currentSessionId = action.payload;
     },
+
+    setSessionName: (
+      state,
+      action: PayloadAction<{ sessionId: number; name: string }>
+    ) => {
+      const { sessionId, name } = action.payload;
+      const session = state.sessions.find((s) => s.id === sessionId);
+      if (session) {
+        session.name = name;
+      }
+    },
+    /**
+     * Updates the last message in the given session.
+     *
+     * @param state the current state of the chat
+     * @param action the action containing the session ID, optional text, and isComplete boolean
+     */
     updateLastMessage: (
       state,
       action: PayloadAction<{
         sessionId: number;
+        messageId?: number;
         text?: string;
         isComplete: boolean;
       }>
     ) => {
-      const { sessionId, text, isComplete } = action.payload;
+      const { sessionId, messageId, text, isComplete } = action.payload;
       const session = state.sessions.find((s) => s.id === sessionId);
       if (session) {
-        const lastMessage = session.messages[session.messages.length - 1];
-        if (lastMessage && lastMessage.sender === 'server') {
+        const targetMessage = messageId
+          ? session.messages.find(m => m.id === messageId)
+          : session.messages[session.messages.length - 1];
+        if (targetMessage && targetMessage.sender === 'server') {
           if (text !== undefined) {
-            lastMessage.text = text;
+            targetMessage.text = text;
           }
-          lastMessage.isComplete = isComplete;
+          targetMessage.isComplete = isComplete;
+        }
+      }
+    },
+    editMessage: (
+      state,
+      action: PayloadAction<{
+        sessionId: number;
+        messageId: number;
+        text: string;
+      }>
+    ) => {
+      const { sessionId, messageId, text } = action.payload;
+      const session = state.sessions.find((s) => s.id === sessionId);
+      if (session) {
+        const message = session.messages.find((m) => m.id === messageId);
+        if (message) {
+          message.text = text;
+        }
+      }
+    },
+    removeMessagesAfter: (
+      state,
+      action: PayloadAction<{
+        sessionId: number;
+        messageId: number;
+      }>
+    ) => {
+      const { sessionId, messageId } = action.payload;
+      const session = state.sessions.find(s => s.id === sessionId);
+      if (session) {
+        const messageIndex = session.messages.findIndex(m => m.id === messageId);
+        if (messageIndex !== -1) {
+          session.messages = session.messages.slice(0, messageIndex + 1);
         }
       }
     },
@@ -88,6 +141,9 @@ export const {
   sendMessage,
   setCurrentSessionId,
   updateLastMessage,
+  setSessionName,
+  editMessage,
+  removeMessagesAfter,
 } = chatSlice.actions;
 
 export const selectSessions = (state: RootState) => state.chat.sessions;
