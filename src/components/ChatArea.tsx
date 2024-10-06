@@ -169,12 +169,14 @@ const ChatArea = React.forwardRef<{ resetState: () => void }, ChatAreaProps>(
             sessions[currentSessionId - 1]?.messages.map((message) => (
               <div
                 key={message.id}
-                className={`bg-gray-800 p-2 mb-2 rounded ${
-                  message.sender === 'user' ? 'self-end' : 'self-start'
+                className={`p-2 mb-2 rounded ${
+                  message.sender === 'user'
+                    ? 'self-end ml-12 bg-blue-600'
+                    : 'self-start mr-12 bg-gray-700'
                 }`}
               >
                 <div className='text-sm'>
-                  <strong>{message.sender}: </strong>
+                  <strong>{message.sender === 'user' ? 'You' : 'AI'}: </strong>
                   {editingMessageId === message.id ? (
                     <div
                       ref={editedMessageRef}
@@ -206,11 +208,13 @@ const ChatArea = React.forwardRef<{ resetState: () => void }, ChatAreaProps>(
                             text={message.text}
                             isComplete={message.isComplete}
                             effect='streaming'
-                            onRegenerate={() => handleRegenerateResponse(message.id)}
+                            onRegenerate={() =>
+                              handleRegenerateResponse(message.id)
+                            }
                           />
                         </div>
                       ) : (
-                        <span>
+                        <span className=''>
                           {message.text.split('<br>').map((line, index) => (
                             <React.Fragment key={index}>
                               {line}
@@ -218,10 +222,10 @@ const ChatArea = React.forwardRef<{ resetState: () => void }, ChatAreaProps>(
                                 message.text.split('<br>').length - 1 && <br />}
                             </React.Fragment>
                           ))}
-                          <div className='flex m-2 gap-2 justify-between'>
+                          <div className='flex mt-2 gap-2 justify-end items-center'>
                             <CopyButton content={message.text} />
                             <Edit
-                              className='hover:scale-50 hover:bg-gray-700 rounded-full'
+                              className='hover:scale-110 hover:bg-blue-500 rounded-full p-1'
                               onClick={() =>
                                 handleClientEditMessage(message.id)
                               }
