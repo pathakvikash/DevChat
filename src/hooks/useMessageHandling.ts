@@ -55,7 +55,8 @@ export const useMessageHandling = (currentSessionId: number | null) => {
   const handleSendMessage = async (
     messageText: string = newMessage,
     isRegenerate: boolean = false,
-    regenerateMessageId?: number
+    regenerateMessageId?: number,
+    systemPrompt: string = ''
   ) => {
     if (messageText.trim() === '' || !currentSessionId) {
       return { controller: null, promise: Promise.resolve() };
@@ -84,7 +85,8 @@ export const useMessageHandling = (currentSessionId: number | null) => {
     const promise = processServerResponse(
       controller.signal,
       messageText,
-      regenerateMessageId
+      regenerateMessageId,
+      systemPrompt
     );
 
     return { controller, promise };
@@ -93,14 +95,15 @@ export const useMessageHandling = (currentSessionId: number | null) => {
   const processServerResponse = async (
     signal: AbortSignal,
     prompt: string,
-    regenerateMessageId?: number
+    regenerateMessageId?: number,
+    systemPrompt: string = ''
   ): Promise<void> => {
     try {
       const response = await sendPromptRequest({
         model: selectedModel,
         prompt: prompt,
         signal,
-        system: '',
+        system: systemPrompt,
         context: [],
       });
 
