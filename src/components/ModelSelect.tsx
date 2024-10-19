@@ -1,5 +1,5 @@
 'use client';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 
 interface ModelSelectProps {
   setSelectedTag: React.Dispatch<React.SetStateAction<string>>;
@@ -7,9 +7,13 @@ interface ModelSelectProps {
 }
 
 const ModelSelect: React.FC<ModelSelectProps> = ({ setSelectedTag, tags }) => {
-  const [selectedModel, setSelectedModel] = useState<string>('');
+  const [selectedModel, setSelectedModel] = useState<string>('qwen2:1.5b');
   const [show, setShow] = useState(false);
   const [isWebSearch, setIsWebSearch] = useState(false);
+
+  useEffect(() => {
+    setSelectedTag(selectedModel);
+  }, [selectedModel, setSelectedTag]);
 
   const toggleModelDialog = () => {
     setShow(!show);
@@ -17,7 +21,6 @@ const ModelSelect: React.FC<ModelSelectProps> = ({ setSelectedTag, tags }) => {
 
   const handleModelSelect = (model: string) => {
     setSelectedModel(model);
-    setSelectedTag(model);
     setShow(false);
   };
 
@@ -59,7 +62,7 @@ const ModelSelect: React.FC<ModelSelectProps> = ({ setSelectedTag, tags }) => {
       <div className='modelSelection flex' onClick={toggleModelDialog}>
         Models:{' '}
         <div className='dark:bg-[#3f4a6b] rounded-md px-1 flex ml-2'>
-          {selectedModel || 'Select a model'}
+          {selectedModel}
         </div>
       </div>
     </div>

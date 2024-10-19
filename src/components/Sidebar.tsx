@@ -23,8 +23,8 @@ const Sidebar: React.FC<SidebarProps> = ({
     <div
       className={`bg-${theme}-800 flex flex-col justify-between sm:fixed md:relative fixed sm:w-1/3 w-[250px] h-screen text-white md:w-1/5 p-4 ${
         theme === 'light'
-          ? 'bg-gray-400 text-gray-800'
-          : 'bg-gray-800 text-gray-200'
+          ? 'bg-gray-800 text-gray-400'
+          : 'bg-gray-900 text-gray-200'
       }`}
     >
       <div className='p-4'>

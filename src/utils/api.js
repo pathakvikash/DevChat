@@ -20,8 +20,8 @@ export async function fetchTags() {
 export async function sendPromptRequest({
   model,
   prompt,
-  system,
-  context,
+  system = '',
+  context = [],
   signal,
 }) {
   const requestOptions = {
