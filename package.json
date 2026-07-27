@@ -16,7 +16,8 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "db:seed": "npx tsx scripts/seed.ts"
+    "db:seed": "npx tsx scripts/seed.ts",
+    "vercel-build": "prisma generate && next build"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^3.0.78",
