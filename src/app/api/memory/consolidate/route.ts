@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { consolidateMemory } from "@/lib/memory";
 
-export const maxDuration = 120;
+export const maxDuration = 60;
 
 /**
  * Manually trigger long-term memory consolidation for a conversation: extract

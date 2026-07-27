@@ -1,7 +1,7 @@
 import { prisma } from "@/lib/db";
 import { runGoal, type GoalEvent } from "@/lib/goal/orchestrator";
 
-export const maxDuration = 800;
+export const maxDuration = 60;
 
 /** Stop a goal run. Sets a cancel flag the orchestrator polls each cycle, and
  *  optimistically marks the run "stopped" so the UI updates immediately even
