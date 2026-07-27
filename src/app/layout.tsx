@@ -1,33 +1,45 @@
-'use client';
-import './globals.css';
-import type { Metadata } from 'next';
-import { Provider } from 'react-redux';
-import { store } from '../store/store';
+import type { Metadata } from "next";
+import { Geist, Geist_Mono } from "next/font/google";
+import "./globals.css";
+import { ToastProvider } from "@/app/components/Toast";
+import CommandPaletteProvider from "@/app/components/CommandPalette";
+import { ThemeProvider } from "@/app/components/ThemeProvider";
+
+const geistSans = Geist({
+  variable: "--font-geist-sans",
+  subsets: ["latin"],
+});
+
+const geistMono = Geist_Mono({
+  variable: "--font-geist-mono",
+  subsets: ["latin"],
+});
+
+export const metadata: Metadata = {
+  title: "DevChat",
+  description: "DevChat - AI chat platform",
+};
 
 export default function RootLayout({
   children,
-}: {
+}: Readonly<{
   children: React.ReactNode;
-}): JSX.Element {
-  const meta: Metadata = {
-    title: 'Dev Chat',
-    description: 'Chat with AI models',
-  };
-
+}>) {
   return (
-    <Provider store={store}>
-      <html lang='en'>
-        <head>
-          <meta charSet='utf-8' />
-          <meta
-            title={meta.title as string}
-            name='viewport'
-            content='width=device-width,initial-scale=1'
-          />
-          <meta name='description' content={meta.description as string} />
-        </head>
-        <body>{children}</body>
-      </html>
-    </Provider>
+    <html
+      lang="en"
+      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
+      data-theme="dark"
+    >
+      <body className="min-h-full flex flex-col">
+        <ThemeProvider>
+          <ToastProvider>
+            <CommandPaletteProvider>
+              {children}
+            </CommandPaletteProvider>
+          </ToastProvider>
+        </ThemeProvider>
+      </body>
+    </html>
   );
 }
