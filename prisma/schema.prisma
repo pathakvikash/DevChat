@@ -1,0 +1,257 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Conversation {
+  id                       String     @id @default(cuid())
+  title                    String     @default("New Chat")
+  model                    String     @default("gpt-4o")
+  persona                  String?
+  systemPrompt             String?
+  kbId                     String?
+  webSearch                Boolean    @default(false)
+  totalTokens              Int        @default(0)
+  temperature              Float      @default(0.7)
+  maxTokens                Int?
+  contextLength            Int?
+  topP                     Float?
+  compressedSummary        String?
+  compressedAt             DateTime?
+  compressedBeforeTokens   Int?
+  compressedAfterTokens    Int?
+  compressedBeforeMessages Int?
+  chatOnlyMode             Boolean    @default(false)
+  memoryDisabled           Boolean    @default(false)
+  maxToolCalls     Int          @default(5)
+  fallbackModel    String? // Optional backup model tried when the primary fails (rate limit, outage, auth).
+   note                     String?
+   pinned                   Boolean    @default(false)
+   archived                 Boolean    @default(false)
+  createdAt                DateTime   @default(now())
+  updatedAt                DateTime   @updatedAt
+  messages                 Message[]
+  artifacts                Artifact[]
+  goalRuns                 GoalRun[]
+  todos                    Todo[]
+
+  @@index([updatedAt])
+}
+
+model Message {
+  id             String       @id @default(cuid())
+  conversationId String
+  role           String
+  content        String
+  systemPrompt   String?
+  parts          String?
+  attachments    String?
+  inputTokens    Int          @default(0)
+  outputTokens   Int          @default(0)
+  model          String?
+  createdAt      DateTime     @default(now())
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  feedback       Feedback?
+
+  @@index([conversationId])
+  @@index([conversationId, createdAt])
+}
+
+model Feedback {
+  id        String   @id @default(cuid())
+  messageId String   @unique
+  rating    Int      // 1 = thumbs up (good), -1 = thumbs down (bad)
+  createdAt DateTime @default(now())
+  message   Message  @relation(fields: [messageId], references: [id], onDelete: Cascade)
+}
+
+model KnowledgeBase {
+  id          String     @id @default(cuid())
+  name        String
+  description String?
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+  documents   Document[]
+}
+
+model Document {
+  id            String        @id @default(cuid())
+  kbId          String
+  filename      String
+  content       String
+  chunks        String
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+  knowledgeBase KnowledgeBase @relation(fields: [kbId], references: [id], onDelete: Cascade)
+
+  @@index([kbId])
+}
+
+model Persona {
+  id           String   @id @default(cuid())
+  name         String   @unique
+  description  String
+  systemPrompt String
+  isBuiltIn    Boolean  @default(false)
+  createdAt    DateTime @default(now())
+}
+
+model Memory {
+  id                   String    @id @default(cuid())
+  key                  String    @unique
+  value                String
+  category             String    @default("general")
+  // --- Lifecycle / salience: lets memory improve over time ---
+  // How confident we are this fact is true & worth keeping (0..1). Reinforced
+  // when re-observed, decayed by consolidation when stale.
+  confidence           Float     @default(0.6)
+  // How many times this fact has been surfaced into a prompt. Frequently used
+  // facts rank higher and survive pruning.
+  useCount             Int       @default(0)
+  // Last time this fact was injected into a model prompt.
+  lastUsedAt           DateTime?
+  // Conversation that first produced/confirmed this fact (provenance).
+  sourceConversationId String?
+  pinned               Boolean   @default(false)
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+
+  @@index([category])
+}
+
+// A single autonomous "Goal Mode" run: an objective the model pursues across
+// many cycles until complete, out of budget, or stopped.
+model GoalRun {
+  id              String       @id @default(cuid())
+  conversationId  String
+  objective       String
+  status          String       @default("planning") // planning | running | done | stopped | failed | exhausted
+  model           String
+  maxCycles       Int          @default(10)
+  cyclesUsed      Int          @default(0)
+  tokenBudget     Int          @default(120000)
+  tokensUsed      Int          @default(0)
+  summary         String? // final deliverable / summary text
+  // Set by the stop endpoint; the orchestrator polls this each cycle and
+  // halts. Lets a run be stopped even from a client that no longer owns the
+  // original streaming request (e.g. after a page refresh).
+  cancelRequested Boolean      @default(false)
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+  conversation    Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  tasks           TaskItem[]
+
+  @@index([conversationId])
+}
+
+// One checklist item within a GoalRun. The live "todo list" the user watches.
+model TaskItem {
+  id        String   @id @default(cuid())
+  goalRunId String
+  text      String
+  status    String   @default("pending") // pending | active | done | blocked
+  order     Int      @default(0)
+  note      String? // short result/finding for this step
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  goalRun   GoalRun  @relation(fields: [goalRunId], references: [id], onDelete: Cascade)
+
+  @@index([goalRunId])
+}
+
+// A per-conversation todo item. Created either by the AI via the createTodo
+// tool or manually by the user. The model can update status via updateTodoStatus.
+model Todo {
+  id             String       @id @default(cuid())
+  conversationId String
+  title          String
+  description    String?
+  status         String       @default("pending") // pending | in_progress | done | cancelled
+  priority       String       @default("medium") // low | medium | high
+  order          Int          @default(0)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@index([conversationId])
+  @@index([conversationId, status])
+}
+
+// An MCP (Model Context Protocol) server connection. Each server exposes
+// tools dynamically that can be toggled on/off per-conversation.
+model McpServer {
+  id          String   @id @default(cuid())
+  name        String   @unique
+  url         String   // The MCP server endpoint URL
+  authType    String   @default("none") // none | apikey | oauth2
+  authConfig  String?  // JSON: { apiKey?, clientId?, clientSecret?, scopes? }
+  authToken   String?  // Encrypted OAuth2 access/refresh token JSON
+  enabled     Boolean  @default(false)
+  lastPingAt  DateTime?
+  errorMsg    String?  // Last connection error
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model Artifact {
+  id             String       @id @default(cuid())
+  conversationId String
+  type           String
+  title          String
+  content        String
+  version        Int          @default(1)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@index([conversationId])
+}
+
+// ─── Observability: per-request generation traces ──────────────────────────
+// One Trace row per chat completion request (a single assistant turn, possibly
+// spanning many tool-call steps). Captures latency, token usage, estimated
+// cost, and outcome so we can monitor the system without an external service.
+model Trace {
+  id             String          @id @default(cuid())
+  conversationId String?
+  model          String
+  provider       String?
+  promptTokens   Int             @default(0)
+  completionTokens Int           @default(0)
+  totalTokens    Int             @default(0)
+  cost           Float? // estimated USD; null when pricing is unknown
+  latencyMs      Int
+  firstTokenMs   Int? // time-to-first-token
+  steps          Int?
+  finishReason   String?
+  status         String          @default("success") // success | error | aborted | truncated
+  errorMsg       String?
+  inputChars     Int?
+  outputChars    Int?
+  createdAt      DateTime        @default(now())
+  toolCalls      TraceToolCall[]
+
+  @@index([createdAt])
+  @@index([model])
+  @@index([status])
+  @@index([conversationId])
+}
+
+// One row per tool invocation within a trace (for per-tool latency/cost drill-down).
+model TraceToolCall {
+  id        String   @id @default(cuid())
+  traceId   String
+  toolName  String
+  input     String? // JSON, truncated
+  output    String? // JSON/text, truncated
+  ok        Boolean  @default(true)
+  latencyMs Int?
+  createdAt DateTime @default(now())
+  trace     Trace    @relation(fields: [traceId], references: [id], onDelete: Cascade)
+
+  @@index([traceId])
+}
