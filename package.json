@@ -17,7 +17,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "db:seed": "npx tsx scripts/seed.ts",
-    "vercel-build": "prisma generate && prisma migrate deploy && next build"
+    "vercel-build": "cp prisma/postgres/schema.prisma prisma/schema.prisma && rm -rf prisma/migrations && cp -r prisma/postgres/migrations prisma/migrations && prisma generate && prisma migrate deploy && next build"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^3.0.78",
