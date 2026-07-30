@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useMemo } from "react";
-import { Trash2, BookOpen, Save, RotateCcw, Loader2, Cable, Database } from "lucide-react";
+import { Trash2, Save, RotateCcw, Loader2, Cable, Database } from "lucide-react";
 import Link from "next/link";
 import Sidebar from "@/app/components/Sidebar";
 import { fetchSettings as apiFetchSettings, saveSettings as apiSaveSettings, deleteSettings as apiDeleteSettings } from "@/app/hooks/useSettingsApi";
@@ -160,15 +160,29 @@ export default function SettingsPage() {
       <Sidebar />
       <div className="flex-1 overflow-y-auto">
         <main className="text-[var(--foreground)] p-8">
-          <div className="flex items-center justify-between mb-8">
+          <div className="sticky top-0 z-10 bg-[var(--background)] -mt-8 pt-8 flex items-center justify-between mb-8">
             <h1 className="text-3xl font-bold">Settings & Analytics</h1>
-            <Link
-              href="/kb"
-              className="flex items-center gap-2 px-4 py-2 glass-button-primary text-white rounded-[var(--glass-radius-md)]"
-            >
-              <BookOpen size={18} />
-              Knowledge Base
-            </Link>
+            <div className="flex items-center gap-4">
+              <button
+                onClick={handleSave}
+                disabled={saving}
+                className="flex items-center gap-2 glass-button-primary text-white rounded-[var(--glass-radius-md)] px-5 py-2.5 font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {saving ? (
+                  <Loader2 size={18} className="animate-spin" />
+                ) : (
+                  <Save size={18} />
+                )}
+                {saving ? "Saving..." : "Save Settings"}
+              </button>
+              <button
+                onClick={handleClearSettings}
+                className="flex items-center gap-2 glass-button text-zinc-300 rounded-[var(--glass-radius-md)] px-5 py-2.5"
+              >
+                <RotateCcw size={18} />
+                Clear
+              </button>
+            </div>
           </div>
 
           {saved && (
@@ -366,29 +380,6 @@ export default function SettingsPage() {
                 thumbs up/down feedback are included.
               </p>
               <DatasetExportSection />
-            </div>
-
-            {/* Save / Clear */}
-            <div className="flex items-center gap-4">
-              <button
-                onClick={handleSave}
-                disabled={saving}
-                className="flex items-center gap-2 glass-button-primary text-white rounded-[var(--glass-radius-md)] px-5 py-2.5 font-medium disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                {saving ? (
-                  <Loader2 size={18} className="animate-spin" />
-                ) : (
-                  <Save size={18} />
-                )}
-                {saving ? "Saving..." : "Save Settings"}
-              </button>
-              <button
-                onClick={handleClearSettings}
-                className="flex items-center gap-2 glass-button text-zinc-300 rounded-[var(--glass-radius-md)] px-5 py-2.5"
-              >
-                <RotateCcw size={18} />
-                Clear
-              </button>
             </div>
 
             {/* Analytics Summary */}

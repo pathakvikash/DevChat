@@ -168,7 +168,7 @@ export default function KnowledgeBasePage() {
       <Sidebar />
       <div className="flex-1 overflow-y-auto">
         <main className="text-[var(--foreground)] p-8">
-          <h1 className="text-3xl font-bold mb-8">Knowledge Base Management</h1>
+          <h1 className="sticky top-0 z-10 bg-[var(--background)] -mt-8 pt-8 text-3xl font-bold mb-8">Knowledge Base Management</h1>
 
           <div className="grid grid-cols-3 gap-8 max-w-6xl">
             {/* Knowledge Bases List */}

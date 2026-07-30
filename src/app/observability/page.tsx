@@ -149,7 +149,7 @@ export default function ObservabilityPage() {
       <div className="flex-1 overflow-y-auto">
         <main className="text-[var(--foreground)] min-h-full">
           <div className="max-w-6xl mx-auto px-6 py-8">
-            <div className="flex items-center justify-between mb-6">
+            <div className="sticky top-0 z-10 bg-[var(--background)] -mt-8 pt-8 flex items-center justify-between mb-6">
               <div className="flex items-center gap-3">
                 <Activity size={26} className="text-blue-400" />
                 <div>

@@ -155,7 +155,7 @@ export default function MemoryPage() {
       <div className="flex-1 overflow-y-auto">
         <main className="text-[var(--foreground)] p-8 min-h-full">
           <div className="max-w-4xl mx-auto">
-            <div className="flex items-start justify-between mb-2">
+            <div className="sticky top-0 z-10 bg-[var(--background)] -mt-8 pt-8 flex items-start justify-between mb-2">
               <div className="flex items-center gap-3">
                 <Brain size={28} className="text-purple-400" />
                 <h1 className="text-3xl font-bold">User Memory</h1>

@@ -272,7 +272,7 @@ export default function McpSettingsPage() {
       <Sidebar />
       <div className="flex-1 overflow-y-auto">
         <main className="text-[var(--foreground)] p-8">
-          <div className="flex items-center justify-between mb-8">
+          <div className="sticky top-0 z-10 bg-[var(--background)] -mt-8 pt-8 flex items-center justify-between mb-8">
             <div className="flex items-center gap-4">
               <Link href="/settings" className="flex items-center gap-1.5 text-sm text-zinc-400 hover:text-zinc-200 transition">
                 <ArrowLeft size={16} /> Settings
