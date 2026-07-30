@@ -3,7 +3,7 @@
 import { useEffect, useState, useMemo } from "react";
 import { Trash2, Save, RotateCcw, Loader2, Cable, Database } from "lucide-react";
 import Link from "next/link";
-import Sidebar from "@/app/components/Sidebar";
+import AppShell, { SidebarToggleButton } from "@/app/components/AppShell";
 import { fetchSettings as apiFetchSettings, saveSettings as apiSaveSettings, deleteSettings as apiDeleteSettings } from "@/app/hooks/useSettingsApi";
 import { fetchModels as apiFetchModels } from "@/app/hooks/useModelsApi";
 import { downloadBlob } from "@/lib/utils/download";
@@ -156,12 +156,13 @@ export default function SettingsPage() {
   }
 
   return (
-    <div className="flex h-screen bg-[var(--background)]">
-      <Sidebar />
-      <div className="flex-1 overflow-y-auto">
+    <AppShell>
         <main className="text-[var(--foreground)] p-8">
-          <div className="sticky top-0 z-10 bg-[var(--background)] -mt-8 pt-8 flex items-center justify-between mb-8">
-            <h1 className="text-3xl font-bold">Settings & Analytics</h1>
+          <div className="sticky top-0 z-10 bg-[var(--background)] -mt-8 pt-8 flex items-center justify-between gap-3 flex-wrap mb-8">
+            <div className="flex items-center gap-3 min-w-0">
+              <SidebarToggleButton />
+              <h1 className="text-xl sm:text-2xl md:text-3xl font-bold">Settings & Analytics</h1>
+            </div>
             <div className="flex items-center gap-4">
               <button
                 onClick={handleSave}
@@ -212,32 +213,32 @@ export default function SettingsPage() {
                         value={orDraft}
                         onChange={(e) => setOrDraft(e.target.value)}
                         placeholder="sk-or-..."
-                        className="flex-1 glass-input rounded-[var(--glass-radius-md)] px-3 py-2 text-sm"
+                        className="flex-1 min-w-0 glass-input rounded-[var(--glass-radius-md)] px-3 py-2 text-sm"
                         autoFocus
                       />
                       <button
                         onClick={() => setEditingKey(null)}
-                        className="glass-button px-3 py-2 text-sm text-zinc-400 rounded-[var(--glass-radius-md)]"
+                        className="shrink-0 glass-button px-3 py-2 text-sm text-zinc-400 rounded-[var(--glass-radius-md)]"
                       >
                         Cancel
                       </button>
                     </div>
                   ) : (
                     <div className="flex items-center gap-2">
-                      <div className="flex-1 glass-input rounded-[var(--glass-radius-md)] px-3 py-2 text-sm font-mono text-zinc-400 select-all">
+                      <div className="flex-1 min-w-0 truncate glass-input rounded-[var(--glass-radius-md)] px-3 py-2 text-sm font-mono text-zinc-400 select-all">
                         {orDisplay ? orDisplay : <span className="text-zinc-600">Not configured</span>}
                       </div>
                       {orDisplay ? (
                         <button
                           onClick={() => { setEditingKey("openrouter"); setOrDraft(""); }}
-                          className="glass-button px-3 py-2 text-sm text-zinc-300 rounded-[var(--glass-radius-md)]"
+                          className="shrink-0 glass-button px-3 py-2 text-sm text-zinc-300 rounded-[var(--glass-radius-md)]"
                         >
                           Change
                         </button>
                       ) : (
                         <button
                           onClick={() => { setEditingKey("openrouter"); setOrDraft(""); }}
-                          className="glass-button-primary px-3 py-2 text-sm text-white rounded-[var(--glass-radius-md)]"
+                          className="shrink-0 glass-button-primary px-3 py-2 text-sm text-white rounded-[var(--glass-radius-md)]"
                         >
                           Add
                         </button>
@@ -261,32 +262,32 @@ export default function SettingsPage() {
                         value={nimDraft}
                         onChange={(e) => setNimDraft(e.target.value)}
                         placeholder="nvapi-..."
-                        className="flex-1 glass-input rounded-[var(--glass-radius-md)] px-3 py-2 text-sm"
+                        className="flex-1 min-w-0 glass-input rounded-[var(--glass-radius-md)] px-3 py-2 text-sm"
                         autoFocus
                       />
                       <button
                         onClick={() => setEditingKey(null)}
-                        className="glass-button px-3 py-2 text-sm text-zinc-400 rounded-[var(--glass-radius-md)]"
+                        className="shrink-0 glass-button px-3 py-2 text-sm text-zinc-400 rounded-[var(--glass-radius-md)]"
                       >
                         Cancel
                       </button>
                     </div>
                   ) : (
                     <div className="flex items-center gap-2">
-                      <div className="flex-1 glass-input rounded-[var(--glass-radius-md)] px-3 py-2 text-sm font-mono text-zinc-400 select-all">
+                      <div className="flex-1 min-w-0 truncate glass-input rounded-[var(--glass-radius-md)] px-3 py-2 text-sm font-mono text-zinc-400 select-all">
                         {nimDisplay ? nimDisplay : <span className="text-zinc-600">Not configured</span>}
                       </div>
                       {nimDisplay ? (
                         <button
                           onClick={() => { setEditingKey("nvidia"); setNimDraft(""); }}
-                          className="glass-button px-3 py-2 text-sm text-zinc-300 rounded-[var(--glass-radius-md)]"
+                          className="shrink-0 glass-button px-3 py-2 text-sm text-zinc-300 rounded-[var(--glass-radius-md)]"
                         >
                           Change
                         </button>
                       ) : (
                         <button
                           onClick={() => { setEditingKey("nvidia"); setNimDraft(""); }}
-                          className="glass-button-primary px-3 py-2 text-sm text-white rounded-[var(--glass-radius-md)]"
+                          className="shrink-0 glass-button-primary px-3 py-2 text-sm text-white rounded-[var(--glass-radius-md)]"
                         >
                           Add
                         </button>
@@ -481,8 +482,7 @@ export default function SettingsPage() {
             )}
           </div>
         </main>
-      </div>
-    </div>
+    </AppShell>
   );
 }
 
