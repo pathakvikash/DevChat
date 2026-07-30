@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/db";
 import { NextRequest, NextResponse } from "next/server";
+import { getSettingsKey } from "@/lib/settings";
 
 export async function GET(req: NextRequest) {
   try {
@@ -40,7 +41,7 @@ export async function POST(req: NextRequest) {
   try {
     const {
       title,
-      model,
+      model: bodyModel,
       persona,
       systemPrompt,
       contextLength,
@@ -48,6 +49,8 @@ export async function POST(req: NextRequest) {
       topP,
       maxTokens,
     } = await req.json();
+
+    const model = bodyModel || await getSettingsKey("defaultModel") || undefined;
 
     const conversation = await prisma.conversation.create({
       data: {
