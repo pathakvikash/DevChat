@@ -7,7 +7,7 @@ import {
   Wifi, WifiOff, Bot, Mail, MessageSquare, Monitor, Building2, LogIn, ExternalLink,
 } from "lucide-react";
 import Link from "next/link";
-import Sidebar from "@/app/components/Sidebar";
+import AppShell, { SidebarToggleButton } from "@/app/components/AppShell";
 import CenteredDialog from "@/app/components/ui/CenteredDialog";
 import { useToast } from "@/app/components/Toast";
 
@@ -268,16 +268,15 @@ export default function McpSettingsPage() {
   }
 
   return (
-    <div className="flex h-screen bg-[var(--background)]">
-      <Sidebar />
-      <div className="flex-1 overflow-y-auto">
+    <AppShell>
         <main className="text-[var(--foreground)] p-8">
-          <div className="sticky top-0 z-10 bg-[var(--background)] -mt-8 pt-8 flex items-center justify-between mb-8">
-            <div className="flex items-center gap-4">
-              <Link href="/settings" className="flex items-center gap-1.5 text-sm text-zinc-400 hover:text-zinc-200 transition">
+          <div className="sticky top-0 z-10 bg-[var(--background)] -mt-8 pt-8 flex items-center justify-between gap-3 flex-wrap mb-8">
+            <div className="flex items-center gap-4 min-w-0">
+              <SidebarToggleButton />
+              <Link href="/settings" className="flex items-center gap-1.5 text-sm text-zinc-400 hover:text-zinc-200 transition shrink-0">
                 <ArrowLeft size={16} /> Settings
               </Link>
-              <h1 className="text-3xl font-bold">MCP Servers</h1>
+              <h1 className="text-xl sm:text-2xl md:text-3xl font-bold">MCP Servers</h1>
             </div>
             <button onClick={openAddForm}
               className="flex items-center gap-2 glass-button-primary text-white rounded-[var(--glass-radius-md)] px-5 py-2.5 font-medium"
@@ -362,7 +361,6 @@ export default function McpSettingsPage() {
             </div>
           )}
         </main>
-      </div>
 
       {/* Add/Edit Dialog */}
       <CenteredDialog isOpen={showForm} onClose={() => setShowForm(false)} widthClass="max-w-lg">
@@ -534,6 +532,6 @@ export default function McpSettingsPage() {
           </div>
         )}
       </CenteredDialog>
-    </div>
+    </AppShell>
   );
 }

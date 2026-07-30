@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { User, Settings, HardDrive, ChevronRight, Sun, Moon, Brain } from "lucide-react";
 import Link from "next/link";
-import Sidebar from "@/app/components/Sidebar";
+import AppShell, { SidebarToggleButton } from "@/app/components/AppShell";
 import { useTheme } from "@/app/components/ThemeProvider";
 
 const MEMORY_KEY = "vas:settings:memory_enabled";
@@ -26,14 +26,13 @@ export default function ProfilePage() {
   }
 
   return (
-    <div className="flex h-screen bg-[var(--background)]">
-      <Sidebar />
-      <div className="flex-1 overflow-y-auto">
+    <AppShell>
         <main className="text-[var(--foreground)] p-8">
           <div className="max-w-3xl mx-auto space-y-6">
             <div className="sticky top-0 z-10 bg-[var(--background)] -mt-8 pt-8 flex items-center gap-3 mb-2">
-              <User size={28} className="text-zinc-400" />
-              <h1 className="text-3xl font-bold">Profile</h1>
+              <SidebarToggleButton />
+              <User size={28} className="text-zinc-400 shrink-0" />
+              <h1 className="text-xl sm:text-2xl md:text-3xl font-bold">Profile</h1>
             </div>
 
             <div className="glass-card rounded-[var(--glass-radius-xl)] p-6 space-y-4">
@@ -139,7 +138,6 @@ export default function ProfilePage() {
             </div>
           </div>
         </main>
-      </div>
-    </div>
+    </AppShell>
   );
 }

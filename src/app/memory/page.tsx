@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { Trash2, Plus, Brain, Pencil, X, Check, AlertTriangle, Pin, PinOff, Download, Upload, BarChart3, Search } from "lucide-react";
-import Sidebar from "@/app/components/Sidebar";
+import AppShell, { SidebarToggleButton } from "@/app/components/AppShell";
 import { downloadBlob } from "@/lib/utils/download";
 
 interface Memory {
@@ -150,15 +150,14 @@ export default function MemoryPage() {
   }, [memories]);
 
   return (
-    <div className="flex h-screen bg-[var(--background)]">
-      <Sidebar />
-      <div className="flex-1 overflow-y-auto">
+    <AppShell>
         <main className="text-[var(--foreground)] p-8 min-h-full">
           <div className="max-w-4xl mx-auto">
-            <div className="sticky top-0 z-10 bg-[var(--background)] -mt-8 pt-8 flex items-start justify-between mb-2">
-              <div className="flex items-center gap-3">
-                <Brain size={28} className="text-purple-400" />
-                <h1 className="text-3xl font-bold">User Memory</h1>
+            <div className="sticky top-0 z-10 bg-[var(--background)] -mt-8 pt-8 flex items-start justify-between gap-3 flex-wrap mb-2">
+              <div className="flex items-center gap-3 min-w-0">
+                <SidebarToggleButton />
+                <Brain size={28} className="text-purple-400 shrink-0" />
+                <h1 className="text-xl sm:text-2xl md:text-3xl font-bold">User Memory</h1>
               </div>
               <div className="flex gap-2">
                 <button onClick={exportJSON} className="flex items-center gap-2 glass-button text-zinc-300 px-4 py-2 rounded-[var(--glass-radius-md)] text-sm" title="Export all memories as JSON">
@@ -329,7 +328,6 @@ export default function MemoryPage() {
             )}
           </div>
         </main>
-      </div>
-    </div>
+    </AppShell>
   );
 }

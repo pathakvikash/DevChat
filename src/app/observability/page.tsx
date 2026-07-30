@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, Fragment } from "react";
-import Sidebar from "@/app/components/Sidebar";
+import AppShell, { SidebarToggleButton } from "@/app/components/AppShell";
 import { Activity, RefreshCw, AlertTriangle, XCircle, CheckCircle2, Clock, DollarSign, Coins, Timer } from "lucide-react";
 
 interface ToolCall {
@@ -144,23 +144,22 @@ export default function ObservabilityPage() {
   const s = data?.summary;
 
   return (
-    <div className="flex h-screen bg-[var(--background)]">
-      <Sidebar />
-      <div className="flex-1 overflow-y-auto">
+    <AppShell>
         <main className="text-[var(--foreground)] min-h-full">
           <div className="max-w-6xl mx-auto px-6 py-8">
-            <div className="sticky top-0 z-10 bg-[var(--background)] -mt-8 pt-8 flex items-center justify-between mb-6">
-              <div className="flex items-center gap-3">
-                <Activity size={26} className="text-blue-400" />
-                <div>
-                  <h1 className="text-2xl font-bold text-[var(--foreground)]">Observability</h1>
+            <div className="sticky top-0 z-10 bg-[var(--background)] -mt-8 pt-8 flex items-center justify-between gap-3 flex-wrap mb-6">
+              <div className="flex items-center gap-3 min-w-0">
+                <SidebarToggleButton />
+                <Activity size={26} className="text-blue-400 shrink-0" />
+                <div className="min-w-0">
+                  <h1 className="text-lg sm:text-xl md:text-2xl font-bold text-[var(--foreground)]">Observability</h1>
                   <p className="text-xs text-zinc-500">Per-request latency, token usage & estimated cost</p>
                 </div>
               </div>
               <button
                 onClick={() => { setLoading(true); load(); }}
                 disabled={loading}
-                className="flex items-center gap-2 glass-button text-zinc-300 rounded-[var(--glass-radius-md)] px-3 py-2 text-sm transition disabled:opacity-50"
+                className="shrink-0 flex items-center gap-2 glass-button text-zinc-300 rounded-[var(--glass-radius-md)] px-3 py-2 text-sm transition disabled:opacity-50"
               >
                 <RefreshCw size={14} className={loading ? "animate-spin" : ""} />
                 Refresh
@@ -301,7 +300,6 @@ export default function ObservabilityPage() {
             </div>
           </div>
         </main>
-      </div>
-    </div>
+    </AppShell>
   );
 }
