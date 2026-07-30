@@ -5,7 +5,6 @@ import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport, generateId } from "ai";
 
 import { runCode } from "@/lib/sandbox";
-import { getClientApiKeys } from "@/lib/apiKeys";
 
 // Tracks the client-generated assistant message id per conversation so the
 // server can persist the DB message under the same id (see captureGenerateId).
@@ -38,14 +37,12 @@ export function useChatTransport(opts: ChatTransportOptions) {
     maxToolCalls: conversation?.maxToolCalls ?? 5,
     autoCompressThreshold: 85,
     assistantMessageId: undefined as string | undefined,
-    ...getClientApiKeys(),
   });
 
   useEffect(() => {
     const threshold = typeof window !== "undefined"
       ? parseInt(localStorage.getItem("vas:settings:auto_compress_threshold") || "85", 10)
       : 85;
-    const apiKeys = getClientApiKeys();
     transportBodyRef.current = {
       conversationId,
       model: conversation?.model,
@@ -60,7 +57,6 @@ export function useChatTransport(opts: ChatTransportOptions) {
       maxToolCalls: conversation?.maxToolCalls ?? 5,
       autoCompressThreshold: threshold,
       assistantMessageId: undefined as string | undefined,
-      ...apiKeys,
     };
   }, [conversationId, conversation?.model, conversation?.systemPrompt, conversation?.temperature, selectedKbId, searchProvider, enabledTools, enabledSkills, conversation?.chatOnlyMode, conversation?.memoryDisabled, conversation?.maxToolCalls]);
 

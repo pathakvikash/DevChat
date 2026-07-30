@@ -6,6 +6,7 @@ import { Command } from "cmdk";
 import { useRouter } from "next/navigation";
 import { FilePlus, Settings } from "lucide-react";
 import { useToast } from "./Toast";
+import { createConversation } from "@/app/hooks/useConversationsApi";
 
 interface CommandPaletteAction {
   id: string;
@@ -70,25 +71,10 @@ export default function CommandPaletteProvider({ children }: { children: React.R
 
   async function createNewChat() {
     try {
-      const savedModel = typeof window !== "undefined"
-        ? localStorage.getItem("vas:settings:default_model")
-        : null;
-      const res = await fetch("/api/conversations", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          title: "New Chat",
-          model: savedModel || undefined,
-        }),
-      });
-      if (res.ok) {
-        const newConv = await res.json();
-        setOpen(false);
-        window.location.href = `/c/${newConv.id}`;
-      }
+      const conv = await createConversation();
+      router.push(`/c/${conv.id}`);
     } catch (error) {
       console.error("Failed to create conversation:", error);
-      toast("Failed to create conversation", "error");
     }
   }
 

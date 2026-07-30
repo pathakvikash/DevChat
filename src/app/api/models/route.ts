@@ -6,14 +6,15 @@ import {
   getSupportsTools,
   getSupportsVision,
   getSupportsThinking,
-  initializeOpenRouterModels,
   initializeNvidiaNimModels,
+  mergeAndDedupeModels,
   nvidiaNim,
   type ModelCatalogEntry,
   type OllamaModelInfo,
 } from "@/lib/models";
+import { resolveOpenRouterKey, resolveNvidiaNimKey } from "@/lib/apiKeys";
 
-export async function GET(req: Request) {
+export async function GET() {
   let ollamaModels: ModelCatalogEntry[] = [];
 
   try {
@@ -32,8 +33,10 @@ export async function GET(req: Request) {
     console.warn("Ollama unavailable, using static models only:", error);
   }
 
-  const openrouterApiKey = req.headers.get("x-openrouter-api-key") || process.env.OPENROUTER_API_KEY;
-  const nvidiaNimApiKey = req.headers.get("x-nvidia-nim-api-key") || process.env.NVIDIA_NIM_API_KEY;
+  const [openrouterApiKey, nvidiaNimApiKey] = await Promise.all([
+    resolveOpenRouterKey(),
+    resolveNvidiaNimKey(),
+  ]);
 
   let openRouterModels: ModelCatalogEntry[] = [];
   if (openrouterApiKey) {
@@ -75,11 +78,10 @@ export async function GET(req: Request) {
     nvidiaModels = nvidiaNim.modelCatalog.slice();
   }
 
-  const deduped = new Map<string, ModelCatalogEntry>();
-  for (const m of [...ollamaModels, ...openRouterModels, ...nvidiaModels]) {
-    if (!deduped.has(m.id)) deduped.set(m.id, m);
-  }
-  const allModels = Array.from(deduped.values());
+  const allModels = mergeAndDedupeModels(ollamaModels, [
+    ...openRouterModels,
+    ...nvidiaModels,
+  ]);
 
   return NextResponse.json({
     models: allModels,

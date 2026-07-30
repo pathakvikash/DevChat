@@ -4,7 +4,10 @@ import { useEffect, useState, useMemo } from "react";
 import { Trash2, BookOpen, Save, RotateCcw, Loader2, Cable, Database } from "lucide-react";
 import Link from "next/link";
 import Sidebar from "@/app/components/Sidebar";
-import { getClientApiKeys } from "@/lib/apiKeys";
+import { fetchSettings as apiFetchSettings, saveSettings as apiSaveSettings, deleteSettings as apiDeleteSettings } from "@/app/hooks/useSettingsApi";
+import { fetchModels as apiFetchModels } from "@/app/hooks/useModelsApi";
+import { downloadBlob } from "@/lib/utils/download";
+import { groupModelsByProvider, type ModelInfo } from "@/app/components/conversation/types";
 
 interface Analytics {
   totalConversations: number;
@@ -14,43 +17,21 @@ interface Analytics {
   estimatedCost: number;
 }
 
-interface ModelInfo {
-  id: string;
-  name: string;
-  provider: string;
-  contextWindow?: number;
-}
-
-interface ModelGroup {
-  provider: string;
-  models: ModelInfo[];
-}
-
-const STORAGE_KEYS = {
-  openrouterApiKey: "vas:settings:openrouter_api_key",
-  nvidiaNimApiKey: "vas:settings:nvidia_nim_api_key",
-  nvidiaNimBaseUrl: "vas:settings:nvidia_nim_base_url",
-  ollamaHost: "vas:settings:ollama_host",
-  defaultModel: "vas:settings:default_model",
+const LOCAL_KEYS = {
   autoCompressThreshold: "vas:settings:auto_compress_threshold",
 } as const;
-
-function groupModelsByProvider(models: ModelInfo[]): ModelGroup[] {
-  const grouped = models.reduce<Record<string, ModelInfo[]>>((acc, model) => {
-    (acc[model.provider] ||= []).push(model);
-    return acc;
-  }, {});
-  return Object.entries(grouped).map(([provider, models]) => ({ provider, models }));
-}
 
 export default function SettingsPage() {
   const [analytics, setAnalytics] = useState<Analytics | null>(null);
   const [loading, setLoading] = useState(true);
 
-  const [openrouterApiKey, setOpenrouterApiKey] = useState("");
-  const [nvidiaNimApiKey, setNvidiaNimApiKey] = useState("");
-  const [nvidiaNimBaseUrl, setNvidiaNimBaseUrl] = useState("");
-  const [ollamaHost, setOllamaHost] = useState("");
+  // API key state (server-side storage)
+  const [orDisplay, setOrDisplay] = useState<string | null>(null);
+  const [nimDisplay, setNimDisplay] = useState<string | null>(null);
+  const [orDraft, setOrDraft] = useState("");
+  const [nimDraft, setNimDraft] = useState("");
+  const [editingKey, setEditingKey] = useState<"openrouter" | "nvidia" | null>(null);
+
   const [defaultModel, setDefaultModel] = useState("");
   const [autoCompressThreshold, setAutoCompressThreshold] = useState(85);
 
@@ -61,18 +42,7 @@ export default function SettingsPage() {
   const modelGroups = useMemo(() => groupModelsByProvider(modelsList), [modelsList]);
 
   useEffect(() => {
-    if (typeof window === "undefined") return;
-    setOpenrouterApiKey(localStorage.getItem(STORAGE_KEYS.openrouterApiKey) || "");
-    setNvidiaNimApiKey(localStorage.getItem(STORAGE_KEYS.nvidiaNimApiKey) || "");
-    setNvidiaNimBaseUrl(localStorage.getItem(STORAGE_KEYS.nvidiaNimBaseUrl) || "");
-    setOllamaHost(localStorage.getItem(STORAGE_KEYS.ollamaHost) || "http://localhost:11434");
-    setDefaultModel(localStorage.getItem(STORAGE_KEYS.defaultModel) || "");
-    setAutoCompressThreshold(
-      parseInt(localStorage.getItem(STORAGE_KEYS.autoCompressThreshold) || "85", 10),
-    );
-  }, []);
-
-  useEffect(() => {
+    fetchSettings();
     fetchAnalytics();
     fetchModels();
   }, []);
@@ -82,6 +52,27 @@ export default function SettingsPage() {
     const timer = setTimeout(() => setSaved(false), 3000);
     return () => clearTimeout(timer);
   }, [saved]);
+
+  async function fetchSettings() {
+    try {
+      const data = await apiFetchSettings();
+      setOrDisplay(data.openrouterApiKey);
+      setNimDisplay(data.nvidiaNimApiKey);
+      setDefaultModel(data.defaultModel || "");
+    } catch {}
+    if (typeof window !== "undefined") {
+      setAutoCompressThreshold(
+        parseInt(localStorage.getItem(LOCAL_KEYS.autoCompressThreshold) || "85", 10),
+      );
+    }
+  }
+
+  useEffect(() => {
+    if (editingKey === null) {
+      setOrDraft("");
+      setNimDraft("");
+    }
+  }, [editingKey]);
 
   async function fetchAnalytics() {
     try {
@@ -96,53 +87,52 @@ export default function SettingsPage() {
     }
   }
 
-  function modelsFetchHeaders(): HeadersInit {
-    const { openrouterApiKey, nvidiaNimApiKey } = getClientApiKeys();
-    const headers: Record<string, string> = {};
-    if (openrouterApiKey) headers["x-openrouter-api-key"] = openrouterApiKey;
-    if (nvidiaNimApiKey) headers["x-nvidia-nim-api-key"] = nvidiaNimApiKey;
-    return headers;
-  }
-
   async function fetchModels() {
     try {
-      const res = await fetch("/api/models", { headers: modelsFetchHeaders() });
-      if (res.ok) {
-        const data = await res.json();
-        setModelsList(data.models || []);
-      }
+      const models = await apiFetchModels();
+      setModelsList(models);
     } catch (error) {
       console.error("Failed to fetch models:", error);
     }
   }
 
-  function handleSave() {
+  async function handleSave() {
     setSaving(true);
-    localStorage.setItem(STORAGE_KEYS.openrouterApiKey, openrouterApiKey);
-    localStorage.setItem(STORAGE_KEYS.nvidiaNimApiKey, nvidiaNimApiKey);
-    localStorage.setItem(STORAGE_KEYS.nvidiaNimBaseUrl, nvidiaNimBaseUrl);
-    localStorage.setItem(STORAGE_KEYS.ollamaHost, ollamaHost);
-    localStorage.setItem(STORAGE_KEYS.defaultModel, defaultModel);
-    localStorage.setItem(STORAGE_KEYS.autoCompressThreshold, String(autoCompressThreshold));
-    setTimeout(() => {
-      setSaving(false);
-      setSaved(true);
-    }, 300);
+
+    const payload: Record<string, string> = {};
+    if (editingKey === "openrouter" && orDraft) payload.openrouterApiKey = orDraft;
+    if (editingKey === "nvidia" && nimDraft) payload.nvidiaNimApiKey = nimDraft;
+    payload.defaultModel = defaultModel;
+
+    if (Object.keys(payload).length > 0) {
+      await apiSaveSettings(payload);
+    }
+
+    localStorage.setItem(LOCAL_KEYS.autoCompressThreshold, String(autoCompressThreshold));
+
+    setEditingKey(null);
+    setSaving(false);
+    setSaved(true);
+    fetchSettings();
   }
 
-  function handleClearSettings() {
-    setOpenrouterApiKey("");
-    setNvidiaNimApiKey("");
-    setNvidiaNimBaseUrl("");
-    setOllamaHost("http://localhost:11434");
+  async function handleClearSettings() {
+    const toRemove: string[] = [];
+    if (orDisplay) toRemove.push("openrouterApiKey");
+    if (nimDisplay) toRemove.push("nvidiaNimApiKey");
+    if (defaultModel) toRemove.push("defaultModel");
+    if (toRemove.length > 0) {
+      await apiDeleteSettings(toRemove as any);
+    }
+
+    setOrDisplay(null);
+    setNimDisplay(null);
+    setOrDraft("");
+    setNimDraft("");
+    setEditingKey(null);
     setDefaultModel("");
     setAutoCompressThreshold(85);
-    localStorage.removeItem(STORAGE_KEYS.openrouterApiKey);
-    localStorage.removeItem(STORAGE_KEYS.nvidiaNimApiKey);
-    localStorage.removeItem(STORAGE_KEYS.nvidiaNimBaseUrl);
-    localStorage.removeItem(STORAGE_KEYS.ollamaHost);
-    localStorage.removeItem(STORAGE_KEYS.defaultModel);
-    localStorage.removeItem(STORAGE_KEYS.autoCompressThreshold);
+    localStorage.removeItem(LOCAL_KEYS.autoCompressThreshold);
     setSaved(true);
   }
 
@@ -190,103 +180,137 @@ export default function SettingsPage() {
           <div className="space-y-8 max-w-4xl">
             {/* API Keys */}
             <div className="glass-card rounded-[var(--glass-radius-xl)] p-6">
-              <h2 className="text-xl font-bold mb-6">API Keys</h2>
+              <h2 className="text-xl font-bold mb-5">API Keys</h2>
+              <p className="text-sm text-zinc-500 mb-5">
+                Keys are stored encrypted on the server. Saved at the
+                conversation level; pass in the chat body as a one-time override.
+              </p>
               <div className="space-y-5">
+                {/* OpenRouter */}
                 <div>
                   <label className="block text-sm font-medium text-zinc-300 mb-1">
                     OpenRouter API Key
                   </label>
-                  <input
-                    type="text"
-                    value={openrouterApiKey}
-                    onChange={(e) => setOpenrouterApiKey(e.target.value)}
-                    placeholder="sk-or-..."
-                    className="w-full glass-input rounded-[var(--glass-radius-md)] px-3 py-2 text-sm"
-                  />
+                  {editingKey === "openrouter" ? (
+                    <div className="flex gap-2">
+                      <input
+                        type="password"
+                        value={orDraft}
+                        onChange={(e) => setOrDraft(e.target.value)}
+                        placeholder="sk-or-..."
+                        className="flex-1 glass-input rounded-[var(--glass-radius-md)] px-3 py-2 text-sm"
+                        autoFocus
+                      />
+                      <button
+                        onClick={() => setEditingKey(null)}
+                        className="glass-button px-3 py-2 text-sm text-zinc-400 rounded-[var(--glass-radius-md)]"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-2">
+                      <div className="flex-1 glass-input rounded-[var(--glass-radius-md)] px-3 py-2 text-sm font-mono text-zinc-400 select-all">
+                        {orDisplay ? orDisplay : <span className="text-zinc-600">Not configured</span>}
+                      </div>
+                      {orDisplay ? (
+                        <button
+                          onClick={() => { setEditingKey("openrouter"); setOrDraft(""); }}
+                          className="glass-button px-3 py-2 text-sm text-zinc-300 rounded-[var(--glass-radius-md)]"
+                        >
+                          Change
+                        </button>
+                      ) : (
+                        <button
+                          onClick={() => { setEditingKey("openrouter"); setOrDraft(""); }}
+                          className="glass-button-primary px-3 py-2 text-sm text-white rounded-[var(--glass-radius-md)]"
+                        >
+                          Add
+                        </button>
+                      )}
+                    </div>
+                  )}
                   <p className="text-xs text-zinc-500 mt-1">
-                    API key for OpenRouter gateway — gives access to 300+ models.
+                    API key for OpenRouter gateway. Stored server-side, never exposed to the client.
                   </p>
                 </div>
+
+                {/* NVIDIA NIM */}
                 <div>
                   <label className="block text-sm font-medium text-zinc-300 mb-1">
                     NVIDIA NIM API Key
                   </label>
-                  <input
-                    type="text"
-                    value={nvidiaNimApiKey}
-                    onChange={(e) => setNvidiaNimApiKey(e.target.value)}
-                    placeholder="nvapi-..."
-                    className="w-full glass-input rounded-[var(--glass-radius-md)] px-3 py-2 text-sm"
-                  />
+                  {editingKey === "nvidia" ? (
+                    <div className="flex gap-2">
+                      <input
+                        type="password"
+                        value={nimDraft}
+                        onChange={(e) => setNimDraft(e.target.value)}
+                        placeholder="nvapi-..."
+                        className="flex-1 glass-input rounded-[var(--glass-radius-md)] px-3 py-2 text-sm"
+                        autoFocus
+                      />
+                      <button
+                        onClick={() => setEditingKey(null)}
+                        className="glass-button px-3 py-2 text-sm text-zinc-400 rounded-[var(--glass-radius-md)]"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-2">
+                      <div className="flex-1 glass-input rounded-[var(--glass-radius-md)] px-3 py-2 text-sm font-mono text-zinc-400 select-all">
+                        {nimDisplay ? nimDisplay : <span className="text-zinc-600">Not configured</span>}
+                      </div>
+                      {nimDisplay ? (
+                        <button
+                          onClick={() => { setEditingKey("nvidia"); setNimDraft(""); }}
+                          className="glass-button px-3 py-2 text-sm text-zinc-300 rounded-[var(--glass-radius-md)]"
+                        >
+                          Change
+                        </button>
+                      ) : (
+                        <button
+                          onClick={() => { setEditingKey("nvidia"); setNimDraft(""); }}
+                          className="glass-button-primary px-3 py-2 text-sm text-white rounded-[var(--glass-radius-md)]"
+                        >
+                          Add
+                        </button>
+                      )}
+                    </div>
+                  )}
                   <p className="text-xs text-zinc-500 mt-1">
-                    API key for NVIDIA NIM hosted models.
+                    API key for NVIDIA NIM hosted models. Stored server-side.
                   </p>
                 </div>
-                <div>
-                  <label className="block text-sm font-medium text-zinc-300 mb-1">
-                    NVIDIA NIM Base URL
-                  </label>
-                  <input
-                    type="text"
-                    value={nvidiaNimBaseUrl}
-                    onChange={(e) => setNvidiaNimBaseUrl(e.target.value)}
-                    placeholder="https://integrate.api.nvidia.com/v1"
-                    className="w-full glass-input rounded-[var(--glass-radius-md)] px-3 py-2 text-sm"
-                  />
-                  <p className="text-xs text-zinc-500 mt-1">
-                    Base URL for NVIDIA NIM API endpoint.
-                  </p>
-                </div>
-              </div>
-            </div>
-
-            {/* Ollama */}
-            <div className="glass-card rounded-[var(--glass-radius-xl)] p-6">
-              <h2 className="text-xl font-bold mb-4">Ollama</h2>
-              <div>
-                <label className="block text-sm font-medium text-zinc-300 mb-1">
-                  Ollama Host URL
-                </label>
-                <input
-                  type="text"
-                  value={ollamaHost}
-                  onChange={(e) => setOllamaHost(e.target.value)}
-                  placeholder="http://localhost:11434"
-                  className="w-full glass-input rounded-[var(--glass-radius-md)] px-3 py-2 text-sm"
-                />
-                <p className="text-xs text-zinc-500 mt-1">
-                  URL of your Ollama instance for local models.
-                </p>
               </div>
             </div>
 
             {/* Default Model */}
             <div className="glass-card rounded-[var(--glass-radius-xl)] p-6">
               <h2 className="text-xl font-bold mb-4">Default Model</h2>
-              <div>
-                <label className="block text-sm font-medium text-zinc-300 mb-1">
-                  Model
-                </label>
-                <select
-                  value={defaultModel}
-                  onChange={(e) => setDefaultModel(e.target.value)}
-                  className="w-full glass-input rounded-[var(--glass-radius-md)] px-3 py-2 text-sm"
-                >
-                  <option value="">None (use per-conversation default)</option>
-                  {modelGroups.map((group) => (
-                    <optgroup key={group.provider} label={group.provider}>
-                      {group.models.map((model) => (
-                        <option key={model.id} value={model.id}>
-                          {model.name}
-                        </option>
-                      ))}
-                    </optgroup>
-                  ))}
-                </select>
-                <p className="text-xs text-zinc-500 mt-1">
-                  Default model for new conversations.
-                </p>
-              </div>
+              <p className="text-sm text-zinc-500 mb-3">
+                Default model used when creating a new conversation. Stored server-side.
+              </p>
+              <select
+                value={defaultModel}
+                onChange={(e) => setDefaultModel(e.target.value)}
+                className="w-full glass-input rounded-[var(--glass-radius-md)] px-3 py-2 text-sm"
+              >
+                <option value="">None (use per-conversation default)</option>
+                {modelGroups.map((group) => (
+                  <optgroup key={group.provider} label={group.provider}>
+                    {group.models.map((model) => (
+                      <option key={model.id} value={model.id}>
+                        {model.name}
+                      </option>
+                    ))}
+                  </optgroup>
+                ))}
+              </select>
+              <p className="text-xs text-zinc-500 mt-1">
+                Default model for new conversations.
+              </p>
             </div>
 
             {/* Auto-Compress Threshold */}
@@ -487,15 +511,8 @@ function DatasetExportSection() {
       const res = await fetch(`/api/dataset?${params.toString()}`);
       if (!res.ok) throw new Error("Export failed");
       const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
       const ext = format === "sharegpt" ? ".json" : ".jsonl";
-      a.download = `vas-dataset${ext}`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      setTimeout(() => URL.revokeObjectURL(url), 5000);
+      downloadBlob(blob, `vas-dataset${ext}`);
     } catch (e) {
       console.error("Dataset export error:", e);
       alert("Export failed. Check console for details.");

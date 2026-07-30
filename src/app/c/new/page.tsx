@@ -2,6 +2,7 @@
 
 import { Suspense, useEffect, useRef } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+import { createConversation } from "@/app/hooks/useConversationsApi";
 
 function NewConversationInner() {
   const router = useRouter();
@@ -14,19 +15,7 @@ function NewConversationInner() {
 
     async function createAndRedirect() {
       try {
-        const savedModel = typeof window !== "undefined"
-          ? localStorage.getItem("vas:settings:default_model")
-          : null;
-        const res = await fetch("/api/conversations", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            title: "New Chat",
-            model: savedModel || undefined,
-          }),
-        });
-        if (!res.ok) return;
-        const conv = await res.json();
+        const conv = await createConversation();
         const q = searchParams.get("q");
         router.push(q ? `/c/${conv.id}?q=${encodeURIComponent(q)}` : `/c/${conv.id}`);
       } catch (error) {

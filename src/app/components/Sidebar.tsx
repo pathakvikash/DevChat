@@ -7,6 +7,13 @@ import { usePathname } from "next/navigation";
 import { Plus, Search, Trash2, Edit2, Settings, BookOpen, Brain, Sparkles, Loader2, Cpu, Pin, Archive, X, StickyNote, HardDrive, MoreHorizontal, CheckSquare, Square, CheckCheck, Activity } from "lucide-react";
 import { useSidebar } from "@/app/contexts/SidebarContext";
 import { useResource } from "@/app/hooks/useResource";
+import {
+  createConversation,
+  fetchConversations,
+  updateConversation,
+  deleteConversation as apiDeleteConversation,
+  generateTitle as apiGenerateTitle,
+} from "@/app/hooks/useConversationsApi";
 import OllamaModelManagerDialog from "./OllamaModelManagerDialog";
 import { useToast } from "@/app/components/Toast";
 
@@ -41,11 +48,7 @@ export default function Sidebar() {
     loading,
     setData: setConversations,
   } = useResource<ConversationItem[]>(
-    async () => {
-      const res = await fetch("/api/conversations");
-      if (!res.ok) throw new Error("Failed to fetch conversations");
-      return res.json();
-    },
+    fetchConversations,
     [],
     { onError: (e) => console.error("Failed to fetch conversations:", e) },
   );
@@ -61,31 +64,17 @@ export default function Sidebar() {
 
   async function createNewChat() {
     try {
-      const savedModel = typeof window !== "undefined"
-        ? localStorage.getItem("vas:settings:default_model")
-        : null;
-      const res = await fetch("/api/conversations", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          title: "New Chat",
-          model: savedModel || undefined,
-        }),
-      });
-      if (res.ok) {
-        const newConv = await res.json();
-        window.location.href = `/c/${newConv.id}`;
-      }
+      const newConv = await createConversation();
+      window.location.href = `/c/${newConv.id}`;
     } catch (error) {
       console.error("Failed to create conversation:", error);
-      toast("Failed to create conversation", "error");
     }
   }
 
   async function deleteConversation(id: string) {
     if (!confirm("Delete this conversation?")) return;
     try {
-      await fetch(`/api/conversations/${id}`, { method: "DELETE" });
+      await apiDeleteConversation(id);
       setConversations((prev) => (prev ?? []).filter((c) => c.id !== id));
     } catch (error) {
       console.error("Failed to delete conversation:", error);
@@ -96,11 +85,7 @@ export default function Sidebar() {
   async function togglePin(conv: ConversationItem) {
     const newPinned = !conv.pinned;
     try {
-      await fetch(`/api/conversations/${conv.id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ pinned: newPinned }),
-      });
+      await updateConversation(conv.id, { pinned: newPinned });
       setConversations((prev) =>
         (prev ?? []).map((c) =>
           c.id === conv.id ? { ...c, pinned: newPinned } : c
@@ -115,11 +100,7 @@ export default function Sidebar() {
   async function toggleArchive(conv: ConversationItem) {
     const newArchived = !conv.archived;
     try {
-      await fetch(`/api/conversations/${conv.id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ archived: newArchived }),
-      });
+      await updateConversation(conv.id, { archived: newArchived });
       setConversations((prev) =>
         (prev ?? []).map((c) =>
           c.id === conv.id ? { ...c, archived: newArchived } : c
@@ -133,11 +114,7 @@ export default function Sidebar() {
 
   async function updateTitle(id: string, newTitle: string) {
     try {
-      await fetch(`/api/conversations/${id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ title: newTitle }),
-      });
+      await updateConversation(id, { title: newTitle });
       setConversations((prev) =>
         (prev ?? []).map((c) => (c.id === id ? { ...c, title: newTitle } : c))
       );
@@ -150,13 +127,10 @@ export default function Sidebar() {
   async function generateTitle(id: string) {
     setGeneratingId(id);
     try {
-      const res = await fetch(`/api/conversations/${id}/generate-title`, {
-        method: "POST",
-      });
-      const data = await res.json();
+      const data = await apiGenerateTitle(id);
       if (data.title) {
         setConversations((prev) =>
-          (prev ?? []).map((c) => (c.id === id ? { ...c, title: data.title } : c))
+          (prev ?? []).map((c) => (c.id === id ? { ...c, title: data.title! } : c))
         );
         window.dispatchEvent(new CustomEvent("vas:title-updated", { detail: { id, title: data.title } }));
       }
@@ -189,29 +163,38 @@ export default function Sidebar() {
     setSelectedIds(new Set());
   }
 
+  async function runBulkAction(
+    ids: string[],
+    action: (id: string) => Promise<unknown>,
+    applySuccess: () => void,
+    successMsg: string,
+    failureMsg: string,
+  ) {
+    try {
+      await Promise.all(ids.map(action));
+      applySuccess();
+      clearSelection();
+      toast(successMsg, "success");
+    } catch {
+      toast(failureMsg, "error");
+    }
+  }
+
   async function bulkArchive() {
     const ids = [...selectedIds];
     if (!ids.length) return;
     const msg = `Archive ${ids.length} conversation${ids.length > 1 ? "s" : ""}?`;
     if (!confirm(msg)) return;
-    try {
-      await Promise.all(ids.map((id) =>
-        fetch(`/api/conversations/${id}`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ archived: true }),
-        })
-      ));
-      setConversations((prev) =>
-        (prev ?? []).map((c) =>
-          selectedIds.has(c.id) ? { ...c, archived: true } : c
-        )
-      );
-      clearSelection();
-      toast(`Archived ${ids.length} conversation${ids.length > 1 ? "s" : ""}`, "success");
-    } catch {
-      toast("Failed to archive some conversations", "error");
-    }
+    await runBulkAction(
+      ids,
+      (id) => updateConversation(id, { archived: true }),
+      () =>
+        setConversations((prev) =>
+          (prev ?? []).map((c) => (ids.includes(c.id) ? { ...c, archived: true } : c))
+        ),
+      `Archived ${ids.length} conversation${ids.length > 1 ? "s" : ""}`,
+      "Failed to archive some conversations",
+    );
   }
 
   async function bulkDelete() {
@@ -219,21 +202,18 @@ export default function Sidebar() {
     if (!ids.length) return;
     const msg = `Permanently delete ${ids.length} conversation${ids.length > 1 ? "s" : ""}? This cannot be undone.`;
     if (!confirm(msg)) return;
-    try {
-      await Promise.all(ids.map((id) =>
-        fetch(`/api/conversations/${id}`, { method: "DELETE" })
-      ));
-      setConversations((prev) =>
-        (prev ?? []).filter((c) => !selectedIds.has(c.id))
-      );
-      if (selectedIds.has(currentConvId ?? "")) {
-        window.location.href = "/";
-      }
-      clearSelection();
-      toast(`Deleted ${ids.length} conversation${ids.length > 1 ? "s" : ""}`, "success");
-    } catch {
-      toast("Failed to delete some conversations", "error");
-    }
+    await runBulkAction(
+      ids,
+      (id) => apiDeleteConversation(id),
+      () => {
+        setConversations((prev) => (prev ?? []).filter((c) => !ids.includes(c.id)));
+        if (ids.includes(currentConvId ?? "")) {
+          window.location.href = "/";
+        }
+      },
+      `Deleted ${ids.length} conversation${ids.length > 1 ? "s" : ""}`,
+      "Failed to delete some conversations",
+    );
   }
 
   return (

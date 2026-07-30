@@ -5,8 +5,8 @@ import { ChevronDown, RotateCcw, Loader2, Settings, Wrench, Eye, Brain } from "l
 import { formatContext } from "@/lib/utils/messageParts";
 import AsyncButton from "../ui/AsyncButton";
 import { useResource } from "@/app/hooks/useResource";
-import { getClientApiKeys } from "@/lib/apiKeys";
-import { ModelInfo, ModelGroup } from "./types";
+import { fetchModels as apiFetchModels, fetchModelUsage } from "@/app/hooks/useModelsApi";
+import { ModelInfo, groupModelsByProvider } from "./types";
 
 interface ModelSelectorProps {
   currentModel: string;
@@ -55,21 +55,10 @@ export default function ModelSelector({
     refetch: refreshModels,
   } = useResource<ModelInfo[]>(
     async () => {
-      const apiKeys = getClientApiKeys();
-      const headers: Record<string, string> = {};
-      if (apiKeys.openrouterApiKey) headers["x-openrouter-api-key"] = apiKeys.openrouterApiKey;
-      if (apiKeys.nvidiaNimApiKey) headers["x-nvidia-nim-api-key"] = apiKeys.nvidiaNimApiKey;
-      const [modelsRes, usageRes] = await Promise.all([
-        fetch("/api/models", { headers }),
-        fetch("/api/models/usage"),
+      const [models, { usage }] = await Promise.all([
+        apiFetchModels(),
+        fetchModelUsage(),
       ]);
-      if (!modelsRes.ok) throw new Error("Failed to fetch models");
-      const modelsData = await modelsRes.json();
-      const models: ModelInfo[] = modelsData.models || [];
-
-      const usage: Record<string, number> = usageRes.ok
-        ? (await usageRes.json()).usage || {}
-        : {};
 
       return models.map((m) => ({ ...m, usageCount: usage[m.id] || 0 }));
     },
@@ -79,15 +68,10 @@ export default function ModelSelector({
   const models = modelsData ?? [];
 
   const modelGroups = useMemo(() => {
-    const grouped = models.reduce<Record<string, ModelInfo[]>>((acc, model) => {
-      (acc[model.provider] ||= []).push(model);
-      return acc;
-    }, {});
-    return Object.entries(grouped)
-      .map(([provider, models]) => ({
-        provider,
-        models: [...models].sort((a, b) => (b.usageCount || 0) - (a.usageCount || 0)),
-      }));
+    return groupModelsByProvider(models).map((g) => ({
+      ...g,
+      models: [...g.models].sort((a, b) => (b.usageCount || 0) - (a.usageCount || 0)),
+    }));
   }, [models]);
 
   const currentModelInfo = models.find((m) => m.id === currentModel);

@@ -36,7 +36,7 @@ export interface ModelInfo {
   id: string;
   name: string;
   provider: string;
-  contextWindow?: number;
+  contextWindow: number;
   supportsTools?: boolean;
   supportsVision?: boolean;
   supportsThinking?: boolean;
@@ -46,4 +46,12 @@ export interface ModelInfo {
 export interface ModelGroup {
   provider: string;
   models: ModelInfo[];
+}
+
+export function groupModelsByProvider(models: ModelInfo[]): ModelGroup[] {
+  const grouped = models.reduce<Record<string, ModelInfo[]>>((acc, model) => {
+    (acc[model.provider] ||= []).push(model);
+    return acc;
+  }, {});
+  return Object.entries(grouped).map(([provider, models]) => ({ provider, models }));
 }
