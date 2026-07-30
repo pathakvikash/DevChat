@@ -28,8 +28,18 @@ function createExternalProvider(def: ExternalProviderDef) {
   }
 
   function setKey(key?: string) {
-    overrideKey = key || undefined;
+    const next = key || undefined;
+    if (next === overrideKey) return;
+    overrideKey = next;
     provider = null;
+    // Cached model configs bind `model:` to the provider instance that was
+    // active when they were first added (see addModel). If the key changes
+    // (e.g. a valid key is added in Settings after an earlier request ran
+    // with no/invalid key), those cached configs would keep using the old
+    // key forever unless we drop them so they get rebuilt against the new
+    // provider on next use.
+    for (const id of Object.keys(modelCache)) delete modelCache[id];
+    modelCatalog = [];
   }
 
   function getProvider() {
@@ -108,26 +118,6 @@ function createExternalProvider(def: ExternalProviderDef) {
     }
   }
 
-  function addToCatalog(id: string, name: string, contextWindow: number) {
-    const supportsTools =
-      getSupportsTools(id) ||
-      getSupportsTools(name) ||
-      getSupportsTools(`${id} ${name}`) ||
-      supportsToolsFromName(id, name);
-    const supportsVision = getSupportsVision(id) || getSupportsVision(name);
-    const supportsThinking =
-      getSupportsThinking(id) || getSupportsThinking(name);
-    modelCatalog.push({
-      id: `${def.modelPrefix}/${id}`,
-      name,
-      provider: def.providerLabel,
-      contextWindow,
-      supportsTools,
-      supportsVision,
-      supportsThinking,
-    });
-  }
-
   return {
     get isAvailable() {
       return !!getEffectiveKey();
@@ -147,7 +137,6 @@ function createExternalProvider(def: ExternalProviderDef) {
     getProvider,
     setKey,
     addModel,
-    addToCatalog,
   };
 }
 
@@ -172,22 +161,6 @@ export const nvidiaNim = createExternalProvider({
   modelPrefix: "nvidia-nim",
 });
 
-export const NVIDIA_NIM_MODELS = [
-  {
-    id: "nvidia/llama-3.1-nemotron-70b-instruct",
-    name: "Llama 3.1 Nemotron 70B",
-    ctx: 131072,
-  },
-  { id: "nvidia/nemotron-4-340b-instruct", name: "Nemotron 4 340B", ctx: 4096 },
-  { id: "meta/llama-3.1-405b-instruct", name: "Llama 3.1 405B", ctx: 131072 },
-  {
-    id: "mistralai/mistral-7b-instruct-v0.3",
-    name: "Mistral 7B v0.3",
-    ctx: 32768,
-  },
-  { id: "google/gemma-2b-it", name: "Gemma 2B IT", ctx: 8192 },
-];
-
 export interface ModelConfig {
   id: string;
   name: string;
@@ -211,7 +184,7 @@ export interface OllamaModelInfo {
   contextWindow?: number;
 }
 
-export const STATIC_MODELS: Record<string, ModelConfig> = {
+const STATIC_MODELS: Record<string, ModelConfig> = {
   // "gpt-4o": {
   //   id: "gpt-4o",
   //   name: "GPT-4o",
@@ -274,7 +247,7 @@ export const STATIC_MODELS: Record<string, ModelConfig> = {
   // },
 };
 
-let ollamaModelCache: Record<string, ModelConfig> = {};
+const ollamaModelCache: Record<string, ModelConfig> = {};
 let ollamaModelInfoCache: OllamaModelInfo[] = [];
 let ollamaModelsFetchedAt = 0;
 const OLLAMA_CACHE_TTL = 30_000; // 30 seconds
@@ -465,58 +438,79 @@ export function getOllamaModelInfos(): OllamaModelInfo[] {
   return ollamaModelInfoCache;
 }
 
-export async function initializeOpenRouterModels(apiKey?: string): Promise<void> {
-  const key = apiKey || process.env[openRouter.envKey] || "";
-  if (!key) return;
-  if (apiKey) openRouter.setKey(apiKey);
-  try {
-    const headers: Record<string, string> = {
-      "Content-Type": "application/json",
-    };
-    if (key) headers["Authorization"] = `Bearer ${key}`;
+interface ProviderModelItem {
+  id?: string;
+  name?: string;
+  context_length?: number;
+  pricing?: { prompt: string; completion: string };
+}
 
-    const response = await fetch("https://openrouter.ai/api/v1/models", {
-      headers,
+async function initializeProviderModels(opts: {
+  apiKey?: string;
+  provider: { envKey: string; setKey: (key?: string) => void };
+  url: string;
+  buildHeaders: (key: string) => Record<string, string>;
+  httpErrorLabel: string;
+  logLabel: string;
+  onModel: (m: ProviderModelItem) => void;
+}): Promise<void> {
+  const key = opts.apiKey || process.env[opts.provider.envKey] || "";
+  if (!key) return;
+  if (opts.apiKey) opts.provider.setKey(opts.apiKey);
+  try {
+    const response = await fetch(opts.url, {
+      headers: opts.buildHeaders(key),
       signal: AbortSignal.timeout(10000),
     });
     if (!response.ok)
-      throw new Error(`OpenRouter API error: ${response.status}`);
+      throw new Error(`${opts.httpErrorLabel} API error: ${response.status}`);
 
     const data = await response.json();
     for (const m of data.data || []) {
-      const p = m.pricing || { prompt: "0", completion: "0" };
-      const isFree =
-        parseFloat(p.prompt) === 0 && parseFloat(p.completion) === 0;
-      if (!isFree) continue;
-      if (!m.id || !m.id.includes("/")) continue;
-      openRouter.addModel(m.id, m.name || m.id, m.context_length || 128000, p);
+      opts.onModel(m);
     }
   } catch (error) {
-    console.error("Failed to fetch OpenRouter models:", error);
+    console.error(`Failed to fetch ${opts.logLabel} models:`, error);
   }
 }
 
+export async function initializeOpenRouterModels(apiKey?: string): Promise<void> {
+  await initializeProviderModels({
+    apiKey,
+    provider: openRouter,
+    url: "https://openrouter.ai/api/v1/models",
+    buildHeaders: (key) => ({
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${key}`,
+    }),
+    httpErrorLabel: "OpenRouter",
+    logLabel: "OpenRouter",
+    onModel: (m) => {
+      const p = m.pricing || { prompt: "0", completion: "0" };
+      const isFree =
+        parseFloat(p.prompt) === 0 && parseFloat(p.completion) === 0;
+      if (!isFree) return;
+      if (!m.id || !m.id.includes("/")) return;
+      openRouter.addModel(m.id, m.name || m.id, m.context_length || 128000, p);
+    },
+  });
+}
+
 export async function initializeNvidiaNimModels(apiKey?: string): Promise<void> {
-  const key = apiKey || process.env.NVIDIA_NIM_API_KEY || "";
-  if (!key) return;
-  if (apiKey) nvidiaNim.setKey(apiKey);
   const baseUrl =
     process.env.NVIDIA_NIM_BASE_URL || "https://integrate.api.nvidia.com/v1";
-  try {
-    const response = await fetch(`${baseUrl}/models`, {
-      headers: { Authorization: `Bearer ${key}` },
-      signal: AbortSignal.timeout(10000),
-    });
-    if (!response.ok) throw new Error(`NVIDIA API error: ${response.status}`);
-
-    const data = await response.json();
-    for (const m of data.data || []) {
-      if (!m.id) continue;
+  await initializeProviderModels({
+    apiKey,
+    provider: nvidiaNim,
+    url: `${baseUrl}/models`,
+    buildHeaders: (key) => ({ Authorization: `Bearer ${key}` }),
+    httpErrorLabel: "NVIDIA",
+    logLabel: "NVIDIA NIM",
+    onModel: (m) => {
+      if (!m.id) return;
       nvidiaNim.addModel(m.id, m.id, m.context_length || 128000);
-    }
-  } catch (error) {
-    console.error("Failed to fetch NVIDIA NIM models:", error);
-  }
+    },
+  });
 }
 
 export function getAllModels(): ModelConfig[] {
@@ -592,18 +586,6 @@ export async function initializeOllamaModels(): Promise<void> {
   }
 }
 
-export function calculateCost(
-  modelId: string,
-  inputTokens: number,
-  outputTokens: number,
-): number {
-  const model = getModel(modelId);
-  return (
-    (inputTokens / 1000) * model.costPer1kInputTokens +
-    (outputTokens / 1000) * model.costPer1kOutputTokens
-  );
-}
-
 export interface ModelCatalogEntry {
   id: string;
   name: string;
@@ -613,40 +595,6 @@ export interface ModelCatalogEntry {
   supportsVision?: boolean;
   supportsThinking?: boolean;
 }
-
-export const STATIC_MODEL_CATALOG: ModelCatalogEntry[] = [
-  { id: "gpt-4o", name: "GPT-4o", provider: "OpenAI", contextWindow: 128000 },
-  {
-    id: "gpt-4o-mini",
-    name: "GPT-4o Mini",
-    provider: "OpenAI",
-    contextWindow: 128000,
-  },
-  {
-    id: "claude-sonnet",
-    name: "Claude 3.5 Sonnet",
-    provider: "Anthropic",
-    contextWindow: 200000,
-  },
-  {
-    id: "claude-opus",
-    name: "Claude 3 Opus",
-    provider: "Anthropic",
-    contextWindow: 200000,
-  },
-  {
-    id: "gemini-pro",
-    name: "Gemini 1.5 Pro",
-    provider: "Google",
-    contextWindow: 1000000,
-  },
-  {
-    id: "gemini-flash",
-    name: "Gemini 1.5 Flash",
-    provider: "Google",
-    contextWindow: 1000000,
-  },
-];
 
 export function getDefaultOllamaContextWindow(modelName: string): number {
   const name = modelName.toLowerCase();

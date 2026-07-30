@@ -1,7 +1,6 @@
 import { convertToModelMessages, streamText, stepCountIs } from "ai";
 import { prisma } from "@/lib/db";
-import { getModel, initializeOllamaModels, initializeOpenRouterModels, initializeNvidiaNimModels, getAllModels } from "@/lib/models";
-import { resolveOpenRouterKey, resolveNvidiaNimKey } from "@/lib/apiKeys";
+import { getModel } from "@/lib/models";
 import { extractText, stripFileParts } from "@/lib/utils/messageParts";
 import {
   buildSystemPrompt,
@@ -9,9 +8,16 @@ import {
 import {
   buildTools,
   resolveActiveToolIds,
-  type SearchProvider,
+  type ToolSet,
 } from "@/lib/chat/buildTools";
 import { safePersistAssistantMessage } from "@/lib/chat/persistAssistantMessage";
+import {
+  isTransientProviderError,
+  friendlyProviderErrorMessage,
+  formatMissingApiKeyMessage,
+} from "@/lib/chat/providerErrors";
+import { resolveChatSettings } from "@/lib/chat/resolveChatSettings";
+import { resolveModelCandidates } from "@/lib/chat/resolveModelCandidates";
 import { recordTrace } from "@/lib/observability";
 import {
   estimatePromptTokens,
@@ -43,99 +49,57 @@ export async function POST(req: Request) {
     messageId: bodyUserMessageId,
     assistantMessageId: bodyAssistantMessageId,
   } = await req.json();
-  let model: string = bodyModel;
+  let model: string | undefined = bodyModel;
   try {
-    const searchProvider: SearchProvider =
-      bodySearchProvider === "tavily" ? "tavily" : "duckduckgo";
+    const settings = await resolveChatSettings({
+      conversationId,
+      bodyModel,
+      bodySystemPrompt,
+      bodyTemperature,
+      bodyKbId,
+      bodySearchProvider,
+      bodyEnabledTools,
+      bodyEnabledSkills,
+      bodyChatOnlyMode,
+      bodyMemoryDisabled,
+      bodyAutoCompressThreshold,
+      bodyMaxToolCalls,
+    });
+    model = settings.model;
+    const {
+      searchProvider,
+      explicitToolIds,
+      skillIds,
+      systemPrompt,
+      temperature,
+      kbId,
+      topP,
+      chatOnlyMode,
+      memoryDisabled,
+      fallbackModel,
+      maxToolCalls,
+      autoCompressThreshold,
+    } = settings;
+    // `contextLength`/`maxTokens` are reassigned below (Ollama context bump,
+    // default maxTokens), so these two stay `let` unlike the rest.
+    let { contextLength, maxTokens } = settings;
 
-    const explicitToolIds: string[] = Array.isArray(bodyEnabledTools)
-      ? bodyEnabledTools
-      : [];
-    const skillIds: string[] = Array.isArray(bodyEnabledSkills)
-      ? bodyEnabledSkills
-      : [];
-
-    let systemPrompt = bodySystemPrompt;
-    let temperature = bodyTemperature ?? 0.7;
-    let kbId = bodyKbId;
-    let contextLength: number | undefined;
-    let topP: number | undefined;
-    let maxTokens: number | undefined;
-    let chatOnlyMode = false;
-    let memoryDisabled = false;
-    let fallbackModel: string | undefined;
-    const autoCompressThreshold = bodyAutoCompressThreshold ?? 85;
-    let maxToolCalls = bodyMaxToolCalls ?? 5;
-
-    if (conversationId) {
-      const conv = await prisma.conversation.findUnique({
-        where: { id: conversationId },
-        select: {
-          model: true,
-          systemPrompt: true,
-          temperature: true,
-          kbId: true,
-          contextLength: true,
-          topP: true,
-          maxTokens: true,
-          chatOnlyMode: true,
-          memoryDisabled: true,
-          maxToolCalls: true,
-          fallbackModel: true,
-        },
-      });
-      if (conv) {
-        model = conv.model || model;
-        systemPrompt = conv.systemPrompt || systemPrompt;
-        temperature = conv.temperature ?? temperature;
-        kbId = conv.kbId || kbId;
-        contextLength = conv.contextLength ?? undefined;
-        topP = conv.topP ?? undefined;
-        maxTokens = conv.maxTokens ?? undefined;
-        chatOnlyMode = conv.chatOnlyMode ?? false;
-        memoryDisabled = conv.memoryDisabled ?? false;
-        maxToolCalls = conv.maxToolCalls ?? 5;
-        if (conv.fallbackModel) fallbackModel = conv.fallbackModel;
-      }
+    const resolution = await resolveModelCandidates({
+      requestedModel: model,
+      fallbackModel,
+      bodyOpenrouterApiKey,
+      bodyNvidiaNimApiKey,
+    });
+    if (!resolution.ok) {
+      return new Response(
+        JSON.stringify({ error: formatMissingApiKeyMessage(resolution.missingKeyProvider) }),
+        { status: 400, headers: { "Content-Type": "application/json" } },
+      );
     }
-
-    await initializeOllamaModels();
-    const effectiveOrKey = resolveOpenRouterKey(bodyOpenrouterApiKey);
-    const effectiveNimKey = resolveNvidiaNimKey(bodyNvidiaNimApiKey);
-    if (effectiveOrKey) {
-      await initializeOpenRouterModels(effectiveOrKey);
-    }
-    if (effectiveNimKey) {
-      await initializeNvidiaNimModels(effectiveNimKey);
-    }
-
-    if (!model) {
-      const allModels = getAllModels();
-      const ollamaModels = allModels.filter((m) => m.id.startsWith("ollama/"));
-      if (ollamaModels.length > 0) {
-        const toolModels = ollamaModels.filter((m) => m.supportsTools);
-        model = (toolModels[0] || ollamaModels[0]).id;
-      } else if (allModels.length > 0) {
-        model = allModels[0].id;
-      } else {
-        throw new Error("No models available");
-      }
-    }
-
-    // ── Candidate model chain (primary + fallback) ─────────────────────────
-    // If the primary model fails (auth error, rate limit, outage, removed id),
-    // retry it with backoff, then fall back to the conversation's fallbackModel
-    // (or the VAS_FALLBACK_MODEL env var) before giving up.
-    const candidateModels: string[] = [];
-    const pushCandidate = (m?: string) => {
-      if (m && !candidateModels.includes(m)) candidateModels.push(m);
-    };
-    pushCandidate(model);
-    pushCandidate(fallbackModel);
-    pushCandidate(process.env.VAS_FALLBACK_MODEL);
+    model = resolution.model;
+    const candidateModels = resolution.candidateModels;
 
     let lastError: unknown;
-    let candidateFailed = false;
     for (const servedModel of candidateModels) {
     let modelConfig: ReturnType<typeof getModel> | null = null;
     try {
@@ -144,7 +108,6 @@ export async function POST(req: Request) {
       console.error(
         `[chat] model config unavailable for ${servedModel} — skipping fallback candidate`,
       );
-      candidateFailed = true;
       continue;
     }
     if (!maxTokens) maxTokens = 8192;
@@ -206,7 +169,7 @@ export async function POST(req: Request) {
       }
     }
 
-    const aiTools = useTools
+    const aiTools: ToolSet = useTools
       ? await buildTools({ activeToolIds, searchProvider, conversationId })
       : {};
 
@@ -250,10 +213,6 @@ export async function POST(req: Request) {
 
     // Per-candidate retry loop (transient errors + Ollama context overflow).
     const RETRIES_PER_MODEL = 2;
-    const isTransientError = (msg: string) =>
-      /rate.?limit|429|too many requests|timeout|timed? out|etimedout|econnreset|econnrefused|503|502|500 |temporarily unavailable|overloaded|fetch failed|network|socket|upstream/i.test(
-        msg,
-      );
     // Tracks partial assistant output so we can persist it if the client
     // stops the stream mid-generation (onFinish won't fire in that case).
     let assistantPersisted = false;
@@ -374,9 +333,6 @@ export async function POST(req: Request) {
           maxRetries: 0,
           abortSignal: req.signal,
           ...(isOllama ? { providerOptions: { ollama: ollamaOptions } } : {}),
-          onError: ({ error }) => {
-            console.error("[streamText error]", error);
-          },
           onChunk: ({ chunk }) => {
             if (chunk.type === "text-delta") {
               partialText += chunk.text;
@@ -486,7 +442,19 @@ export async function POST(req: Request) {
             `useTools=${useTools}`,
         );
 
-        const response = result.toUIMessageStreamResponse();
+        // The AI SDK swallows stream errors into a generic "An error
+        // occurred." by default so server error details aren't leaked to the
+        // client. Auth failures happen mid-stream (after headers are already
+        // sent, so the try/catch below never sees them) — surface a message
+        // the user can actually act on instead of a silent/opaque toast.
+        const response = result.toUIMessageStreamResponse({
+          onError: (streamError) => {
+            const rawMsg =
+              streamError instanceof Error ? streamError.message : String(streamError);
+            console.error(`[chat] stream error on ${servedModel}:`, rawMsg);
+            return friendlyProviderErrorMessage(rawMsg, { servedModel, isOllama }) ?? rawMsg;
+          },
+        });
 
         // If the client stops the generation, onFinish may not fire. Persist
         // whatever partial content we've accumulated so it isn't lost on refresh.
@@ -589,9 +557,15 @@ export async function POST(req: Request) {
             continue;
           }
         }
+        // Auth/invalid-key errors → friendly message instead of raw 401
+        const friendlyAuthMsg = friendlyProviderErrorMessage(errMsg, { servedModel, isOllama });
+        if (friendlyAuthMsg) {
+          lastError = new Error(friendlyAuthMsg);
+          break;
+        }
         // Transient provider errors (rate limit, timeout, 5xx, network blip):
         // back off and retry the SAME candidate before giving up on it.
-        if (isTransientError(errMsg) && attempt < RETRIES_PER_MODEL - 1) {
+        if (isTransientProviderError(errMsg) && attempt < RETRIES_PER_MODEL - 1) {
           const delay = 400 * Math.pow(2, attempt);
           console.warn(
             `[chat] transient error on ${servedModel} (attempt ${attempt + 1}) — ` +
@@ -601,10 +575,8 @@ export async function POST(req: Request) {
           continue;
         }
         console.error(`[chat] ${servedModel} failed after retries:`, errMsg);
-        candidateFailed = true;
         break;
       }
-      if (candidateFailed) continue;
     }
     }
     throw lastError;

@@ -42,7 +42,12 @@ export async function GET(
       return NextResponse.json({ error: "Conversation not found" }, { status: 404 });
     }
 
-    const modelConfig = getModel(conversation.model);
+    let modelConfig;
+    try {
+      modelConfig = getModel(conversation.model);
+    } catch {
+      modelConfig = null;
+    }
     const contextLength = conversation.contextLength || modelConfig?.contextWindow || 8192;
     const systemPrompt = conversation.systemPrompt || "";
     const compressedSummary = conversation.compressedSummary || null;
