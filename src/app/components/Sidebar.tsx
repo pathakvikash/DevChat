@@ -225,7 +225,7 @@ export default function Sidebar() {
             <X size={18} />
           </button>
         </div>
-        <Link href="/" className="flex items-center gap-2 mb-3 group">
+        <Link href="/" onClick={close} className="flex items-center gap-2 mb-3 group">
           <div className="size-7 rounded-lg bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center text-white text-xs font-bold group-hover:shadow-lg group-hover:shadow-blue-500/30 transition-shadow">
             V
           </div>
@@ -329,6 +329,7 @@ export default function Sidebar() {
                 </button>
                 <Link
                   href={`/c/${conv.id}`}
+                  onClick={close}
                   className="flex-1 min-w-0"
                   title={conv.model.split('/').pop()}
                 >
@@ -437,6 +438,7 @@ export default function Sidebar() {
         <div className="grid grid-cols-4 gap-1 mb-2">
           <Link
             href="/kb"
+            onClick={close}
             className={`flex items-center justify-center p-2 rounded-[var(--glass-radius-sm)] transition ${
               pathname === "/kb"
                 ? "glass-button-primary text-white"
@@ -448,6 +450,7 @@ export default function Sidebar() {
           </Link>
           <Link
             href="/notes"
+            onClick={close}
             className={`flex items-center justify-center p-2 rounded-[var(--glass-radius-sm)] transition ${
               pathname === "/notes"
                 ? "glass-button-primary text-white"
@@ -459,6 +462,7 @@ export default function Sidebar() {
           </Link>
           <Link
             href="/memory"
+            onClick={close}
             className={`flex items-center justify-center p-2 rounded-[var(--glass-radius-sm)] transition ${
               pathname === "/memory"
                 ? "glass-button-primary text-white"
@@ -470,6 +474,7 @@ export default function Sidebar() {
           </Link>
           <Link
             href="/claude"
+            onClick={close}
             className={`flex items-center justify-center p-2 rounded-[var(--glass-radius-sm)] transition ${
               pathname.startsWith("/claude")
                 ? "glass-button-primary text-white"
@@ -488,6 +493,7 @@ export default function Sidebar() {
           </button>
           <Link
             href="/settings"
+            onClick={close}
             className={`flex items-center justify-center p-2 rounded-[var(--glass-radius-sm)] transition ${
               pathname === "/settings"
                 ? "glass-button-primary text-white"
@@ -499,6 +505,7 @@ export default function Sidebar() {
           </Link>
           <Link
             href="/observability"
+            onClick={close}
             className={`flex items-center justify-center p-2 rounded-[var(--glass-radius-sm)] transition ${
               pathname === "/observability"
                 ? "glass-button-primary text-white"
