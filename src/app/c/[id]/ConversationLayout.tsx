@@ -214,6 +214,7 @@ export default function ConversationLayout({ conversationId, initialPrompt }: Pr
         currentKbId={p.selectedKbId || null}
         currentMaxToolCalls={p.conversation.maxToolCalls}
         currentFallbackModel={p.conversation.fallbackModel || null}
+        currentPersona={p.conversation.persona || null}
         onSave={p.handleModelSettingsSave}
       />
       <ContextDetailsPanel

@@ -7,13 +7,12 @@ import ErrorBanner from "./ui/ErrorBanner";
 import SectionHeader from "./ui/SectionHeader";
 import AsyncButton from "./ui/AsyncButton";
 import { useResource } from "@/app/hooks/useResource";
-import { getClientApiKeys } from "@/lib/apiKeys";
-import type { ModelCatalogEntry } from "@/lib/models";
+import { fetchModels as apiFetchModels } from "@/app/hooks/useModelsApi";
+import type { ModelInfo } from "@/app/components/conversation/types";
 import { useToast } from "@/app/components/Toast";
 import ModelPicker from "./modelSettings/ModelPicker";
 import GenerationParams from "./modelSettings/GenerationParams";
-
-type ModelInfo = ModelCatalogEntry;
+import PersonaSelector from "./PersonaSelector";
 
 interface KbInfo {
   id: string;
@@ -36,6 +35,7 @@ interface ModelSettingsDialogProps {
   currentKbId: string | null;
   currentMaxToolCalls?: number;
   currentFallbackModel?: string | null;
+  currentPersona?: string | null;
   onSave: (settings: {
     model?: string;
     systemPrompt?: string;
@@ -47,6 +47,7 @@ interface ModelSettingsDialogProps {
     kbId?: string | null;
     maxToolCalls?: number;
     fallbackModel?: string | null;
+    persona?: string | null;
   }) => void;
 }
 
@@ -64,10 +65,12 @@ export default function ModelSettingsDialog({
   currentKbId,
   currentMaxToolCalls,
   currentFallbackModel,
+  currentPersona,
   onSave,
 }: ModelSettingsDialogProps) {
   const [selectedModel, setSelectedModel] = useState(currentModel);
   const [systemPrompt, setSystemPrompt] = useState(currentSystemPrompt);
+  const [persona, setPersona] = useState<string>(currentPersona || "");
   const [temperature, setTemperature] = useState(currentTemperature);
   const [contextLength, setContextLength] = useState(
     currentContextLength || 8192,
@@ -94,14 +97,7 @@ export default function ModelSettingsDialog({
     refetch: () => Promise<void>;
   } = useResource<ModelInfo[]>(
     async () => {
-      const apiKeys = getClientApiKeys();
-      const headers: Record<string, string> = {};
-      if (apiKeys.openrouterApiKey) headers["x-openrouter-api-key"] = apiKeys.openrouterApiKey;
-      if (apiKeys.nvidiaNimApiKey) headers["x-nvidia-nim-api-key"] = apiKeys.nvidiaNimApiKey;
-      const res = await fetch("/api/models", { headers });
-      if (!res.ok) throw new Error("Failed to fetch models");
-      const data = await res.json();
-      return data.models || [];
+      return apiFetchModels();
     },
     [],
     { enabled: isOpen, onError: (e) => console.error("Failed to fetch models:", e) },
@@ -121,9 +117,10 @@ export default function ModelSettingsDialog({
       setMaxToolCalls(currentMaxToolCalls ?? 5);
       setFallbackModel(currentFallbackModel || "");
       setKbId(currentKbId || "");
+      setPersona(currentPersona || "");
       setError(null);
     }
-  }, [isOpen, currentModel, currentSystemPrompt, currentTemperature, currentContextLength, currentTopP, currentMaxTokens, currentChatOnlyMode, currentKbId, currentMaxToolCalls, currentFallbackModel, models]);
+  }, [isOpen, currentModel, currentSystemPrompt, currentTemperature, currentContextLength, currentTopP, currentMaxTokens, currentChatOnlyMode, currentKbId, currentMaxToolCalls, currentFallbackModel, currentPersona, models]);
   const modelInfo = useMemo<ModelInfo | null>(
     () => models.find((m) => m.id === selectedModel) || null,
     [selectedModel, models],
@@ -162,6 +159,7 @@ export default function ModelSettingsDialog({
           kbId: kbId || null,
           maxToolCalls,
           fallbackModel: fallbackModel || null,
+          persona: persona || null,
         }),
       });
       if (!res.ok) throw new Error("Failed to save settings");
@@ -176,6 +174,7 @@ export default function ModelSettingsDialog({
         kbId: kbId || null,
         maxToolCalls,
         fallbackModel: fallbackModel || null,
+        persona: persona || null,
       });
       toast("Conversation saved", "success");
       onClose();
@@ -300,6 +299,22 @@ export default function ModelSettingsDialog({
                 Manage knowledge bases →
               </a>
             </p>
+          </section>
+
+          <section>
+            <SectionHeader>Persona</SectionHeader>
+            <p className="text-xs text-zinc-400 mb-2">
+              Pick a saved persona to prefill the system prompt below with its
+              instructions. You can still edit the prompt afterward.
+            </p>
+            <PersonaSelector
+              value={persona}
+              disabled={saving}
+              onSelect={(p) => {
+                setPersona(p.id);
+                setSystemPrompt(p.systemPrompt);
+              }}
+            />
           </section>
 
           <section>
