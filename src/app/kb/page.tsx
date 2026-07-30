@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { Trash2, Upload, FileText } from "lucide-react";
-import Sidebar from "@/app/components/Sidebar";
+import AppShell, { SidebarToggleButton } from "@/app/components/AppShell";
 
 interface Document {
   id: string;
@@ -16,6 +16,7 @@ interface KnowledgeBase {
   description?: string;
   createdAt: string;
   documents?: Document[];
+  _count?: { documents: number };
 }
 
 export default function KnowledgeBasePage() {
@@ -26,10 +27,17 @@ export default function KnowledgeBasePage() {
   const [newKbName, setNewKbName] = useState("");
   const [newKbDesc, setNewKbDesc] = useState("");
   const [uploading, setUploading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     fetchKbList();
   }, []);
+
+  useEffect(() => {
+    if (!error) return;
+    const timer = setTimeout(() => setError(null), 5000);
+    return () => clearTimeout(timer);
+  }, [error]);
 
   async function fetchKbList() {
     try {
@@ -80,9 +88,12 @@ export default function KnowledgeBasePage() {
         setNewKbName("");
         setNewKbDesc("");
         setShowNewKbForm(false);
+      } else {
+        setError("Failed to create knowledge base.");
       }
     } catch (error) {
       console.error("Failed to create KB:", error);
+      setError("Failed to create knowledge base.");
     }
   }
 
@@ -91,14 +102,23 @@ export default function KnowledgeBasePage() {
       return;
 
     try {
-      await fetch(`/api/kb/${kbId}`, { method: "DELETE" });
+      const res = await fetch(`/api/kb/${kbId}`, { method: "DELETE" });
+      if (!res.ok) {
+        setError("Failed to delete knowledge base.");
+        return;
+      }
       const updated = kbList.filter((kb) => kb.id !== kbId);
       setKbList(updated);
       if (selectedKb?.id === kbId) {
-        setSelectedKb(updated.length > 0 ? updated[0] : null);
+        if (updated.length > 0) {
+          await fetchKbDetails(updated[0].id);
+        } else {
+          setSelectedKb(null);
+        }
       }
     } catch (error) {
       console.error("Failed to delete KB:", error);
+      setError("Failed to delete knowledge base.");
     }
   }
 
@@ -106,15 +126,27 @@ export default function KnowledgeBasePage() {
     if (!confirm("Delete this document?")) return;
 
     try {
-      await fetch(`/api/kb/${kbId}/documents/${docId}`, { method: "DELETE" });
+      const res = await fetch(`/api/kb/${kbId}/documents/${docId}`, { method: "DELETE" });
+      if (!res.ok) {
+        setError("Failed to delete document.");
+        return;
+      }
       if (selectedKb?.id === kbId) {
         setSelectedKb({
           ...selectedKb,
           documents: selectedKb.documents?.filter((d) => d.id !== docId),
         });
+        setKbList((prev) =>
+          prev.map((kb) =>
+            kb.id === kbId && kb._count
+              ? { ...kb, _count: { documents: kb._count.documents - 1 } }
+              : kb,
+          ),
+        );
       }
     } catch (error) {
       console.error("Failed to delete document:", error);
+      setError("Failed to delete document.");
     }
   }
 
@@ -143,9 +175,11 @@ export default function KnowledgeBasePage() {
         }),
       );
 
+      let succeeded = 0;
       for (const result of results) {
         if (result.status === "fulfilled") {
           const { doc } = result.value;
+          succeeded++;
           setSelectedKb((prev) =>
             prev
               ? { ...prev, documents: [...(prev.documents || []), doc] }
@@ -155,8 +189,28 @@ export default function KnowledgeBasePage() {
           console.error("Upload failed:", result.reason);
         }
       }
+
+      if (succeeded > 0) {
+        setKbList((prev) =>
+          prev.map((kb) =>
+            kb.id === selectedKb.id
+              ? { ...kb, _count: { documents: (kb._count?.documents || 0) + succeeded } }
+              : kb,
+          ),
+        );
+      }
+
+      const failed = results.length - succeeded;
+      if (failed > 0) {
+        setError(
+          failed === 1
+            ? "Failed to upload 1 file."
+            : `Failed to upload ${failed} files.`,
+        );
+      }
     } catch (error) {
       console.error("Upload error:", error);
+      setError("Upload failed.");
     } finally {
       setUploading(false);
       e.target.value = "";
@@ -164,15 +218,22 @@ export default function KnowledgeBasePage() {
   }
 
   return (
-    <div className="flex h-screen bg-[var(--background)]">
-      <Sidebar />
-      <div className="flex-1 overflow-y-auto">
+    <AppShell>
         <main className="text-[var(--foreground)] p-8">
-          <h1 className="sticky top-0 z-10 bg-[var(--background)] -mt-8 pt-8 text-3xl font-bold mb-8">Knowledge Base Management</h1>
+          <div className="sticky top-0 z-10 bg-[var(--background)] -mt-8 pt-8 flex items-center gap-3 mb-8">
+            <SidebarToggleButton />
+            <h1 className="text-xl sm:text-2xl md:text-3xl font-bold">Knowledge Base Management</h1>
+          </div>
 
-          <div className="grid grid-cols-3 gap-8 max-w-6xl">
+          {error && (
+            <div className="mb-6 px-4 py-3 glass-card rounded-[var(--glass-radius-md)] border border-red-900/50 text-red-300 text-sm max-w-6xl">
+              {error}
+            </div>
+          )}
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-8 max-w-6xl">
             {/* Knowledge Bases List */}
-            <div className="col-span-1">
+            <div className="md:col-span-1">
               <div className="glass-card rounded-[var(--glass-radius-xl)] p-6">
                 <div className="flex items-center justify-between mb-4">
                   <h2 className="text-lg font-bold">Knowledge Bases</h2>
@@ -240,8 +301,8 @@ export default function KnowledgeBasePage() {
                           </p>
                         )}
                         <p className="text-xs text-zinc-500 mt-2">
-                          {kb.documents?.length || 0} document
-                          {kb.documents?.length !== 1 ? "s" : ""}
+                          {kb._count?.documents || 0} document
+                          {kb._count?.documents !== 1 ? "s" : ""}
                         </p>
                       </button>
                     ))}
@@ -252,7 +313,7 @@ export default function KnowledgeBasePage() {
 
             {/* KB Details */}
             {selectedKb && (
-              <div className="col-span-2">
+              <div className="md:col-span-2">
                 <div className="glass-card rounded-[var(--glass-radius-xl)] p-6">
                   <div className="flex items-start justify-between mb-6">
                     <div>
@@ -341,7 +402,6 @@ export default function KnowledgeBasePage() {
             )}
           </div>
         </main>
-      </div>
-    </div>
+    </AppShell>
   );
 }
