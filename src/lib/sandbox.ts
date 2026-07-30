@@ -2,7 +2,7 @@
 
 let pyodideLoader: Promise<any> | null = null;
 
-export function loadPyodide(): Promise<any> {
+function loadPyodide(): Promise<any> {
   if (typeof window === "undefined") {
     return Promise.reject(new Error("Pyodide only runs in the browser"));
   }
@@ -55,7 +55,7 @@ export function loadPyodide(): Promise<any> {
   return pyodideLoader;
 }
 
-export async function runPython(code: string): Promise<string> {
+async function runPython(code: string): Promise<string> {
   const py = await loadPyodide();
   py.runPython(`
 import sys, io
@@ -79,7 +79,7 @@ sys.stderr = io.StringIO()
   return parts.join("").trimEnd() || "(no output)";
 }
 
-export function runJavaScript(code: string, timeoutMs = 5000): Promise<string> {
+function runJavaScript(code: string, timeoutMs = 5000): Promise<string> {
   if (code.length > 10000) {
     return Promise.resolve(`Error: code exceeds 10,000 character limit (${code.length} chars).`);
   }

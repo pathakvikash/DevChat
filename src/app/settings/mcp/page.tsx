@@ -8,7 +8,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import Sidebar from "@/app/components/Sidebar";
-import GlassDialog from "@/app/components/ui/glass/GlassDialog";
+import CenteredDialog from "@/app/components/ui/CenteredDialog";
 import { useToast } from "@/app/components/Toast";
 
 interface McpServer {
@@ -365,7 +365,7 @@ export default function McpSettingsPage() {
       </div>
 
       {/* Add/Edit Dialog */}
-      <GlassDialog isOpen={showForm} onClose={() => setShowForm(false)} widthClass="max-w-lg">
+      <CenteredDialog isOpen={showForm} onClose={() => setShowForm(false)} widthClass="max-w-lg">
         <div className="space-y-5">
           {activePreset?.needsAuth === "oauth" ? (
             <>
@@ -504,10 +504,10 @@ export default function McpSettingsPage() {
             </>
           )}
         </div>
-      </GlassDialog>
+      </CenteredDialog>
 
       {/* Tools Dialog */}
-      <GlassDialog isOpen={!!toolsDialog} onClose={() => setToolsDialog(null)} widthClass="max-w-lg">
+      <CenteredDialog isOpen={!!toolsDialog} onClose={() => setToolsDialog(null)} widthClass="max-w-lg">
         {toolsDialog && (
           <div className="space-y-4">
             <h2 className="text-xl font-bold">Tools: {toolsDialog.server.name}</h2>
@@ -533,7 +533,7 @@ export default function McpSettingsPage() {
             </div>
           </div>
         )}
-      </GlassDialog>
+      </CenteredDialog>
     </div>
   );
 }

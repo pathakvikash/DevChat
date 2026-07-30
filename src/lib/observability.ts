@@ -70,7 +70,7 @@ function bareModel(model: string): string {
   return model.includes("/") ? model.split("/").pop()! : model;
 }
 
-export function estimateCost(model: string, inTok: number, outTok: number): number | null {
+function estimateCost(model: string, inTok: number, outTok: number): number | null {
   if (model.startsWith("ollama/")) return 0;
   const key = bareModel(model);
   const price = PRICING[model] ?? PRICING[key];

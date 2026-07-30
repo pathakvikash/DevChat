@@ -1,8 +1,8 @@
 import { countTokens } from "@/lib/tokens";
 
-export const CONTEXT_TIERS = [4096, 8192, 16384, 32768] as const;
-export const MAX_DYNAMIC_CTX = 32768;
-export const INCREASE_THRESHOLD = 0.8;
+const CONTEXT_TIERS = [4096, 8192, 16384, 32768] as const;
+const MAX_DYNAMIC_CTX = 32768;
+const INCREASE_THRESHOLD = 0.8;
 
 export function getNextContextTier(current: number): number | null {
   for (const t of CONTEXT_TIERS) {

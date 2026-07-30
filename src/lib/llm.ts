@@ -11,7 +11,7 @@ import {
  * Ensures every configured provider's model catalogue is loaded. Safe to call
  * repeatedly — the underlying initializers are idempotent and cheap once warm.
  */
-export async function ensureModelsInitialized(): Promise<void> {
+async function ensureModelsInitialized(): Promise<void> {
   await initializeOllamaModels();
   if (process.env.OPENROUTER_API_KEY) await initializeOpenRouterModels();
   if (process.env.NVIDIA_NIM_API_KEY) await initializeNvidiaNimModels();

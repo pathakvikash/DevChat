@@ -12,7 +12,7 @@ import type { SkillDefinition } from "./types";
  *  Tool ids must match keys in lib/registry/tools.ts.
  * ─────────────────────────────────────────────────────────────────────────
  */
-export const SKILL_REGISTRY: Record<string, SkillDefinition> = {
+const SKILL_REGISTRY: Record<string, SkillDefinition> = {
   "data-analyst": {
     id: "data-analyst",
     name: "Data Analyst",

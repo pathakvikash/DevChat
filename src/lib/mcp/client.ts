@@ -40,7 +40,7 @@ function makeHeaders(
   return headers;
 }
 
-export async function connectToServer(serverId: string): Promise<void> {
+async function connectToServer(serverId: string): Promise<void> {
   const existing = clientCache.get(serverId);
   if (existing) {
     try { await existing.client.ping(); return; } catch {
@@ -135,8 +135,4 @@ export async function testConnection(
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : String(err) };
   }
-}
-
-export function clearClientCache(): void {
-  clientCache.clear();
 }

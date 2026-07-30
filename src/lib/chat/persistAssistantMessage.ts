@@ -17,7 +17,7 @@ export interface PersistAssistantMessageOptions {
   messageId?: string;
 }
 
-export async function persistAssistantMessage(
+async function persistAssistantMessage(
   event: { steps: any[]; totalUsage?: any },
   opts: PersistAssistantMessageOptions,
 ): Promise<void> {

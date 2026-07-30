@@ -2,7 +2,7 @@
 
 import { createContext, useContext, useEffect, useState, useCallback } from "react";
 
-export type Theme = "dark" | "light";
+type Theme = "dark" | "light";
 
 const STORAGE_KEY = "vas:theme";
 
