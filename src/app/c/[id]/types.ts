@@ -1,7 +1,8 @@
 import type { MinimapMessage } from "@/app/components/MinimapNavigator";
 import type { Conversation } from "@/app/components/conversation/types";
+import type { DataActions } from "./useConversationData";
 
-export interface ConversationPageState {
+export interface ConversationPageState extends DataActions {
   conversation: Conversation | null;
   setConversation: React.Dispatch<React.SetStateAction<Conversation | null>>;
   loading: boolean;
@@ -26,8 +27,6 @@ export interface ConversationPageState {
   setArtifactPanelOpen: React.Dispatch<React.SetStateAction<boolean>>;
   selectedArtifactId: string | null;
   setSelectedArtifactId: React.Dispatch<React.SetStateAction<string | null>>;
-  artifacts: any[];
-  setArtifacts: React.Dispatch<React.SetStateAction<any[]>>;
   contextPanelOpen: boolean;
   setContextPanelOpen: React.Dispatch<React.SetStateAction<boolean>>;
   contextData: { usedTokens: number; maxContextTokens: number; contextPercent: number } | null;
@@ -57,14 +56,6 @@ export interface ConversationPageState {
   addToolResult: any;
   isLoading: boolean;
   currentModelName: string;
-  fetchConversation: () => Promise<void>;
-  fetchArtifacts: () => Promise<void>;
-  refreshConversation: () => Promise<void>;
-  refreshConversationAndMessages: () => Promise<void>;
-  fetchContextUsage: () => Promise<void>;
-  handleModelSettingsSave: (settings: any) => Promise<void>;
-  handleModelChange: (modelId: string) => Promise<void>;
-  handleKbToggle: () => Promise<void>;
   handleClarificationAnswer: (toolCallId: string, answer: string) => Promise<void>;
   handleEditMessage: (messageId: string, content: string) => Promise<void>;
   handleDeleteMessage: (messageId: string) => Promise<void>;

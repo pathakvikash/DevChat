@@ -1,11 +1,3 @@
-import { prisma } from "./db";
-
-interface Chunk {
-  text: string;
-  embedding: number[];
-  index: number;
-}
-
 const OLLAMA_URL = process.env.OLLAMA_BASE_URL || "http://localhost:11434";
 const EMBED_MODEL = process.env.EMBED_MODEL || "nomic-embed-text";
 
@@ -97,39 +89,31 @@ export function cosineSimilarity(a: number[], b: number[]): number {
   return denominator === 0 ? 0 : dotProduct / denominator;
 }
 
-// Retrieve relevant chunks from knowledge base
-export async function retrieveChunks(
-  kbId: string,
-  query: string,
-  topK = 5
-): Promise<string> {
-  try {
-    const documents = await prisma.document.findMany({
-      where: { kbId },
-    });
-
-    const queryEmbedding = await embed(query);
-    const allChunks: Array<{ text: string; score: number }> = [];
-
-    for (const doc of documents) {
-      let chunks: Chunk[];
-      try {
-        chunks = JSON.parse(doc.chunks) as Chunk[];
-      } catch {
-        continue;
-      }
-      for (const chunk of chunks) {
-        const score = cosineSimilarity(queryEmbedding, chunk.embedding);
-        allChunks.push({ text: chunk.text, score });
-      }
-    }
-
-    // Sort by score and get top K
-    const topChunks = allChunks.sort((a, b) => b.score - a.score).slice(0, topK);
-
-    return topChunks.map((c) => c.text).join("\n\n---\n\n");
-  } catch (error) {
-    console.error("Failed to retrieve chunks:", error);
-    return "";
-  }
+export interface ScoredChunk {
+  text: string;
+  source: string;
+  score: number;
 }
+
+/**
+ * Parses a document's persisted chunk JSON and scores each chunk by cosine
+ * similarity against a query embedding. Throws if `doc.chunks` isn't valid
+ * JSON — callers decide whether to skip the document or surface an error.
+ */
+export function scoreDocumentChunks(
+  doc: { filename: string; chunks: string },
+  queryEmbedding: number[],
+): ScoredChunk[] {
+  const chunks: Array<{ text: string; embedding: number[] }> = JSON.parse(doc.chunks);
+  const scored: ScoredChunk[] = [];
+  chunks.forEach((chunk, i) => {
+    if (!chunk.embedding || !Array.isArray(chunk.embedding)) return;
+    scored.push({
+      text: chunk.text,
+      source: `${doc.filename}#chunk${i}`,
+      score: cosineSimilarity(queryEmbedding, chunk.embedding),
+    });
+  });
+  return scored;
+}
+

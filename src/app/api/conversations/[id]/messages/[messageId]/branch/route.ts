@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/db";
 import { NextRequest, NextResponse } from "next/server";
+import { findConversationMessage } from "@/lib/api/messages";
 
 export async function POST(
   req: NextRequest,
@@ -8,18 +9,13 @@ export async function POST(
   try {
     const { id, messageId } = await params;
 
-    const target = await prisma.message.findUnique({
-      where: { id: messageId },
-      select: { conversationId: true, createdAt: true },
-    });
-
-    if (!target) {
-      return NextResponse.json({ error: "Message not found" }, { status: 404 });
+    const result = await findConversationMessage(id, messageId);
+    if (!result.ok) {
+      return result.reason === "not_found"
+        ? NextResponse.json({ error: "Message not found" }, { status: 404 })
+        : NextResponse.json({ error: "Message not in this conversation" }, { status: 400 });
     }
-
-    if (target.conversationId !== id) {
-      return NextResponse.json({ error: "Message not in this conversation" }, { status: 400 });
-    }
+    const target = result.message;
 
     await prisma.$transaction([
       prisma.message.deleteMany({

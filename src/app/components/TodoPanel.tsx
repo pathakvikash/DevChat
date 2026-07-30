@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import {
   CheckCircle2,
   Circle,
@@ -10,6 +10,7 @@ import {
   RefreshCw,
 } from "lucide-react";
 import SidePanel from "./ui/SidePanel";
+import { useResource } from "@/app/hooks/useResource";
 
 interface TodoItem {
   id: string;
@@ -54,41 +55,32 @@ function timeAgo(dateStr: string): string {
   return `${Math.floor(hours / 24)}d ago`;
 }
 
+async function fetchTodosList(conversationId: string): Promise<TodoItem[]> {
+  const res = await fetch(`/api/conversations/${conversationId}/todos`);
+  if (!res.ok) throw new Error(`Failed to fetch todos: ${res.status}`);
+  const data = await res.json();
+  return data.todos || [];
+}
+
 export default function TodoPanel({ isOpen, onClose, conversationId, onRefresh }: TodoPanelProps) {
-  const [todos, setTodos] = useState<TodoItem[]>([]);
-  const [loading, setLoading] = useState(false);
   const [filter, setFilter] = useState<string>("all");
-  const mountedRef = useRef(true);
-
-  const fetchTodos = useCallback(async () => {
-    if (!conversationId) return;
-    setLoading(true);
-    try {
-      const res = await fetch(`/api/conversations/${conversationId}/todos`);
-      if (res.ok) {
-        const data = await res.json();
-        if (mountedRef.current) setTodos(data.todos || []);
-      }
-    } catch {
-    } finally {
-      if (mountedRef.current) setLoading(false);
-    }
-  }, [conversationId]);
+  const {
+    data: todosData,
+    loading,
+    refetch: fetchTodos,
+    setData: setTodos,
+  } = useResource<TodoItem[]>(
+    () => fetchTodosList(conversationId),
+    [conversationId],
+    { enabled: isOpen && !!conversationId },
+  );
+  const todos = todosData ?? [];
 
   useEffect(() => {
-    mountedRef.current = true;
     if (!isOpen) return;
-    fetchTodos();
     const iv = setInterval(fetchTodos, 3000);
-    return () => {
-      mountedRef.current = false;
-      clearInterval(iv);
-    };
+    return () => clearInterval(iv);
   }, [isOpen, fetchTodos]);
-
-  useEffect(() => {
-    if (isOpen) fetchTodos();
-  }, [conversationId]);
 
   const filtered = filter === "all"
     ? todos
@@ -107,7 +99,7 @@ export default function TodoPanel({ isOpen, onClose, conversationId, onRefresh }
       });
       if (res.ok) {
         setTodos((prev) =>
-          prev.map((t) => (t.id === todoId ? { ...t, status: newStatus, updatedAt: new Date().toISOString() } : t)),
+          (prev ?? []).map((t) => (t.id === todoId ? { ...t, status: newStatus, updatedAt: new Date().toISOString() } : t)),
         );
         onRefresh?.();
       }

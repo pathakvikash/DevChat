@@ -15,7 +15,8 @@ vi.mock("@/lib/db", () => ({
   },
 }));
 
-vi.mock("@/lib/search", () => ({
+vi.mock("@/lib/search", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/search")>()),
   webSearch: vi.fn(),
 }));
 

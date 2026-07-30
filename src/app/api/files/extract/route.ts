@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getModel } from "@/lib/models";
+import { extractKnownFileText, validateFileSize } from "@/lib/file-extract";
 
 export const runtime = "nodejs";
 
@@ -20,11 +21,9 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "No file provided" }, { status: 400 });
     }
 
-    if (file.size > 20 * 1024 * 1024) {
-      return NextResponse.json(
-        { error: "File exceeds the 20 MB size limit." },
-        { status: 400 }
-      );
+    const sizeError = validateFileSize(file);
+    if (sizeError) {
+      return NextResponse.json({ error: sizeError }, { status: 400 });
     }
 
     const arrayBuffer = await file.arrayBuffer();
@@ -34,32 +33,10 @@ export async function POST(req: NextRequest) {
     let text = "";
     let kind: "pdf" | "docx" | "text" | "unknown" = "unknown";
 
-    if (name.endsWith(".pdf") || file.type === "application/pdf") {
-      kind = "pdf";
-      const path = await import("path");
-      const { pathToFileURL } = await import("url");
-      const workerPath = path.join(
-        process.cwd(),
-        "node_modules/pdfjs-dist/legacy/build/pdf.worker.mjs"
-      );
-      const { PDFParse } = await import("pdf-parse");
-      PDFParse.setWorker(pathToFileURL(workerPath).href);
-      const parser = new PDFParse({
-        data: new Uint8Array(arrayBuffer),
-        useWorkerFetch: false,
-        isEvalSupported: false,
-      });
-      const result = await parser.getText();
-      text = result.text || "";
-    } else if (
-      name.endsWith(".docx") ||
-      file.type ===
-        "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-    ) {
-      kind = "docx";
-      const mammoth = (await import("mammoth")).default as any;
-      const result = await mammoth.extractRawText({ buffer });
-      text = result.value || "";
+    const known = await extractKnownFileText(file, arrayBuffer, buffer);
+    if (known) {
+      kind = known.kind;
+      text = known.text;
     } else if (file.type.startsWith("text/") || /\.(txt|md|csv|json|yaml|yml|xml|html|js|ts|tsx|jsx|py|rb|go|rs|java|c|cpp|h|hpp|css|sql|sh|toml)$/i.test(name)) {
       kind = "text";
       text = buffer.toString("utf8");
@@ -90,7 +67,7 @@ export async function POST(req: NextRequest) {
     );
 
     let truncated = false;
-    let originalChars = text.length;
+    const originalChars = text.length;
     if (text.length > perFileCharCap) {
       text =
         text.slice(0, perFileCharCap) +

@@ -1,5 +1,5 @@
-import { prisma } from "@/lib/db";
 import { NextRequest, NextResponse } from "next/server";
+import { findConversationArtifact } from "@/lib/api/artifacts";
 
 export async function GET(
   _req: NextRequest,
@@ -8,17 +8,14 @@ export async function GET(
   try {
     const { id, artifactId } = await params;
 
-    const artifact = await prisma.artifact.findUnique({
-      where: { id: artifactId },
-    });
-
-    if (!artifact) {
-      return new NextResponse("Artifact not found", { status: 404 });
+    const result = await findConversationArtifact(id, artifactId);
+    if (!result.ok) {
+      return new NextResponse(
+        result.reason === "not_found" ? "Artifact not found" : "Artifact not in this conversation",
+        { status: result.reason === "not_found" ? 404 : 400 },
+      );
     }
-
-    if (artifact.conversationId !== id) {
-      return new NextResponse("Artifact not in this conversation", { status: 400 });
-    }
+    const { artifact } = result;
 
     if (artifact.type !== "html") {
       return new NextResponse("Artifact is not HTML", { status: 400 });

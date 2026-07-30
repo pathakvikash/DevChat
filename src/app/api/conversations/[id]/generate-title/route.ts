@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { generateText } from "ai";
 import { prisma } from "@/lib/db";
 import { getModel, getAllModels, initializeOllamaModels, type ModelConfig } from "@/lib/models";
+import { getConversationOrNull } from "@/lib/api/conversations";
 
 async function resolveTitleModel(
   preferredModelId: string | null,
@@ -61,10 +62,7 @@ export async function POST(
   try {
     const { id } = await params;
 
-    const conversation = await prisma.conversation.findUnique({
-      where: { id },
-      select: { id: true, model: true },
-    });
+    const conversation = await getConversationOrNull(id);
 
     if (!conversation) {
       return NextResponse.json({ error: "Conversation not found" }, { status: 404 });

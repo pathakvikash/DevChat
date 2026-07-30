@@ -17,29 +17,33 @@ export default function VoiceWaveform({ isActive }: VoiceWaveformProps) {
   const rafRef = useRef(0);
   const cleanupRef = useRef(false);
 
+  function teardown(resetBars: boolean) {
+    cleanupRef.current = true;
+    cancelAnimationFrame(rafRef.current);
+    if (sourceRef.current) {
+      try { sourceRef.current.disconnect(); } catch {}
+      sourceRef.current = null;
+    }
+    if (audioCtxRef.current) {
+      try { audioCtxRef.current.close(); } catch {}
+      audioCtxRef.current = null;
+    }
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach((t) => t.stop());
+      streamRef.current = null;
+    }
+    if (resetBars && containerRef.current) {
+      const bars = containerRef.current.children;
+      for (let i = 0; i < bars.length; i++) {
+        (bars[i] as HTMLElement).style.height = "3%";
+      }
+    }
+    analyserRef.current = null;
+  }
+
   useEffect(() => {
     if (!isActive) {
-      cleanupRef.current = true;
-      cancelAnimationFrame(rafRef.current);
-      if (sourceRef.current) {
-        try { sourceRef.current.disconnect(); } catch {}
-        sourceRef.current = null;
-      }
-      if (audioCtxRef.current) {
-        try { audioCtxRef.current.close(); } catch {}
-        audioCtxRef.current = null;
-      }
-      if (streamRef.current) {
-        streamRef.current.getTracks().forEach((t) => t.stop());
-        streamRef.current = null;
-      }
-      if (containerRef.current) {
-        const bars = containerRef.current.children;
-        for (let i = 0; i < bars.length; i++) {
-          (bars[i] as HTMLElement).style.height = "3%";
-        }
-      }
-      analyserRef.current = null;
+      teardown(true);
       return;
     }
 
@@ -94,23 +98,7 @@ export default function VoiceWaveform({ isActive }: VoiceWaveformProps) {
 
     start();
 
-    return () => {
-      cleanupRef.current = true;
-      cancelAnimationFrame(rafRef.current);
-      if (sourceRef.current) {
-        try { sourceRef.current.disconnect(); } catch {}
-        sourceRef.current = null;
-      }
-      if (audioCtxRef.current) {
-        try { audioCtxRef.current.close(); } catch {}
-        audioCtxRef.current = null;
-      }
-      if (streamRef.current) {
-        streamRef.current.getTracks().forEach((t) => t.stop());
-        streamRef.current = null;
-      }
-      analyserRef.current = null;
-    };
+    return () => teardown(false);
   }, [isActive]);
 
   if (!isActive) return null;

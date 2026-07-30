@@ -5,6 +5,7 @@ import { useState, useRef, useEffect } from "react";
 import Link from "next/link";
 import { useSidebar } from "@/app/contexts/SidebarContext";
 import { formatContext } from "@/lib/utils/messageParts";
+import { downloadBlob } from "@/lib/utils/download";
 
 interface ConversationHeaderProps {
   conversation: {
@@ -81,14 +82,7 @@ export default function ConversationHeader({
       const safeTitle = (conversation.title || "conversation").replace(/[^a-zA-Z0-9 _-]/g, "").trim() || "conversation";
       const ext = format === "json" ? "json" : "md";
       const blob = new Blob([content], { type: format === "json" ? "application/json" : "text/markdown" });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `${safeTitle}.${ext}`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      setTimeout(() => URL.revokeObjectURL(url), 5000);
+      downloadBlob(blob, `${safeTitle}.${ext}`);
     } catch (e) {
       console.error("[ConversationHeader] export error:", e);
     }
@@ -220,7 +214,9 @@ export default function ConversationHeader({
           <div className="mt-3 flex items-start gap-2 rounded-[var(--glass-radius-md)] border border-red-500/30 bg-red-500/10 backdrop-blur-[var(--glass-blur-sm)] px-4 py-3 text-sm text-red-600">
             <AlertCircle size={18} className="shrink-0 mt-0.5 text-red-500" />
             <div className="flex-1">
-              <div className="font-medium">Chat error</div>
+              <div className="font-medium">
+                {error.message?.includes("API key") ? "API key required" : "Chat error"}
+              </div>
               <div className="text-red-500/80 wrap-break-word">
                 {error.message || "Failed to get a response. Check your API key or try a different model."}
               </div>

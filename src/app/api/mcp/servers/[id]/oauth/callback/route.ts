@@ -1,10 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "@/lib/db";
 import { exchangeCode } from "@/lib/mcp/oauth2";
-
-function getPrismaMcp() {
-  return (prisma as any).mcpServer;
-}
+import { getPrismaMcp, findMcpServer } from "@/lib/api/mcpServers";
 
 export async function GET(
   req: NextRequest,
@@ -50,10 +46,11 @@ export async function GET(
       return clearResponse;
     }
 
-    const server = await getPrismaMcp().findUnique({ where: { id } });
-    if (!server) {
+    const result = await findMcpServer(id);
+    if (!result.ok) {
       return clearResponse;
     }
+    const { server } = result;
 
     let authConfig: Record<string, string> = {};
     if (server.authConfig) {

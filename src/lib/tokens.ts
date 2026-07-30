@@ -53,6 +53,14 @@ export function estimateTokens(text: string): number {
   return Math.ceil(words * 1.3);
 }
 
+function historyTokensOf(messages: Array<{ role: string; content: string }>): number {
+  return countTokens(messages.map((m) => `${m.role}: ${m.content}`).join("\n"));
+}
+
+function contextPercentOf(total: number, contextLength: number): number {
+  return Math.min(100, Math.round((total / contextLength) * 100));
+}
+
 export async function calculateContextUsage(
   model: string,
   systemPrompt: string,
@@ -69,13 +77,13 @@ export async function calculateContextUsage(
   if (compressedSummary && compressedSummary.trim().length > 0) {
     historyTokens = countTokens(`[Compressed History]: ${compressedSummary}`);
   } else {
-    historyTokens = countTokens(messages.map((m) => `${m.role}: ${m.content}`).join("\n"));
+    historyTokens = historyTokensOf(messages);
   }
 
   const currentTokens = countTokens(currentMessage);
 
   const total = systemTokens + historyTokens + currentTokens;
-  const percent = Math.min(100, Math.round((total / contextLength) * 100));
+  const percent = contextPercentOf(total, contextLength);
 
   return {
     usedTokens: total,
@@ -114,14 +122,7 @@ export function calculateDetailedContextUsage(
         : 0;
   const kb = sections.kb ? countTokens(sections.kb) : 0;
 
-  let historyTokens: number;
-  if (compressed > 0) {
-    historyTokens = 0;
-  } else {
-    historyTokens = countTokens(
-      messages.map((m) => `${m.role}: ${m.content}`).join("\n"),
-    );
-  }
+  const historyTokens = compressed > 0 ? 0 : historyTokensOf(messages);
 
   const currentTokens = countTokens(currentMessage);
 
@@ -136,7 +137,7 @@ export function calculateDetailedContextUsage(
     historyTokens +
     currentTokens;
 
-  const percent = Math.min(100, Math.round((total / contextLength) * 100));
+  const percent = contextPercentOf(total, contextLength);
 
   return {
     usedTokens: total,

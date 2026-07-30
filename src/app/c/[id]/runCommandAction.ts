@@ -1,6 +1,7 @@
 "use client";
 
 import type { SlashCommand } from "@/lib/commands";
+import { runWebSearch, formatWebSearchResults } from "./webSearch";
 
 export interface RunCommandCtx {
   conversationId: string;
@@ -32,16 +33,10 @@ export async function runCommandAction(
       const query = arg.slice(0, 300);
       let text = arg;
       try {
-        const res = await fetch(`/api/web-search?q=${encodeURIComponent(query)}`);
-        if (res.ok) {
-          const data = await res.json();
-          const results = (data.results || []) as Array<{ title: string; url: string; snippet: string }>;
-          if (results.length > 0) {
-            const formatted = results
-              .map((r, i) => `${i + 1}. ${r.title}\n   ${r.url}\n   ${r.snippet}`)
-              .join("\n\n");
-            text = `[Web Search Results for "${query}"]\n${formatted}\n\n---\n\nUsing the results above, answer: ${arg}`;
-          }
+        const results = await runWebSearch(query);
+        if (results.length > 0) {
+          const formatted = formatWebSearchResults(results);
+          text = `[Web Search Results for "${query}"]\n${formatted}\n\n---\n\nUsing the results above, answer: ${arg}`;
         }
       } catch (e) {
         console.error("[/search] web search failed:", e);

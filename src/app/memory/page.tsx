@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Trash2, Plus, Brain, Pencil, X, Check, AlertTriangle, Pin, PinOff, Download, Upload, BarChart3, Search } from "lucide-react";
 import Sidebar from "@/app/components/Sidebar";
+import { downloadBlob } from "@/lib/utils/download";
 
 interface Memory {
   id: string;
@@ -91,12 +92,7 @@ export default function MemoryPage() {
 
   function exportJSON() {
     const blob = new Blob([JSON.stringify(memories, null, 2)], { type: "application/json" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url; a.download = "vas-memories.json";
-    document.body.appendChild(a); a.click();
-    document.body.removeChild(a);
-    setTimeout(() => URL.revokeObjectURL(url), 5000);
+    downloadBlob(blob, "vas-memories.json");
   }
 
   function handleImport(e: React.ChangeEvent<HTMLInputElement>) {

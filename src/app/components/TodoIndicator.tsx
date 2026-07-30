@@ -1,7 +1,8 @@
 "use client";
 
 import { ListTodo } from "lucide-react";
-import { useEffect, useState, useCallback, useRef } from "react";
+import { useEffect } from "react";
+import { useResource } from "@/app/hooks/useResource";
 
 interface TodoIndicatorProps {
   conversationId: string;
@@ -13,34 +14,21 @@ interface TodoSummary {
   completed: number;
 }
 
+async function fetchTodoSummary(conversationId: string): Promise<TodoSummary> {
+  const res = await fetch(`/api/conversations/${conversationId}/todos?summary=true`);
+  if (!res.ok) throw new Error(`Failed to fetch todo summary: ${res.status}`);
+  return res.json();
+}
+
 export default function TodoIndicator({
   conversationId,
   onOpen,
 }: TodoIndicatorProps) {
-  const [summary, setSummary] = useState<TodoSummary | null>(null);
-  const [loading, setLoading] = useState(false);
-  const mountedRef = useRef(true);
-
-  const fetchSummary = useCallback(async () => {
-    if (!conversationId) return;
-    setLoading(true);
-    try {
-      const res = await fetch(`/api/conversations/${conversationId}/todos?summary=true`);
-      if (res.ok) {
-        const data = await res.json();
-        if (mountedRef.current) setSummary(data);
-      }
-    } catch {
-    } finally {
-      if (mountedRef.current) setLoading(false);
-    }
-  }, [conversationId]);
-
-  useEffect(() => {
-    mountedRef.current = true;
-    fetchSummary();
-    return () => { mountedRef.current = false; };
-  }, [fetchSummary]);
+  const { data: summary, refetch: fetchSummary } = useResource<TodoSummary>(
+    () => fetchTodoSummary(conversationId),
+    [conversationId],
+    { enabled: !!conversationId },
+  );
 
   useEffect(() => {
     const handler = () => fetchSummary();

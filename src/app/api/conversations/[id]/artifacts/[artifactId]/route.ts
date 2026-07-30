@@ -1,5 +1,12 @@
 import { prisma } from "@/lib/db";
 import { NextRequest, NextResponse } from "next/server";
+import { findConversationArtifact } from "@/lib/api/artifacts";
+
+function artifactLookupErrorResponse(reason: "not_found" | "wrong_conversation") {
+  return reason === "not_found"
+    ? NextResponse.json({ error: "Artifact not found" }, { status: 404 })
+    : NextResponse.json({ error: "Artifact not in this conversation" }, { status: 400 });
+}
 
 export async function GET(
   req: NextRequest,
@@ -8,25 +15,10 @@ export async function GET(
   try {
     const { id, artifactId } = await params;
 
-    const artifact = await prisma.artifact.findUnique({
-      where: { id: artifactId },
-    });
+    const result = await findConversationArtifact(id, artifactId);
+    if (!result.ok) return artifactLookupErrorResponse(result.reason);
 
-    if (!artifact) {
-      return NextResponse.json(
-        { error: "Artifact not found" },
-        { status: 404 }
-      );
-    }
-
-    if (artifact.conversationId !== id) {
-      return NextResponse.json(
-        { error: "Artifact not in this conversation" },
-        { status: 400 }
-      );
-    }
-
-    return NextResponse.json(artifact);
+    return NextResponse.json(result.artifact);
   } catch (error) {
     console.error("Failed to fetch artifact:", error);
     return NextResponse.json({ error: "Failed to fetch artifact" }, { status: 500 });
@@ -41,23 +33,9 @@ export async function PATCH(
     const { id, artifactId } = await params;
     const { type, title, content } = await req.json();
 
-    const artifact = await prisma.artifact.findUnique({
-      where: { id: artifactId },
-    });
-
-    if (!artifact) {
-      return NextResponse.json(
-        { error: "Artifact not found" },
-        { status: 404 }
-      );
-    }
-
-    if (artifact.conversationId !== id) {
-      return NextResponse.json(
-        { error: "Artifact not in this conversation" },
-        { status: 400 }
-      );
-    }
+    const result = await findConversationArtifact(id, artifactId);
+    if (!result.ok) return artifactLookupErrorResponse(result.reason);
+    const { artifact } = result;
 
     const version =
       content !== undefined && content !== artifact.content
@@ -88,23 +66,8 @@ export async function DELETE(
   try {
     const { id, artifactId } = await params;
 
-    const artifact = await prisma.artifact.findUnique({
-      where: { id: artifactId },
-    });
-
-    if (!artifact) {
-      return NextResponse.json(
-        { error: "Artifact not found" },
-        { status: 404 }
-      );
-    }
-
-    if (artifact.conversationId !== id) {
-      return NextResponse.json(
-        { error: "Artifact not in this conversation" },
-        { status: 400 }
-      );
-    }
+    const result = await findConversationArtifact(id, artifactId);
+    if (!result.ok) return artifactLookupErrorResponse(result.reason);
 
     await prisma.artifact.delete({ where: { id: artifactId } });
 

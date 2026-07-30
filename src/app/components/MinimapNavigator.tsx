@@ -81,16 +81,20 @@ function MinimapNavigatorInner({
     setShowPopup(false);
   }
 
+  function handlePopupMouseEnter() {
+    if (hoverTimeoutRef.current) clearTimeout(hoverTimeoutRef.current);
+    setShowPopup(true);
+  }
+
+  function handlePopupMouseLeave() {
+    hoverTimeoutRef.current = setTimeout(() => setShowPopup(false), 200);
+  }
+
   return (
     <div
       className="hidden md:flex flex-col w-[28px] shrink-0 relative justify-center mr-[50px]"
-      onMouseEnter={() => {
-        if (hoverTimeoutRef.current) clearTimeout(hoverTimeoutRef.current);
-        setShowPopup(true);
-      }}
-      onMouseLeave={() => {
-        hoverTimeoutRef.current = setTimeout(() => setShowPopup(false), 200);
-      }}
+      onMouseEnter={handlePopupMouseEnter}
+      onMouseLeave={handlePopupMouseLeave}
     >
       <div className="flex flex-col items-center justify-center w-full gap-[4px]">
         {messages.map((msg, i) => {
@@ -117,13 +121,8 @@ function MinimapNavigatorInner({
       {showPopup && (
         <div
           className="absolute right-full mr-3 z-50 top-1/2 -translate-y-1/2"
-          onMouseEnter={() => {
-            if (hoverTimeoutRef.current) clearTimeout(hoverTimeoutRef.current);
-            setShowPopup(true);
-          }}
-          onMouseLeave={() => {
-            hoverTimeoutRef.current = setTimeout(() => setShowPopup(false), 200);
-          }}
+          onMouseEnter={handlePopupMouseEnter}
+          onMouseLeave={handlePopupMouseLeave}
         >
           <div className="glass-panel rounded-[var(--glass-radius-md)] shadow-xl max-h-[70vh] overflow-y-auto w-64">
             <div className="px-3 py-2 text-xs text-zinc-500 border-b border-[var(--glass-border)] font-medium">

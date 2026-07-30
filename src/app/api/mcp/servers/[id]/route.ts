@@ -1,10 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "@/lib/db";
 import { disconnectFromServer } from "@/lib/mcp/client";
-
-function getPrismaMcp() {
-  return (prisma as any).mcpServer;
-}
+import { getPrismaMcp, findMcpServer, mcpServerNotFoundResponse } from "@/lib/api/mcpServers";
 
 export async function GET(
   _req: NextRequest,
@@ -12,10 +8,11 @@ export async function GET(
 ) {
   const { id } = await params;
   try {
-    const server = await getPrismaMcp().findUnique({ where: { id } });
-    if (!server) {
-      return NextResponse.json({ error: "MCP server not found" }, { status: 404 });
+    const result = await findMcpServer(id);
+    if (!result.ok) {
+      return mcpServerNotFoundResponse();
     }
+    const { server } = result;
     return NextResponse.json({
       id: server.id,
       name: server.name,
@@ -41,9 +38,9 @@ export async function PATCH(
   const { id } = await params;
   try {
     const body = await req.json();
-    const existing = await getPrismaMcp().findUnique({ where: { id } });
-    if (!existing) {
-      return NextResponse.json({ error: "MCP server not found" }, { status: 404 });
+    const result = await findMcpServer(id);
+    if (!result.ok) {
+      return mcpServerNotFoundResponse();
     }
 
     const data: Record<string, unknown> = {};

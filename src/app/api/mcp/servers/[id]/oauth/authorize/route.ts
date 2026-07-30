@@ -1,11 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "@/lib/db";
 import { getOAuth2Provider, buildAuthorizationUrl } from "@/lib/mcp/oauth2";
+import { findMcpServer, mcpServerNotFoundResponse } from "@/lib/api/mcpServers";
 import crypto from "crypto";
-
-function getPrismaMcp() {
-  return (prisma as any).mcpServer;
-}
 
 export async function GET(
   _req: NextRequest,
@@ -13,10 +9,11 @@ export async function GET(
 ) {
   const { id } = await params;
   try {
-    const server = await getPrismaMcp().findUnique({ where: { id } });
-    if (!server) {
-      return NextResponse.json({ error: "MCP server not found" }, { status: 404 });
+    const result = await findMcpServer(id);
+    if (!result.ok) {
+      return mcpServerNotFoundResponse();
     }
+    const { server } = result;
 
     let authConfig: Record<string, string> = {};
     if (server.authConfig) {

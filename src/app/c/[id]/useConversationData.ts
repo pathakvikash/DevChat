@@ -4,9 +4,18 @@ import { useCallback } from "react";
 import { buildMessagesFromConversation } from "@/lib/utils/conversation";
 import type { Conversation } from "@/app/components/conversation/types";
 
+async function fetchConversationData(
+  conversationId: string,
+): Promise<{ ok: true; conv: any } | { ok: false; status: number }> {
+  const res = await fetch(`/api/conversations/${conversationId}`);
+  if (res.ok) {
+    return { ok: true, conv: await res.json() };
+  }
+  return { ok: false, status: res.status };
+}
+
 export interface DataActions {
   fetchConversation: () => Promise<void>;
-  fetchArtifacts: () => Promise<void>;
   refreshConversation: () => Promise<void>;
   refreshConversationAndMessages: () => Promise<void>;
   fetchContextUsage: () => Promise<void>;
@@ -23,7 +32,6 @@ export function useConversationData(
     setConversation: React.Dispatch<React.SetStateAction<Conversation | null>>;
     setMessages: React.Dispatch<React.SetStateAction<any[]>>;
     setSelectedKbId: React.Dispatch<React.SetStateAction<string>>;
-    setArtifacts: React.Dispatch<React.SetStateAction<any[]>>;
     setContextData: React.Dispatch<React.SetStateAction<any>>;
     setLoading: React.Dispatch<React.SetStateAction<boolean>>;
     toast: (msg: string, type: "success" | "error" | "info") => void;
@@ -35,21 +43,28 @@ export function useConversationData(
     setConversation,
     setMessages,
     setSelectedKbId,
-    setArtifacts,
     setContextData,
     setLoading,
     toast,
   } = deps;
 
+  const applyConversation = useCallback(
+    (conv: any, withMessages: boolean) => {
+      setConversation(conv);
+      setSelectedKbId(conv.kbId || "");
+      if (withMessages) {
+        setMessages(buildMessagesFromConversation(conv) as any[]);
+      }
+    },
+    [setConversation, setSelectedKbId, setMessages],
+  );
+
   const fetchConversation = useCallback(async () => {
     try {
-      const res = await fetch(`/api/conversations/${conversationId}`);
-      if (res.ok) {
-        const conv = await res.json();
-        setConversation(conv);
-        setSelectedKbId(conv.kbId || "");
-        setMessages(buildMessagesFromConversation(conv) as any[]);
-      } else if (res.status === 404) {
+      const result = await fetchConversationData(conversationId);
+      if (result.ok) {
+        applyConversation(result.conv, true);
+      } else if (result.status === 404) {
         setConversation(null);
       }
     } catch (error) {
@@ -58,48 +73,27 @@ export function useConversationData(
     } finally {
       setLoading(false);
     }
-  }, [conversationId, setConversation, setSelectedKbId, setMessages, setLoading, toast]);
-
-  const fetchArtifacts = useCallback(async () => {
-    try {
-      const res = await fetch(`/api/conversations/${conversationId}/artifacts`);
-      if (res.ok) {
-        const data = await res.json();
-        setArtifacts(data.artifacts);
-      }
-    } catch (e) {
-      console.error("Failed to fetch artifacts:", e);
-    }
-  }, [conversationId, setArtifacts]);
+  }, [conversationId, applyConversation, setConversation, setLoading, toast]);
 
   const refreshConversation = useCallback(async () => {
     try {
-      const res = await fetch(`/api/conversations/${conversationId}`);
-      if (res.ok) {
-        const conv = await res.json();
-        setConversation(conv);
-        setSelectedKbId(conv.kbId || "");
-      }
+      const result = await fetchConversationData(conversationId);
+      if (result.ok) applyConversation(result.conv, false);
     } catch (e) {
       console.error("Failed to refresh conversation:", e);
       toast("Failed to refresh conversation", "error");
     }
-  }, [conversationId, setConversation, setSelectedKbId, toast]);
+  }, [conversationId, applyConversation, toast]);
 
   const refreshConversationAndMessages = useCallback(async () => {
     try {
-      const res = await fetch(`/api/conversations/${conversationId}`);
-      if (res.ok) {
-        const conv = await res.json();
-        setConversation(conv);
-        setSelectedKbId(conv.kbId || "");
-        setMessages(buildMessagesFromConversation(conv) as any[]);
-      }
+      const result = await fetchConversationData(conversationId);
+      if (result.ok) applyConversation(result.conv, true);
     } catch (e) {
       console.error("Failed to refresh conversation:", e);
       toast("Failed to refresh conversation", "error");
     }
-  }, [conversationId, setConversation, setSelectedKbId, setMessages, toast]);
+  }, [conversationId, applyConversation, toast]);
 
   const fetchContextUsage = useCallback(async () => {
     if (!conversation) return;
@@ -169,7 +163,6 @@ export function useConversationData(
 
   return {
     fetchConversation,
-    fetchArtifacts,
     refreshConversation,
     refreshConversationAndMessages,
     fetchContextUsage,

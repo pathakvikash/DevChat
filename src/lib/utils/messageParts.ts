@@ -28,13 +28,6 @@ export interface AnyPart {
   [k: string]: unknown;
 }
 
-/** A whole message as it lives in the UI: id, role, parts. */
-export interface ChatMessage {
-  id: string;
-  role: string;
-  parts: AnyPart[];
-}
-
 /**
  * Concatenate the text portions of a UIMessage-shaped `parts` array.
  * Accepts either `parts: Part[]` (AI SDK v5) or the older
@@ -54,7 +47,7 @@ export function extractText(message: unknown): string {
 }
 
 /** Type guard for tool-call parts (type === "tool-<name>"). */
-export function isToolPart(part: AnyPart): part is AnyPart & ToolPart {
+function isToolPart(part: AnyPart): part is AnyPart & ToolPart {
   return typeof part?.type === "string" && part.type.startsWith("tool-");
 }
 
@@ -82,7 +75,7 @@ export function findCompressionEvent(
 
 /** Stable id for a tool part: prefer the SDK-assigned `toolCallId`, fall
  *  back to its position in the array so React keys never collide. */
-export function toolKey(part: AnyPart & ToolPart, index: number): string {
+function toolKey(part: AnyPart & ToolPart, index: number): string {
   return part.toolCallId || `tool-${index}`;
 }
 
@@ -166,22 +159,22 @@ function needsServerExtract(file: File): boolean {
   );
 }
 
-function readAsDataUrl(file: File): Promise<string> {
+function readFile(file: File, mode: "dataUrl" | "text"): Promise<string> {
   return new Promise((resolve, reject) => {
     const r = new FileReader();
     r.onload = () => resolve(r.result as string);
     r.onerror = () => reject(r.error || new Error("Failed to read file"));
-    r.readAsDataURL(file);
+    if (mode === "dataUrl") r.readAsDataURL(file);
+    else r.readAsText(file);
   });
 }
 
-async function readAsText(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const r = new FileReader();
-    r.onload = () => resolve(r.result as string);
-    r.onerror = () => reject(r.error || new Error("Failed to read file"));
-    r.readAsText(file);
-  });
+function readAsDataUrl(file: File): Promise<string> {
+  return readFile(file, "dataUrl");
+}
+
+function readAsText(file: File): Promise<string> {
+  return readFile(file, "text");
 }
 
 export async function buildMessageParts(

@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "@/lib/db";
 import {
   compressConversation,
   saveCompressedSummary,
 } from "@/lib/compression";
+import { getConversationOrNull } from "@/lib/api/conversations";
 
 export async function POST(
   req: NextRequest,
@@ -12,10 +12,7 @@ export async function POST(
   try {
     const { id } = await params;
 
-    const conversation = await prisma.conversation.findUnique({
-      where: { id },
-      select: { id: true, model: true },
-    });
+    const conversation = await getConversationOrNull(id);
 
     if (!conversation) {
       return NextResponse.json(

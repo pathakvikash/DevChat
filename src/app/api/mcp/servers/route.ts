@@ -1,14 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "@/lib/db";
 import { testConnection, disconnectFromServer } from "@/lib/mcp/client";
+import { getPrismaMcp } from "@/lib/api/mcpServers";
 
 export async function GET() {
   try {
-    const servers = await (prisma as any).mcpServer.findMany({
+    const servers = await getPrismaMcp().findMany({
       orderBy: { createdAt: "desc" },
     });
     return NextResponse.json(
-      servers.map((s: any) => ({
+      servers.map((s) => ({
         id: s.id,
         name: s.name,
         url: s.url,
@@ -36,12 +36,12 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Name and URL are required" }, { status: 400 });
     }
 
-    const existing = await (prisma as any).mcpServer.findUnique({ where: { name } });
+    const existing = await getPrismaMcp().findUnique({ where: { name } });
     if (existing) {
       return NextResponse.json({ error: "A server with this name already exists" }, { status: 409 });
     }
 
-    const server = await (prisma as any).mcpServer.create({
+    const server = await getPrismaMcp().create({
       data: {
         name,
         url,
@@ -54,7 +54,7 @@ export async function POST(req: NextRequest) {
     // Test connection in background
     testConnection(url, authType, authConfig ? JSON.stringify(authConfig) : undefined).then(
       (result) => {
-        (prisma as any).mcpServer.update({
+        getPrismaMcp().update({
           where: { id: server.id },
           data: { errorMsg: result.ok ? null : (result.error || null), lastPingAt: new Date() },
         }).catch(() => {});

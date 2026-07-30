@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "@/lib/db";
 import { testConnection } from "@/lib/mcp/client";
+import { getPrismaMcp, findMcpServer, mcpServerNotFoundResponse } from "@/lib/api/mcpServers";
 
 export async function POST(
   _req: NextRequest,
@@ -8,12 +8,18 @@ export async function POST(
 ) {
   const { id } = await params;
   try {
-    const server = await (prisma as any).mcpServer.findUnique({ where: { id } });
-    if (!server) {
-      return NextResponse.json({ error: "MCP server not found" }, { status: 404 });
+    const lookup = await findMcpServer(id);
+    if (!lookup.ok) {
+      return mcpServerNotFoundResponse();
     }
-    const result = await testConnection(server.url, server.authType, server.authConfig, server.authToken);
-    await (prisma as any).mcpServer.update({
+    const { server } = lookup;
+    const result = await testConnection(
+      server.url,
+      server.authType,
+      server.authConfig ?? undefined,
+      server.authToken ?? undefined,
+    );
+    await getPrismaMcp().update({
       where: { id },
       data: { errorMsg: result.ok ? null : (result.error || null), lastPingAt: new Date() },
     });

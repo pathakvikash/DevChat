@@ -1,7 +1,7 @@
 import { z } from "zod";
 import type { ToolDefinition } from "./types";
 import { prisma } from "@/lib/db";
-import { embed, cosineSimilarity } from "@/lib/rag";
+import { embed, scoreDocumentChunks, type ScoredChunk } from "@/lib/rag";
 import { evaluate } from "mathjs";
 
 function isPrivateUrl(url: string): boolean {
@@ -366,22 +366,13 @@ export const TOOL_REGISTRY: Record<string, ToolDefinition> = {
           return "The knowledge base is empty. Tell the user to upload documents at /kb.";
         }
 
-        const scored: Array<{ text: string; source: string; score: number }> = [];
+        const scored: ScoredChunk[] = [];
         for (const doc of documents) {
-          let chunks: Array<{ text: string; embedding: number[] }>;
           try {
-            chunks = JSON.parse(doc.chunks);
+            scored.push(...scoreDocumentChunks(doc, queryEmb));
           } catch {
             return `Error: document '${doc.filename}' has malformed chunk data.`;
           }
-          chunks.forEach((chunk, i) => {
-            if (!chunk.embedding || !Array.isArray(chunk.embedding)) return;
-            scored.push({
-              text: chunk.text,
-              source: `${doc.filename}#chunk${i}`,
-              score: cosineSimilarity(queryEmb, chunk.embedding),
-            });
-          });
         }
 
         if (scored.length === 0) {

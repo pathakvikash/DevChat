@@ -7,6 +7,7 @@ import type { MinimapMessage } from "@/app/components/MinimapNavigator";
 import { parseCommand } from "@/lib/commands";
 import { buildMessageParts } from "@/lib/utils/messageParts";
 
+import { fetchSettings as apiFetchSettings, saveSettings as apiSaveSettings } from "@/app/hooks/useSettingsApi";
 import { runCommandAction } from "./runCommandAction";
 import { useConversationData } from "./useConversationData";
 import { useChatTransport } from "./useChatTransport";
@@ -30,10 +31,7 @@ export function useConversationPage(conversationId: string, initialPrompt?: stri
   const [goalPanelOpen, setGoalPanelOpen] = useState(false);
   const [goalKickoff, setGoalKickoff] = useState<{ objective: string; nonce: number }>({ objective: "", nonce: 0 });
   const [todoPanelOpen, setTodoPanelOpen] = useState(false);
-  const [searchProvider, setSearchProvider] = useState<"duckduckgo" | "tavily">(() => {
-    if (typeof window === "undefined") return "duckduckgo";
-    return (localStorage.getItem("vas:searchProvider") === "tavily" ? "tavily" : "duckduckgo");
-  });
+  const [searchProvider, setSearchProvider] = useState<"duckduckgo" | "tavily">("duckduckgo");
   const settingsKey = `vas:advancedSettings:${conversationId}`;
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [enabledTools, setEnabledTools] = useState<string[]>([]);
@@ -41,7 +39,6 @@ export function useConversationPage(conversationId: string, initialPrompt?: stri
   const [modelSettingsOpen, setModelSettingsOpen] = useState(false);
   const [artifactPanelOpen, setArtifactPanelOpen] = useState(false);
   const [selectedArtifactId, setSelectedArtifactId] = useState<string | null>(null);
-  const [artifacts, setArtifacts] = useState<any[]>([]);
   const [contextPanelOpen, setContextPanelOpen] = useState(false);
   const [contextData, setContextData] = useState<{ usedTokens: number; maxContextTokens: number; contextPercent: number } | null>(null);
   const [toolErrorDialogOpen, setToolErrorDialogOpen] = useState(false);
@@ -68,10 +65,18 @@ export function useConversationPage(conversationId: string, initialPrompt?: stri
     if (typeof window !== "undefined") localStorage.setItem(settingsKey, JSON.stringify(next));
   }
 
+  useEffect(() => {
+    apiFetchSettings().then(d => {
+      if (d.searchProvider === "tavily" || d.searchProvider === "duckduckgo") {
+        setSearchProvider(d.searchProvider);
+      }
+    }).catch(() => {});
+  }, []);
+
   function toggleSearchProvider() {
     setSearchProvider((prev) => {
       const next = prev === "tavily" ? "duckduckgo" : "tavily";
-      if (typeof window !== "undefined") localStorage.setItem("vas:searchProvider", next);
+      apiSaveSettings({ searchProvider: next }).catch(() => {});
       return next;
     });
   }
@@ -98,12 +103,12 @@ export function useConversationPage(conversationId: string, initialPrompt?: stri
 
   const dataActions = useConversationData(conversationId, {
     conversation, input,
-    setConversation, setMessages, setSelectedKbId, setArtifacts, setContextData, setLoading,
+    setConversation, setMessages, setSelectedKbId, setContextData, setLoading,
     toast,
   });
 
   const {
-    fetchConversation, fetchArtifacts, refreshConversation, refreshConversationAndMessages,
+    fetchConversation, refreshConversation, refreshConversationAndMessages,
     fetchContextUsage, handleModelSettingsSave, handleModelChange, handleKbToggle,
   } = dataActions;
 
@@ -117,7 +122,6 @@ export function useConversationPage(conversationId: string, initialPrompt?: stri
         const id = output.replace(/^Artifact (created|updated): /, "").split(" ")[0];
         setSelectedArtifactId(id);
         setArtifactPanelOpen(true);
-        fetchArtifacts();
       }
     }
     // Auto-consolidate memory every 10 messages
@@ -128,15 +132,16 @@ export function useConversationPage(conversationId: string, initialPrompt?: stri
         body: JSON.stringify({ conversationId, model: conversation?.model }),
       }).catch(() => {});
     }
-  }, [refreshConversation, fetchContextUsage, fetchArtifacts, messages, setSelectedArtifactId, setArtifactPanelOpen, setIsCompressing, conversationId, conversation?.model]);
+  }, [refreshConversation, fetchContextUsage, messages, setSelectedArtifactId, setArtifactPanelOpen, setIsCompressing, conversationId, conversation?.model]);
 
   onErrorRef.current = useCallback((err: Error) => {
     const msg = err?.message || String(err);
+    toast(msg, "error");
     if (msg.includes("does not support tools") || (msg.includes("does not support") && msg.includes("tools")) ||
         msg.includes("model does not support") || (msg.includes("no") && msg.includes("tool support"))) {
       setToolErrorDialogOpen(true);
     }
-  }, []);
+  }, [toast]);
 
   /* ─── Initial fetches ──────────────────────────────────────────────────── */
 
@@ -159,7 +164,6 @@ export function useConversationPage(conversationId: string, initialPrompt?: stri
       );
     }, 0);
   }, [convLoaded]);
-  useEffect(() => { fetchArtifacts(); }, [conversationId]);
   useEffect(() => { fetchContextUsage(); }, [conversationId, messages.length, conversation?.model]);
   useEffect(() => {
     function handleTitleUpdate(e: Event) {
@@ -264,7 +268,7 @@ export function useConversationPage(conversationId: string, initialPrompt?: stri
     todoPanelOpen, setTodoPanelOpen,
     advancedOpen, setAdvancedOpen,
     modelSettingsOpen, setModelSettingsOpen,
-    artifactPanelOpen, setArtifactPanelOpen, selectedArtifactId, setSelectedArtifactId, artifacts, setArtifacts,
+    artifactPanelOpen, setArtifactPanelOpen, selectedArtifactId, setSelectedArtifactId,
     contextPanelOpen, setContextPanelOpen, contextData, setContextData,
     toolErrorDialogOpen, setToolErrorDialogOpen,
     keyboardShortcutsOpen, setKeyboardShortcutsOpen,
@@ -275,7 +279,7 @@ export function useConversationPage(conversationId: string, initialPrompt?: stri
     scrollRef, toast,
     messages, sendMessage, status, stop, regenerate, error, setMessages, addToolResult,
     isLoading, currentModelName,
-    fetchConversation, fetchArtifacts, refreshConversation, refreshConversationAndMessages,
+    fetchConversation, refreshConversation, refreshConversationAndMessages,
     fetchContextUsage, handleModelSettingsSave, handleModelChange, handleKbToggle,
     handleClarificationAnswer, handleEditMessage, handleDeleteMessage, handleCopyMessage,
     handleRegenerate, handleRegenerateMessage, handleRegenExecute, regenModal, setRegenModal,

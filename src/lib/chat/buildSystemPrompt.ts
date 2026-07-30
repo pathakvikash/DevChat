@@ -1,8 +1,8 @@
 import { prisma } from "@/lib/db";
-import { embed, cosineSimilarity } from "@/lib/rag";
+import { embed, scoreDocumentChunks, type ScoredChunk } from "@/lib/rag";
 import { getMemoryBlock } from "@/lib/memory";
 import { getCompressedContext } from "@/lib/compression";
-import { TOOL_REGISTRY, SKILL_REGISTRY } from "@/lib/registry";
+import { TOOL_REGISTRY, getSkill } from "@/lib/registry";
 import { extractText } from "@/lib/utils/messageParts";
 import { BUILTIN_TOOL_IDS } from "./buildTools";
 import { countTokens } from "@/lib/tokens";
@@ -95,8 +95,8 @@ export async function buildSystemPrompt(
       : null;
 
   const activeSkills = skillIds
-    .map((sid) => SKILL_REGISTRY[sid])
-    .filter(Boolean);
+    .map((sid) => getSkill(sid))
+    .filter((s): s is NonNullable<typeof s> => Boolean(s));
   const skills =
     activeSkills.length > 0
       ? `--- Active Skills ---\n${activeSkills
@@ -141,7 +141,7 @@ export async function buildSystemPrompt(
  *  3-4 dense chunks and stays well under 25% of an 8K context window. */
 const KB_TOKEN_BUDGET = 1500;
 
-export async function retrieveKbContext({
+async function retrieveKbContext({
   kbId,
   ragContext,
   messages,
@@ -161,26 +161,13 @@ export async function retrieveKbContext({
         select: { id: true, filename: true, chunks: true },
       });
 
-      const scored: Array<{
-        text: string;
-        source: string;
-        score: number;
-      }> = [];
+      const scored: ScoredChunk[] = [];
       documents.forEach((doc) => {
-        let chunks: Array<{ text: string; embedding: number[] }>;
         try {
-          chunks = JSON.parse(doc.chunks);
+          scored.push(...scoreDocumentChunks(doc, queryEmbedding));
         } catch {
-          return;
+          // Skip documents with malformed chunk data.
         }
-        chunks.forEach((chunk, i) => {
-          if (!chunk.embedding || !Array.isArray(chunk.embedding)) return;
-          scored.push({
-            text: chunk.text,
-            source: `${doc.filename}#chunk${i}`,
-            score: cosineSimilarity(queryEmbedding, chunk.embedding),
-          });
-        });
       });
 
       if (scored.length === 0) return null;

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useCallback } from "react";
+import { runWebSearch, formatWebSearchResults } from "./webSearch";
 
 interface UseMessageActionsOptions {
   conversationId: string;
@@ -190,20 +191,10 @@ export function useMessageActions({
         case "search": {
           const query = ctx.userMessageText.slice(0, 200);
           try {
-            const res = await fetch(`/api/web-search?q=${encodeURIComponent(query)}`);
-            if (res.ok) {
-              const data = await res.json();
-              const results = (data.results || []) as Array<{
-                title: string;
-                url: string;
-                snippet: string;
-              }>;
-              if (results.length > 0) {
-                const formatted = results
-                  .map((r, i) => `${i + 1}. ${r.title}\n   ${r.url}\n   ${r.snippet}`)
-                  .join("\n\n");
-                modifiedText = `[Web Search Results]\n${formatted}\n\n---\n\nOriginal request: ${ctx.userMessageText}`;
-              }
+            const results = await runWebSearch(query);
+            if (results.length > 0) {
+              const formatted = formatWebSearchResults(results);
+              modifiedText = `[Web Search Results]\n${formatted}\n\n---\n\nOriginal request: ${ctx.userMessageText}`;
             }
           } catch (e) {
             console.error("[regen] web search failed:", e);

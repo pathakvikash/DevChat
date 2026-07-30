@@ -9,7 +9,7 @@ export type SearchProvider = "tavily" | "duckduckgo";
 /**
  * Tavily — high quality, requires TAVILY_API_KEY (free tier 1000/mo).
  */
-export async function tavilySearch(query: string): Promise<SearchResult[]> {
+async function tavilySearch(query: string): Promise<SearchResult[]> {
   const apiKey = process.env.TAVILY_API_KEY;
   if (!apiKey) throw new Error("TAVILY_API_KEY not set");
 
@@ -42,7 +42,7 @@ const DDG_BROWSER_UA =
  * DuckDuckGo HTML — free, no API key. Scrapes the HTML endpoint.
  * Fragile to layout changes but reasonable for personal use.
  */
-export async function duckDuckGoSearch(query: string): Promise<SearchResult[]> {
+async function duckDuckGoSearch(query: string): Promise<SearchResult[]> {
   const url = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`;
   const response = await fetch(url, {
     signal: AbortSignal.timeout(15000),
@@ -135,6 +135,6 @@ export async function webSearch(
 export function formatSearchResults(results: SearchResult[]): string {
   if (results.length === 0) return "";
   return results
-    .map((r, i) => `${i + 1}. ${r.title}\n   URL: ${r.url}\n   ${r.snippet}`)
+    .map((r, i) => `${i + 1}. ${r.title}\n   ${r.url}\n   ${r.snippet}`)
     .join("\n\n");
 }

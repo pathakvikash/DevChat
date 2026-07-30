@@ -1,5 +1,12 @@
 import { prisma } from "@/lib/db";
 import { NextRequest, NextResponse } from "next/server";
+import { findConversationMessage } from "@/lib/api/messages";
+
+function messageLookupErrorResponse(reason: "not_found" | "wrong_conversation") {
+  return reason === "not_found"
+    ? NextResponse.json({ error: "Message not found" }, { status: 404 })
+    : NextResponse.json({ error: "Message not in this conversation" }, { status: 400 });
+}
 
 export async function PATCH(
   req: NextRequest,
@@ -13,17 +20,8 @@ export async function PATCH(
       return NextResponse.json({ error: "Content is required" }, { status: 400 });
     }
 
-    const message = await prisma.message.findUnique({
-      where: { id: messageId },
-    });
-
-    if (!message) {
-      return NextResponse.json({ error: "Message not found" }, { status: 404 });
-    }
-
-    if (message.conversationId !== id) {
-      return NextResponse.json({ error: "Message not in this conversation" }, { status: 400 });
-    }
+    const result = await findConversationMessage(id, messageId);
+    if (!result.ok) return messageLookupErrorResponse(result.reason);
 
     const updatedMessage = await prisma.message.update({
       where: { id: messageId },
@@ -53,17 +51,8 @@ export async function DELETE(
   try {
     const { id, messageId } = await params;
 
-    const message = await prisma.message.findUnique({
-      where: { id: messageId },
-    });
-
-    if (!message) {
-      return NextResponse.json({ error: "Message not found" }, { status: 404 });
-    }
-
-    if (message.conversationId !== id) {
-      return NextResponse.json({ error: "Message not in this conversation" }, { status: 400 });
-    }
+    const result = await findConversationMessage(id, messageId);
+    if (!result.ok) return messageLookupErrorResponse(result.reason);
 
     await prisma.message.delete({
       where: { id: messageId },

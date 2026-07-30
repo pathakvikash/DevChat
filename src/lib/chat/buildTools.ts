@@ -1,8 +1,8 @@
-import { tool, type Tool, type UIMessage } from "ai";
+import { tool, type Tool } from "ai";
 import { z } from "zod";
-import { TOOL_REGISTRY, SKILL_REGISTRY } from "@/lib/registry";
+import { TOOL_REGISTRY, getSkill } from "@/lib/registry";
 import { prisma } from "@/lib/db";
-import { webSearch } from "@/lib/search";
+import { webSearch, formatSearchResults, type SearchProvider } from "@/lib/search";
 import { listServerTools, callServerTool } from "@/lib/mcp/client";
 import type { ToolExecutionContext } from "@/lib/registry/types";
 
@@ -22,8 +22,6 @@ export const BUILTIN_TOOL_IDS = [
   "jsonExtract",
 ] as const;
 
-export type SearchProvider = "tavily" | "duckduckgo";
-
 export function resolveActiveToolIds(
   explicitToolIds: string[],
   skillIds: string[],
@@ -32,7 +30,7 @@ export function resolveActiveToolIds(
   const active = new Set<string>(BUILTIN_TOOL_IDS);
   for (const id of explicitToolIds) active.add(id);
   for (const sid of skillIds) {
-    const skill = SKILL_REGISTRY[sid];
+    const skill = getSkill(sid);
     if (!skill) continue;
     for (const tid of skill.toolIds) active.add(tid);
   }
@@ -133,10 +131,7 @@ export async function buildTools({
           const { results, usedProvider, warning } = await webSearch(query, searchProvider);
           const header = `[search via ${usedProvider}${warning ? ` — ${warning}` : ""}]`;
           if (results.length === 0) return `${header}\nNo results.`;
-          const body = results
-            .map((r, i) => `${i + 1}. ${r.title}\n   ${r.url}\n   ${r.snippet}`)
-            .join("\n\n");
-          return `${header}\n\n${body}`;
+          return `${header}\n\n${formatSearchResults(results)}`;
         },
       });
       continue;
@@ -202,4 +197,3 @@ export async function buildTools({
 }
 
 export type ToolSet = Awaited<ReturnType<typeof buildTools>>;
-export type ChatMessage = UIMessage;
