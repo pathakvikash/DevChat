@@ -211,6 +211,14 @@ model Artifact {
   @@index([conversationId])
 }
 
+// Per-app settings (API keys, preferences) stored server-side.
+model AppSetting {
+  id        String   @id @default(cuid())
+  key       String   @unique
+  value     String
+  updatedAt DateTime @updatedAt
+}
+
 // ─── Observability: per-request generation traces ──────────────────────────
 // One Trace row per chat completion request (a single assistant turn, possibly
 // spanning many tool-call steps). Captures latency, token usage, estimated
