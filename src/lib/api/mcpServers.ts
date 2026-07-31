@@ -11,10 +11,10 @@ export type McpServerLookupResult =
   | { ok: true; server: McpServer }
   | { ok: false };
 
-/** Looks up an MCP server by id. */
-export async function findMcpServer(id: string): Promise<McpServerLookupResult> {
+/** Looks up an MCP server by id, scoped to its owning user. */
+export async function findMcpServer(id: string, userId: string): Promise<McpServerLookupResult> {
   const server = await prisma.mcpServer.findUnique({ where: { id } });
-  if (!server) return { ok: false };
+  if (!server || server.userId !== userId) return { ok: false };
   return { ok: true, server };
 }
 

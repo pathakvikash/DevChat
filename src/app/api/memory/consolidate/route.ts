@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { consolidateMemory } from "@/lib/memory";
+import { prisma } from "@/lib/db";
+import { requireUserId } from "@/lib/auth";
 
 export const maxDuration = 60;
 
@@ -10,6 +12,7 @@ export const maxDuration = 60;
  */
 export async function POST(req: NextRequest) {
   try {
+    const userId = await requireUserId();
     const { conversationId, model } = await req.json();
     if (!conversationId || typeof conversationId !== "string") {
       return NextResponse.json(
@@ -17,7 +20,14 @@ export async function POST(req: NextRequest) {
         { status: 400 },
       );
     }
-    const result = await consolidateMemory({ conversationId, modelId: model });
+    const conv = await prisma.conversation.findUnique({
+      where: { id: conversationId },
+      select: { userId: true },
+    });
+    if (!conv || conv.userId !== userId) {
+      return NextResponse.json({ error: "Conversation not found" }, { status: 404 });
+    }
+    const result = await consolidateMemory({ conversationId, userId, modelId: model });
     return NextResponse.json(result);
   } catch (e) {
     console.error("Memory consolidation failed:", e);

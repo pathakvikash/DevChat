@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getOAuth2Provider, buildAuthorizationUrl } from "@/lib/mcp/oauth2";
 import { findMcpServer, mcpServerNotFoundResponse } from "@/lib/api/mcpServers";
+import { requireUserId } from "@/lib/auth";
 import crypto from "crypto";
 
 export async function GET(
@@ -9,7 +10,8 @@ export async function GET(
 ) {
   const { id } = await params;
   try {
-    const result = await findMcpServer(id);
+    const userId = await requireUserId();
+    const result = await findMcpServer(id, userId);
     if (!result.ok) {
       return mcpServerNotFoundResponse();
     }

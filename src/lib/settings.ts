@@ -1,20 +1,20 @@
 import { prisma } from "./db";
 
-export async function getSettingsKey(key: string): Promise<string | null> {
-  const row = await prisma.appSetting.findUnique({ where: { key } });
+export async function getSettingsKey(userId: string, key: string): Promise<string | null> {
+  const row = await prisma.appSetting.findUnique({ where: { userId_key: { userId, key } } });
   return row?.value ?? null;
 }
 
-export async function setSettingsKey(key: string, value: string): Promise<void> {
+export async function setSettingsKey(userId: string, key: string, value: string): Promise<void> {
   await prisma.appSetting.upsert({
-    where: { key },
+    where: { userId_key: { userId, key } },
     update: { value },
-    create: { key, value },
+    create: { userId, key, value },
   });
 }
 
-export async function deleteSettingsKey(key: string): Promise<void> {
-  await prisma.appSetting.deleteMany({ where: { key } });
+export async function deleteSettingsKey(userId: string, key: string): Promise<void> {
+  await prisma.appSetting.deleteMany({ where: { userId, key } });
 }
 
 export function maskKey(key: string): string {

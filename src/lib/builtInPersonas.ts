@@ -48,11 +48,15 @@ export const builtInPersonas: BuiltInPersona[] = [
 export async function seedBuiltInPersonas(prisma: PrismaClient): Promise<number> {
   let seededCount = 0;
   for (const persona of builtInPersonas) {
-    const result = await prisma.persona.upsert({
-      where: { name: persona.name },
-      update: {},
-      create: persona,
+    // Compound-unique `where` inputs can't express `userId: null` (Prisma
+    // types that key as non-nullable even though the column is), so built-ins
+    // are looked up manually instead of via upsert.
+    const existing = await prisma.persona.findFirst({
+      where: { userId: null, name: persona.name },
     });
+    const result = existing
+      ? existing
+      : await prisma.persona.create({ data: persona });
     if (result) seededCount++;
   }
   return seededCount;

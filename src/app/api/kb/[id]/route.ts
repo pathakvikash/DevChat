@@ -1,11 +1,13 @@
 import { prisma } from "@/lib/db";
 import { NextRequest, NextResponse } from "next/server";
+import { requireUserId } from "@/lib/auth";
 
 export async function GET(
   _req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const userId = await requireUserId();
     const { id } = await params;
     const kb = await prisma.knowledgeBase.findUnique({
       where: { id },
@@ -21,7 +23,7 @@ export async function GET(
       },
     });
 
-    if (!kb) {
+    if (!kb || kb.userId !== userId) {
       return NextResponse.json(
         { error: "Knowledge base not found" },
         { status: 404 }
@@ -43,10 +45,18 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const userId = await requireUserId();
     const { id } = await params;
-    await prisma.knowledgeBase.delete({
-      where: { id },
+    const result = await prisma.knowledgeBase.deleteMany({
+      where: { id, userId },
     });
+
+    if (result.count === 0) {
+      return NextResponse.json(
+        { error: "Knowledge base not found" },
+        { status: 404 }
+      );
+    }
 
     return NextResponse.json({ success: true });
   } catch (error) {

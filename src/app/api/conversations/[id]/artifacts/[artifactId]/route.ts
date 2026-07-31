@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/db";
 import { NextRequest, NextResponse } from "next/server";
 import { findConversationArtifact } from "@/lib/api/artifacts";
+import { requireUserId } from "@/lib/auth";
 
 function artifactLookupErrorResponse(reason: "not_found" | "wrong_conversation") {
   return reason === "not_found"
@@ -13,9 +14,10 @@ export async function GET(
   { params }: { params: Promise<{ id: string; artifactId: string }> }
 ) {
   try {
+    const userId = await requireUserId();
     const { id, artifactId } = await params;
 
-    const result = await findConversationArtifact(id, artifactId);
+    const result = await findConversationArtifact(id, artifactId, userId);
     if (!result.ok) return artifactLookupErrorResponse(result.reason);
 
     return NextResponse.json(result.artifact);
@@ -30,10 +32,11 @@ export async function PATCH(
   { params }: { params: Promise<{ id: string; artifactId: string }> }
 ) {
   try {
+    const userId = await requireUserId();
     const { id, artifactId } = await params;
     const { type, title, content } = await req.json();
 
-    const result = await findConversationArtifact(id, artifactId);
+    const result = await findConversationArtifact(id, artifactId, userId);
     if (!result.ok) return artifactLookupErrorResponse(result.reason);
     const { artifact } = result;
 
@@ -64,9 +67,10 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string; artifactId: string }> }
 ) {
   try {
+    const userId = await requireUserId();
     const { id, artifactId } = await params;
 
-    const result = await findConversationArtifact(id, artifactId);
+    const result = await findConversationArtifact(id, artifactId, userId);
     if (!result.ok) return artifactLookupErrorResponse(result.reason);
 
     await prisma.artifact.delete({ where: { id: artifactId } });

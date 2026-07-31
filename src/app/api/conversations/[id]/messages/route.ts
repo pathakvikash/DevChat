@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/db";
 import { NextRequest, NextResponse } from "next/server";
+import { requireUserId } from "@/lib/auth";
 
 /**
  * DELETE /api/conversations/:id/messages
@@ -22,16 +23,17 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const userId = await requireUserId();
     const { id: conversationId } = await params;
     const fromMessageId = req.nextUrl.searchParams.get("fromMessageId");
     const afterTimestamp = req.nextUrl.searchParams.get("afterTimestamp");
 
     const conversation = await prisma.conversation.findUnique({
       where: { id: conversationId },
-      select: { id: true },
+      select: { id: true, userId: true },
     });
 
-    if (!conversation) {
+    if (!conversation || conversation.userId !== userId) {
       return NextResponse.json(
         { error: "Conversation not found" },
         { status: 404 },
@@ -111,6 +113,7 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const userId = await requireUserId();
     const { id: conversationId } = await params;
     const body = await req.json();
     const {
@@ -134,10 +137,10 @@ export async function POST(
 
     const conversation = await prisma.conversation.findUnique({
       where: { id: conversationId },
-      select: { id: true },
+      select: { id: true, userId: true },
     });
 
-    if (!conversation) {
+    if (!conversation || conversation.userId !== userId) {
       return NextResponse.json({ error: "Conversation not found" }, { status: 404 });
     }
 

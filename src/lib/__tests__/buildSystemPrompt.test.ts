@@ -42,6 +42,7 @@ const makeOpts = (overrides: Record<string, any> = {}) => ({
   kbId: undefined,
   ragContext: undefined,
   messages: [],
+  userId: "test-user",
   ...overrides,
 });
 

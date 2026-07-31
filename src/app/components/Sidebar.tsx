@@ -4,7 +4,8 @@ import { useState } from "react";
 import { motion } from "framer-motion";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Plus, Search, Trash2, Edit2, Settings, BookOpen, Brain, Sparkles, Loader2, Cpu, Pin, Archive, X, StickyNote, HardDrive, MoreHorizontal, CheckSquare, Square, CheckCheck, Activity } from "lucide-react";
+import { Plus, Search, Trash2, Edit2, Settings, BookOpen, Brain, Sparkles, Loader2, Cpu, Pin, Archive, X, StickyNote, HardDrive, MoreHorizontal, CheckSquare, Square, CheckCheck, Activity, LogOut, User as UserIcon } from "lucide-react";
+import { useSession, signOut } from "next-auth/react";
 import { useSidebar } from "@/app/contexts/SidebarContext";
 import { useResource } from "@/app/hooks/useResource";
 import {
@@ -32,6 +33,7 @@ interface ConversationItem {
 
 export default function Sidebar() {
   const { close } = useSidebar();
+  const { data: session } = useSession();
   const [searchInput, setSearchInput] = useState("");
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingTitle, setEditingTitle] = useState("");
@@ -428,6 +430,42 @@ export default function Sidebar() {
 
       {/* Footer - Navigation */}
       <div className="p-3 border-t border-[var(--glass-border)] glass-surface">
+        {session?.user && (
+          <Link
+            href="/profile"
+            onClick={close}
+            className="flex items-center gap-2 mb-3 px-1.5 py-1 rounded-[var(--glass-radius-sm)] hover:bg-[var(--glass-bg-hover)] transition"
+          >
+            {session.user.image ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={session.user.image}
+                alt=""
+                className="size-7 rounded-full shrink-0"
+              />
+            ) : (
+              <div className="size-7 rounded-full glass-surface flex items-center justify-center shrink-0">
+                <UserIcon size={14} className="text-zinc-400" />
+              </div>
+            )}
+            <div className="flex-1 min-w-0">
+              <div className="text-xs font-medium text-zinc-200 truncate">
+                {session.user.name || session.user.email}
+              </div>
+            </div>
+            <button
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                signOut({ callbackUrl: "/login" });
+              }}
+              className="p-1.5 rounded-[var(--glass-radius-sm)] text-zinc-500 hover:text-zinc-200 hover:bg-[var(--glass-bg-hover)] transition shrink-0"
+              title="Sign out"
+            >
+              <LogOut size={14} />
+            </button>
+          </Link>
+        )}
         <div className="mb-2 text-xs text-zinc-400">
           Total: <strong>{conversations.length}</strong> conversations
         </div>

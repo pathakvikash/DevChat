@@ -5,10 +5,13 @@ export interface ConversationModelInfo {
   model: string;
 }
 
-/** Looks up just the `id`/`model` of a conversation — enough to know it exists and which model to use. */
-export async function getConversationOrNull(id: string): Promise<ConversationModelInfo | null> {
-  return prisma.conversation.findUnique({
-    where: { id },
+/** Looks up just the `id`/`model` of a conversation owned by `userId` — enough to know it exists and which model to use. */
+export async function getConversationOrNull(
+  id: string,
+  userId: string,
+): Promise<ConversationModelInfo | null> {
+  return prisma.conversation.findFirst({
+    where: { id, userId },
     select: { id: true, model: true },
   });
 }

@@ -5,11 +5,20 @@ export type ArtifactLookupResult =
   | { ok: true; artifact: Artifact }
   | { ok: false; reason: "not_found" | "wrong_conversation" };
 
-/** Looks up an artifact by id and confirms it belongs to `conversationId`. */
+/** Looks up an artifact by id and confirms it belongs to `conversationId`, which
+ *  must itself belong to `userId`. */
 export async function findConversationArtifact(
   conversationId: string,
   artifactId: string,
+  userId: string,
 ): Promise<ArtifactLookupResult> {
+  const conversation = await prisma.conversation.findUnique({
+    where: { id: conversationId },
+    select: { userId: true },
+  });
+  if (!conversation || conversation.userId !== userId) {
+    return { ok: false, reason: "not_found" };
+  }
   const artifact = await prisma.artifact.findUnique({ where: { id: artifactId } });
   if (!artifact) return { ok: false, reason: "not_found" };
   if (artifact.conversationId !== conversationId) {

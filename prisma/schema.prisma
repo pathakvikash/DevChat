@@ -7,8 +7,63 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+// ─── Auth.js (NextAuth v5) models ───────────────────────────────────────────
+model User {
+  id            String    @id @default(cuid())
+  name          String?
+  email         String?   @unique
+  emailVerified DateTime?
+  image         String?
+  createdAt     DateTime  @default(now())
+  accounts      Account[]
+  sessions      Session[]
+
+  conversations  Conversation[]
+  knowledgeBases KnowledgeBase[]
+  memories       Memory[]
+  mcpServers     McpServer[]
+  personas       Persona[]
+  appSettings    AppSetting[]
+  traces         Trace[]
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String?
+  access_token      String?
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String?
+  session_state     String?
+  user              User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
 model Conversation {
   id                       String     @id @default(cuid())
+  userId                   String?
   title                    String     @default("New Chat")
   model                    String     @default("gpt-4o")
   persona                  String?
@@ -34,12 +89,14 @@ model Conversation {
    archived                 Boolean    @default(false)
   createdAt                DateTime   @default(now())
   updatedAt                DateTime   @updatedAt
+  user                     User?      @relation(fields: [userId], references: [id], onDelete: Cascade)
   messages                 Message[]
   artifacts                Artifact[]
   goalRuns                 GoalRun[]
   todos                    Todo[]
 
   @@index([updatedAt])
+  @@index([userId])
 }
 
 model Message {
@@ -71,11 +128,15 @@ model Feedback {
 
 model KnowledgeBase {
   id          String     @id @default(cuid())
+  userId      String?
   name        String
   description String?
   createdAt   DateTime   @default(now())
   updatedAt   DateTime   @updatedAt
+  user        User?      @relation(fields: [userId], references: [id], onDelete: Cascade)
   documents   Document[]
+
+  @@index([userId])
 }
 
 model Document {
@@ -93,16 +154,21 @@ model Document {
 
 model Persona {
   id           String   @id @default(cuid())
-  name         String   @unique
+  userId       String?
+  name         String
   description  String
   systemPrompt String
   isBuiltIn    Boolean  @default(false)
   createdAt    DateTime @default(now())
+  user         User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, name])
 }
 
 model Memory {
   id                   String    @id @default(cuid())
-  key                  String    @unique
+  userId               String?
+  key                  String
   value                String
   category             String    @default("general")
   // --- Lifecycle / salience: lets memory improve over time ---
@@ -119,8 +185,11 @@ model Memory {
   pinned               Boolean   @default(false)
   createdAt            DateTime  @default(now())
   updatedAt            DateTime  @updatedAt
+  user                 User?     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
+  @@unique([userId, key])
   @@index([category])
+  @@index([userId])
 }
 
 // A single autonomous "Goal Mode" run: an objective the model pursues across
@@ -185,7 +254,8 @@ model Todo {
 // tools dynamically that can be toggled on/off per-conversation.
 model McpServer {
   id          String   @id @default(cuid())
-  name        String   @unique
+  userId      String?
+  name        String
   url         String   // The MCP server endpoint URL
   authType    String   @default("none") // none | apikey | oauth2
   authConfig  String?  // JSON: { apiKey?, clientId?, clientSecret?, scopes? }
@@ -195,6 +265,9 @@ model McpServer {
   errorMsg    String?  // Last connection error
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
+  user        User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, name])
 }
 
 model Artifact {
@@ -211,12 +284,16 @@ model Artifact {
   @@index([conversationId])
 }
 
-// Per-app settings (API keys, preferences) stored server-side.
+// Per-app settings (API keys, preferences) stored server-side, scoped per user.
 model AppSetting {
   id        String   @id @default(cuid())
-  key       String   @unique
+  userId    String?
+  key       String
   value     String
   updatedAt DateTime @updatedAt
+  user      User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, key])
 }
 
 // ─── Observability: per-request generation traces ──────────────────────────
@@ -225,6 +302,7 @@ model AppSetting {
 // cost, and outcome so we can monitor the system without an external service.
 model Trace {
   id             String          @id @default(cuid())
+  userId         String?
   conversationId String?
   model          String
   provider       String?
@@ -241,12 +319,14 @@ model Trace {
   inputChars     Int?
   outputChars    Int?
   createdAt      DateTime        @default(now())
+  user           User?           @relation(fields: [userId], references: [id], onDelete: Cascade)
   toolCalls      TraceToolCall[]
 
   @@index([createdAt])
   @@index([model])
   @@index([status])
   @@index([conversationId])
+  @@index([userId])
 }
 
 // One row per tool invocation within a trace (for per-tool latency/cost drill-down).

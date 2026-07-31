@@ -4,6 +4,7 @@ import { calculateDetailedContextUsage } from "@/lib/tokens";
 import { buildSystemPrompt } from "@/lib/chat/buildSystemPrompt";
 import { resolveActiveToolIds } from "@/lib/chat/buildTools";
 import { getModel } from "@/lib/models";
+import { requireUserId } from "@/lib/auth";
 
 function parseListParam(raw: string | null): string[] {
   if (!raw) return [];
@@ -20,6 +21,7 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const userId = await requireUserId();
     const { id } = await params;
     const { searchParams } = new URL(req.url);
     const currentMessage = searchParams.get("currentMessage") || "";
@@ -38,7 +40,7 @@ export async function GET(
       },
     });
 
-    if (!conversation) {
+    if (!conversation || conversation.userId !== userId) {
       return NextResponse.json({ error: "Conversation not found" }, { status: 404 });
     }
 
@@ -97,6 +99,7 @@ export async function GET(
       ragContext: undefined,
       messages: panelMessages,
       memoryDisabled,
+      userId,
     });
 
     const result = calculateDetailedContextUsage(

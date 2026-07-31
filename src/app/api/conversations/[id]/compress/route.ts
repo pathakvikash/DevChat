@@ -4,15 +4,17 @@ import {
   saveCompressedSummary,
 } from "@/lib/compression";
 import { getConversationOrNull } from "@/lib/api/conversations";
+import { requireUserId } from "@/lib/auth";
 
 export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const userId = await requireUserId();
     const { id } = await params;
 
-    const conversation = await getConversationOrNull(id);
+    const conversation = await getConversationOrNull(id, userId);
 
     if (!conversation) {
       return NextResponse.json(

@@ -1,8 +1,10 @@
 import { prisma } from "@/lib/db";
 import { NextRequest, NextResponse } from "next/server";
+import { requireUserId } from "@/lib/auth";
 
 export async function GET(req: NextRequest) {
   try {
+    const userId = await requireUserId();
     const query = req.nextUrl.searchParams.get("q");
 
     if (!query || query.length < 2) {
@@ -12,6 +14,7 @@ export async function GET(req: NextRequest) {
     // Search in conversation titles
     const conversations = await prisma.conversation.findMany({
       where: {
+        userId,
         title: ({ contains: query, mode: "insensitive" } as any),
       },
       select: {
@@ -23,10 +26,11 @@ export async function GET(req: NextRequest) {
       take: 20,
     });
 
-    // Search in message content
+    // Search in message content (scoped to this user's conversations)
     const messages = await prisma.message.findMany({
       where: {
         content: ({ contains: query, mode: "insensitive" } as any),
+        conversation: { userId },
       },
       select: {
         id: true,

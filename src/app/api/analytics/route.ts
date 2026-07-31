@@ -1,12 +1,14 @@
 import { prisma } from "@/lib/db";
 import { NextResponse } from "next/server";
 import { getModel } from "@/lib/models";
+import { requireUserId } from "@/lib/auth";
 
 export async function GET() {
   try {
+    const userId = await requireUserId();
     const ninetyDaysAgo = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000);
     const conversations = await prisma.conversation.findMany({
-      where: { createdAt: { gte: ninetyDaysAgo } },
+      where: { userId, createdAt: { gte: ninetyDaysAgo } },
       include: { messages: true },
       take: 500,
       orderBy: { createdAt: "desc" },

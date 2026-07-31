@@ -1,13 +1,15 @@
 import { prisma } from "@/lib/db";
 import { NextRequest, NextResponse } from "next/server";
 import { getSettingsKey } from "@/lib/settings";
+import { requireUserId } from "@/lib/auth";
 
 export async function GET(req: NextRequest) {
   try {
+    const userId = await requireUserId();
     const { searchParams } = new URL(req.url);
     const hasNote = searchParams.get("hasNote") === "true";
 
-    const where = hasNote ? { note: { not: null } } : {};
+    const where = { userId, ...(hasNote ? { note: { not: null } } : {}) };
 
     const conversations = await prisma.conversation.findMany({
       select: {
@@ -39,6 +41,7 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
+    const userId = await requireUserId();
     const {
       title,
       model: bodyModel,
@@ -50,10 +53,11 @@ export async function POST(req: NextRequest) {
       maxTokens,
     } = await req.json();
 
-    const model = bodyModel || await getSettingsKey("defaultModel") || undefined;
+    const model = bodyModel || await getSettingsKey(userId, "defaultModel") || undefined;
 
     const conversation = await prisma.conversation.create({
       data: {
+        userId,
         title: title || "New Chat",
         model,
         persona,

@@ -1,12 +1,22 @@
 import { prisma } from "@/lib/db";
 import { NextRequest, NextResponse } from "next/server";
+import { requireUserId } from "@/lib/auth";
 
 export async function GET(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const userId = await requireUserId();
     const { id } = await params;
+
+    const conversation = await prisma.conversation.findUnique({
+      where: { id },
+      select: { userId: true },
+    });
+    if (!conversation || conversation.userId !== userId) {
+      return NextResponse.json({ error: "Conversation not found" }, { status: 404 });
+    }
 
     const artifacts = await prisma.artifact.findMany({
       where: { conversationId: id },
@@ -25,6 +35,7 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const userId = await requireUserId();
     const { id } = await params;
     const { type, title, content } = await req.json();
 
@@ -38,7 +49,7 @@ export async function POST(
     const conversation = await prisma.conversation.findUnique({
       where: { id },
     });
-    if (!conversation) {
+    if (!conversation || conversation.userId !== userId) {
       return NextResponse.json(
         { error: "Conversation not found" },
         { status: 404 }

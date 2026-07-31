@@ -41,6 +41,7 @@ export interface BuildToolsOptions {
   activeToolIds: Set<string>;
   searchProvider: SearchProvider;
   conversationId?: string;
+  userId: string;
 }
 
 /** Convert a JSON Schema object to a Zod schema (supports basic types). */
@@ -76,6 +77,7 @@ export async function buildTools({
   activeToolIds,
   searchProvider,
   conversationId,
+  userId,
 }: BuildToolsOptions): Promise<Record<string, Tool>> {
   const ctx: ToolExecutionContext = { conversationId };
   const aiTools: Record<string, Tool> = {};
@@ -83,7 +85,7 @@ export async function buildTools({
   // ─── Load MCP tools from enabled servers ────────────────────────────────
   try {
     const servers = await (prisma as any).mcpServer.findMany({
-      where: { enabled: true },
+      where: { enabled: true, userId },
     });
     for (const server of servers) {
       try {
@@ -166,8 +168,8 @@ export async function buildTools({
         const cleanKey = key.trim().slice(0, 80);
         if (!cleanKey) return "Error: key cannot be empty.";
         const m = await prisma.memory.upsert({
-          where: { key: cleanKey },
-          create: { key: cleanKey, value: value.trim().slice(0, 2000), category: category || "profile" },
+          where: { userId_key: { userId, key: cleanKey } },
+          create: { userId, key: cleanKey, value: value.trim().slice(0, 2000), category: category || "profile" },
           update: { value: value.trim().slice(0, 2000), category: category || "profile" },
         });
         return `Saved memory [${m.category}] ${m.key} = "${m.value}"`;
@@ -183,7 +185,7 @@ export async function buildTools({
       }),
       execute: async ({ key }) => {
         try {
-          await prisma.memory.delete({ where: { key: key.trim() } });
+          await prisma.memory.delete({ where: { userId_key: { userId, key: key.trim() } } });
           return `Forgot memory: ${key}`;
         } catch (e: any) {
           if (e?.code === "P2025") return `No such memory: ${key}`;

@@ -1,14 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
 import { findConversationArtifact } from "@/lib/api/artifacts";
+import { requireUserId } from "@/lib/auth";
 
 export async function GET(
   _req: NextRequest,
   { params }: { params: Promise<{ id: string; artifactId: string }> }
 ) {
   try {
+    const userId = await requireUserId();
     const { id, artifactId } = await params;
 
-    const result = await findConversationArtifact(id, artifactId);
+    const result = await findConversationArtifact(id, artifactId, userId);
     if (!result.ok) {
       return new NextResponse(
         result.reason === "not_found" ? "Artifact not found" : "Artifact not in this conversation",

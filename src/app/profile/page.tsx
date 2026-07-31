@@ -1,8 +1,9 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { User, Settings, HardDrive, ChevronRight, Sun, Moon, Brain } from "lucide-react";
+import { User, Settings, HardDrive, ChevronRight, Sun, Moon, Brain, LogOut } from "lucide-react";
 import Link from "next/link";
+import { useSession, signOut } from "next-auth/react";
 import AppShell, { SidebarToggleButton } from "@/app/components/AppShell";
 import { useTheme } from "@/app/components/ThemeProvider";
 
@@ -10,6 +11,7 @@ const MEMORY_KEY = "vas:settings:memory_enabled";
 
 export default function ProfilePage() {
   const { theme, setTheme } = useTheme();
+  const { data: session } = useSession();
   const [memoryEnabled, setMemoryEnabled] = useState(true);
 
   useEffect(() => {
@@ -37,15 +39,31 @@ export default function ProfilePage() {
 
             <div className="glass-card rounded-[var(--glass-radius-xl)] p-6 space-y-4">
               <div className="flex items-center gap-4">
-                <div className="size-16 rounded-full glass-surface flex items-center justify-center">
-                  <User size={32} className="text-zinc-400" />
+                {session?.user?.image ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={session.user.image}
+                    alt=""
+                    className="size-16 rounded-full"
+                  />
+                ) : (
+                  <div className="size-16 rounded-full glass-surface flex items-center justify-center">
+                    <User size={32} className="text-zinc-400" />
+                  </div>
+                )}
+                <div className="flex-1 min-w-0">
+                  <h2 className="text-xl font-semibold text-zinc-200">
+                    {session?.user?.name || "Signed in"}
+                  </h2>
+                  <p className="text-sm text-zinc-500">{session?.user?.email}</p>
                 </div>
-                <div>
-                  <h2 className="text-xl font-semibold text-zinc-200">Local User</h2>
-                  <p className="text-sm text-zinc-500">
-                    Running on {typeof window !== "undefined" ? navigator.platform : ""}
-                  </p>
-                </div>
+                <button
+                  onClick={() => signOut({ callbackUrl: "/login" })}
+                  className="flex items-center gap-2 px-3 py-2 rounded-[var(--glass-radius-md)] glass-button text-sm text-zinc-300 hover:text-zinc-100 transition shrink-0"
+                >
+                  <LogOut size={15} />
+                  Sign out
+                </button>
               </div>
             </div>
 

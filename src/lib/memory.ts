@@ -36,8 +36,8 @@ function salience(m: {
  * lastUsedAt so frequently-relevant facts rank higher and resist pruning.
  * This is the "memory improves over time" feedback loop on the read path.
  */
-export async function getMemoryBlock(): Promise<string> {
-  const memories = await prisma.memory.findMany();
+export async function getMemoryBlock(userId: string): Promise<string> {
+  const memories = await prisma.memory.findMany({ where: { userId } });
   if (memories.length === 0) return "";
 
   const now = Date.now();
@@ -112,10 +112,11 @@ Rules:
  */
 export async function consolidateMemory(opts: {
   conversationId: string;
+  userId: string;
   modelId?: string;
   maxMessages?: number;
 }): Promise<{ applied: number; pruned: number }> {
-  const { conversationId, modelId, maxMessages = 20 } = opts;
+  const { conversationId, userId, modelId, maxMessages = 20 } = opts;
   try {
     const messages = await prisma.message.findMany({
       where: { conversationId },
@@ -138,6 +139,7 @@ export async function consolidateMemory(opts: {
       .join("\n");
 
     const existing = await prisma.memory.findMany({
+      where: { userId },
       orderBy: { updatedAt: "desc" },
       take: 60,
     });
@@ -163,13 +165,13 @@ export async function consolidateMemory(opts: {
         const key = op.key.trim().slice(0, 80);
         if (!key) continue;
         if (op.op === "forget") {
-          await prisma.memory.deleteMany({ where: { key } });
+          await prisma.memory.deleteMany({ where: { userId, key } });
           applied++;
         } else if (op.op === "upsert" && op.value) {
           const value = String(op.value).trim().slice(0, 2000);
           const category = (op.category || "context").trim().slice(0, 40);
           const conf = clamp(op.confidence ?? 0.6, 0.1, 1);
-          const prev = await prisma.memory.findUnique({ where: { key } });
+          const prev = await prisma.memory.findUnique({ where: { userId_key: { userId, key } } });
           // Conflict detection: if the same key gets a meaningfully different
           // value, flag it so the user can review.
           if (prev && prev.value !== value && !value.toLowerCase().includes(prev.value.toLowerCase()) && !prev.value.toLowerCase().includes(value.toLowerCase())) {
@@ -179,8 +181,8 @@ export async function consolidateMemory(opts: {
             ? clamp(Math.max(prev.confidence, (prev.confidence + conf) / 2 + 0.05), 0.1, 1)
             : conf;
           await prisma.memory.upsert({
-            where: { key },
-            create: { key, value, category, confidence, sourceConversationId: conversationId },
+            where: { userId_key: { userId, key } },
+            create: { userId, key, value, category, confidence, sourceConversationId: conversationId },
             update: { value, category, confidence, sourceConversationId: conversationId },
           });
           applied++;
@@ -191,7 +193,7 @@ export async function consolidateMemory(opts: {
       console.log("[memory] consolidation conflicts:", conflicts);
     }
 
-    const pruned = await decayAndPrune();
+    const pruned = await decayAndPrune(userId);
     return { applied, pruned };
   } catch (e) {
     console.error("[memory] consolidation failed:", e);
@@ -204,9 +206,9 @@ export async function consolidateMemory(opts: {
  * both low-confidence AND stale, it's pruned. Keeps memory from accumulating
  * stale noise as it grows.
  */
-async function decayAndPrune(): Promise<number> {
+async function decayAndPrune(userId: string): Promise<number> {
   const now = Date.now();
-  const all = await prisma.memory.findMany();
+  const all = await prisma.memory.findMany({ where: { userId } });
   let pruned = 0;
   for (const m of all) {
     if (m.pinned) continue;

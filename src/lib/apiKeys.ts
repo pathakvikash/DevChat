@@ -7,18 +7,19 @@ const ENV_KEY_MAP: Record<string, string | undefined> = {
 
 async function resolveApiKey(
   keyName: "openrouterApiKey" | "nvidiaNimApiKey",
+  userId: string,
   requestSource?: string,
 ): Promise<string | undefined> {
   if (requestSource) return requestSource;
-  const dbKey = await getSettingsKey(keyName);
+  const dbKey = await getSettingsKey(userId, keyName);
   if (dbKey) return dbKey;
   return ENV_KEY_MAP[keyName] || undefined;
 }
 
-export async function resolveOpenRouterKey(bodyKey?: string) {
-  return resolveApiKey("openrouterApiKey", bodyKey);
+export async function resolveOpenRouterKey(userId: string, bodyKey?: string) {
+  return resolveApiKey("openrouterApiKey", userId, bodyKey);
 }
 
-export async function resolveNvidiaNimKey(bodyKey?: string) {
-  return resolveApiKey("nvidiaNimApiKey", bodyKey);
+export async function resolveNvidiaNimKey(userId: string, bodyKey?: string) {
+  return resolveApiKey("nvidiaNimApiKey", userId, bodyKey);
 }

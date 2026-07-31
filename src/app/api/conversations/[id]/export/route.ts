@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/db";
 import { NextRequest, NextResponse } from "next/server";
+import { requireUserId } from "@/lib/auth";
 
 function getMessageText(msg: { content: string; parts: string | null }): string {
   if (msg.parts) {
@@ -39,6 +40,7 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const userId = await requireUserId();
     const { id } = await params;
     const format = req.nextUrl.searchParams.get("format") || "markdown";
 
@@ -47,7 +49,7 @@ export async function GET(
       include: { messages: { orderBy: { createdAt: "asc" } } },
     });
 
-    if (!conversation) {
+    if (!conversation || conversation.userId !== userId) {
       return NextResponse.json({ error: "Conversation not found" }, { status: 404 });
     }
 

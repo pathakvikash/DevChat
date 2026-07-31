@@ -1,5 +1,6 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/db";
+import { requireUserId } from "@/lib/auth";
 
 interface ShareGPTMessage {
   from: "human" | "gpt" | "system" | "tool";
@@ -8,6 +9,7 @@ interface ShareGPTMessage {
 
 export async function GET(req: NextRequest) {
   try {
+    const userId = await requireUserId();
     const url = new URL(req.url);
     const format = url.searchParams.get("format") || "sharegpt";
     const minRating = url.searchParams.get("minRating");
@@ -19,6 +21,7 @@ export async function GET(req: NextRequest) {
 
     const where: Record<string, unknown> = {
       role: "assistant",
+      conversation: { userId },
     };
     if (minRating) {
       where.feedback = { is: { rating: { gte: parseInt(minRating, 10) } } };

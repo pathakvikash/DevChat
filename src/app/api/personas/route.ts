@@ -1,9 +1,12 @@
 import { prisma } from "@/lib/db";
 import { NextRequest, NextResponse } from "next/server";
+import { requireUserId } from "@/lib/auth";
 
 export async function GET() {
   try {
+    const userId = await requireUserId();
     const personas = await prisma.persona.findMany({
+      where: { OR: [{ isBuiltIn: true }, { userId }] },
       orderBy: [
         { isBuiltIn: "desc" }, // Built-in personas first
         { createdAt: "desc" },
@@ -19,6 +22,7 @@ export async function GET() {
 
 export async function POST(req: NextRequest) {
   try {
+    const userId = await requireUserId();
     const { name, description, systemPrompt } = await req.json();
 
     if (!name || !description || !systemPrompt) {
@@ -49,6 +53,7 @@ export async function POST(req: NextRequest) {
 
     const persona = await prisma.persona.create({
       data: {
+        userId,
         name,
         description,
         systemPrompt,

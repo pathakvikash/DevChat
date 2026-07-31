@@ -1,9 +1,12 @@
 import { prisma } from "@/lib/db";
 import { NextRequest, NextResponse } from "next/server";
+import { requireUserId } from "@/lib/auth";
 
 export async function GET() {
   try {
+    const userId = await requireUserId();
     const memories = await prisma.memory.findMany({
+      where: { userId },
       orderBy: [{ category: "asc" }, { updatedAt: "desc" }],
     });
     return NextResponse.json(memories);
@@ -15,6 +18,7 @@ export async function GET() {
 
 export async function POST(req: NextRequest) {
   try {
+    const userId = await requireUserId();
     const { key, value, category, pinned } = await req.json();
     if (!key || typeof key !== "string" || !value || typeof value !== "string") {
       return NextResponse.json(
@@ -27,8 +31,8 @@ export async function POST(req: NextRequest) {
     const cleanValue = value.trim().slice(0, 2000);
 
     const memory = await prisma.memory.upsert({
-      where: { key: cleanKey },
-      create: { key: cleanKey, value: cleanValue, category: cleanCategory, pinned: pinned === true },
+      where: { userId_key: { userId, key: cleanKey } },
+      create: { userId, key: cleanKey, value: cleanValue, category: cleanCategory, pinned: pinned === true },
       update: { value: cleanValue, category: cleanCategory, pinned: pinned === true },
     });
     return NextResponse.json(memory);
@@ -40,16 +44,17 @@ export async function POST(req: NextRequest) {
 
 export async function DELETE(req: NextRequest) {
   try {
+    const userId = await requireUserId();
     const key = req.nextUrl.searchParams.get("key");
     const all = req.nextUrl.searchParams.get("all");
     if (all === "1") {
-      await prisma.memory.deleteMany({});
+      await prisma.memory.deleteMany({ where: { userId } });
       return NextResponse.json({ success: true, deleted: "all" });
     }
     if (!key) {
       return NextResponse.json({ error: "key query param required" }, { status: 400 });
     }
-    await prisma.memory.delete({ where: { key } });
+    await prisma.memory.delete({ where: { userId_key: { userId, key } } });
     return NextResponse.json({ success: true });
   } catch (e: any) {
     if (e?.code === "P2025") {

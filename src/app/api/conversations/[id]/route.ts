@@ -1,8 +1,10 @@
 import { prisma } from "@/lib/db";
 import { NextRequest, NextResponse } from "next/server";
+import { requireUserId } from "@/lib/auth";
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
+    const userId = await requireUserId();
     const { id } = await params;
 
     const conversation = await prisma.conversation.findUnique({
@@ -15,7 +17,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
       },
     });
 
-    if (!conversation) {
+    if (!conversation || conversation.userId !== userId) {
       return NextResponse.json({ error: "Conversation not found" }, { status: 404 });
     }
 
@@ -28,12 +30,23 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
 
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
+    const userId = await requireUserId();
     const { id } = await params;
     const { title, model, persona, systemPrompt, webSearch, temperature, maxTokens, kbId, contextLength, topP, chatOnlyMode, pinned, archived, note, maxToolCalls, fallbackModel } =
       await req.json();
 
-    const conversation = await prisma.conversation.update({
-      where: { id },
+    if (kbId) {
+      const kb = await prisma.knowledgeBase.findUnique({
+        where: { id: kbId },
+        select: { userId: true },
+      });
+      if (!kb || kb.userId !== userId) {
+        return NextResponse.json({ error: "Knowledge base not found" }, { status: 404 });
+      }
+    }
+
+    const conversation = await prisma.conversation.updateMany({
+      where: { id, userId },
       data: {
         ...(title !== undefined && { title }),
         ...(model !== undefined && { model }),
@@ -54,7 +67,12 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       },
     });
 
-    return NextResponse.json(conversation);
+    if (conversation.count === 0) {
+      return NextResponse.json({ error: "Conversation not found" }, { status: 404 });
+    }
+
+    const updated = await prisma.conversation.findUnique({ where: { id } });
+    return NextResponse.json(updated);
   } catch (error) {
     console.error("Failed to update conversation:", error);
     return NextResponse.json({ error: "Failed to update conversation" }, { status: 500 });
@@ -63,11 +81,16 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 
 export async function DELETE(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
+    const userId = await requireUserId();
     const { id } = await params;
 
-    await prisma.conversation.delete({
-      where: { id },
+    const result = await prisma.conversation.deleteMany({
+      where: { id, userId },
     });
+
+    if (result.count === 0) {
+      return NextResponse.json({ error: "Conversation not found" }, { status: 404 });
+    }
 
     return NextResponse.json({ success: true });
   } catch (error) {

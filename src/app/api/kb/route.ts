@@ -1,9 +1,12 @@
 import { prisma } from "@/lib/db";
 import { NextRequest, NextResponse } from "next/server";
+import { requireUserId } from "@/lib/auth";
 
 export async function GET() {
   try {
+    const userId = await requireUserId();
     const knowledgeBases = await prisma.knowledgeBase.findMany({
+      where: { userId },
       include: {
         _count: { select: { documents: true } },
       },
@@ -19,6 +22,7 @@ export async function GET() {
 
 export async function POST(req: NextRequest) {
   try {
+    const userId = await requireUserId();
     const { name, description } = await req.json();
 
     if (!name) {
@@ -26,7 +30,7 @@ export async function POST(req: NextRequest) {
     }
 
     const kb = await prisma.knowledgeBase.create({
-      data: { name, description },
+      data: { userId, name, description },
     });
 
     return NextResponse.json(kb, { status: 201 });

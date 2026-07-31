@@ -60,6 +60,7 @@ describe("buildTools", () => {
     const tools = await buildTools({
       activeToolIds: new Set(["executeCode", "webSearch"]),
       searchProvider: "duckduckgo",
+      userId: "test-user",
     });
     expect(tools).toHaveProperty("webSearch");
     expect(tools).not.toHaveProperty("fetchUrl");
@@ -69,6 +70,7 @@ describe("buildTools", () => {
     const tools = await buildTools({
       activeToolIds: new Set(["rememberFact"]),
       searchProvider: "duckduckgo",
+      userId: "test-user",
     });
     expect(tools).toHaveProperty("rememberFact");
   });
@@ -77,6 +79,7 @@ describe("buildTools", () => {
     const tools = await buildTools({
       activeToolIds: new Set(["rememberFact"]),
       searchProvider: "duckduckgo",
+      userId: "test-user",
     });
     expect(typeof tools.rememberFact.execute).toBe("function");
   });
@@ -85,6 +88,7 @@ describe("buildTools", () => {
     const tools = await buildTools({
       activeToolIds: new Set(["rememberFact"]),
       searchProvider: "duckduckgo",
+      userId: "test-user",
     });
     const schema = (tools.rememberFact as any).inputSchema as z.ZodTypeAny;
     expect(schema).toBeDefined();
@@ -96,6 +100,7 @@ describe("buildTools", () => {
     const tools = await buildTools({
       activeToolIds: new Set(["rememberFact"]),
       searchProvider: "duckduckgo",
+      userId: "test-user",
     });
     const schema = (tools.rememberFact as any).inputSchema as z.ZodObject<any>;
     const parsed = schema.safeParse({ value: "Alice" });
@@ -106,6 +111,7 @@ describe("buildTools", () => {
     const tools = await buildTools({
       activeToolIds: new Set(["rememberFact"]),
       searchProvider: "duckduckgo",
+      userId: "test-user",
     });
     const schema = (tools.rememberFact as any).inputSchema as z.ZodObject<any>;
     const parsed = schema.safeParse({ key: "name" });
@@ -116,6 +122,7 @@ describe("buildTools", () => {
     const tools = await buildTools({
       activeToolIds: new Set(["forgetFact"]),
       searchProvider: "duckduckgo",
+      userId: "test-user",
     });
     expect(tools).toHaveProperty("forgetFact");
     expect(typeof tools.forgetFact.execute).toBe("function");
@@ -125,6 +132,7 @@ describe("buildTools", () => {
     const tools = await buildTools({
       activeToolIds: new Set(["forgetFact"]),
       searchProvider: "duckduckgo",
+      userId: "test-user",
     });
     const schema = (tools.forgetFact as any).inputSchema as z.ZodObject<any>;
     const parsed = schema.safeParse({ key: "name" });
@@ -135,6 +143,7 @@ describe("buildTools", () => {
     const tools = await buildTools({
       activeToolIds: new Set(["forgetFact"]),
       searchProvider: "duckduckgo",
+      userId: "test-user",
     });
     const schema = (tools.forgetFact as any).inputSchema as z.ZodObject<any>;
     const parsed = schema.safeParse({});
@@ -153,6 +162,7 @@ describe("buildTools", () => {
     const tools = await buildTools({
       activeToolIds: new Set(["webSearch"]),
       searchProvider: "duckduckgo",
+      userId: "test-user",
     });
 
     const result = await tools.webSearch.execute!({ query: "test query" }, {} as any);
@@ -172,6 +182,7 @@ describe("buildTools", () => {
     const tools = await buildTools({
       activeToolIds: new Set(["webSearch"]),
       searchProvider: "duckduckgo",
+      userId: "test-user",
     });
 
     const result = await tools.webSearch.execute!({ query: "nothing" }, {} as any);
@@ -182,6 +193,7 @@ describe("buildTools", () => {
     const tools = await buildTools({
       activeToolIds: new Set(["fetchUrl", "calculator"]),
       searchProvider: "duckduckgo",
+      userId: "test-user",
     });
     expect(tools).toHaveProperty("fetchUrl");
     expect(tools).toHaveProperty("calculator");

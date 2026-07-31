@@ -46,6 +46,7 @@ export interface BuildSystemPromptOptions {
   ragContext?: string;
   messages: unknown[];
   memoryDisabled?: boolean;
+  userId: string;
 }
 
 /** Individual sections of the system prompt, exposed for the Context panel
@@ -118,7 +119,7 @@ export async function buildSystemPrompt(
           .join("\n")}`
       : null;
 
-  const memoryRaw = opts.memoryDisabled ? null : await getMemoryBlock();
+  const memoryRaw = opts.memoryDisabled ? null : await getMemoryBlock(opts.userId);
   const memory = memoryRaw ?? null;
 
   let compressed: string | null = null;

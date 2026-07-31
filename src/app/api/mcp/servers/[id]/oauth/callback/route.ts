@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { exchangeCode } from "@/lib/mcp/oauth2";
 import { getPrismaMcp, findMcpServer } from "@/lib/api/mcpServers";
+import { requireUserId } from "@/lib/auth";
 
 export async function GET(
   req: NextRequest,
@@ -8,6 +9,7 @@ export async function GET(
 ) {
   const { id } = await params;
   try {
+    const userId = await requireUserId();
     const { searchParams } = req.nextUrl;
     const code = searchParams.get("code");
     const state = searchParams.get("state");
@@ -46,7 +48,7 @@ export async function GET(
       return clearResponse;
     }
 
-    const result = await findMcpServer(id);
+    const result = await findMcpServer(id, userId);
     if (!result.ok) {
       return clearResponse;
     }

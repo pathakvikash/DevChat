@@ -11,6 +11,7 @@ export interface ResolveModelCandidatesOptions {
   fallbackModel: string | undefined;
   bodyOpenrouterApiKey: string | undefined;
   bodyNvidiaNimApiKey: string | undefined;
+  userId: string;
 }
 
 export type ResolveModelCandidatesResult =
@@ -26,8 +27,8 @@ export async function resolveModelCandidates(
   opts: ResolveModelCandidatesOptions,
 ): Promise<ResolveModelCandidatesResult> {
   await initializeOllamaModels();
-  const effectiveOrKey = await resolveOpenRouterKey(opts.bodyOpenrouterApiKey);
-  const effectiveNimKey = await resolveNvidiaNimKey(opts.bodyNvidiaNimApiKey);
+  const effectiveOrKey = await resolveOpenRouterKey(opts.userId, opts.bodyOpenrouterApiKey);
+  const effectiveNimKey = await resolveNvidiaNimKey(opts.userId, opts.bodyNvidiaNimApiKey);
   if (effectiveOrKey) {
     await initializeOpenRouterModels(effectiveOrKey);
   }

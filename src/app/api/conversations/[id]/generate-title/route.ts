@@ -3,6 +3,7 @@ import { generateText } from "ai";
 import { prisma } from "@/lib/db";
 import { getModel, getAllModels, initializeOllamaModels, type ModelConfig } from "@/lib/models";
 import { getConversationOrNull } from "@/lib/api/conversations";
+import { requireUserId } from "@/lib/auth";
 
 async function resolveTitleModel(
   preferredModelId: string | null,
@@ -60,9 +61,10 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const userId = await requireUserId();
     const { id } = await params;
 
-    const conversation = await getConversationOrNull(id);
+    const conversation = await getConversationOrNull(id, userId);
 
     if (!conversation) {
       return NextResponse.json({ error: "Conversation not found" }, { status: 404 });

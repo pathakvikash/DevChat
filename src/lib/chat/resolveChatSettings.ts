@@ -3,6 +3,7 @@ import { getSettingsKey } from "@/lib/settings";
 import type { SearchProvider } from "@/lib/search";
 
 export interface ResolveChatSettingsOptions {
+  userId: string;
   conversationId: string | undefined;
   bodyModel: string | undefined;
   bodySystemPrompt: string | undefined;
@@ -43,7 +44,7 @@ export interface ResolvedChatSettings {
 export async function resolveChatSettings(
   opts: ResolveChatSettingsOptions,
 ): Promise<ResolvedChatSettings> {
-  const bodySP = opts.bodySearchProvider || (await getSettingsKey("searchProvider"));
+  const bodySP = opts.bodySearchProvider || (await getSettingsKey(opts.userId, "searchProvider"));
   const searchProvider: SearchProvider = bodySP === "tavily" ? "tavily" : "duckduckgo";
 
   const explicitToolIds: string[] = Array.isArray(opts.bodyEnabledTools)

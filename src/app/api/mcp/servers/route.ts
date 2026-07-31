@@ -1,10 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { testConnection, disconnectFromServer } from "@/lib/mcp/client";
 import { getPrismaMcp } from "@/lib/api/mcpServers";
+import { requireUserId } from "@/lib/auth";
 
 export async function GET() {
   try {
+    const userId = await requireUserId();
     const servers = await getPrismaMcp().findMany({
+      where: { userId },
       orderBy: { createdAt: "desc" },
     });
     return NextResponse.json(
@@ -29,6 +32,7 @@ export async function GET() {
 
 export async function POST(req: NextRequest) {
   try {
+    const userId = await requireUserId();
     const body = await req.json();
     const { name, url, authType, authConfig } = body;
 
@@ -36,13 +40,14 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Name and URL are required" }, { status: 400 });
     }
 
-    const existing = await getPrismaMcp().findUnique({ where: { name } });
+    const existing = await getPrismaMcp().findUnique({ where: { userId_name: { userId, name } } });
     if (existing) {
       return NextResponse.json({ error: "A server with this name already exists" }, { status: 409 });
     }
 
     const server = await getPrismaMcp().create({
       data: {
+        userId,
         name,
         url,
         authType: authType || "none",

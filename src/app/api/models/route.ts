@@ -13,8 +13,10 @@ import {
   type OllamaModelInfo,
 } from "@/lib/models";
 import { resolveOpenRouterKey, resolveNvidiaNimKey } from "@/lib/apiKeys";
+import { requireUserId } from "@/lib/auth";
 
 export async function GET() {
+  const userId = await requireUserId();
   let ollamaModels: ModelCatalogEntry[] = [];
 
   try {
@@ -34,8 +36,8 @@ export async function GET() {
   }
 
   const [openrouterApiKey, nvidiaNimApiKey] = await Promise.all([
-    resolveOpenRouterKey(),
-    resolveNvidiaNimKey(),
+    resolveOpenRouterKey(userId),
+    resolveNvidiaNimKey(userId),
   ]);
 
   let openRouterModels: ModelCatalogEntry[] = [];

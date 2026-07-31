@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { disconnectFromServer } from "@/lib/mcp/client";
 import { getPrismaMcp, findMcpServer, mcpServerNotFoundResponse } from "@/lib/api/mcpServers";
+import { requireUserId } from "@/lib/auth";
 
 export async function GET(
   _req: NextRequest,
@@ -8,7 +9,8 @@ export async function GET(
 ) {
   const { id } = await params;
   try {
-    const result = await findMcpServer(id);
+    const userId = await requireUserId();
+    const result = await findMcpServer(id, userId);
     if (!result.ok) {
       return mcpServerNotFoundResponse();
     }
@@ -37,8 +39,9 @@ export async function PATCH(
 ) {
   const { id } = await params;
   try {
+    const userId = await requireUserId();
     const body = await req.json();
-    const result = await findMcpServer(id);
+    const result = await findMcpServer(id, userId);
     if (!result.ok) {
       return mcpServerNotFoundResponse();
     }
@@ -76,6 +79,11 @@ export async function DELETE(
 ) {
   const { id } = await params;
   try {
+    const userId = await requireUserId();
+    const result = await findMcpServer(id, userId);
+    if (!result.ok) {
+      return mcpServerNotFoundResponse();
+    }
     await disconnectFromServer(id).catch(() => {});
     await getPrismaMcp().delete({ where: { id } });
     return NextResponse.json({ success: true });

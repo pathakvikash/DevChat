@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { testConnection } from "@/lib/mcp/client";
 import { getPrismaMcp, findMcpServer, mcpServerNotFoundResponse } from "@/lib/api/mcpServers";
+import { requireUserId } from "@/lib/auth";
 
 export async function POST(
   _req: NextRequest,
@@ -8,7 +9,8 @@ export async function POST(
 ) {
   const { id } = await params;
   try {
-    const lookup = await findMcpServer(id);
+    const userId = await requireUserId();
+    const lookup = await findMcpServer(id, userId);
     if (!lookup.ok) {
       return mcpServerNotFoundResponse();
     }

@@ -1,9 +1,12 @@
 import { prisma } from "@/lib/db";
 import { NextResponse } from "next/server";
+import { requireUserId } from "@/lib/auth";
 
 export async function GET() {
   try {
+    const userId = await requireUserId();
     const conversations = await prisma.conversation.findMany({
+      where: { userId },
       select: { model: true },
       orderBy: { updatedAt: "desc" },
       take: 500,

@@ -1,8 +1,10 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/db";
+import { requireUserId } from "@/lib/auth";
 
 export async function PUT(req: NextRequest) {
   try {
+    const userId = await requireUserId();
     const { messageId, rating } = await req.json();
 
     if (!messageId || (rating !== 1 && rating !== -1)) {
@@ -10,6 +12,17 @@ export async function PUT(req: NextRequest) {
         JSON.stringify({ error: "messageId and rating (1 or -1) required" }),
         { status: 400, headers: { "Content-Type": "application/json" } },
       );
+    }
+
+    const message = await prisma.message.findUnique({
+      where: { id: messageId },
+      select: { conversation: { select: { userId: true } } },
+    });
+    if (!message || message.conversation.userId !== userId) {
+      return new Response(JSON.stringify({ error: "Message not found" }), {
+        status: 404,
+        headers: { "Content-Type": "application/json" },
+      });
     }
 
     const existing = await prisma.feedback.findUnique({

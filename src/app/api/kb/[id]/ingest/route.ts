@@ -2,13 +2,24 @@ import { prisma } from "@/lib/db";
 import { chunkText, embed } from "@/lib/rag";
 import { extractKnownFileText, validateFileSize } from "@/lib/file-extract";
 import { NextRequest, NextResponse } from "next/server";
+import { requireUserId } from "@/lib/auth";
 
 export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const userId = await requireUserId();
     const { id } = await params;
+
+    const kb = await prisma.knowledgeBase.findUnique({
+      where: { id },
+      select: { userId: true },
+    });
+    if (!kb || kb.userId !== userId) {
+      return NextResponse.json({ error: "Knowledge base not found" }, { status: 404 });
+    }
+
     const formData = await req.formData();
     const file = formData.get("file") as File;
 

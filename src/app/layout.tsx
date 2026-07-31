@@ -4,6 +4,7 @@ import "./globals.css";
 import { ToastProvider } from "@/app/components/Toast";
 import CommandPaletteProvider from "@/app/components/CommandPalette";
 import { ThemeProvider } from "@/app/components/ThemeProvider";
+import { SessionProvider } from "@/app/components/SessionProvider";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -32,13 +33,15 @@ export default function RootLayout({
       data-theme="dark"
     >
       <body className="min-h-full flex flex-col">
-        <ThemeProvider>
-          <ToastProvider>
-            <CommandPaletteProvider>
-              {children}
-            </CommandPaletteProvider>
-          </ToastProvider>
-        </ThemeProvider>
+        <SessionProvider>
+          <ThemeProvider>
+            <ToastProvider>
+              <CommandPaletteProvider>
+                {children}
+              </CommandPaletteProvider>
+            </ToastProvider>
+          </ThemeProvider>
+        </SessionProvider>
       </body>
     </html>
   );

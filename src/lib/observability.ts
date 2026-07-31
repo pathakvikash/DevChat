@@ -46,6 +46,7 @@ export interface ToolCallObservation {
 
 export interface TraceObservation {
   conversationId?: string | null;
+  userId?: string | null;
   model: string;
   promptTokens: number;
   completionTokens: number;
@@ -93,6 +94,7 @@ export async function recordTrace(obs: TraceObservation): Promise<void> {
     const trace = await prisma.trace.create({
       data: {
         conversationId: obs.conversationId ?? null,
+        userId: obs.userId ?? null,
         model: obs.model,
         provider: deriveProvider(obs.model),
         promptTokens: obs.promptTokens,

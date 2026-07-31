@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/db";
 import { NextRequest, NextResponse } from "next/server";
 import { findConversationMessage } from "@/lib/api/messages";
+import { requireUserId } from "@/lib/auth";
 
 function messageLookupErrorResponse(reason: "not_found" | "wrong_conversation") {
   return reason === "not_found"
@@ -13,6 +14,7 @@ export async function PATCH(
   { params }: { params: Promise<{ id: string; messageId: string }> }
 ) {
   try {
+    const userId = await requireUserId();
     const { id, messageId } = await params;
     const { content } = await req.json();
 
@@ -20,7 +22,7 @@ export async function PATCH(
       return NextResponse.json({ error: "Content is required" }, { status: 400 });
     }
 
-    const result = await findConversationMessage(id, messageId);
+    const result = await findConversationMessage(id, messageId, userId);
     if (!result.ok) return messageLookupErrorResponse(result.reason);
 
     const updatedMessage = await prisma.message.update({
@@ -49,9 +51,10 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string; messageId: string }> }
 ) {
   try {
+    const userId = await requireUserId();
     const { id, messageId } = await params;
 
-    const result = await findConversationMessage(id, messageId);
+    const result = await findConversationMessage(id, messageId, userId);
     if (!result.ok) return messageLookupErrorResponse(result.reason);
 
     await prisma.message.delete({

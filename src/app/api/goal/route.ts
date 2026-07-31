@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/db";
 import { runGoal, type GoalEvent } from "@/lib/goal/orchestrator";
+import { requireUserId } from "@/lib/auth";
 
 export const maxDuration = 60;
 
@@ -8,6 +9,7 @@ export const maxDuration = 60;
  *  if the original streaming request is already gone (e.g. after a refresh). */
 export async function PATCH(req: Request) {
   try {
+    const userId = await requireUserId();
     const { runId } = await req.json();
     if (!runId) {
       return new Response(JSON.stringify({ error: "runId required" }), {
@@ -15,8 +17,11 @@ export async function PATCH(req: Request) {
         headers: { "Content-Type": "application/json" },
       });
     }
-    const run = await prisma.goalRun.findUnique({ where: { id: runId } });
-    if (!run) {
+    const run = await prisma.goalRun.findUnique({
+      where: { id: runId },
+      include: { conversation: { select: { userId: true } } },
+    });
+    if (!run || run.conversation.userId !== userId) {
       return new Response(JSON.stringify({ error: "Goal run not found" }), {
         status: 404,
         headers: { "Content-Type": "application/json" },
@@ -45,11 +50,22 @@ export async function PATCH(req: Request) {
 /** Fetch the most recent goal run (with its checklist) for a conversation,
  *  so the panel can restore state on reload. */
 export async function GET(req: Request) {
+  const userId = await requireUserId();
   const url = new URL(req.url);
   const conversationId = url.searchParams.get("conversationId");
   if (!conversationId) {
     return new Response(JSON.stringify({ error: "conversationId required" }), {
       status: 400,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+  const conv = await prisma.conversation.findUnique({
+    where: { id: conversationId },
+    select: { userId: true },
+  });
+  if (!conv || conv.userId !== userId) {
+    return new Response(JSON.stringify({ error: "Conversation not found" }), {
+      status: 404,
       headers: { "Content-Type": "application/json" },
     });
   }
@@ -71,6 +87,7 @@ export async function GET(req: Request) {
  */
 export async function POST(req: Request) {
   try {
+    const userId = await requireUserId();
     const body = await req.json();
     const {
       conversationId,
@@ -95,9 +112,9 @@ export async function POST(req: Request) {
 
     const conv = await prisma.conversation.findUnique({
       where: { id: conversationId },
-      select: { id: true, model: true },
+      select: { id: true, model: true, userId: true },
     });
-    if (!conv) {
+    if (!conv || conv.userId !== userId) {
       return new Response(JSON.stringify({ error: "Conversation not found" }), {
         status: 404,
         headers: { "Content-Type": "application/json" },
@@ -123,7 +140,7 @@ export async function POST(req: Request) {
         };
         send({ type: "status", status: "planning", cyclesUsed: 0, tokensUsed: 0, tokenBudget: run.tokenBudget, runId: run.id } as never);
         try {
-          for await (const event of runGoal(run.id, req.signal)) {
+          for await (const event of runGoal(run.id, req.signal, userId)) {
             send(event);
           }
         } catch (e: any) {

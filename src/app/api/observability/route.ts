@@ -1,27 +1,32 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
+import { requireUserId } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
 
 export async function GET(req: Request) {
   try {
+    const userId = await requireUserId();
     const url = new URL(req.url);
     const limit = Math.min(parseInt(url.searchParams.get("limit") || "50", 10) || 50, 200);
 
     const [total, recent, byModel, byStatus] = await Promise.all([
-      prisma.trace.count(),
+      prisma.trace.count({ where: { userId } }),
       prisma.trace.findMany({
+        where: { userId },
         orderBy: { createdAt: "desc" },
         take: limit,
         include: { toolCalls: { orderBy: { createdAt: "asc" } } },
       }),
       prisma.trace.groupBy({
+        where: { userId },
         by: ["model"],
         _count: { _all: true },
         _sum: { promptTokens: true, completionTokens: true, totalTokens: true, cost: true, latencyMs: true },
         _avg: { latencyMs: true, firstTokenMs: true, totalTokens: true, cost: true },
       }),
       prisma.trace.groupBy({
+        where: { userId },
         by: ["status"],
         _count: { _all: true },
       }),
@@ -29,6 +34,7 @@ export async function GET(req: Request) {
 
     // Roll totals across all traces (not just the page) for the header cards.
     const agg = await prisma.trace.aggregate({
+      where: { userId },
       _sum: {
         promptTokens: true,
         completionTokens: true,

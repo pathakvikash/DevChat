@@ -24,10 +24,12 @@ import {
   shouldIncreaseContext,
   getNextContextTier,
 } from "@/lib/contextManager";
+import { requireUserId } from "@/lib/auth";
 
 export async function POST(req: Request) {
   const requestStartedAt = Date.now();
   let traceRecorded = false;
+  const userId = await requireUserId();
   const {
     messages,
     conversationId,
@@ -51,7 +53,20 @@ export async function POST(req: Request) {
   } = await req.json();
   let model: string | undefined = bodyModel;
   try {
+    if (conversationId) {
+      const owned = await prisma.conversation.findUnique({
+        where: { id: conversationId },
+        select: { userId: true },
+      });
+      if (!owned || owned.userId !== userId) {
+        return new Response(JSON.stringify({ error: "Conversation not found" }), {
+          status: 404,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+    }
     const settings = await resolveChatSettings({
+      userId,
       conversationId,
       bodyModel,
       bodySystemPrompt,
@@ -72,7 +87,6 @@ export async function POST(req: Request) {
       skillIds,
       systemPrompt,
       temperature,
-      kbId,
       topP,
       chatOnlyMode,
       memoryDisabled,
@@ -82,13 +96,24 @@ export async function POST(req: Request) {
     } = settings;
     // `contextLength`/`maxTokens` are reassigned below (Ollama context bump,
     // default maxTokens), so these two stay `let` unlike the rest.
-    let { contextLength, maxTokens } = settings;
+    let { contextLength, maxTokens, kbId } = settings;
+    // `kbId` can come from an unvalidated client-supplied fallback inside
+    // resolveChatSettings — verify it's actually owned by this user before
+    // letting searchKnowledgeBase / the KB auto-inject read from it.
+    if (kbId) {
+      const kb = await prisma.knowledgeBase.findUnique({
+        where: { id: kbId },
+        select: { userId: true },
+      });
+      if (!kb || kb.userId !== userId) kbId = undefined;
+    }
 
     const resolution = await resolveModelCandidates({
       requestedModel: model,
       fallbackModel,
       bodyOpenrouterApiKey,
       bodyNvidiaNimApiKey,
+      userId,
     });
     if (!resolution.ok) {
       return new Response(
@@ -124,6 +149,7 @@ export async function POST(req: Request) {
       ragContext,
       messages,
       memoryDisabled,
+      userId,
     });
 
     console.log(
@@ -170,7 +196,7 @@ export async function POST(req: Request) {
     }
 
     const aiTools: ToolSet = useTools
-      ? await buildTools({ activeToolIds, searchProvider, conversationId })
+      ? await buildTools({ activeToolIds, searchProvider, conversationId, userId })
       : {};
 
     const isOllama = servedModel.startsWith("ollama/");
@@ -419,6 +445,7 @@ export async function POST(req: Request) {
               const inputChars = lastMsg?.role === "user" ? (lastMsg.content || "").length : undefined;
               recordTrace({
                 conversationId,
+                userId,
                 model: servedModel,
                 promptTokens: inTok,
                 completionTokens: outTok,
@@ -495,6 +522,7 @@ export async function POST(req: Request) {
                 const inputChars = lastMsg?.role === "user" ? (lastMsg.content || "").length : undefined;
                 recordTrace({
                   conversationId,
+                  userId,
                   model: servedModel,
                   promptTokens: 0,
                   completionTokens: 0,
@@ -587,6 +615,7 @@ export async function POST(req: Request) {
       traceRecorded = true;
       recordTrace({
         conversationId,
+        userId,
         model: model || bodyModel || "unknown",
         promptTokens: 0,
         completionTokens: 0,

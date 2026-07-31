@@ -44,6 +44,7 @@ Be strict: only mark goalComplete when the objective is truly met. Prefer finish
 export async function* runGoal(
   goalRunId: string,
   signal: AbortSignal,
+  userId: string,
 ): AsyncGenerator<GoalEvent> {
   let run = await prisma.goalRun.findUnique({ where: { id: goalRunId } });
   if (!run) {
@@ -66,6 +67,7 @@ export async function* runGoal(
     activeToolIds,
     searchProvider: "duckduckgo",
     conversationId: run.conversationId,
+    userId,
   });
 
   let tokensUsed = 0;
@@ -106,7 +108,7 @@ export async function* runGoal(
       tasks: created.map((t) => ({ id: t.id, text: t.text })),
     };
 
-    const memBlock = await getMemoryBlock();
+    const memBlock = await getMemoryBlock(userId);
     let cyclesUsed = 0;
     let staleCycles = 0;
     let finalStatus = "exhausted";
@@ -319,7 +321,7 @@ ${memBlock ? `\n${memBlock}` : ""}`;
     yield { type: "done", status: finalStatus, summary };
 
     // Learn from the run: consolidate long-term memory (fire-and-forget).
-    consolidateMemory({ conversationId: run.conversationId, modelId: run.model }).catch(
+    consolidateMemory({ conversationId: run.conversationId, userId, modelId: run.model }).catch(
       () => {},
     );
   } catch (e: any) {
