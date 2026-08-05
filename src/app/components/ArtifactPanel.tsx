@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback, useMemo, useRef } from "react";
+import { useEffect, useState, useCallback, useMemo, useRef, useId } from "react";
 import {
   FileCode,
   FileText,
@@ -17,7 +17,9 @@ import {
   ExternalLink,
   Square,
   AlertTriangle,
+  Maximize2,
 } from "lucide-react";
+import CenteredDialog from "./ui/CenteredDialog";
 import SidePanel from "./ui/SidePanel";
 import { resolveLanguage, highlightCode } from "@/lib/utils/highlight";
 import CodeRunner from "./CodeRunner";
@@ -500,6 +502,8 @@ export default function ArtifactPanel({
 function MermaidRenderer({ content }: { content: string }) {
   const [svg, setSvg] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [fullscreen, setFullscreen] = useState(false);
+  const renderId = `mermaid-artifact-${useId().replace(/:/g, "")}`;
 
   useEffect(() => {
     let cancelled = false;
@@ -511,9 +515,13 @@ function MermaidRenderer({ content }: { content: string }) {
           theme: "dark",
           securityLevel: "loose",
         });
-        const { svg } = await mermaid.default.render("mermaid-artifact", content);
+        const { svg } = await mermaid.default.render(
+          `${renderId}-${Date.now()}`,
+          content,
+        );
         if (!cancelled) setSvg(svg);
       } catch (e) {
+        console.error("Mermaid render failed", e);
         if (!cancelled) {
           setError(e instanceof Error ? e.message : String(e));
           setSvg(null);
@@ -526,11 +534,42 @@ function MermaidRenderer({ content }: { content: string }) {
 
   if (svg) {
     return (
-      <div
-        className="rounded-[var(--glass-radius-md)] overflow-auto border border-[var(--glass-border)] bg-white flex items-center justify-center p-4"
-        style={{ minHeight: "200px" }}
-        dangerouslySetInnerHTML={{ __html: svg }}
-      />
+      <>
+        <div className="relative">
+          <div
+            className="rounded-[var(--glass-radius-md)] overflow-auto border border-[var(--glass-border)] bg-white flex items-center justify-center p-4"
+            style={{ minHeight: "200px" }}
+            dangerouslySetInnerHTML={{ __html: svg }}
+          />
+          <button
+            onClick={() => setFullscreen(true)}
+            title="View fullscreen"
+            className="absolute top-2 right-2 p-1.5 rounded bg-black/60 hover:bg-black/80 text-white transition"
+          >
+            <Maximize2 size={14} />
+          </button>
+        </div>
+        <CenteredDialog
+          isOpen={fullscreen}
+          onClose={() => setFullscreen(false)}
+          widthClass="max-w-[95vw]"
+          paddingClass="p-4"
+        >
+          <div className="flex justify-end mb-2">
+            <button
+              onClick={() => setFullscreen(false)}
+              className="p-1.5 rounded hover:bg-white/10 text-zinc-300 transition"
+            >
+              <X size={18} />
+            </button>
+          </div>
+          <div
+            className="rounded-[var(--glass-radius-md)] overflow-auto bg-white flex items-center justify-center p-4"
+            style={{ maxHeight: "85vh" }}
+            dangerouslySetInnerHTML={{ __html: svg }}
+          />
+        </CenteredDialog>
+      </>
     );
   }
 
@@ -539,7 +578,7 @@ function MermaidRenderer({ content }: { content: string }) {
       <div className="space-y-2">
         <div className="flex items-center gap-1.5 text-xs text-red-400">
           <AlertTriangle size={14} />
-          Mermaid render failed
+          Mermaid render failed{error ? `: ${error}` : ""}
         </div>
         <pre className="overflow-x-auto rounded-[var(--glass-radius-md)] glass-card px-4 py-3 text-sm text-zinc-200 font-mono whitespace-pre-wrap break-all">
           {content}
