@@ -18,6 +18,7 @@ import {
   Square,
   AlertTriangle,
   Maximize2,
+  ArrowLeft,
 } from "lucide-react";
 import CenteredDialog from "./ui/CenteredDialog";
 import SidePanel from "./ui/SidePanel";
@@ -90,6 +91,7 @@ export default function ArtifactPanel({
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [openPreviewIds, setOpenPreviewIds] = useState<Set<string>>(new Set());
   const previewWindows = useRef<Map<string, Window | null>>(new Map());
+  const [viewModes, setViewModes] = useState<Record<string, "preview" | "code">>({});
 
   const openPreview = useCallback((artifactId: string) => {
     const url = `/api/conversations/${conversationId}/artifacts/${artifactId}/html`;
@@ -201,6 +203,27 @@ export default function ArtifactPanel({
     setEditingId(null);
   }
 
+  function ViewModeTabs({ artifactId }: { artifactId: string }) {
+    const mode = viewModes[artifactId] || "preview";
+    return (
+      <div className="inline-flex items-center gap-0.5 p-0.5 rounded-lg glass-card w-fit">
+        {(["preview", "code"] as const).map((m) => (
+          <button
+            key={m}
+            onClick={() => setViewModes((prev) => ({ ...prev, [artifactId]: m }))}
+            className={`px-2.5 py-1 text-xs rounded-md capitalize transition ${
+              mode === m
+                ? "bg-[var(--glass-bg-hover)] text-zinc-100"
+                : "text-zinc-500 hover:text-zinc-300"
+            }`}
+          >
+            {m}
+          </button>
+        ))}
+      </div>
+    );
+  }
+
   function renderContent(artifact: Artifact) {
     if (editingId === artifact.id) {
       return (
@@ -283,63 +306,87 @@ export default function ArtifactPanel({
     if (artifact.type === "html") {
       const isOpen = openPreviewIds.has(artifact.id);
       const htmlUrl = `/api/conversations/${conversationId}/artifacts/${artifact.id}/html`;
+      const mode = viewModes[artifact.id] || "preview";
       return (
         <div className="space-y-3">
-          <div className="rounded-[var(--glass-radius-md)] overflow-hidden border border-[var(--glass-border)] bg-white" style={{ minHeight: "200px" }}>
-            <iframe
-              src={htmlUrl}
-              title={artifact.title}
-              className="w-full border-0"
-              style={{ height: "50vh", minHeight: "250px" }}
-              sandbox="allow-scripts allow-same-origin"
-            />
-          </div>
-          <div className="flex gap-2 items-center flex-wrap">
-            <a
-              href={htmlUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded bg-orange-600 hover:bg-orange-500 text-white transition"
-            >
-              <ExternalLink size={14} />
-              Open in new tab
-            </a>
-            {isOpen && (
-              <button
-                onClick={() => closePreview(artifact.id)}
-                className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded bg-red-600 hover:bg-red-500 text-white transition"
-              >
-                <Square size={14} />
-                Close tab
-              </button>
-            )}
-          </div>
+          <ViewModeTabs artifactId={artifact.id} />
+          {mode === "preview" ? (
+            <>
+              <div className="rounded-[var(--glass-radius-md)] overflow-hidden border border-[var(--glass-border)] bg-white" style={{ minHeight: "200px" }}>
+                <iframe
+                  src={htmlUrl}
+                  title={artifact.title}
+                  className="w-full border-0"
+                  style={{ height: "50vh", minHeight: "250px" }}
+                  sandbox="allow-scripts allow-same-origin"
+                />
+              </div>
+              <div className="flex gap-2 items-center flex-wrap">
+                <a
+                  href={htmlUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded bg-orange-600 hover:bg-orange-500 text-white transition"
+                >
+                  <ExternalLink size={14} />
+                  Open in new tab
+                </a>
+                {isOpen && (
+                  <button
+                    onClick={() => closePreview(artifact.id)}
+                    className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded bg-red-600 hover:bg-red-500 text-white transition"
+                  >
+                    <Square size={14} />
+                    Close tab
+                  </button>
+                )}
+              </div>
+            </>
+          ) : (
+            <pre className="overflow-x-auto rounded-[var(--glass-radius-md)] glass-card px-4 py-3 text-sm text-zinc-200 font-mono whitespace-pre-wrap break-all">
+              <code
+                dangerouslySetInnerHTML={{ __html: highlightCode(artifact.content, "html") }}
+              />
+            </pre>
+          )}
         </div>
       );
     }
 
     if (artifact.type === "svg") {
+      const mode = viewModes[artifact.id] || "preview";
       return (
         <div className="space-y-3">
-          <div
-            className="rounded-[var(--glass-radius-md)] overflow-auto border border-[var(--glass-border)] bg-white flex items-center justify-center p-4"
-            style={{ minHeight: "200px" }}
-            dangerouslySetInnerHTML={{ __html: artifact.content }}
-          />
-          <details className="group">
-            <summary className="cursor-pointer text-xs text-zinc-500 hover:text-zinc-300 transition select-none">
-              View source
-            </summary>
-            <pre className="mt-2 overflow-x-auto rounded-[var(--glass-radius-md)] glass-card px-4 py-3 text-sm text-zinc-200 font-mono whitespace-pre-wrap break-all">
+          <ViewModeTabs artifactId={artifact.id} />
+          {mode === "preview" ? (
+            <div
+              className="rounded-[var(--glass-radius-md)] overflow-auto border border-[var(--glass-border)] bg-white flex items-center justify-center p-4"
+              style={{ minHeight: "200px" }}
+              dangerouslySetInnerHTML={{ __html: artifact.content }}
+            />
+          ) : (
+            <pre className="overflow-x-auto rounded-[var(--glass-radius-md)] glass-card px-4 py-3 text-sm text-zinc-200 font-mono whitespace-pre-wrap break-all">
               {artifact.content}
             </pre>
-          </details>
+          )}
         </div>
       );
     }
 
     if (artifact.type === "mermaid") {
-      return <MermaidRenderer content={artifact.content} />;
+      const mode = viewModes[artifact.id] || "preview";
+      return (
+        <div className="space-y-3">
+          <ViewModeTabs artifactId={artifact.id} />
+          {mode === "preview" ? (
+            <MermaidRenderer content={artifact.content} />
+          ) : (
+            <pre className="overflow-x-auto rounded-[var(--glass-radius-md)] glass-card px-4 py-3 text-sm text-zinc-200 font-mono whitespace-pre-wrap break-all">
+              {artifact.content}
+            </pre>
+          )}
+        </div>
+      );
     }
 
     return (
@@ -412,6 +459,14 @@ export default function ArtifactPanel({
 
       {!loading && selectedArtifact && (
         <div className="space-y-4">
+          <button
+            onClick={() => onSelect(null)}
+            className="flex items-center gap-1 text-xs text-zinc-400 hover:text-zinc-200 transition"
+          >
+            <ArrowLeft size={14} />
+            Back to artifacts
+          </button>
+
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
                {(() => {
@@ -450,13 +505,6 @@ export default function ArtifactPanel({
                   <Trash2 size={14} />
                 </button>
               )}
-              <button
-                onClick={() => onSelect(null)}
-                className="p-1.5 rounded glass-button text-zinc-400 transition"
-                title="Back to list"
-              >
-                <X size={14} />
-              </button>
             </div>
           </div>
 
