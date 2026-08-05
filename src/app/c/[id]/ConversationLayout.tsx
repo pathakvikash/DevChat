@@ -154,7 +154,6 @@ export default function ConversationLayout({ conversationId, initialPrompt }: Pr
           isLoading={p.isLoading}
           onSubmit={p.handleSubmit}
           onStop={p.stop}
-          onRetry={p.handleRegenerate}
           kbId={p.selectedKbId}
           contextUsage={p.contextData}
           onContextClick={() => p.setContextPanelOpen(true)}

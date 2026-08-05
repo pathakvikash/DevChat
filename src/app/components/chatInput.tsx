@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, useCallback } from "react";
-import { Plus, Upload, Globe, BookOpen, Settings, X, Slash, Mic, MicOff, RotateCcw } from "lucide-react";
+import { Plus, Upload, Globe, BookOpen, Settings, X, Slash, Mic, MicOff } from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
 import AttachmentChip from "./AttachmentChip";
 import DragOverlay from "./DragOverlay";
@@ -23,7 +23,6 @@ interface ChatInputProps {
   isLoading: boolean;
   onSubmit: (e: React.FormEvent<HTMLFormElement>) => void;
   onStop: () => void;
-  onRetry: () => void;
   kbId?: string;
   contextUsage?: {
     usedTokens: number;
@@ -49,7 +48,6 @@ export default function ChatInput({
   isLoading,
   onSubmit,
   onStop,
-  onRetry,
   kbId,
   contextUsage,
   onContextClick,
@@ -390,7 +388,7 @@ export default function ChatInput({
               onChange={(e) => setInput(e.target.value)}
               disabled={isLoading}
               placeholder={isListening ? "" : "Type a message, / for commands, or drop files..."}
-              className="w-full resize-none bg-transparent text-sm text-[var(--foreground)] outline-none placeholder:text-zinc-500 disabled:opacity-50 py-1.5 overflow-y-auto"
+              className="w-full resize-none bg-transparent text-sm text-[var(--foreground)] outline-none placeholder:text-zinc-500 placeholder:truncate disabled:opacity-50 py-1.5 overflow-y-auto"
               rows={1}
               onKeyDown={(e) => {
                 if (showCommands) {
@@ -494,18 +492,6 @@ export default function ChatInput({
                 ) : (
                   <MicOff size={16} />
                 )}
-              </button>
-            )}
-
-            {!isLoading && (
-              <button
-                type="button"
-                onClick={onRetry}
-                className="flex h-9 items-center justify-center rounded-[var(--glass-radius-md)] glass-button px-2.5 text-sm font-medium text-zinc-300 shrink-0"
-                title="Retry last message"
-              >
-                <RotateCcw size={14} className="md:hidden" />
-                <span className="hidden md:inline">Retry</span>
               </button>
             )}
 

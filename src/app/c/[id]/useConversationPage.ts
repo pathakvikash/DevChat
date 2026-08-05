@@ -183,7 +183,7 @@ export function useConversationPage(conversationId: string, initialPrompt?: stri
   const {
     regenModal, setRegenModal,
     handleClarificationAnswer, handleEditMessage, handleDeleteMessage, handleCopyMessage,
-    handleRegenerate, handleRegenerateMessage, handleRegenExecute,
+    handleRegenerateMessage, handleRegenExecute,
   } = msgActions;
 
   /* ─── Submit ────────────────────────────────────────────────────────────── */
@@ -282,7 +282,7 @@ export function useConversationPage(conversationId: string, initialPrompt?: stri
     fetchConversation, refreshConversation, refreshConversationAndMessages,
     fetchContextUsage, handleModelSettingsSave, handleModelChange, handleKbToggle,
     handleClarificationAnswer, handleEditMessage, handleDeleteMessage, handleCopyMessage,
-    handleRegenerate, handleRegenerateMessage, handleRegenExecute, regenModal, setRegenModal,
+    handleRegenerateMessage, handleRegenExecute, regenModal, setRegenModal,
     handleSubmit,
     minimapMessages,
     isDialogOpen, closeTopDialog,

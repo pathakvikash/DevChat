@@ -101,50 +101,6 @@ export function useMessageActions({
     navigator.clipboard.writeText(content);
   }
 
-  const handleRegenerate = useCallback(() => {
-    if (status === "streaming" || status === "submitted") return;
-
-    let lastAssistantId: string | undefined;
-    let lastUserCreatedAt: string | undefined;
-    let lastUserText = "";
-    for (let i = messages.length - 1; i >= 0; i--) {
-      const m = messages[i] as any;
-      if (!lastAssistantId && m.role === "assistant") {
-        lastAssistantId = m.id;
-      }
-      if (m.role === "user" && (m as any).createdAt) {
-        lastUserCreatedAt = (m as any).createdAt;
-        const parts = (m.parts || []) as any[];
-        lastUserText = parts
-          .filter((p: any) => p.type === "text")
-          .map((p: any) => p.text)
-          .join("");
-        break;
-      }
-    }
-
-    if (!lastAssistantId) {
-      const lastUser = [...messages].reverse().find((m: any) => m.role === "user");
-      if (lastUser) {
-        const parts = (lastUser as any).parts || [];
-        const textParts = parts.filter((p: any) => p.type === "text");
-        if (textParts.length > 0) {
-          sendMessage({
-            parts: textParts.map((p: any) => ({ type: "text" as const, text: p.text })),
-          });
-        }
-      }
-      return;
-    }
-
-    setRegenModal({
-      type: "retry",
-      messageId: lastAssistantId,
-      userMessageText: lastUserText,
-      userCreatedAt: lastUserCreatedAt,
-    });
-  }, [messages, status, conversationId, sendMessage]);
-
   const handleRegenerateMessage = useCallback(
     (messageId: string) => {
       if (status === "streaming" || status === "submitted") return;
@@ -271,7 +227,6 @@ export function useMessageActions({
     handleEditMessage,
     handleDeleteMessage,
     handleCopyMessage,
-    handleRegenerate,
     handleRegenerateMessage,
     handleRegenExecute,
   };
