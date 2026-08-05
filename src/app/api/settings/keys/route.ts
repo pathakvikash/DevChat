@@ -7,6 +7,7 @@ const ALL_KEYS = [
   "nvidiaNimApiKey",
   "defaultModel",
   "searchProvider",
+  "customInstructions",
 ] as const;
 
 export async function GET() {

@@ -7,6 +7,7 @@ export interface SettingsData {
   nvidiaNimApiKey: string | null;
   defaultModel: string | null;
   searchProvider: string | null;
+  customInstructions: string | null;
 }
 
 export async function fetchSettings(): Promise<SettingsData> {
