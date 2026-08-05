@@ -64,23 +64,6 @@ function MessageBubble({
   const [isEditing, setIsEditing] = useState(false);
   const [editBuffer, setEditBuffer] = useState(content);
 
-  if (role === "compression") {
-    const compressionPart = findCompressionEvent(allParts || []);
-    if (compressionPart) {
-      return (
-        <CompressionEvent
-          summary={compressionPart.summary}
-          compressedAt={compressionPart.compressedAt}
-          beforeTokens={compressionPart.beforeTokens}
-          afterTokens={compressionPart.afterTokens}
-          reductionPercent={compressionPart.reductionPercent}
-          beforeMessages={compressionPart.beforeMessages}
-        />
-      );
-    }
-    return null;
-  }
-
   const startEditing = useCallback(() => {
     setEditBuffer(content);
     setIsEditing(true);
@@ -104,6 +87,23 @@ function MessageBubble({
     [messageId, onEdit, content],
   );
 
+  if (role === "compression") {
+    const compressionPart = findCompressionEvent(allParts || []);
+    if (compressionPart) {
+      return (
+        <CompressionEvent
+          summary={compressionPart.summary}
+          compressedAt={compressionPart.compressedAt}
+          beforeTokens={compressionPart.beforeTokens}
+          afterTokens={compressionPart.afterTokens}
+          reductionPercent={compressionPart.reductionPercent}
+          beforeMessages={compressionPart.beforeMessages}
+        />
+      );
+    }
+    return null;
+  }
+
   const showEditor = isEditing && isUser;
 
   return (
@@ -121,7 +121,6 @@ function MessageBubble({
               ? "glass-button-primary text-white"
               : "glass-card text-[var(--foreground)]"
             }
-            ${showEditor ? "shadow-[var(--glass-shadow-glow)]" : ""}
           `}
         >
           <FileAttachments fileParts={fileParts} />
@@ -135,7 +134,6 @@ function MessageBubble({
               initialContent={editBuffer}
               onSave={handleEdit}
               onCancel={cancelEditing}
-              embedded
             />
           ) : allParts && allParts.length > 0 ? (
             <MessageContent
