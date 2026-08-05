@@ -275,9 +275,11 @@ export default function McpSettingsPage() {
           <div className="sticky top-0 z-10 bg-[var(--background)] -mt-8 pt-8 flex items-center justify-between gap-3 flex-wrap mb-8">
             <div className="flex items-center gap-4 min-w-0">
               {!embed && <SidebarToggleButton />}
-              <Link href="/settings" className="flex items-center gap-1.5 text-sm text-zinc-400 hover:text-zinc-200 transition shrink-0">
-                <ArrowLeft size={16} /> Settings
-              </Link>
+              {!embed && (
+                <Link href="/settings" className="flex items-center gap-1.5 text-sm text-zinc-400 hover:text-zinc-200 transition shrink-0">
+                  <ArrowLeft size={16} /> Settings
+                </Link>
+              )}
               <h1 className="text-xl sm:text-2xl md:text-3xl font-bold">MCP Servers</h1>
             </div>
             <button onClick={openAddForm}
