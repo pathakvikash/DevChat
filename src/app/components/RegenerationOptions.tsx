@@ -137,9 +137,7 @@ export default function RegenerationOptions({
             onClick={handleExecute}
             className="px-5 py-2 text-sm font-medium rounded-lg bg-blue-600 text-white hover:bg-blue-500 transition-colors"
           >
-            {selectedMode === "retry" && "Regenerate"}
-            {selectedMode === "think" && "Regenerate (Think Longer)"}
-            {selectedMode === "search" && "Regenerate (Web Search)"}
+            Regenerate
           </button>
         </div>
       </div>
