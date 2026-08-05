@@ -1,7 +1,7 @@
 "use client";
 
 import { Copy, Edit, RotateCcw, ThumbsUp, ThumbsDown, Trash2 } from "lucide-react";
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 
 interface MessageActionsProps {
   messageId?: string;
@@ -32,6 +32,19 @@ export default function MessageActions({
 }: MessageActionsProps) {
   const [feedback, setFeedback] = useState<number | null>(initialFeedback ?? null);
   const [feedbackLoading, setFeedbackLoading] = useState(false);
+  const [feedbackMenuOpen, setFeedbackMenuOpen] = useState(false);
+  const feedbackMenuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!feedbackMenuOpen) return;
+    function handleClickOutside(e: MouseEvent) {
+      if (feedbackMenuRef.current && !feedbackMenuRef.current.contains(e.target as Node)) {
+        setFeedbackMenuOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [feedbackMenuOpen]);
 
   const handleFeedback = useCallback(async (rating: number) => {
     if (!messageId || feedbackLoading) return;
@@ -75,7 +88,7 @@ export default function MessageActions({
       className={`
         mt-1.5 flex items-center gap-1
         ${isUser ? "justify-end" : "justify-start"}
-        opacity-0 group-hover:opacity-100 focus-within:opacity-100
+        opacity-100 sm:opacity-0 sm:group-hover:opacity-100 sm:focus-within:opacity-100
         transition-opacity duration-150
       `}
     >
@@ -86,36 +99,53 @@ export default function MessageActions({
       )}
 
       {!isUser && messageId && (
-        <>
+        <div className="relative" ref={feedbackMenuRef}>
           <button
             type="button"
-            onClick={() => handleFeedback(1)}
+            onClick={() => setFeedbackMenuOpen((v) => !v)}
             disabled={feedbackLoading}
-            title={feedback === 1 ? "Remove thumbs up" : "Thumbs up"}
-            aria-label="Rate good"
-            className={`inline-flex items-center gap-1 px-2 py-1 text-xs glass-button rounded-[var(--glass-radius-sm)] transition ${
-              feedback === 1
-                ? "text-emerald-400"
-                : "text-zinc-400 hover:text-zinc-100"
-            }`}
+            title="Rate response"
+            aria-label="Rate response"
+            aria-haspopup="menu"
+            aria-expanded={feedbackMenuOpen}
+            className="inline-flex items-center gap-1 px-2 py-1 text-xs glass-button rounded-[var(--glass-radius-sm)] transition text-zinc-400 hover:text-zinc-100"
           >
-            <ThumbsUp size={12} />
+            <ThumbsUp size={12} className={feedback === 1 ? "text-emerald-400" : ""} />
+            <ThumbsDown size={12} className={feedback === -1 ? "text-red-400" : ""} />
           </button>
-          <button
-            type="button"
-            onClick={() => handleFeedback(-1)}
-            disabled={feedbackLoading}
-            title={feedback === -1 ? "Remove thumbs down" : "Thumbs down"}
-            aria-label="Rate bad"
-            className={`inline-flex items-center gap-1 px-2 py-1 text-xs glass-button rounded-[var(--glass-radius-sm)] transition ${
-              feedback === -1
-                ? "text-red-400"
-                : "text-zinc-400 hover:text-zinc-100"
-            }`}
-          >
-            <ThumbsDown size={12} />
-          </button>
-        </>
+
+          {feedbackMenuOpen && (
+            <div
+              role="menu"
+              className="absolute bottom-full left-0 mb-2 w-48 glass-panel-strong rounded-[var(--glass-radius-md)] shadow-lg border border-[var(--glass-border-strong)] z-[9999] overflow-hidden"
+            >
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => {
+                  setFeedbackMenuOpen(false);
+                  handleFeedback(1);
+                }}
+                className="flex w-full items-center gap-3 px-4 py-3 text-sm text-[var(--foreground)] hover:bg-[var(--glass-bg-hover)] transition"
+              >
+                <ThumbsUp size={16} className={feedback === 1 ? "text-emerald-400" : ""} />
+                <span>Good response</span>
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => {
+                  setFeedbackMenuOpen(false);
+                  handleFeedback(-1);
+                }}
+                className="flex w-full items-center gap-3 px-4 py-3 text-sm text-[var(--foreground)] hover:bg-[var(--glass-bg-hover)] transition"
+              >
+                <ThumbsDown size={16} className={feedback === -1 ? "text-red-400" : ""} />
+                <span>Bad response</span>
+              </button>
+            </div>
+          )}
+        </div>
       )}
 
       <button
@@ -126,7 +156,6 @@ export default function MessageActions({
         className="inline-flex items-center gap-1 px-2 py-1 text-xs text-zinc-400 hover:text-zinc-100 glass-button rounded-[var(--glass-radius-sm)] transition"
       >
         <Copy size={12} />
-        <span>Copy</span>
       </button>
 
       {!isUser && onRegenerateMessage && messageId && (
@@ -138,7 +167,6 @@ export default function MessageActions({
           className="inline-flex items-center gap-1 px-2 py-1 text-xs text-zinc-400 hover:text-zinc-100 glass-button rounded-[var(--glass-radius-sm)] transition"
         >
           <RotateCcw size={12} />
-          <span>Regenerate</span>
         </button>
       )}
 
@@ -151,7 +179,6 @@ export default function MessageActions({
           className="inline-flex items-center gap-1 px-2 py-1 text-xs text-zinc-400 hover:text-zinc-100 glass-button rounded-[var(--glass-radius-sm)] transition"
         >
           <Edit size={12} />
-          <span>Edit</span>
         </button>
       )}
 
@@ -164,7 +191,6 @@ export default function MessageActions({
           className="inline-flex items-center gap-1 px-2 py-1 text-xs text-zinc-400 hover:text-red-400 glass-button rounded-[var(--glass-radius-sm)] transition"
         >
           <Trash2 size={12} />
-          <span>Delete</span>
         </button>
       )}
     </div>
