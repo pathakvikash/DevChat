@@ -4,8 +4,8 @@ import { useState } from "react";
 import { motion } from "framer-motion";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Plus, Search, Trash2, Edit2, Settings, BookOpen, Brain, Sparkles, Loader2, Cpu, Pin, Archive, X, StickyNote, HardDrive, MoreHorizontal, CheckSquare, Square, CheckCheck, Activity, LogOut, User as UserIcon } from "lucide-react";
-import { useSession, signOut } from "next-auth/react";
+import { Plus, Search, Trash2, Edit2, Sparkles, Loader2, Pin, Archive, X, MoreHorizontal, CheckSquare, Square, CheckCheck, User as UserIcon } from "lucide-react";
+import { useSession } from "next-auth/react";
 import { useSidebar } from "@/app/contexts/SidebarContext";
 import { useResource } from "@/app/hooks/useResource";
 import {
@@ -15,7 +15,7 @@ import {
   deleteConversation as apiDeleteConversation,
   generateTitle as apiGenerateTitle,
 } from "@/app/hooks/useConversationsApi";
-import OllamaModelManagerDialog from "./OllamaModelManagerDialog";
+import ProfileDialog from "./ProfileDialog";
 import { useToast } from "@/app/components/Toast";
 
 interface ConversationItem {
@@ -38,7 +38,7 @@ export default function Sidebar() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingTitle, setEditingTitle] = useState("");
   const [generatingId, setGeneratingId] = useState<string | null>(null);
-  const [showModelManager, setShowModelManager] = useState(false);
+  const [profileOpen, setProfileOpen] = useState(false);
   const [activeFilter, setActiveFilter] = useState<"all" | "pinned" | "archived">("all");
   const [menuOpenId, setMenuOpenId] = useState<string | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -431,10 +431,9 @@ export default function Sidebar() {
       {/* Footer - Navigation */}
       <div className="p-3 border-t border-[var(--glass-border)] glass-surface">
         {session?.user && (
-          <Link
-            href="/profile"
-            onClick={close}
-            className="flex items-center gap-2 mb-3 px-1.5 py-1 rounded-[var(--glass-radius-sm)] hover:bg-[var(--glass-bg-hover)] transition"
+          <button
+            onClick={() => setProfileOpen(true)}
+            className="w-full flex items-center gap-2 mb-3 px-1.5 py-1 rounded-[var(--glass-radius-sm)] hover:bg-[var(--glass-bg-hover)] transition text-left"
           >
             {session.user.image ? (
               // eslint-disable-next-line @next/next/no-img-element
@@ -453,106 +452,11 @@ export default function Sidebar() {
                 {session.user.name || session.user.email}
               </div>
             </div>
-            <button
-              onClick={(e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                signOut({ callbackUrl: "/login" });
-              }}
-              className="p-1.5 rounded-[var(--glass-radius-sm)] text-zinc-500 hover:text-zinc-200 hover:bg-[var(--glass-bg-hover)] transition shrink-0"
-              title="Sign out"
-            >
-              <LogOut size={14} />
-            </button>
-          </Link>
+          </button>
         )}
+        <ProfileDialog isOpen={profileOpen} onClose={() => setProfileOpen(false)} />
         <div className="mb-2 text-xs text-zinc-400">
           Total: <strong>{conversations.length}</strong> conversations
-        </div>
-        <OllamaModelManagerDialog
-          isOpen={showModelManager}
-          onClose={() => setShowModelManager(false)}
-        />
-        <div className="grid grid-cols-4 gap-1 mb-2">
-          <Link
-            href="/kb"
-            onClick={close}
-            className={`flex items-center justify-center p-2 rounded-[var(--glass-radius-sm)] transition ${
-              pathname === "/kb"
-                ? "glass-button-primary text-white"
-                : "glass-button text-zinc-300"
-            }`}
-            title="Knowledge Base"
-          >
-            <BookOpen size={16} />
-          </Link>
-          <Link
-            href="/notes"
-            onClick={close}
-            className={`flex items-center justify-center p-2 rounded-[var(--glass-radius-sm)] transition ${
-              pathname === "/notes"
-                ? "glass-button-primary text-white"
-                : "glass-button text-zinc-300"
-            }`}
-            title="Notes"
-          >
-            <StickyNote size={16} />
-          </Link>
-          <Link
-            href="/memory"
-            onClick={close}
-            className={`flex items-center justify-center p-2 rounded-[var(--glass-radius-sm)] transition ${
-              pathname === "/memory"
-                ? "glass-button-primary text-white"
-                : "glass-button text-zinc-300"
-            }`}
-            title="Memory"
-          >
-            <Brain size={16} />
-          </Link>
-          <Link
-            href="/claude"
-            onClick={close}
-            className={`flex items-center justify-center p-2 rounded-[var(--glass-radius-sm)] transition ${
-              pathname.startsWith("/claude")
-                ? "glass-button-primary text-white"
-                : "glass-button text-zinc-300"
-            }`}
-            title="Claude System"
-          >
-            <HardDrive size={16} />
-          </Link>
-          <button
-            onClick={() => setShowModelManager(true)}
-            className="flex items-center justify-center p-2 rounded-[var(--glass-radius-sm)] glass-button text-zinc-300 hover:text-zinc-100 transition"
-            title="Manage Models"
-          >
-            <Cpu size={16} />
-          </button>
-          <Link
-            href="/settings"
-            onClick={close}
-            className={`flex items-center justify-center p-2 rounded-[var(--glass-radius-sm)] transition ${
-              pathname === "/settings"
-                ? "glass-button-primary text-white"
-                : "glass-button text-zinc-300"
-            }`}
-            title="Settings"
-          >
-            <Settings size={16} />
-          </Link>
-          <Link
-            href="/observability"
-            onClick={close}
-            className={`flex items-center justify-center p-2 rounded-[var(--glass-radius-sm)] transition ${
-              pathname === "/observability"
-                ? "glass-button-primary text-white"
-                : "glass-button text-zinc-300"
-            }`}
-            title="Observability"
-          >
-            <Activity size={16} />
-          </Link>
         </div>
       </div>
     </div>
