@@ -19,6 +19,7 @@ export interface TokenBreakdown {
  *  that bucket, not an estimate of overhead. */
 export interface DetailedTokenBreakdown {
   base: number;
+  instructions: number;
   persona: number;
   skills: number;
   tools: number;
@@ -30,6 +31,7 @@ export interface DetailedTokenBreakdown {
   total: number;
   sections: {
     base: string;
+    instructions: string | null;
     persona: string | null;
     skills: string | null;
     tools: string | null;
@@ -110,6 +112,7 @@ export function calculateDetailedContextUsage(
   compressedSummary?: string | null,
 ): TokenCountResult & { breakdown: DetailedTokenBreakdown } {
   const base = countTokens(sections.base);
+  const instructions = sections.instructions ? countTokens(sections.instructions) : 0;
   const persona = sections.persona ? countTokens(sections.persona) : 0;
   const skills = sections.skills ? countTokens(sections.skills) : 0;
   const tools = sections.tools ? countTokens(sections.tools) : 0;
@@ -128,6 +131,7 @@ export function calculateDetailedContextUsage(
 
   const total =
     base +
+    instructions +
     persona +
     skills +
     tools +
@@ -145,6 +149,7 @@ export function calculateDetailedContextUsage(
     contextPercent: percent,
     breakdown: {
       base,
+      instructions,
       persona,
       skills,
       tools,
@@ -156,6 +161,7 @@ export function calculateDetailedContextUsage(
       total,
       sections: {
         base: sections.base,
+        instructions: sections.instructions,
         persona: sections.persona,
         skills: sections.skills,
         tools: sections.tools,

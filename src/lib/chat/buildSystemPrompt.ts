@@ -6,6 +6,7 @@ import { TOOL_REGISTRY, getSkill } from "@/lib/registry";
 import { extractText } from "@/lib/utils/messageParts";
 import { BUILTIN_TOOL_IDS } from "./buildTools";
 import { countTokens } from "@/lib/tokens";
+import { getSettingsKey } from "@/lib/settings";
 
 const VAS_TODO_SECTION = `TASK TRACKING — \`createTodos\` / \`createTodo\` / \`updateTodo\`
 You MUST use todos for ANY request with multiple steps. Call \`createTodos\` ONCE at the start with ALL steps listed, then update each with \`updateTodo\` as you complete it. This gives the user real-time progress — they can see exactly what you're doing. \`createTodo\` (singular) is for adding one-off items mid-task. This is mandatory.`;
@@ -55,6 +56,7 @@ export interface BuildSystemPromptOptions {
  *  `null` when the section wasn't generated. */
 export interface SystemPromptSections {
   base: string;
+  instructions: string | null;
   persona: string | null;
   skills: string | null;
   tools: string | null;
@@ -89,6 +91,12 @@ export async function buildSystemPrompt(
   if (hasClarification) baseSections.push(VAS_CLARIFICATION_SECTION);
   if (hasKbTool) baseSections.push(VAS_KB_SECTION);
   const base = useTools ? baseSections.join("\n\n") : VAS_SYSTEM_PROMPT_CHAT_ONLY;
+
+  const customInstructions = await getSettingsKey(opts.userId, "customInstructions");
+  const instructions =
+    customInstructions && customInstructions.trim()
+      ? `--- Instructions for DevChat ---\n${customInstructions}`
+      : null;
 
   const persona =
     systemPrompt && systemPrompt.trim()
@@ -130,8 +138,8 @@ export async function buildSystemPrompt(
 
   const kb = await retrieveKbContext({ kbId, ragContext, messages });
 
-  const sections: SystemPromptSections = { base, persona, skills, tools, memory, compressed, kb };
-  const text = [base, persona, skills, tools, memory, compressed, kb]
+  const sections: SystemPromptSections = { base, instructions, persona, skills, tools, memory, compressed, kb };
+  const text = [base, instructions, persona, skills, tools, memory, compressed, kb]
     .filter((s): s is string => Boolean(s))
     .join("\n\n");
 

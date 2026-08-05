@@ -130,6 +130,7 @@ describe("calculateContextUsage", () => {
 describe("calculateDetailedContextUsage", () => {
   const emptySections = {
     base: "",
+    instructions: null,
     persona: null,
     skills: null,
     tools: null,

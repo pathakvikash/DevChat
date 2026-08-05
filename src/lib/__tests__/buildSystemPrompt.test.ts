@@ -22,6 +22,10 @@ vi.mock("@/lib/compression", () => ({
   getCompressedContext: vi.fn(),
 }));
 
+vi.mock("@/lib/settings", () => ({
+  getSettingsKey: vi.fn(),
+}));
+
 vi.mock("@/lib/utils/messageParts", () => ({
   extractText: vi.fn(),
 }));
