@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
+import { useSearchParams } from "next/navigation";
 import { FolderOpen, ListChecks, FileText, Settings, ChevronDown, ChevronRight, HardDrive, X, Save, Eye, Edit3, Loader2, Globe, Lightbulb, ClipboardList, Brain } from "lucide-react";
 import AppShell, { SidebarToggleButton } from "@/app/components/AppShell";
 
@@ -119,6 +120,7 @@ function FileRow({ file, onOpen }: { file: FileEntry; onOpen: (f: FileEntry) => 
 }
 
 export default function ClaudePage() {
+  const embed = useSearchParams().get("embed") === "1";
   const [data, setData] = useState<ClaudeSystemData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -205,18 +207,16 @@ export default function ClaudePage() {
   }, [modal.path, modal.content]);
 
   if (loading) {
-    return (
-      <AppShell>
+    const loadingContent = (
           <main className="text-[var(--foreground)] p-8">
             <div className="max-w-5xl mx-auto space-y-8">Loading...</div>
           </main>
-      </AppShell>
     );
+    return embed ? loadingContent : <AppShell>{loadingContent}</AppShell>;
   }
 
   if (error) {
-    return (
-      <AppShell>
+    const errorContent = (
           <main className="text-[var(--foreground)] p-8">
             <div className="max-w-5xl mx-auto">
               <div className="glass-card rounded-[var(--glass-radius-xl)] p-6 border-red-900/60">
@@ -224,8 +224,8 @@ export default function ClaudePage() {
               </div>
             </div>
           </main>
-      </AppShell>
     );
+    return embed ? errorContent : <AppShell>{errorContent}</AppShell>;
   }
 
   if (!data) return null;
@@ -241,12 +241,12 @@ export default function ClaudePage() {
     return files.map((f) => <FileRow key={f.path} file={f} onOpen={openFile} />);
   }
 
-  return (
-    <AppShell>
+  const content = (
+      <>
         <main className="text-[var(--foreground)] p-8">
           <div className="max-w-5xl mx-auto space-y-8">
             <div className="sticky top-0 z-10 bg-[var(--background)] -mt-8 pt-8 flex items-center gap-3 mb-2">
-              <SidebarToggleButton />
+              {!embed && <SidebarToggleButton />}
               <HardDrive size={28} className="text-zinc-400 shrink-0" />
               <h1 className="text-xl sm:text-2xl md:text-3xl font-bold">Claude Code System</h1>
             </div>
@@ -378,6 +378,8 @@ export default function ClaudePage() {
           </div>
         </div>
       )}
-    </AppShell>
+      </>
   );
+
+  return embed ? content : <AppShell>{content}</AppShell>;
 }

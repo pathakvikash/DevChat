@@ -267,12 +267,14 @@ export default function McpSettingsPage() {
     }
   }
 
-  return (
-    <AppShell>
+  const embed = searchParams.get("embed") === "1";
+
+  const content = (
+      <>
         <main className="text-[var(--foreground)] p-8">
           <div className="sticky top-0 z-10 bg-[var(--background)] -mt-8 pt-8 flex items-center justify-between gap-3 flex-wrap mb-8">
             <div className="flex items-center gap-4 min-w-0">
-              <SidebarToggleButton />
+              {!embed && <SidebarToggleButton />}
               <Link href="/settings" className="flex items-center gap-1.5 text-sm text-zinc-400 hover:text-zinc-200 transition shrink-0">
                 <ArrowLeft size={16} /> Settings
               </Link>
@@ -532,6 +534,8 @@ export default function McpSettingsPage() {
           </div>
         )}
       </CenteredDialog>
-    </AppShell>
+      </>
   );
+
+  return embed ? content : <AppShell>{content}</AppShell>;
 }

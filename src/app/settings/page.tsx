@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useMemo } from "react";
+import { useSearchParams } from "next/navigation";
 import { Trash2, Save, RotateCcw, Loader2, Cable, Database } from "lucide-react";
 import Link from "next/link";
 import AppShell, { SidebarToggleButton } from "@/app/components/AppShell";
@@ -155,12 +156,13 @@ export default function SettingsPage() {
     }
   }
 
-  return (
-    <AppShell>
+  const embed = useSearchParams().get("embed") === "1";
+
+  const content = (
         <main className="text-[var(--foreground)] p-8">
           <div className="sticky top-0 z-10 bg-[var(--background)] -mt-8 pt-8 flex items-center justify-between gap-3 flex-wrap mb-8">
             <div className="flex items-center gap-3 min-w-0">
-              <SidebarToggleButton />
+              {!embed && <SidebarToggleButton />}
               <h1 className="text-xl sm:text-2xl md:text-3xl font-bold">Settings & Analytics</h1>
             </div>
             <div className="flex items-center gap-4">
@@ -482,8 +484,9 @@ export default function SettingsPage() {
             )}
           </div>
         </main>
-    </AppShell>
   );
+
+  return embed ? content : <AppShell>{content}</AppShell>;
 }
 
 function DatasetExportSection() {

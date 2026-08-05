@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { Trash2, Plus, Brain, Pencil, X, Check, AlertTriangle, Pin, PinOff, Download, Upload, BarChart3, Search } from "lucide-react";
 import AppShell, { SidebarToggleButton } from "@/app/components/AppShell";
 import { downloadBlob } from "@/lib/utils/download";
@@ -149,13 +150,14 @@ export default function MemoryPage() {
     return out;
   }, [memories]);
 
-  return (
-    <AppShell>
+  const embed = useSearchParams().get("embed") === "1";
+
+  const content = (
         <main className="text-[var(--foreground)] p-8 min-h-full">
           <div className="max-w-4xl mx-auto">
             <div className="sticky top-0 z-10 bg-[var(--background)] -mt-8 pt-8 flex items-start justify-between gap-3 flex-wrap mb-2">
               <div className="flex items-center gap-3 min-w-0">
-                <SidebarToggleButton />
+                {!embed && <SidebarToggleButton />}
                 <Brain size={28} className="text-purple-400 shrink-0" />
                 <h1 className="text-xl sm:text-2xl md:text-3xl font-bold">User Memory</h1>
               </div>
@@ -328,6 +330,7 @@ export default function MemoryPage() {
             )}
           </div>
         </main>
-    </AppShell>
   );
+
+  return embed ? content : <AppShell>{content}</AppShell>;
 }

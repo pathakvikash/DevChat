@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { StickyNote, Pencil, X, Check, Trash2, Search, MessageSquare } from "lucide-react";
 import AppShell, { SidebarToggleButton } from "@/app/components/AppShell";
 
@@ -80,13 +81,14 @@ export default function NotesPage() {
     );
   }, [notes, searchQuery]);
 
-  return (
-    <AppShell>
+  const embed = useSearchParams().get("embed") === "1";
+
+  const content = (
         <main className="text-[var(--foreground)] p-8 min-h-full">
           <div className="max-w-4xl mx-auto">
             <div className="sticky top-0 z-10 bg-[var(--background)] -mt-8 pt-8 flex items-start justify-between mb-2">
               <div className="flex items-center gap-3 min-w-0">
-                <SidebarToggleButton />
+                {!embed && <SidebarToggleButton />}
                 <StickyNote size={28} className="text-amber-400 shrink-0" />
                 <h1 className="text-xl sm:text-2xl md:text-3xl font-bold">Chats Notes</h1>
               </div>
@@ -194,6 +196,7 @@ export default function NotesPage() {
             )}
           </div>
         </main>
-    </AppShell>
   );
+
+  return embed ? content : <AppShell>{content}</AppShell>;
 }

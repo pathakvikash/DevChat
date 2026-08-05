@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, Fragment } from "react";
+import { useSearchParams } from "next/navigation";
 import AppShell, { SidebarToggleButton } from "@/app/components/AppShell";
 import { Activity, RefreshCw, AlertTriangle, XCircle, CheckCircle2, Clock, DollarSign, Coins, Timer } from "lucide-react";
 
@@ -143,13 +144,14 @@ export default function ObservabilityPage() {
 
   const s = data?.summary;
 
-  return (
-    <AppShell>
+  const embed = useSearchParams().get("embed") === "1";
+
+  const content = (
         <main className="text-[var(--foreground)] min-h-full">
           <div className="max-w-6xl mx-auto px-6 py-8">
             <div className="sticky top-0 z-10 bg-[var(--background)] -mt-8 pt-8 flex items-center justify-between gap-3 flex-wrap mb-6">
               <div className="flex items-center gap-3 min-w-0">
-                <SidebarToggleButton />
+                {!embed && <SidebarToggleButton />}
                 <Activity size={26} className="text-blue-400 shrink-0" />
                 <div className="min-w-0">
                   <h1 className="text-lg sm:text-xl md:text-2xl font-bold text-[var(--foreground)]">Observability</h1>
@@ -300,6 +302,7 @@ export default function ObservabilityPage() {
             </div>
           </div>
         </main>
-    </AppShell>
   );
+
+  return embed ? content : <AppShell>{content}</AppShell>;
 }

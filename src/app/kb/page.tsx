@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { Trash2, Upload, FileText } from "lucide-react";
 import AppShell, { SidebarToggleButton } from "@/app/components/AppShell";
 
@@ -217,11 +218,12 @@ export default function KnowledgeBasePage() {
     }
   }
 
-  return (
-    <AppShell>
+  const embed = useSearchParams().get("embed") === "1";
+
+  const content = (
         <main className="text-[var(--foreground)] p-8">
           <div className="sticky top-0 z-10 bg-[var(--background)] -mt-8 pt-8 flex items-center gap-3 mb-8">
-            <SidebarToggleButton />
+            {!embed && <SidebarToggleButton />}
             <h1 className="text-xl sm:text-2xl md:text-3xl font-bold">Knowledge Base Management</h1>
           </div>
 
@@ -402,6 +404,7 @@ export default function KnowledgeBasePage() {
             )}
           </div>
         </main>
-    </AppShell>
   );
+
+  return embed ? content : <AppShell>{content}</AppShell>;
 }
