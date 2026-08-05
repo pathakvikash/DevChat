@@ -8,7 +8,6 @@ interface MessageEditorProps {
   onSave: (newContent: string) => Promise<void> | void;
   onCancel: () => void;
   className?: string;
-  embedded?: boolean;
 }
 
 export default function MessageEditor({
@@ -16,7 +15,6 @@ export default function MessageEditor({
   onSave,
   onCancel,
   className = "",
-  embedded = false,
 }: MessageEditorProps) {
   const [value, setValue] = useState(initialContent);
   const [saving, setSaving] = useState(false);
@@ -68,15 +66,11 @@ export default function MessageEditor({
         onInput={handleInput}
         disabled={saving}
         rows={3}
-        className={`
+        className="
           w-full min-h-[60px] resize-none rounded-[var(--glass-radius-md)] px-3 py-2 font-mono text-sm
-          focus:outline-none focus:ring-2
-          ${
-            embedded
-              ? "bg-blue-700/70 border border-blue-500 text-white placeholder-blue-200/60 focus:ring-blue-300"
-              : "glass-input"
-          }
-        `}
+          focus:outline-none focus:ring-1
+          bg-white/10 border border-white/20 text-white placeholder-white/50 focus:ring-white/40 caret-white
+        "
         placeholder="Edit your message..."
       />
       <div className="mt-2 flex items-center gap-2">
@@ -84,7 +78,7 @@ export default function MessageEditor({
           type="button"
           onClick={() => void handleSave()}
           disabled={saving}
-          className="inline-flex items-center gap-1 px-3 py-1 text-xs font-medium text-white glass-button-primary rounded-[var(--glass-radius-sm)] disabled:opacity-50"
+          className="inline-flex items-center gap-1 px-3 py-1 text-xs font-medium rounded-[var(--glass-radius-sm)] disabled:opacity-50 transition bg-white text-blue-700 hover:bg-white/90"
         >
           <Check size={12} />
           {saving ? "Saving…" : "Save"}
@@ -93,15 +87,15 @@ export default function MessageEditor({
           type="button"
           onClick={onCancel}
           disabled={saving}
-          className="inline-flex items-center gap-1 px-3 py-1 text-xs font-medium text-zinc-300 glass-button rounded-[var(--glass-radius-sm)] disabled:opacity-50"
+          className="inline-flex items-center gap-1 px-3 py-1 text-xs font-medium rounded-[var(--glass-radius-sm)] disabled:opacity-50 transition bg-white/10 border border-white/20 text-white hover:bg-white/15"
         >
           <X size={12} />
           Cancel
         </button>
-        <span className="text-[11px] text-zinc-500 ml-1">
-          Enter to save · Shift+Enter for newline · Esc to cancel
-        </span>
       </div>
+      <p className="mt-1.5 text-[11px] text-white/50">
+        Enter to save · Shift+Enter for newline · Esc to cancel
+      </p>
     </div>
   );
 }
