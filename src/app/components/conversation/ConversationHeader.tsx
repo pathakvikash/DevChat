@@ -1,8 +1,7 @@
 "use client";
 
-import { Code2, Settings2, AlertCircle, Download, FileCode, Menu, Target, Keyboard, Brain, MoreHorizontal, User } from "lucide-react";
+import { Code2, Settings2, AlertCircle, Download, FileCode, Menu, Target, Keyboard, Brain, MoreHorizontal } from "lucide-react";
 import { useState, useRef, useEffect } from "react";
-import Link from "next/link";
 import { useSidebar } from "@/app/contexts/SidebarContext";
 import { formatContext } from "@/lib/utils/messageParts";
 import { downloadBlob } from "@/lib/utils/download";
@@ -192,13 +191,6 @@ export default function ConversationHeader({
                 </div>
               )}
             </div>
-            <Link
-              href="/profile"
-              className="flex items-center justify-center rounded-[var(--glass-radius-md)] p-1.5 transition glass-button text-[var(--foreground)] shrink-0"
-              title="Profile"
-            >
-              <User size={16} />
-            </Link>
           </div>
         </div>
         <div className="flex items-center gap-3 mt-1">
