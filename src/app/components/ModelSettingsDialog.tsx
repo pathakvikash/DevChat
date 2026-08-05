@@ -140,6 +140,9 @@ export default function ModelSettingsDialog({
   );
   const kbs = kbsData ?? [];
   const selectedKb = kbs.find((k) => k.id === kbId) || null;
+  // `contextLength` is Ollama's num_ctx override — saving it for cloud
+  // providers would shadow their real (much larger) context window.
+  const isOllamaModel = selectedModel.startsWith("ollama/");
 
   async function handleSave() {
     setSaving(true);
@@ -152,7 +155,7 @@ export default function ModelSettingsDialog({
           model: selectedModel,
           systemPrompt: systemPrompt.trim() || undefined,
           temperature,
-          contextLength,
+          contextLength: isOllamaModel ? contextLength : undefined,
           topP,
           maxTokens: maxTokens ? parseInt(maxTokens, 10) : undefined,
           chatOnlyMode,
@@ -167,7 +170,7 @@ export default function ModelSettingsDialog({
         model: selectedModel,
         systemPrompt: systemPrompt.trim() || undefined,
         temperature,
-        contextLength,
+        contextLength: isOllamaModel ? contextLength : undefined,
         topP,
         maxTokens: maxTokens ? parseInt(maxTokens, 10) : undefined,
         chatOnlyMode,
@@ -338,6 +341,7 @@ export default function ModelSettingsDialog({
             onTopPChange={setTopP}
             contextLength={contextLength}
             onContextLengthChange={setContextLength}
+            showContextLength={isOllamaModel}
             maxTokens={maxTokens}
             onMaxTokensChange={setMaxTokens}
             maxContextWindow={modelInfo?.contextWindow ?? 0}

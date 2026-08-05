@@ -50,7 +50,14 @@ export async function GET(
     } catch {
       modelConfig = null;
     }
-    const contextLength = conversation.contextLength || modelConfig?.contextWindow || 8192;
+    // `conversation.contextLength` is really Ollama's `num_ctx` override (see
+    // api/chat/route.ts) — it must not shadow a cloud model's real, much
+    // larger context window just because an earlier Ollama session on this
+    // conversation set it.
+    const isOllama = conversation.model.startsWith("ollama/");
+    const contextLength = isOllama
+      ? conversation.contextLength || modelConfig?.contextWindow || 8192
+      : modelConfig?.contextWindow || 8192;
     const systemPrompt = conversation.systemPrompt || "";
     const compressedSummary = conversation.compressedSummary || null;
     const compressedAt = conversation.compressedAt

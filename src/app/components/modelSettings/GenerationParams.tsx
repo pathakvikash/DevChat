@@ -7,6 +7,8 @@ interface GenerationParamsProps {
   onTopPChange: (v: number) => void;
   contextLength: number;
   onContextLengthChange: (v: number) => void;
+  /** Ollama-only: cloud models' context window is fixed by the model, not user-configurable. */
+  showContextLength: boolean;
   maxTokens: string;
   onMaxTokensChange: (v: string) => void;
   maxContextWindow: number;
@@ -23,6 +25,7 @@ export default function GenerationParams({
   onTopPChange,
   contextLength,
   onContextLengthChange,
+  showContextLength,
   maxTokens,
   onMaxTokensChange,
   maxContextWindow,
@@ -76,25 +79,27 @@ export default function GenerationParams({
           </p>
         </div>
 
-        <div>
-          <label className="block text-xs text-zinc-400 mb-1">
-            Context Length (num_ctx)
-          </label>
-          <input
-            type="number"
-            value={contextLength}
-            onChange={(e) =>
-              onContextLengthChange(parseInt(e.target.value, 10) || 8192)
-            }
-            min="1024"
-            max={maxContextWindow || 200000}
-            step="1024"
-            className="w-full glass-input rounded-[var(--glass-radius-md)] px-3 py-2 text-sm"
-          />
-          <p className="text-xs text-zinc-500 mt-1">
-            Model max: {(maxContextWindow || 0).toLocaleString() || "Unknown"}
-          </p>
-        </div>
+        {showContextLength && (
+          <div>
+            <label className="block text-xs text-zinc-400 mb-1">
+              Context Length (num_ctx)
+            </label>
+            <input
+              type="number"
+              value={contextLength}
+              onChange={(e) =>
+                onContextLengthChange(parseInt(e.target.value, 10) || 8192)
+              }
+              min="1024"
+              max={maxContextWindow || 200000}
+              step="1024"
+              className="w-full glass-input rounded-[var(--glass-radius-md)] px-3 py-2 text-sm"
+            />
+            <p className="text-xs text-zinc-500 mt-1">
+              Model max: {(maxContextWindow || 0).toLocaleString() || "Unknown"}
+            </p>
+          </div>
+        )}
 
         <div>
           <label className="block text-xs text-zinc-400 mb-1">
