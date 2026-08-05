@@ -140,7 +140,7 @@ export default function ConversationHeader({
                 <MoreHorizontal size={16} />
               </button>
               {moreOpen && (
-                <div className="absolute right-0 top-full mt-1 w-44 glass-panel rounded-[var(--glass-radius-md)] shadow-lg border border-[var(--glass-border)] z-[9999] overflow-hidden">
+                <div className="absolute right-0 top-full mt-1 w-44 glass-panel-strong rounded-[var(--glass-radius-md)] shadow-lg border border-[var(--glass-border-strong)] z-[9999] overflow-hidden">
                   {onToggleMemory && (
                     <button
                       onClick={() => { setMoreOpen(false); onToggleMemory(); }}
