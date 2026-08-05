@@ -1,7 +1,5 @@
 "use client";
 
-import Mascot from "@/app/components/Mascot";
-
 interface EmptyStateProps {
   modelName: string;
 }
@@ -9,9 +7,7 @@ interface EmptyStateProps {
 export default function EmptyState({ modelName }: EmptyStateProps) {
   return (
     <div className="flex-1 flex flex-col items-center justify-center text-zinc-500 px-6">
-      <div className="mb-4">
-        <Mascot size={88} />
-      </div>
+      <div className="text-5xl mb-4">💬</div>
       <h2 className="text-xl font-semibold text-zinc-300 mb-2">
         Start the conversation
       </h2>
