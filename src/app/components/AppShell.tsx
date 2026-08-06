@@ -1,9 +1,11 @@
 "use client";
 
 import { AnimatePresence, motion } from "framer-motion";
-import { Menu } from "lucide-react";
+import { Menu, ChevronLeft, ChevronRight } from "lucide-react";
 import Sidebar from "./Sidebar";
 import { SidebarProvider, useSidebar } from "@/app/contexts/SidebarContext";
+
+const SIDEBAR_WIDTH = 256;
 
 /**
  * Mobile hamburger toggle. Must be rendered as a descendant of `AppShell`
@@ -21,10 +23,10 @@ export function SidebarToggleButton() {
 }
 
 function AppShellInner({ children }: { children: React.ReactNode }) {
-  const { isOpen, close } = useSidebar();
+  const { isOpen, close, collapsed, toggleCollapsed } = useSidebar();
 
   return (
-    <div className="flex h-screen bg-[var(--background)]">
+    <div className="relative flex h-screen bg-[var(--background)]">
       {/* Mobile sidebar: fixed overlay */}
       <AnimatePresence>
         {isOpen && (
@@ -49,9 +51,26 @@ function AppShellInner({ children }: { children: React.ReactNode }) {
         )}
       </AnimatePresence>
       {/* Desktop sidebar */}
-      <div className="hidden md:flex">
+      <motion.div
+        className="hidden md:flex overflow-hidden shrink-0"
+        animate={{ width: collapsed ? 0 : SIDEBAR_WIDTH }}
+        transition={{ duration: 0.2, ease: "easeInOut" }}
+      >
         <Sidebar />
-      </div>
+      </motion.div>
+
+      {/* Desktop collapse/expand handle */}
+      <motion.button
+        onClick={toggleCollapsed}
+        animate={{ left: collapsed ? 8 : SIDEBAR_WIDTH - 12 }}
+        transition={{ duration: 0.2, ease: "easeInOut" }}
+        className="hidden md:flex items-center justify-center absolute top-1/2 -translate-y-1/2 z-30 size-6 rounded-full glass-button text-zinc-400 hover:text-zinc-100 transition-colors"
+        title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+        aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+      >
+        {collapsed ? <ChevronRight size={14} /> : <ChevronLeft size={14} />}
+      </motion.button>
+
       <div className="flex-1 overflow-y-auto">{children}</div>
     </div>
   );

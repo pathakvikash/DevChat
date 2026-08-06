@@ -1,4 +1,5 @@
-import { generateText, stepCountIs } from "ai";
+import { generateText, stepCountIs, Agent } from "ai";
+import {ToolLoopAgent} from "ai";
 import { prisma } from "@/lib/db";
 import { resolveModel } from "@/lib/llm";
 import { extractJson } from "@/lib/utils/json";
