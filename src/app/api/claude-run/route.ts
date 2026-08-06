@@ -2,9 +2,10 @@ import { spawn } from "child_process";
 import { requireUserId } from "@/lib/auth";
 import { isRunnableCwd } from "@/lib/claude/sessions";
 
-// Spawning a CLI needs the Node runtime and a long-lived connection.
+// Spawning a CLI needs the Node runtime. 60s is the Vercel hobby ceiling; this
+// route only really works locally, where the limit doesn't apply.
 export const runtime = "nodejs";
-export const maxDuration = 300;
+export const maxDuration = 60;
 
 /**
  * Headless runs can't prompt, so this holds for the whole run. `plan` is
