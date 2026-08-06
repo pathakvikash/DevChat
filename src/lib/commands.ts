@@ -3,8 +3,8 @@
  *
  *  - "transform": a pure rewrite of the user's message text before it's sent
  *    to the model (e.g. /think, /plan, /loop). No side effects — lives here.
- *  - "action": a side effect handled by the conversation page (e.g. /goal,
- *    /compress, /title). The registry only carries metadata + an `action` id;
+ *  - "action": a side effect handled by the conversation page (e.g. /compress,
+ *    /title). The registry only carries metadata + an `action` id;
  *    the page maps that id to a handler.
  *
  * This module is the single source of truth for both the autocomplete popover
@@ -17,7 +17,7 @@ export interface SlashCommand {
   name: string;
   aliases?: string[];
   description: string;
-  /** Shown in the popover, e.g. "/goal <objective>". */
+  /** Shown in the popover, e.g. "/plan <task>". */
   usage: string;
   kind: CommandKind;
   /** transform: rewrite the message text. `arg` is everything after the command. */
@@ -29,15 +29,7 @@ export interface SlashCommand {
 }
 
 export const SLASH_COMMANDS: SlashCommand[] = [
-  // ---- Autonomous / planning ----
-  {
-    name: "goal",
-    description: "Run an autonomous Goal Mode loop until the objective is met",
-    usage: "/goal <objective>",
-    kind: "action",
-    action: "goal",
-    requiresArg: true,
-  },
+  // ---- Planning ----
   {
     name: "plan",
     description: "Get a step-by-step plan only — no execution",

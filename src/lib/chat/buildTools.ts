@@ -37,11 +37,16 @@ export function resolveActiveToolIds(
   return active;
 }
 
+/** Chat offers read-only tools; Agent additionally offers mutating ones. */
+export type ToolMode = "chat" | "agent";
+
 export interface BuildToolsOptions {
   activeToolIds: Set<string>;
   searchProvider: SearchProvider;
   conversationId?: string;
   userId: string;
+  /** Defaults to "agent" so server-side callers keep full capability. */
+  mode?: ToolMode;
 }
 
 /** Convert a JSON Schema object to a Zod schema (supports basic types). */
@@ -78,15 +83,19 @@ export async function buildTools({
   searchProvider,
   conversationId,
   userId,
+  mode = "agent",
 }: BuildToolsOptions): Promise<Record<string, Tool>> {
   const ctx: ToolExecutionContext = { conversationId };
   const aiTools: Record<string, Tool> = {};
+  const allowMutating = mode === "agent";
 
   // ─── Load MCP tools from enabled servers ────────────────────────────────
+  // MCP servers can do anything, so they count as mutating. Skipping the whole
+  // block in chat mode also avoids pinging every configured server for nothing.
   try {
-    const servers = await (prisma as any).mcpServer.findMany({
-      where: { enabled: true, userId },
-    });
+    const servers = allowMutating
+      ? await (prisma as any).mcpServer.findMany({ where: { enabled: true, userId } })
+      : [];
     for (const server of servers) {
       try {
         const tools = await listServerTools(server.id);
@@ -125,6 +134,7 @@ export async function buildTools({
     if (aiTools[toolId]) continue; // skip MCP tools already added
     const def = TOOL_REGISTRY[toolId];
     if (!def) continue;
+    if (def.mutates && !allowMutating) continue;
     if (toolId === "webSearch") {
       aiTools.webSearch = tool({
         description: def.modelDescription,
@@ -153,7 +163,7 @@ export async function buildTools({
     }
   }
 
-  if (activeToolIds.has("rememberFact")) {
+  if (allowMutating && activeToolIds.has("rememberFact")) {
     aiTools.rememberFact = tool({
       description: "Save a persistent fact about the user...",
       inputSchema: z.object({
@@ -177,7 +187,7 @@ export async function buildTools({
     });
   }
 
-  if (activeToolIds.has("forgetFact")) {
+  if (allowMutating && activeToolIds.has("forgetFact")) {
     aiTools.forgetFact = tool({
       description: "Delete a stored memory by key...",
       inputSchema: z.object({

@@ -17,8 +17,8 @@ describe("parseCommand", () => {
   });
 
   it("parses a command and its argument", () => {
-    const r = parseCommand("/goal build me a website");
-    expect(r?.command.name).toBe("goal");
+    const r = parseCommand("/plan build me a website");
+    expect(r?.command.name).toBe("plan");
     expect(r?.arg).toBe("build me a website");
   });
 
@@ -52,8 +52,9 @@ describe("matchCommands", () => {
   });
 
   it("prioritizes prefix matches", () => {
-    const m = matchCommands("go");
-    expect(m[0].name).toBe("goal");
+    // A name-prefix hit should outrank commands that just mention it.
+    const m = matchCommands("plan");
+    expect(m[0].name).toBe("plan");
   });
 
   it("matches by alias prefix", () => {
@@ -68,7 +69,7 @@ describe("activeCommandQuery", () => {
   });
 
   it("is null once an argument is being typed", () => {
-    expect(activeCommandQuery("/goal ship it")).toBeNull();
+    expect(activeCommandQuery("/plan ship it")).toBeNull();
   });
 
   it("is null for non-slash input", () => {

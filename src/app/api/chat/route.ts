@@ -9,8 +9,10 @@ import {
   buildTools,
   resolveActiveToolIds,
   type ToolSet,
+  type ToolMode,
 } from "@/lib/chat/buildTools";
 import { safePersistAssistantMessage } from "@/lib/chat/persistAssistantMessage";
+import { normalizeMessageToolParts } from "@/lib/chat/normalizeToolParts";
 import {
   isTransientProviderError,
   friendlyProviderErrorMessage,
@@ -50,7 +52,10 @@ export async function POST(req: Request) {
     nvidiaNimApiKey: bodyNvidiaNimApiKey,
     messageId: bodyUserMessageId,
     assistantMessageId: bodyAssistantMessageId,
+    mode: bodyMode,
   } = await req.json();
+  // Anything that isn't "agent" falls back to chat, the safer of the two.
+  const toolMode: ToolMode = bodyMode === "agent" ? "agent" : "chat";
   let model: string | undefined = bodyModel;
   try {
     if (conversationId) {
@@ -150,6 +155,7 @@ export async function POST(req: Request) {
       messages,
       memoryDisabled,
       userId,
+      mode: toolMode,
     });
 
     console.log(
@@ -162,8 +168,10 @@ export async function POST(req: Request) {
         `kb=${(sections.kb?.length || 0)}ch`,
     );
 
-    const sanitizedMessages = (Array.isArray(messages) ? messages : []).filter(
-      (m: any) => m && m.role !== "compression",
+    const sanitizedMessages = normalizeMessageToolParts(
+      (Array.isArray(messages) ? messages : []).filter(
+        (m: any) => m && m.role !== "compression",
+      ),
     );
     const modelMessages = await convertToModelMessages(sanitizedMessages);
 
@@ -196,7 +204,7 @@ export async function POST(req: Request) {
     }
 
     const aiTools: ToolSet = useTools
-      ? await buildTools({ activeToolIds, searchProvider, conversationId, userId })
+      ? await buildTools({ activeToolIds, searchProvider, conversationId, userId, mode: toolMode })
       : {};
 
     const isOllama = servedModel.startsWith("ollama/");
@@ -465,7 +473,7 @@ export async function POST(req: Request) {
         console.log(
           `[chat] model=${servedModel} tools=${Object.keys(aiTools).join(",")} ` +
             `kbId=${kbId || "none"} activeToolIds=${[...activeToolIds].join(",")} ` +
-            `chatOnlyMode=${chatOnlyMode} supportsTools=${modelConfig.supportsTools} ` +
+            `mode=${toolMode} chatOnlyMode=${chatOnlyMode} supportsTools=${modelConfig.supportsTools} ` +
             `useTools=${useTools}`,
         );
 
@@ -546,6 +554,7 @@ export async function POST(req: Request) {
         const debugHeaders = new Headers(response.headers);
         debugHeaders.set("X-Debug-Model", servedModel);
         debugHeaders.set("X-Debug-Chat-Only-Mode", String(chatOnlyMode));
+        debugHeaders.set("X-Debug-Tool-Mode", toolMode);
         debugHeaders.set("X-Debug-Supports-Tools", String(modelConfig.supportsTools));
         debugHeaders.set("X-Debug-Use-Tools", String(useTools));
         debugHeaders.set(

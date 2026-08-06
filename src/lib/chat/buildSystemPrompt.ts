@@ -4,7 +4,7 @@ import { getMemoryBlock } from "@/lib/memory";
 import { getCompressedContext } from "@/lib/compression";
 import { TOOL_REGISTRY, getSkill } from "@/lib/registry";
 import { extractText } from "@/lib/utils/messageParts";
-import { BUILTIN_TOOL_IDS } from "./buildTools";
+import { BUILTIN_TOOL_IDS, type ToolMode } from "./buildTools";
 import { countTokens } from "@/lib/tokens";
 import { getSettingsKey } from "@/lib/settings";
 
@@ -37,6 +37,14 @@ You have two data sources: (a) this tool for on-demand queries returning \`[sour
 
 const VAS_SYSTEM_PROMPT_CHAT_ONLY = `You are VAS (chat-only, no tools). You can answer questions, write code in markdown blocks, analyze file attachments, and use KB context if attached. You cannot execute code or search the web.`;
 
+const VAS_READ_ONLY_SECTION = `--- Read-only mode ---
+You are in Chat mode, so only read-only tools are available. You CANNOT create or
+update artifacts, create or update todos, save or forget memories, or call MCP
+servers right now.
+
+Never claim to have done any of those things. If the user asks for one, say it
+needs Agent mode and offer to do the read-only part now.`;
+
 export interface BuildSystemPromptOptions {
   useTools: boolean;
   systemPrompt?: string;
@@ -48,6 +56,8 @@ export interface BuildSystemPromptOptions {
   messages: unknown[];
   memoryDisabled?: boolean;
   userId: string;
+  /** Chat withholds mutating tools; the prompt must not advertise them. */
+  mode?: ToolMode;
 }
 
 /** Individual sections of the system prompt, exposed for the Context panel
@@ -87,9 +97,13 @@ export async function buildSystemPrompt(
   const hasKbTool = useTools && activeToolIds.has("searchKnowledgeBase");
   const hasClarification = useTools && activeToolIds.has("askClarification");
 
-  const baseSections = [VAS_SYSTEM_PROMPT_WITH_TOOLS_BASE, VAS_TODO_SECTION];
+  const agentMode = (opts.mode ?? "agent") === "agent";
+  const baseSections = [VAS_SYSTEM_PROMPT_WITH_TOOLS_BASE];
+  // Todos are a mutating tool, so the todo instructions only apply in agent mode.
+  if (agentMode) baseSections.push(VAS_TODO_SECTION);
   if (hasClarification) baseSections.push(VAS_CLARIFICATION_SECTION);
   if (hasKbTool) baseSections.push(VAS_KB_SECTION);
+  if (!agentMode) baseSections.push(VAS_READ_ONLY_SECTION);
   const base = useTools ? baseSections.join("\n\n") : VAS_SYSTEM_PROMPT_CHAT_ONLY;
 
   const customInstructions = await getSettingsKey(opts.userId, "customInstructions");

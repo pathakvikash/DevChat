@@ -2,6 +2,7 @@
 
 import Sidebar from "@/app/components/Sidebar";
 import { SidebarProvider, useSidebar } from "@/app/contexts/SidebarContext";
+import { ChatModeProvider } from "@/app/contexts/ChatModeContext";
 import { motion, AnimatePresence } from "framer-motion";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 
@@ -68,7 +69,10 @@ export default function ConversationLayout({
 }) {
   return (
     <SidebarProvider>
-      <LayoutInner>{children}</LayoutInner>
+      {/* Above LayoutInner so the sidebar and header share one mode state. */}
+      <ChatModeProvider>
+        <LayoutInner>{children}</LayoutInner>
+      </ChatModeProvider>
     </SidebarProvider>
   );
 }

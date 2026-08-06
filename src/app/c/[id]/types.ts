@@ -13,10 +13,6 @@ export interface ConversationPageState extends DataActions {
   setFiles: React.Dispatch<React.SetStateAction<File[]>>;
   scratchpadOpen: boolean;
   setScratchpadOpen: React.Dispatch<React.SetStateAction<boolean>>;
-  goalPanelOpen: boolean;
-  setGoalPanelOpen: React.Dispatch<React.SetStateAction<boolean>>;
-  goalKickoff: { objective: string; nonce: number };
-  setGoalKickoff: React.Dispatch<React.SetStateAction<{ objective: string; nonce: number }>>;
   todoPanelOpen: boolean;
   setTodoPanelOpen: React.Dispatch<React.SetStateAction<boolean>>;
   advancedOpen: boolean;

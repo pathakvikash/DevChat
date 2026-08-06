@@ -7,6 +7,8 @@ import { usePathname } from "next/navigation";
 import { Plus, Search, Trash2, Edit2, Sparkles, Loader2, Pin, Archive, X, MoreHorizontal, CheckSquare, Square, CheckCheck, User as UserIcon } from "lucide-react";
 import { useSession } from "next-auth/react";
 import { useSidebar } from "@/app/contexts/SidebarContext";
+import { useChatModeOptional } from "@/app/contexts/ChatModeContext";
+import ModeToggle from "./ModeToggle";
 import { useResource } from "@/app/hooks/useResource";
 import {
   createConversation,
@@ -33,6 +35,7 @@ interface ConversationItem {
 
 export default function Sidebar() {
   const { close } = useSidebar();
+  const chatMode = useChatModeOptional();
   const { data: session } = useSession();
   const [searchInput, setSearchInput] = useState("");
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -227,12 +230,20 @@ export default function Sidebar() {
             <X size={18} />
           </button>
         </div>
-        <Link href="/" onClick={close} className="flex items-center gap-2 mb-3 group">
-          <div className="size-7 rounded-lg bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center text-white text-xs font-bold group-hover:shadow-lg group-hover:shadow-blue-500/30 transition-shadow">
-            V
-          </div>
-          <span className="text-sm font-bold text-[var(--foreground)]">DevChat</span>
-        </Link>
+        <div className="flex items-center gap-2 mb-3">
+          <Link href="/" onClick={close} className="flex items-center gap-2 group shrink-0">
+            <div className="size-7 rounded-lg bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center text-white text-xs font-bold group-hover:shadow-lg group-hover:shadow-blue-500/30 transition-shadow">
+              V
+            </div>
+            <span className="text-sm font-bold text-[var(--foreground)]">Dev</span>
+          </Link>
+          {/* Null outside a conversation (/kb, /settings, ...). */}
+          {chatMode && (
+            <div className="ml-auto shrink-0">
+              <ModeToggle mode={chatMode.mode} onModeChange={chatMode.setMode} compact />
+            </div>
+          )}
+        </div>
         <motion.button
           whileHover={{ scale: 1.02 }}
           whileTap={{ scale: 0.98 }}

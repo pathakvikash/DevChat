@@ -1,8 +1,10 @@
 "use client";
 
-import { Code2, Settings2, AlertCircle, Download, FileCode, Menu, Target, Keyboard, Brain, MoreHorizontal } from "lucide-react";
+import { Code2, Settings2, AlertCircle, Download, FileCode, Menu, Keyboard, Brain, MoreHorizontal } from "lucide-react";
 import { useState, useRef, useEffect } from "react";
 import { useSidebar } from "@/app/contexts/SidebarContext";
+import { useChatMode } from "@/app/contexts/ChatModeContext";
+import ModeToggle from "../ModeToggle";
 import { formatContext } from "@/lib/utils/messageParts";
 import { downloadBlob } from "@/lib/utils/download";
 
@@ -23,8 +25,6 @@ interface ConversationHeaderProps {
   onToggleScratchpad: () => void;
   artifactsOpen: boolean;
   onToggleArtifacts: () => void;
-  goalOpen: boolean;
-  onToggleGoal: () => void;
   enabledToolsCount: number;
   enabledSkillsCount: number;
   onOpenAdvanced: () => void;
@@ -40,8 +40,6 @@ export default function ConversationHeader({
   onToggleScratchpad,
   artifactsOpen,
   onToggleArtifacts,
-  goalOpen,
-  onToggleGoal,
   enabledToolsCount,
   enabledSkillsCount,
   onOpenAdvanced,
@@ -50,6 +48,7 @@ export default function ConversationHeader({
   onToggleMemory,
 }: ConversationHeaderProps) {
   const { toggle } = useSidebar();
+  const { mode, setMode } = useChatMode();
   const [moreOpen, setMoreOpen] = useState(false);
   const moreRef = useRef<HTMLDivElement>(null);
 
@@ -94,9 +93,12 @@ export default function ConversationHeader({
           <button onClick={toggle} className="md:hidden p-1.5 glass-button rounded transition shrink-0" title="Toggle sidebar">
             <Menu size={18} />
           </button>
-          <h1 className="text-lg font-bold truncate text-[var(--foreground)]">{conversation.title}</h1>
-          <div className="flex items-center gap-2 ml-auto shrink-0">
-            <div className="flex items-center gap-2 overflow-x-auto">
+          {/* min-w-0 or the title refuses to truncate and squeezes the actions. */}
+          <h1 className="min-w-0 flex-1 text-lg font-bold truncate text-[var(--foreground)]">{conversation.title}</h1>
+          <div className="flex items-center gap-2 shrink-0">
+            <ModeToggle mode={mode} onModeChange={setMode} />
+            {/* These move into the More menu on small screens. */}
+            <div className="hidden sm:flex items-center gap-2">
               <button
                 onClick={onToggleScratchpad}
                 className={`flex items-center justify-center rounded-[var(--glass-radius-md)] p-1.5 transition shrink-0 ${
@@ -119,17 +121,6 @@ export default function ConversationHeader({
               >
                 <FileCode size={16} />
               </button>
-              <button
-                onClick={onToggleGoal}
-                className={`flex items-center justify-center rounded-[var(--glass-radius-md)] p-1.5 transition shrink-0 ${
-                  goalOpen
-                    ? "glass-button-primary text-white"
-                    : "glass-button text-[var(--foreground)]"
-                }`}
-                title="Goal Mode"
-              >
-                <Target size={16} />
-              </button>
             </div>
             <div ref={moreRef} className="relative">
               <button
@@ -141,6 +132,22 @@ export default function ConversationHeader({
               </button>
               {moreOpen && (
                 <div className="absolute right-0 top-full mt-1 w-44 glass-panel-strong rounded-[var(--glass-radius-md)] shadow-lg border border-[var(--glass-border-strong)] z-[9999] overflow-hidden">
+                  {/* Mirrors the header toggles that are hidden on small screens. */}
+                  <button
+                    onClick={() => { setMoreOpen(false); onToggleScratchpad(); }}
+                    className="sm:hidden flex w-full items-center gap-3 px-4 py-3 text-sm text-[var(--foreground)] hover:bg-[var(--glass-bg-hover)] transition"
+                  >
+                    <Code2 size={14} />
+                    <span>Scratchpad {scratchpadOpen ? "(open)" : ""}</span>
+                  </button>
+                  <button
+                    onClick={() => { setMoreOpen(false); onToggleArtifacts(); }}
+                    className="sm:hidden flex w-full items-center gap-3 px-4 py-3 text-sm text-[var(--foreground)] hover:bg-[var(--glass-bg-hover)] transition"
+                  >
+                    <FileCode size={14} />
+                    <span>Artifacts {artifactsOpen ? "(open)" : ""}</span>
+                  </button>
+                  <div className="sm:hidden border-t border-[var(--glass-border)]" />
                   {onToggleMemory && (
                     <button
                       onClick={() => { setMoreOpen(false); onToggleMemory(); }}

@@ -38,6 +38,7 @@ export const TOOL_REGISTRY: Record<string, ToolDefinition> = {
   // ─── ARTIFACTS ──────────────────────────────────────────────────────────
   createArtifact: {
     id: "createArtifact",
+    mutates: true,
     name: "Create Artifact",
     description:
       "Create an artifact — a reusable document, code file, report, table, or other structured content that will be shown in a side panel.",
@@ -71,6 +72,7 @@ export const TOOL_REGISTRY: Record<string, ToolDefinition> = {
 
   updateArtifact: {
     id: "updateArtifact",
+    mutates: true,
     name: "Update Artifact",
     description:
       "Update an existing artifact. The artifact will be shown in the side panel with the updated content.",
@@ -393,6 +395,7 @@ export const TOOL_REGISTRY: Record<string, ToolDefinition> = {
   // ─── TODOS ──────────────────────────────────────────────────────────────
   createTodo: {
     id: "createTodo",
+    mutates: true,
     name: "Create Todo",
     description: "Create a todo item for the current conversation.",
     modelDescription:
@@ -421,6 +424,7 @@ export const TOOL_REGISTRY: Record<string, ToolDefinition> = {
 
   updateTodo: {
     id: "updateTodo",
+    mutates: true,
     name: "Update Todo",
     description: "Update a todo item's status.",
     modelDescription:
@@ -450,6 +454,7 @@ export const TOOL_REGISTRY: Record<string, ToolDefinition> = {
 
   createTodos: {
     id: "createTodos",
+    mutates: true,
     name: "Create Multiple Todos",
     description: "Create multiple todo items at once for the current conversation.",
     modelDescription:
