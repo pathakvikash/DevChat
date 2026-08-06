@@ -92,7 +92,6 @@ model Conversation {
   user                     User?      @relation(fields: [userId], references: [id], onDelete: Cascade)
   messages                 Message[]
   artifacts                Artifact[]
-  goalRuns                 GoalRun[]
   todos                    Todo[]
 
   @@index([updatedAt])
@@ -192,45 +191,7 @@ model Memory {
   @@index([userId])
 }
 
-// A single autonomous "Goal Mode" run: an objective the model pursues across
-// many cycles until complete, out of budget, or stopped.
-model GoalRun {
-  id              String       @id @default(cuid())
-  conversationId  String
-  objective       String
-  status          String       @default("planning") // planning | running | done | stopped | failed | exhausted
-  model           String
-  maxCycles       Int          @default(10)
-  cyclesUsed      Int          @default(0)
-  tokenBudget     Int          @default(120000)
-  tokensUsed      Int          @default(0)
-  summary         String? // final deliverable / summary text
-  // Set by the stop endpoint; the orchestrator polls this each cycle and
-  // halts. Lets a run be stopped even from a client that no longer owns the
-  // original streaming request (e.g. after a page refresh).
-  cancelRequested Boolean      @default(false)
-  createdAt       DateTime     @default(now())
-  updatedAt       DateTime     @updatedAt
-  conversation    Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
-  tasks           TaskItem[]
 
-  @@index([conversationId])
-}
-
-// One checklist item within a GoalRun. The live "todo list" the user watches.
-model TaskItem {
-  id        String   @id @default(cuid())
-  goalRunId String
-  text      String
-  status    String   @default("pending") // pending | active | done | blocked
-  order     Int      @default(0)
-  note      String? // short result/finding for this step
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  goalRun   GoalRun  @relation(fields: [goalRunId], references: [id], onDelete: Cascade)
-
-  @@index([goalRunId])
-}
 
 // A per-conversation todo item. Created either by the AI via the createTodo
 // tool or manually by the user. The model can update status via updateTodoStatus.

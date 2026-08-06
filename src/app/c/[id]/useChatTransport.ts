@@ -16,12 +16,14 @@ interface ChatTransportOptions {
   searchProvider: string;
   enabledTools: string[];
   enabledSkills: string[];
+  /** Chat = read-only tools, Agent = read + write tools. */
+  mode: "chat" | "agent";
   onFinishRef: React.MutableRefObject<() => void>;
   onErrorRef: React.MutableRefObject<(err: Error) => void>;
 }
 
 export function useChatTransport(opts: ChatTransportOptions) {
-  const { conversationId, conversation, selectedKbId, searchProvider, enabledTools, enabledSkills, onFinishRef, onErrorRef } = opts;
+  const { conversationId, conversation, selectedKbId, searchProvider, enabledTools, enabledSkills, mode, onFinishRef, onErrorRef } = opts;
 
   const transportBodyRef = useRef({
     conversationId,
@@ -32,6 +34,7 @@ export function useChatTransport(opts: ChatTransportOptions) {
     searchProvider,
     enabledTools,
     enabledSkills,
+    mode,
     chatOnlyMode: conversation?.chatOnlyMode ?? false,
     memoryDisabled: conversation?.memoryDisabled ?? false,
     maxToolCalls: conversation?.maxToolCalls ?? 5,
@@ -52,13 +55,14 @@ export function useChatTransport(opts: ChatTransportOptions) {
       searchProvider,
       enabledTools,
       enabledSkills,
+      mode,
       chatOnlyMode: conversation?.chatOnlyMode ?? false,
       memoryDisabled: conversation?.memoryDisabled ?? false,
       maxToolCalls: conversation?.maxToolCalls ?? 5,
       autoCompressThreshold: threshold,
       assistantMessageId: undefined as string | undefined,
     };
-  }, [conversationId, conversation?.model, conversation?.systemPrompt, conversation?.temperature, selectedKbId, searchProvider, enabledTools, enabledSkills, conversation?.chatOnlyMode, conversation?.memoryDisabled, conversation?.maxToolCalls]);
+  }, [conversationId, conversation?.model, conversation?.systemPrompt, conversation?.temperature, selectedKbId, searchProvider, enabledTools, enabledSkills, mode, conversation?.chatOnlyMode, conversation?.memoryDisabled, conversation?.maxToolCalls]);
 
   // Capture the client-generated id of the NEXT assistant message so the
   // server can persist it under the SAME id. Without this, the DB message

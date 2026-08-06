@@ -5,7 +5,6 @@ import MinimapNavigator from "@/app/components/MinimapNavigator";
 import ChatInput from "@/app/components/chatInput";
 import Scratchpad from "@/app/components/Scratchpad";
 import ArtifactPanel from "@/app/components/ArtifactPanel";
-import GoalPanel from "@/app/components/GoalPanel";
 import TodoPanel from "@/app/components/TodoPanel";
 import TodoIndicator from "@/app/components/TodoIndicator";
 import AdvancedSettings from "@/app/components/AdvancedSettings";
@@ -33,7 +32,6 @@ export default function ConversationLayout({ conversationId, initialPrompt }: Pr
   const p = useConversationPage(conversationId, initialPrompt);
 
   useCommandPaletteActions("Panels", [
-    { id: "goal", label: "Open Goal Mode", icon: <Target size={16} />, onSelect: () => p.setGoalPanelOpen(true) },
     { id: "scratchpad", label: "Open Scratchpad", icon: <StickyNote size={16} />, onSelect: () => p.setScratchpadOpen(true) },
     { id: "artifacts", label: "Open Artifacts", icon: <FileCode size={16} />, onSelect: () => p.setArtifactPanelOpen(true) },
     { id: "advanced-settings", label: "Advanced Settings", icon: <SlidersHorizontal size={16} />, onSelect: () => p.setAdvancedOpen(true) },
@@ -87,8 +85,6 @@ export default function ConversationLayout({ conversationId, initialPrompt }: Pr
           onToggleScratchpad={() => p.setScratchpadOpen((v: boolean) => !v)}
           artifactsOpen={p.artifactPanelOpen}
           onToggleArtifacts={() => p.setArtifactPanelOpen((v: boolean) => !v)}
-          goalOpen={p.goalPanelOpen}
-          onToggleGoal={() => p.setGoalPanelOpen((v: boolean) => !v)}
           enabledToolsCount={p.enabledTools.length}
           enabledSkillsCount={p.enabledSkills.length}
           onOpenAdvanced={() => p.setAdvancedOpen(true)}
@@ -178,14 +174,6 @@ export default function ConversationLayout({ conversationId, initialPrompt }: Pr
         isOpen={p.scratchpadOpen}
         onClose={() => p.setScratchpadOpen(false)}
         conversationId={conversationId}
-      />
-      <GoalPanel
-        isOpen={p.goalPanelOpen}
-        onClose={() => p.setGoalPanelOpen(false)}
-        conversationId={conversationId}
-        model={p.conversation.model}
-        kickoff={p.goalKickoff}
-        onComplete={() => { p.refreshConversationAndMessages(); }}
       />
       <TodoPanel
         isOpen={p.todoPanelOpen}

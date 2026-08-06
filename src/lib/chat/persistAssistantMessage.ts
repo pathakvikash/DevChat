@@ -28,6 +28,10 @@ async function persistAssistantMessage(
   let finalText = "";
   let lastInputTokens = 0;
 
+  // One part per toolCallId. A dangling call with no matching result makes
+  // providers reject the whole history on reload.
+  const toolPartIndex = new Map<string, number>();
+
   for (const step of steps) {
     const stepText = step.text || "";
     finalText = stepText;
@@ -38,25 +42,33 @@ async function persistAssistantMessage(
 
     if (step.toolCalls && step.toolCalls.length > 0) {
       for (const tc of step.toolCalls) {
+        toolPartIndex.set(tc.toolCallId, parts.length);
         parts.push({
           type: `tool-${tc.toolName}`,
           toolCallId: tc.toolCallId,
           toolName: tc.toolName,
           input: tc.input || tc.args,
-          state: "output-available",
+          // Upgraded below once the result lands. Client-side tools (executeCode)
+          // report back from the browser, so mark it errored rather than fake output.
+          state: "output-error",
+          errorText: "No output was recorded for this tool call.",
         });
       }
     }
 
     if (step.toolResults && step.toolResults.length > 0) {
       for (const tr of step.toolResults) {
-        parts.push({
+        const idx = toolPartIndex.get(tr.toolCallId);
+        const resolved = {
           type: `tool-${tr.toolName}`,
           toolCallId: tr.toolCallId,
           toolName: tr.toolName,
+          input: idx !== undefined ? parts[idx]?.input : undefined,
           output: tr.output,
-          state: "result",
-        });
+          state: "output-available",
+        };
+        if (idx !== undefined) parts[idx] = resolved;
+        else parts.push(resolved);
       }
     }
 

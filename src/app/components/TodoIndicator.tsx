@@ -36,9 +36,12 @@ export default function TodoIndicator({
     return () => window.removeEventListener("vas:todos-updated", handler);
   }, [fetchSummary]);
 
-  if (!summary || summary.total === 0) return null;
+  // Needs real numbers — an odd payload should hide the pill, not show an empty one.
+  const total = typeof summary?.total === "number" ? summary.total : 0;
+  const completed = typeof summary?.completed === "number" ? summary.completed : 0;
+  if (total === 0) return null;
 
-  const pct = summary.total > 0 ? Math.round((summary.completed / summary.total) * 100) : 0;
+  const pct = Math.round((completed / total) * 100);
 
   return (
     <button
@@ -46,7 +49,7 @@ export default function TodoIndicator({
       className="absolute top-2 right-2 z-10 flex items-center gap-2 rounded-[var(--glass-radius-md)] glass-button px-2.5 py-1.5 text-xs text-zinc-300 shadow-lg transition hover:text-[var(--foreground)]"
     >
       <ListTodo size={14} />
-      <span>{summary.completed}/{summary.total}</span>
+      <span>{completed}/{total}</span>
       <div className="h-1.5 w-12 overflow-hidden rounded-full bg-[var(--glass-bg-strong)]">
         <div
           className="h-full rounded-full bg-emerald-500 transition-all"

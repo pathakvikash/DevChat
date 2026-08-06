@@ -45,6 +45,8 @@ export interface ToolDefinition {
   builtIn?: boolean;
   /** Internal tools are always available to the model and hidden from the UI toggle list. */
   internal?: boolean;
+  /** Writes something (DB rows, memory, a third-party system). Agent mode only. */
+  mutates?: boolean;
 }
 
 /**

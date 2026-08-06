@@ -3,6 +3,7 @@
 import { useEffect, useState, useMemo, useCallback, useRef } from "react";
 import { useToast } from "@/app/components/Toast";
 import type { Conversation } from "@/app/components/conversation/types";
+import { useChatMode } from "@/app/contexts/ChatModeContext";
 import type { MinimapMessage } from "@/app/components/MinimapNavigator";
 import { parseCommand } from "@/lib/commands";
 import { buildMessageParts } from "@/lib/utils/messageParts";
@@ -28,10 +29,9 @@ export function useConversationPage(conversationId: string, initialPrompt?: stri
   const scrollRef = useRef<HTMLDivElement>(null);
   const [selectedKbId, setSelectedKbId] = useState<string>("");
   const [scratchpadOpen, setScratchpadOpen] = useState(false);
-  const [goalPanelOpen, setGoalPanelOpen] = useState(false);
-  const [goalKickoff, setGoalKickoff] = useState<{ objective: string; nonce: number }>({ objective: "", nonce: 0 });
   const [todoPanelOpen, setTodoPanelOpen] = useState(false);
   const [searchProvider, setSearchProvider] = useState<"duckduckgo" | "tavily">("duckduckgo");
+  const { mode } = useChatMode();
   const settingsKey = `vas:advancedSettings:${conversationId}`;
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [enabledTools, setEnabledTools] = useState<string[]>([]);
@@ -58,6 +58,7 @@ export function useConversationPage(conversationId: string, initialPrompt?: stri
       }
     } catch {}
   }, [conversationId]);
+
 
   function persistAdvanced(next: { enabledTools: string[]; enabledSkills: string[] }) {
     setEnabledTools(next.enabledTools);
@@ -93,6 +94,7 @@ export function useConversationPage(conversationId: string, initialPrompt?: stri
     searchProvider,
     enabledTools,
     enabledSkills,
+    mode,
     onFinishRef,
     onErrorRef,
   });
@@ -205,7 +207,7 @@ export function useConversationPage(conversationId: string, initialPrompt?: stri
       } else {
         await runCommandAction(command, arg, {
           conversationId, conversation, sendMessage, setMessages, setConversation,
-          setGoalPanelOpen, setGoalKickoff, setIsCompressing, setArtifactPanelOpen,
+          setIsCompressing, setArtifactPanelOpen,
           setScratchpadOpen, setModelSettingsOpen, toast, refreshConversationAndMessages,
         });
       }
@@ -222,8 +224,8 @@ export function useConversationPage(conversationId: string, initialPrompt?: stri
 
   const isDialogOpen = useMemo(() =>
     scratchpadOpen || advancedOpen || modelSettingsOpen || contextPanelOpen ||
-    toolErrorDialogOpen || artifactPanelOpen || goalPanelOpen || todoPanelOpen || keyboardShortcutsOpen,
-    [scratchpadOpen, advancedOpen, modelSettingsOpen, contextPanelOpen, toolErrorDialogOpen, artifactPanelOpen, goalPanelOpen, todoPanelOpen, keyboardShortcutsOpen],
+    toolErrorDialogOpen || artifactPanelOpen || todoPanelOpen || keyboardShortcutsOpen,
+    [scratchpadOpen, advancedOpen, modelSettingsOpen, contextPanelOpen, toolErrorDialogOpen, artifactPanelOpen, todoPanelOpen, keyboardShortcutsOpen],
   );
 
   const closeTopDialog = useCallback(() => {
@@ -231,11 +233,10 @@ export function useConversationPage(conversationId: string, initialPrompt?: stri
     else if (contextPanelOpen) setContextPanelOpen(false);
     else if (modelSettingsOpen) setModelSettingsOpen(false);
     else if (advancedOpen) setAdvancedOpen(false);
-    else if (goalPanelOpen) setGoalPanelOpen(false);
     else if (artifactPanelOpen) setArtifactPanelOpen(false);
     else if (todoPanelOpen) setTodoPanelOpen(false);
     else if (scratchpadOpen) setScratchpadOpen(false);
-  }, [toolErrorDialogOpen, contextPanelOpen, modelSettingsOpen, advancedOpen, goalPanelOpen, artifactPanelOpen, todoPanelOpen, scratchpadOpen]);
+  }, [toolErrorDialogOpen, contextPanelOpen, modelSettingsOpen, advancedOpen, artifactPanelOpen, todoPanelOpen, scratchpadOpen]);
 
   /* ─── Minimap ───────────────────────────────────────────────────────────── */
 
@@ -264,7 +265,6 @@ export function useConversationPage(conversationId: string, initialPrompt?: stri
     conversation, setConversation, loading, setLoading,
     input, setInput, files, setFiles,
     scratchpadOpen, setScratchpadOpen,
-    goalPanelOpen, setGoalPanelOpen, goalKickoff, setGoalKickoff,
     todoPanelOpen, setTodoPanelOpen,
     advancedOpen, setAdvancedOpen,
     modelSettingsOpen, setModelSettingsOpen,

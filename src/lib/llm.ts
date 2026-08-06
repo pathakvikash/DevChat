@@ -6,25 +6,35 @@ import {
   initializeNvidiaNimModels,
   type ModelConfig,
 } from "@/lib/models";
+import { resolveOpenRouterKey, resolveNvidiaNimKey } from "@/lib/apiKeys";
 
 /**
  * Ensures every configured provider's model catalogue is loaded. Safe to call
  * repeatedly — the underlying initializers are idempotent and cheap once warm.
+ *
+ * Keys usually live in per-user settings rather than env. Without passing them
+ * through, requests go out with no Authorization header.
  */
-async function ensureModelsInitialized(): Promise<void> {
+async function ensureModelsInitialized(userId?: string): Promise<void> {
   await initializeOllamaModels();
-  if (process.env.OPENROUTER_API_KEY) await initializeOpenRouterModels();
-  if (process.env.NVIDIA_NIM_API_KEY) await initializeNvidiaNimModels();
+  const [openRouterKey, nvidiaNimKey] = userId
+    ? await Promise.all([resolveOpenRouterKey(userId), resolveNvidiaNimKey(userId)])
+    : [process.env.OPENROUTER_API_KEY, process.env.NVIDIA_NIM_API_KEY];
+  if (openRouterKey) await initializeOpenRouterModels(openRouterKey);
+  if (nvidiaNimKey) await initializeNvidiaNimModels(nvidiaNimKey);
 }
 
 /**
  * Resolve a usable model for a server-side utility call (planning, self-eval,
- * memory consolidation, goal cycles). Falls back to a tool-capable local model,
+ * memory consolidation). Falls back to a tool-capable local model,
  * then any available model, mirroring the default-selection logic in
  * /api/chat so behavior is consistent across the app.
  */
-export async function resolveModel(preferredId?: string): Promise<ModelConfig> {
-  await ensureModelsInitialized();
+export async function resolveModel(
+  preferredId?: string,
+  userId?: string,
+): Promise<ModelConfig> {
+  await ensureModelsInitialized(userId);
 
   if (preferredId) {
     try {

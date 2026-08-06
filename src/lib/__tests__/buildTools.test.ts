@@ -200,3 +200,87 @@ describe("buildTools", () => {
     expect(typeof tools.fetchUrl.execute).toBe("function");
   });
 });
+
+describe("buildTools mode gating", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  const ALL = new Set([
+    "executeCode",
+    "webSearch",
+    "calculator",
+    "createArtifact",
+    "updateArtifact",
+    "createTodo",
+    "updateTodo",
+    "createTodos",
+    "rememberFact",
+    "forgetFact",
+  ]);
+
+  it("chat mode withholds every mutating tool", async () => {
+    const tools = await buildTools({
+      activeToolIds: ALL,
+      searchProvider: "duckduckgo",
+      userId: "test-user",
+      mode: "chat",
+    });
+    for (const id of [
+      "createArtifact",
+      "updateArtifact",
+      "createTodo",
+      "updateTodo",
+      "createTodos",
+      "rememberFact",
+      "forgetFact",
+    ]) {
+      expect(tools).not.toHaveProperty(id);
+    }
+  });
+
+  it("chat mode keeps read-only tools, including executeCode", async () => {
+    const tools = await buildTools({
+      activeToolIds: ALL,
+      searchProvider: "duckduckgo",
+      userId: "test-user",
+      mode: "chat",
+    });
+    expect(tools).toHaveProperty("executeCode");
+    expect(tools).toHaveProperty("webSearch");
+    expect(tools).toHaveProperty("calculator");
+  });
+
+  it("agent mode exposes the mutating tools", async () => {
+    const tools = await buildTools({
+      activeToolIds: ALL,
+      searchProvider: "duckduckgo",
+      userId: "test-user",
+      mode: "agent",
+    });
+    expect(tools).toHaveProperty("createArtifact");
+    expect(tools).toHaveProperty("createTodos");
+    expect(tools).toHaveProperty("rememberFact");
+    expect(tools).toHaveProperty("forgetFact");
+  });
+
+  it("defaults to agent so server-side callers keep full capability", async () => {
+    const tools = await buildTools({
+      activeToolIds: ALL,
+      searchProvider: "duckduckgo",
+      userId: "test-user",
+    });
+    expect(tools).toHaveProperty("createArtifact");
+  });
+
+  it("chat mode never queries MCP servers", async () => {
+    const { prisma } = await import("@/lib/db");
+    await buildTools({
+      activeToolIds: ALL,
+      searchProvider: "duckduckgo",
+      userId: "test-user",
+      mode: "chat",
+    });
+    expect((prisma as any).mcpServer.findMany).not.toHaveBeenCalled();
+  });
+});

@@ -8,7 +8,6 @@ export const maxDuration = 60;
 /**
  * Manually trigger long-term memory consolidation for a conversation: extract
  * durable facts, merge/reinforce existing ones, and prune stale low-value
- * facts. Also runs automatically after each Goal Mode run.
  */
 export async function POST(req: NextRequest) {
   try {

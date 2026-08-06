@@ -9,8 +9,6 @@ export interface RunCommandCtx {
   sendMessage: (msg: { parts: Array<{ type: "text"; text: string }> }) => Promise<void>;
   setMessages: (fn: (prev: any[]) => any[]) => void;
   setConversation: (fn: (prev: any) => any) => void;
-  setGoalPanelOpen: (v: boolean) => void;
-  setGoalKickoff: (v: { objective: string; nonce: number }) => void;
   setIsCompressing: (v: boolean) => void;
   setArtifactPanelOpen: (v: boolean) => void;
   setScratchpadOpen: (v: boolean) => void;
@@ -25,10 +23,6 @@ export async function runCommandAction(
   ctx: RunCommandCtx,
 ): Promise<void> {
   switch (cmd.action) {
-    case "goal":
-      ctx.setGoalPanelOpen(true);
-      ctx.setGoalKickoff({ objective: arg, nonce: Date.now() });
-      break;
     case "search": {
       const query = arg.slice(0, 300);
       let text = arg;

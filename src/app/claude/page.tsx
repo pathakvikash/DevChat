@@ -4,6 +4,7 @@ import { useEffect, useState, useCallback } from "react";
 import { useSearchParams } from "next/navigation";
 import { FolderOpen, ListChecks, FileText, Settings, ChevronDown, ChevronRight, HardDrive, X, Save, Eye, Edit3, Loader2, Globe, Lightbulb, ClipboardList, Brain } from "lucide-react";
 import AppShell, { SidebarToggleButton } from "@/app/components/AppShell";
+import ClaudeRunner from "@/app/components/claude/ClaudeRunner";
 
 interface FileEntry {
   name: string;
@@ -250,6 +251,8 @@ export default function ClaudePage() {
               <HardDrive size={28} className="text-zinc-400 shrink-0" />
               <h1 className="text-xl sm:text-2xl md:text-3xl font-bold">Claude Code System</h1>
             </div>
+
+            <ClaudeRunner />
 
             {/* Stats */}
             <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
