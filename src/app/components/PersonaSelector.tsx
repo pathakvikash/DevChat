@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ChevronDown } from "lucide-react";
 import { useResource } from "@/app/hooks/useResource";
 
@@ -24,6 +24,18 @@ export default function PersonaSelector({
   disabled = false,
 }: PersonaSelectorProps) {
   const [isOpen, setIsOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    function handleClickOutside(e: MouseEvent) {
+      if (rootRef.current && !rootRef.current.contains(e.target as Node)) {
+        setIsOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [isOpen]);
 
   const { data: personasData, loading } = useResource<Persona[]>(
     async () => {
@@ -38,8 +50,12 @@ export default function PersonaSelector({
   const selectedPersona = personas.find((p) => p.id === value);
 
   return (
-    <div className="relative">
+    // inline-block so the menu anchors to the button, not the whole dialog.
+    <div className="relative inline-block" ref={rootRef}>
       <button
+        type="button"
+        aria-haspopup="listbox"
+        aria-expanded={isOpen}
         onClick={() => setIsOpen(!isOpen)}
         disabled={disabled || loading}
         className="flex items-center gap-2 glass-button text-[var(--foreground)] rounded-[var(--glass-radius-md)] px-3 py-2 text-sm transition disabled:cursor-not-allowed"
@@ -49,7 +65,10 @@ export default function PersonaSelector({
       </button>
 
       {isOpen && !loading && (
-        <div className="absolute right-0 mt-2 w-64 glass-panel rounded-[var(--glass-radius-md)] shadow-lg z-50">
+        <div
+          role="listbox"
+          className="absolute left-0 mt-2 w-64 max-h-72 overflow-y-auto glass-panel-strong rounded-[var(--glass-radius-md)] shadow-lg z-50"
+        >
           {personas.map((persona) => (
             <button
               key={persona.id}

@@ -14,6 +14,12 @@ import {
   type SlashCommand,
 } from "@/lib/commands";
 import { useVoiceDictation } from "@/lib/useVoiceDictation";
+import { useChatMode } from "@/app/contexts/ChatModeContext";
+
+/** Max composer height before it starts scrolling. */
+const MAX_INPUT_HEIGHT = 200;
+/** Above this the text has wrapped — one line measures ~32px. */
+const SINGLE_LINE_HEIGHT = 40;
 
 interface ChatInputProps {
   input: string;
@@ -60,6 +66,10 @@ export default function ChatInput({
   searchProvider,
   onToggleSearchProvider,
 }: ChatInputProps) {
+  // Read-only here; the sidebar and header toggles do the actual switching.
+  const { mode } = useChatMode();
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const [expanded, setExpanded] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
   const [, setDragCounter] = useState(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -195,6 +205,18 @@ export default function ChatInput({
     if (!isLoading) submitLockRef.current = false;
   }, [isLoading]);
 
+  // Resize on value change rather than onInput, so it also shrinks back after
+  // send and still grows for voice dictation and slash-command completion.
+  useEffect(() => {
+    const el = textareaRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    const content = el.scrollHeight;
+    el.style.height = `${Math.min(content, MAX_INPUT_HEIGHT)}px`;
+    // Once it wraps, go full width and let the buttons drop underneath.
+    setExpanded(content > SINGLE_LINE_HEIGHT);
+  }, [input]);
+
   return (
     <>
       <DragOverlay isVisible={isDragging} fileCount={files.length} />
@@ -257,7 +279,7 @@ export default function ChatInput({
           onDragOver={handleDragOver}
           onDrop={handleDrop}
           className={`
-            relative flex items-end gap-2 rounded-[var(--glass-radius-xl)] glass px-3 py-2 transition-all duration-200
+            relative flex flex-wrap items-end gap-x-2 gap-y-1.5 rounded-[var(--glass-radius-xl)] glass px-3 py-2 transition-all duration-200
             ${
               isDragging
                 ? "shadow-[var(--glass-shadow-glow)] border-[var(--glass-accent)]"
@@ -296,7 +318,76 @@ export default function ChatInput({
             </div>
           )}
 
-          <div className="relative" ref={plusRef}>
+          {/* One row until the text wraps, then the input takes the full width. */}
+          <div className={`min-w-0 flex flex-col ${expanded ? "order-1 w-full" : "order-2 flex-1"}`}>
+            <textarea
+              ref={textareaRef}
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              disabled={isLoading}
+              placeholder={
+                isListening
+                  ? ""
+                  : mode === "agent"
+                    ? "Agent mode — can write artifacts, todos, memories..."
+                    : "Type a message, / for commands, or drop files..."
+              }
+              className="w-full resize-none bg-transparent text-sm text-[var(--foreground)] outline-none placeholder:text-zinc-500 placeholder:truncate disabled:opacity-50 py-1.5 overflow-y-auto"
+              rows={1}
+              onKeyDown={(e) => {
+                if (showCommands) {
+                  if (e.key === "ArrowDown") {
+                    e.preventDefault();
+                    setCmdIndex((i) => (i + 1) % cmdMatches.length);
+                    return;
+                  }
+                  if (e.key === "ArrowUp") {
+                    e.preventDefault();
+                    setCmdIndex((i) => (i - 1 + cmdMatches.length) % cmdMatches.length);
+                    return;
+                  }
+                  if (e.key === "Tab" || (e.key === "Enter" && !e.shiftKey)) {
+                    e.preventDefault();
+                    applyCommand(cmdMatches[cmdIndex] ?? cmdMatches[0]);
+                    return;
+                  }
+                  if (e.key === "Escape") {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    setCmdDismissed(cmdQuery);
+                    return;
+                  }
+                }
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault();
+                  if (canSubmit && !isLoading && !submitLockRef.current) {
+                    submitLockRef.current = true;
+                    onSubmit(e as any);
+                  }
+                }
+              }}
+              style={{
+                minHeight: "36px",
+                maxHeight: `${MAX_INPUT_HEIGHT}px`,
+              }}
+            />
+
+            <AnimatePresence>
+              {isListening && (
+                <motion.div
+                  initial={{ height: 0, opacity: 0 }}
+                  animate={{ height: "auto", opacity: 1 }}
+                  exit={{ height: 0, opacity: 0 }}
+                  transition={{ type: "spring", stiffness: 400, damping: 30 }}
+                  className="overflow-hidden w-full"
+                >
+                  <VoiceWaveform isActive={isListening} />
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
+
+          <div className={`relative shrink-0 ${expanded ? "order-2" : "order-1"}`} ref={plusRef}>
             <button
               type="button"
               onClick={() => setPlusOpen(!plusOpen)}
@@ -382,74 +473,9 @@ export default function ChatInput({
             accept="image/*,.pdf,.doc,.docx,.txt,.md"
           />
 
-          <div className="flex flex-col flex-1 min-w-0">
-            <textarea
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              disabled={isLoading}
-              placeholder={isListening ? "" : "Type a message, / for commands, or drop files..."}
-              className="w-full resize-none bg-transparent text-sm text-[var(--foreground)] outline-none placeholder:text-zinc-500 placeholder:truncate disabled:opacity-50 py-1.5 overflow-y-auto"
-              rows={1}
-              onKeyDown={(e) => {
-                if (showCommands) {
-                  if (e.key === "ArrowDown") {
-                    e.preventDefault();
-                    setCmdIndex((i) => (i + 1) % cmdMatches.length);
-                    return;
-                  }
-                  if (e.key === "ArrowUp") {
-                    e.preventDefault();
-                    setCmdIndex((i) => (i - 1 + cmdMatches.length) % cmdMatches.length);
-                    return;
-                  }
-                  if (e.key === "Tab" || (e.key === "Enter" && !e.shiftKey)) {
-                    e.preventDefault();
-                    applyCommand(cmdMatches[cmdIndex] ?? cmdMatches[0]);
-                    return;
-                  }
-                  if (e.key === "Escape") {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    setCmdDismissed(cmdQuery);
-                    return;
-                  }
-                }
-                if (e.key === "Enter" && !e.shiftKey) {
-                  e.preventDefault();
-                  if (canSubmit && !isLoading && !submitLockRef.current) {
-                    submitLockRef.current = true;
-                    onSubmit(e as any);
-                  }
-                }
-              }}
-              style={{
-                minHeight: "36px",
-                maxHeight: "120px",
-              }}
-              onInput={(e) => {
-                const target = e.target as HTMLTextAreaElement;
-                target.style.height = "auto";
-                target.style.height = Math.min(target.scrollHeight, 120) + "px";
-              }}
-            />
-
-            <AnimatePresence>
-              {isListening && (
-                <motion.div
-                  initial={{ height: 0, opacity: 0 }}
-                  animate={{ height: "auto", opacity: 1 }}
-                  exit={{ height: 0, opacity: 0 }}
-                  transition={{ type: "spring", stiffness: 400, damping: 30 }}
-                  className="overflow-hidden w-full"
-                >
-                  <VoiceWaveform isActive={isListening} />
-                </motion.div>
-              )}
-            </AnimatePresence>
-          </div>
-
-          <div className="flex items-center gap-1.5">
-            {!isLoading && (
+          <div className="order-3 ml-auto flex items-center gap-1.5">
+            {/* Reads like a second placeholder when the box is empty. */}
+            {!isLoading && input.length > 0 && (
               <span className="text-[11px] text-zinc-600 hidden md:block mr-1 whitespace-nowrap">
                 Enter to send · Shift+Enter for newline
               </span>

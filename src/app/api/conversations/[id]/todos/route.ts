@@ -17,6 +17,18 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     if (!(await assertConversationOwner(id, userId))) {
       return NextResponse.json({ error: "Conversation not found" }, { status: 404 });
     }
+    // The pill only shows once todos exist, so it wants counts, not the list.
+    if (req.nextUrl.searchParams.get("summary") === "true") {
+      // Cancelled ones drop out of the total so the bar can still hit 100%.
+      const [total, completed] = await Promise.all([
+        prisma.todo.count({
+          where: { conversationId: id, status: { not: "cancelled" } },
+        }),
+        prisma.todo.count({ where: { conversationId: id, status: "done" } }),
+      ]);
+      return NextResponse.json({ total, completed });
+    }
+
     const todos = await prisma.todo.findMany({
       where: { conversationId: id },
       orderBy: [{ status: "asc" }, { order: "asc" }, { createdAt: "asc" }],

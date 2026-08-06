@@ -7,7 +7,16 @@ export default async function LoginPage({
 }: {
   searchParams: Promise<{ callbackUrl?: string }>;
 }) {
-  const session = await auth();
+  // A cookie from an old AUTH_SECRET makes auth() throw. Treat it as signed
+  // out, or the page that fixes the problem is the one that's broken.
+  let session = null;
+  try {
+    session = await auth();
+  } catch (e) {
+    // Next throws `digest`-carrying errors for control flow — don't swallow those.
+    if (typeof (e as { digest?: unknown })?.digest === "string") throw e;
+    console.warn("[login] ignoring unreadable session cookie:", e);
+  }
   if (session?.user) redirect("/");
 
   const { callbackUrl } = await searchParams;

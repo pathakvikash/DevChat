@@ -148,7 +148,7 @@ export async function consolidateMemory(opts: {
         ? existing.map((m) => `- ${m.key} [${m.category}]: ${m.value}`).join("\n")
         : "(none yet)";
 
-    const cfg = await resolveModel(modelId);
+    const cfg = await resolveModel(modelId, userId);
     const { text } = await generateText({
       model: cfg.model,
       system: CONSOLIDATION_SYSTEM,
