@@ -11,7 +11,7 @@ import { runCode } from "@/lib/sandbox";
 
 interface ChatTransportOptions {
   conversationId: string;
-  conversation: { model?: string; systemPrompt?: string; temperature?: number; chatOnlyMode?: boolean; memoryDisabled?: boolean; maxToolCalls?: number } | null;
+  conversation: { model?: string; systemPrompt?: string; temperature?: number; chatOnlyMode?: boolean; memoryDisabled?: boolean; generativeUiEnabled?: boolean; maxToolCalls?: number } | null;
   selectedKbId: string;
   searchProvider: string;
   enabledTools: string[];
@@ -37,6 +37,7 @@ export function useChatTransport(opts: ChatTransportOptions) {
     mode,
     chatOnlyMode: conversation?.chatOnlyMode ?? false,
     memoryDisabled: conversation?.memoryDisabled ?? false,
+    generativeUiEnabled: conversation?.generativeUiEnabled ?? false,
     maxToolCalls: conversation?.maxToolCalls ?? 5,
     autoCompressThreshold: 85,
     assistantMessageId: undefined as string | undefined,
@@ -58,11 +59,12 @@ export function useChatTransport(opts: ChatTransportOptions) {
       mode,
       chatOnlyMode: conversation?.chatOnlyMode ?? false,
       memoryDisabled: conversation?.memoryDisabled ?? false,
+      generativeUiEnabled: conversation?.generativeUiEnabled ?? false,
       maxToolCalls: conversation?.maxToolCalls ?? 5,
       autoCompressThreshold: threshold,
       assistantMessageId: undefined as string | undefined,
     };
-  }, [conversationId, conversation?.model, conversation?.systemPrompt, conversation?.temperature, selectedKbId, searchProvider, enabledTools, enabledSkills, mode, conversation?.chatOnlyMode, conversation?.memoryDisabled, conversation?.maxToolCalls]);
+  }, [conversationId, conversation?.model, conversation?.systemPrompt, conversation?.temperature, selectedKbId, searchProvider, enabledTools, enabledSkills, mode, conversation?.chatOnlyMode, conversation?.memoryDisabled, conversation?.generativeUiEnabled, conversation?.maxToolCalls]);
 
   // Capture the client-generated id of the NEXT assistant message so the
   // server can persist it under the SAME id. Without this, the DB message

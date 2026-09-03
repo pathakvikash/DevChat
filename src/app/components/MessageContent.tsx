@@ -7,6 +7,8 @@ import {
   type AnyPart,
   type ToolPart,
 } from "@/lib/utils/messageParts";
+import { useJsonRenderMessage, Renderer } from "@json-render/react";
+import { registry } from "@/lib/generativeUi/registry";
 
 interface MessageContentProps {
   role: "user" | "assistant" | "system";
@@ -29,6 +31,11 @@ export default function MessageContent({
 }: MessageContentProps) {
   const isAssistant = role === "assistant";
   const merged = groupToolParts(allParts);
+  // Generative UI: data-spec parts (already split from prose server-side by
+  // pipeJsonRender) aren't a recognized part type in groupToolParts/the loop
+  // below, so they just fall through and render nothing — this hook is only
+  // for reconstructing the spec for the Renderer, not for text extraction.
+  const { spec, hasSpec } = useJsonRenderMessage(allParts as any);
 
   return (
     <>
@@ -60,6 +67,11 @@ export default function MessageContent({
         }
         return null;
       })}
+      {isAssistant && hasSpec && spec && (
+        <div className="max-w-2xl">
+          <Renderer spec={spec} registry={registry} loading={isStreaming} />
+        </div>
+      )}
       {isStreaming && !toolParts?.length && (
         <span className="ml-1 animate-pulse">▊</span>
       )}

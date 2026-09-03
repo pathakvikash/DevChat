@@ -137,6 +137,7 @@ describe("calculateDetailedContextUsage", () => {
     memory: null,
     compressed: null,
     kb: null,
+    generativeUi: null,
   };
 
   it("returns empty breakdown for all-empty input", () => {

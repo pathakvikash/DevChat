@@ -7,6 +7,7 @@ import { extractText } from "@/lib/utils/messageParts";
 import { BUILTIN_TOOL_IDS, type ToolMode } from "./buildTools";
 import { countTokens } from "@/lib/tokens";
 import { getSettingsKey } from "@/lib/settings";
+import { catalog as generativeUiCatalog } from "@/lib/generativeUi/catalog";
 
 const VAS_TODO_SECTION = `TASK TRACKING — \`createTodos\` / \`createTodo\` / \`updateTodo\`
 You MUST use todos for ANY request with multiple steps. Call \`createTodos\` ONCE at the start with ALL steps listed, then update each with \`updateTodo\` as you complete it. This gives the user real-time progress — they can see exactly what you're doing. \`createTodo\` (singular) is for adding one-off items mid-task. This is mandatory.`;
@@ -55,6 +56,7 @@ export interface BuildSystemPromptOptions {
   ragContext?: string;
   messages: unknown[];
   memoryDisabled?: boolean;
+  generativeUiEnabled?: boolean;
   userId: string;
   /** Chat withholds mutating tools; the prompt must not advertise them. */
   mode?: ToolMode;
@@ -73,6 +75,7 @@ export interface SystemPromptSections {
   memory: string | null;
   compressed: string | null;
   kb: string | null;
+  generativeUi: string | null;
 }
 
 export interface BuildSystemPromptResult {
@@ -152,8 +155,18 @@ export async function buildSystemPrompt(
 
   const kb = await retrieveKbContext({ kbId, ragContext, messages });
 
-  const sections: SystemPromptSections = { base, instructions, persona, skills, tools, memory, compressed, kb };
-  const text = [base, instructions, persona, skills, tools, memory, compressed, kb]
+  const generativeUi = opts.generativeUiEnabled
+    ? generativeUiCatalog.prompt({
+        mode: "inline",
+        customRules: [
+          "Only generate a UI component when it clearly helps — e.g. the user asks to see/show/display something structured. Plain questions get plain text answers.",
+          "The JSONL patch fence MUST be exactly a markdown code fence: an opening line of exactly ```spec and a closing line of exactly ``` (three backticks, nothing else on those lines). Do NOT use any other wrapper — no <spec> tags, no other XML/HTML-style tags, no custom delimiters. Only ```spec ... ``` is recognized; anything else will be shown to the user as literal broken text.",
+        ],
+      })
+    : null;
+
+  const sections: SystemPromptSections = { base, instructions, persona, skills, tools, memory, compressed, kb, generativeUi };
+  const text = [base, instructions, persona, skills, tools, memory, compressed, kb, generativeUi]
     .filter((s): s is string => Boolean(s))
     .join("\n\n");
 

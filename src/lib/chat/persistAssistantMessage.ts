@@ -15,6 +15,15 @@ export interface PersistAssistantMessageOptions {
   // Use the client-generated message id so the persisted DB row matches the
   // id the UI uses (feedback/edit/delete keys stay consistent without a refresh).
   messageId?: string;
+  /**
+   * Generative-UI turns only: the already-`pipeJsonRender`-split `text`/
+   * `data-spec` parts (from `createUIMessageStream`'s own `onFinish`), used
+   * in place of rebuilding parts from `steps`. Without this, the persisted
+   * text is the raw, pre-split model output — prose and JSONL patch lines
+   * still mixed together — so reloading the page would show the JSONL as
+   * plain text instead of re-rendering the UI.
+   */
+  overrideParts?: any[];
 }
 
 async function persistAssistantMessage(
@@ -24,8 +33,10 @@ async function persistAssistantMessage(
   const { conversationId, model, autoCompressThreshold, systemPrompt } = opts;
   const { steps, totalUsage } = event;
 
-  const parts: any[] = [];
-  let finalText = "";
+  const parts: any[] = opts.overrideParts ? [...opts.overrideParts] : [];
+  let finalText = opts.overrideParts
+    ? opts.overrideParts.filter((p) => p.type === "text").map((p) => p.text || "").join("")
+    : "";
   let lastInputTokens = 0;
 
   // One part per toolCallId. A dangling call with no matching result makes
@@ -34,10 +45,11 @@ async function persistAssistantMessage(
 
   for (const step of steps) {
     const stepText = step.text || "";
-    finalText = stepText;
-
-    if (stepText) {
-      parts.push({ type: "text", text: stepText });
+    if (!opts.overrideParts) {
+      finalText = stepText;
+      if (stepText) {
+        parts.push({ type: "text", text: stepText });
+      }
     }
 
     if (step.toolCalls && step.toolCalls.length > 0) {
