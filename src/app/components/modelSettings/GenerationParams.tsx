@@ -14,8 +14,15 @@ interface GenerationParamsProps {
   maxContextWindow: number;
   chatOnlyMode: boolean;
   onChatOnlyModeChange: (v: boolean) => void;
+  generativeUiEnabled: boolean;
+  onGenerativeUiEnabledChange: (v: boolean) => void;
   maxToolCalls: number;
   onMaxToolCallsChange: (v: number) => void;
+  /** "" = model default; low | medium | high | max. */
+  reasoningEffort: string;
+  onReasoningEffortChange: (v: string) => void;
+  /** Shown for models that report thinking support. */
+  showReasoningEffort: boolean;
 }
 
 export default function GenerationParams({
@@ -31,8 +38,13 @@ export default function GenerationParams({
   maxContextWindow,
   chatOnlyMode,
   onChatOnlyModeChange,
+  generativeUiEnabled,
+  onGenerativeUiEnabledChange,
   maxToolCalls,
   onMaxToolCallsChange,
+  reasoningEffort,
+  onReasoningEffortChange,
+  showReasoningEffort,
 }: GenerationParamsProps) {
   return (
     <section>
@@ -140,6 +152,27 @@ export default function GenerationParams({
           </p>
         </div>
 
+        {showReasoningEffort && (
+          <div>
+            <label className="block text-xs text-zinc-400 mb-1">Reasoning effort</label>
+            <select
+              value={reasoningEffort}
+              onChange={(e) => onReasoningEffortChange(e.target.value)}
+              className="w-full glass-input rounded-[var(--glass-radius-md)] px-3 py-2 text-sm"
+            >
+              <option value="">Model default</option>
+              <option value="low">Low</option>
+              <option value="medium">Medium</option>
+              <option value="high">High</option>
+              <option value="max">Max</option>
+            </select>
+            <p className="text-xs text-zinc-500 mt-1">
+              How hard the model thinks before answering. Claude Code, Codex and
+              OpenCode honor this; other models ignore it.
+            </p>
+          </div>
+        )}
+
         <div className="sm:col-span-2">
           <label className="flex items-center gap-3 cursor-pointer">
             <input
@@ -156,6 +189,27 @@ export default function GenerationParams({
                 Disable tool calling. Use for models that don&apos;t support tools
                 (e.g., llama3). In this mode, the model can only chat — no code
                 execution, web search, or other tools.
+              </p>
+            </div>
+          </label>
+        </div>
+
+        <div className="sm:col-span-2">
+          <label className="flex items-center gap-3 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={generativeUiEnabled}
+              onChange={(e) => onGenerativeUiEnabledChange(e.target.checked)}
+              className="w-4 h-4 accent-blue-500 rounded border-[var(--glass-border)] bg-[var(--glass-bg)]"
+            />
+            <div>
+              <span className="text-sm font-medium text-zinc-100">
+                Generative UI (experimental)
+              </span>
+              <p className="text-xs text-zinc-500 mt-0.5">
+                The model can render real UI components (cards, buttons, lists)
+                inline in its replies instead of only text. Disables normal
+                tool calling for this conversation while active.
               </p>
             </div>
           </label>

@@ -99,8 +99,7 @@ export default function ChatInput({
   const showCommands =
     cmdQuery !== null &&
     cmdQuery !== cmdDismissed &&
-    cmdMatches.length > 0 &&
-    !isLoading;
+    cmdMatches.length > 0;
 
   useEffect(() => {
     setCmdIndex((i) => (i >= cmdMatches.length ? 0 : i));
@@ -324,7 +323,6 @@ export default function ChatInput({
               ref={textareaRef}
               value={input}
               onChange={(e) => setInput(e.target.value)}
-              disabled={isLoading}
               placeholder={
                 isListening
                   ? ""
@@ -475,9 +473,9 @@ export default function ChatInput({
 
           <div className="order-3 ml-auto flex items-center gap-1.5">
             {/* Reads like a second placeholder when the box is empty. */}
-            {!isLoading && input.length > 0 && (
+            {input.length > 0 && (
               <span className="text-[11px] text-zinc-600 hidden md:block mr-1 whitespace-nowrap">
-                Enter to send · Shift+Enter for newline
+                {isLoading ? "Type ahead · Enter sends when the reply finishes" : "Enter to send · Shift+Enter for newline"}
               </span>
             )}
             {contextUsage && (

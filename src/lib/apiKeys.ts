@@ -1,25 +1,27 @@
-import { getSettingsKey } from "./settings";
+import { PROVIDERS } from "./providers";
+import { envCredsFor, type ProviderCreds } from "./models";
+import { getSettingsKeys } from "./settings";
 
-const ENV_KEY_MAP: Record<string, string | undefined> = {
-  openrouterApiKey: process.env.OPENROUTER_API_KEY,
-  nvidiaNimApiKey: process.env.NVIDIA_NIM_API_KEY,
-};
+/**
+ * Which hosted providers this user can talk to, and with what. A key saved in
+ * Settings wins over the server's env var, so on a shared deployment each user
+ * brings their own key while a self-hoster can just set env vars once.
+ */
+export async function resolveProviderCreds(userId: string): Promise<ProviderCreds> {
+  const wanted = PROVIDERS.flatMap((p) =>
+    p.baseUrlSettingKey ? [p.settingKey, p.baseUrlSettingKey] : [p.settingKey],
+  );
+  const saved = await getSettingsKeys(userId, wanted);
 
-async function resolveApiKey(
-  keyName: "openrouterApiKey" | "nvidiaNimApiKey",
-  userId: string,
-  requestSource?: string,
-): Promise<string | undefined> {
-  if (requestSource) return requestSource;
-  const dbKey = await getSettingsKey(userId, keyName);
-  if (dbKey) return dbKey;
-  return ENV_KEY_MAP[keyName] || undefined;
-}
-
-export async function resolveOpenRouterKey(userId: string, bodyKey?: string) {
-  return resolveApiKey("openrouterApiKey", userId, bodyKey);
-}
-
-export async function resolveNvidiaNimKey(userId: string, bodyKey?: string) {
-  return resolveApiKey("nvidiaNimApiKey", userId, bodyKey);
+  const creds: ProviderCreds = {};
+  for (const p of PROVIDERS) {
+    const env = envCredsFor(p);
+    const apiKey = saved[p.settingKey] || env?.apiKey || "";
+    const baseUrl =
+      (p.baseUrlSettingKey && saved[p.baseUrlSettingKey]) || env?.baseUrl || p.baseUrl || "";
+    if (!baseUrl) continue;
+    if (!apiKey && !p.keyOptional) continue;
+    creds[p.id] = { apiKey, baseUrl };
+  }
+  return creds;
 }

@@ -17,8 +17,10 @@ export interface Conversation {
   note?: string;
   chatOnlyMode?: boolean;
   memoryDisabled?: boolean;
+  generativeUiEnabled?: boolean;
   maxToolCalls?: number;
   fallbackModel?: string | null;
+  reasoningEffort?: string | null;
   compressedSummary?: string;
   compressedAt?: string;
   compressedBeforeTokens?: number;

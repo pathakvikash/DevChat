@@ -14,6 +14,7 @@ export interface ResolveChatSettingsOptions {
   bodyEnabledSkills: unknown;
   bodyChatOnlyMode: boolean | undefined;
   bodyMemoryDisabled: boolean | undefined;
+  bodyGenerativeUiEnabled: boolean | undefined;
   bodyAutoCompressThreshold: number | undefined;
   bodyMaxToolCalls: number | undefined;
 }
@@ -31,9 +32,11 @@ export interface ResolvedChatSettings {
   maxTokens: number | undefined;
   chatOnlyMode: boolean;
   memoryDisabled: boolean;
+  generativeUiEnabled: boolean;
   fallbackModel: string | undefined;
   autoCompressThreshold: number;
   maxToolCalls: number;
+  reasoningEffort: string | undefined;
 }
 
 /**
@@ -63,9 +66,11 @@ export async function resolveChatSettings(
   let maxTokens: number | undefined;
   let chatOnlyMode = opts.bodyChatOnlyMode ?? false;
   let memoryDisabled = opts.bodyMemoryDisabled ?? false;
+  let generativeUiEnabled = opts.bodyGenerativeUiEnabled ?? false;
   let fallbackModel: string | undefined;
   const autoCompressThreshold = opts.bodyAutoCompressThreshold ?? 85;
   let maxToolCalls = opts.bodyMaxToolCalls ?? 5;
+  let reasoningEffort: string | undefined;
 
   if (opts.conversationId) {
     const conv = await prisma.conversation.findUnique({
@@ -80,8 +85,10 @@ export async function resolveChatSettings(
         maxTokens: true,
         chatOnlyMode: true,
         memoryDisabled: true,
+        generativeUiEnabled: true,
         maxToolCalls: true,
         fallbackModel: true,
+        reasoningEffort: true,
       },
     });
     if (conv) {
@@ -94,7 +101,9 @@ export async function resolveChatSettings(
       maxTokens = conv.maxTokens ?? undefined;
       chatOnlyMode = conv.chatOnlyMode ?? chatOnlyMode;
       memoryDisabled = conv.memoryDisabled ?? memoryDisabled;
+      generativeUiEnabled = conv.generativeUiEnabled ?? generativeUiEnabled;
       maxToolCalls = conv.maxToolCalls ?? maxToolCalls;
+      reasoningEffort = conv.reasoningEffort ?? undefined;
       if (conv.fallbackModel) fallbackModel = conv.fallbackModel;
     }
   }
@@ -112,8 +121,10 @@ export async function resolveChatSettings(
     maxTokens,
     chatOnlyMode,
     memoryDisabled,
+    generativeUiEnabled,
     fallbackModel,
     autoCompressThreshold,
     maxToolCalls,
+    reasoningEffort,
   };
 }

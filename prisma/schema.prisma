@@ -82,7 +82,9 @@ model Conversation {
   compressedBeforeMessages Int?
   chatOnlyMode             Boolean    @default(false)
   memoryDisabled           Boolean    @default(false)
+  generativeUiEnabled      Boolean    @default(false)
   maxToolCalls     Int          @default(5)
+  reasoningEffort  String? // low | medium | high | max; honored by reasoning-capable providers (Claude Code --effort, Codex, OpenCode --variant)
   fallbackModel    String? // Optional backup model tried when the primary fails (rate limit, outage, auth).
    note                     String?
    pinned                   Boolean    @default(false)

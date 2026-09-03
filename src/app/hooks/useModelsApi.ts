@@ -18,3 +18,23 @@ export async function fetchModelUsage(): Promise<ModelUsage> {
   if (!res.ok) return { usage: {} };
   return res.json();
 }
+
+export interface ProviderStatusInfo {
+  id: string;
+  label: string;
+  configured: boolean;
+  modelCount: number;
+  error?: string;
+  kind?: "cli";
+}
+
+/** Models plus per-provider availability, for the Settings page. */
+export async function fetchModelCatalog(): Promise<{
+  models: ModelInfo[];
+  providers: ProviderStatusInfo[];
+}> {
+  const res = await fetch("/api/models");
+  if (!res.ok) throw new Error("Failed to fetch models");
+  const data = await res.json();
+  return { models: data.models || [], providers: data.providers || [] };
+}

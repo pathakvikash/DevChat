@@ -1,4 +1,11 @@
-import { convertToModelMessages, streamText, stepCountIs } from "ai";
+import {
+  convertToModelMessages,
+  streamText,
+  stepCountIs,
+  createUIMessageStream,
+  createUIMessageStreamResponse,
+} from "ai";
+import { pipeJsonRender } from "@json-render/core";
 import { prisma } from "@/lib/db";
 import { getModel } from "@/lib/models";
 import { extractText, stripFileParts } from "@/lib/utils/messageParts";
@@ -20,6 +27,7 @@ import {
 } from "@/lib/chat/providerErrors";
 import { resolveChatSettings } from "@/lib/chat/resolveChatSettings";
 import { resolveModelCandidates } from "@/lib/chat/resolveModelCandidates";
+import { cliProviderForModel } from "@/lib/cliProviders";
 import { recordTrace } from "@/lib/observability";
 import {
   estimatePromptTokens,
@@ -45,11 +53,10 @@ export async function POST(req: Request) {
     enabledTools: bodyEnabledTools,
     enabledSkills: bodyEnabledSkills,
     chatOnlyMode: bodyChatOnlyMode,
+    generativeUiEnabled: bodyGenerativeUiEnabled,
     memoryDisabled: bodyMemoryDisabled,
     autoCompressThreshold: bodyAutoCompressThreshold,
     maxToolCalls: bodyMaxToolCalls,
-    openrouterApiKey: bodyOpenrouterApiKey,
-    nvidiaNimApiKey: bodyNvidiaNimApiKey,
     messageId: bodyUserMessageId,
     assistantMessageId: bodyAssistantMessageId,
     mode: bodyMode,
@@ -82,6 +89,7 @@ export async function POST(req: Request) {
       bodyEnabledSkills,
       bodyChatOnlyMode,
       bodyMemoryDisabled,
+      bodyGenerativeUiEnabled,
       bodyAutoCompressThreshold,
       bodyMaxToolCalls,
     });
@@ -95,9 +103,11 @@ export async function POST(req: Request) {
       topP,
       chatOnlyMode,
       memoryDisabled,
+      generativeUiEnabled,
       fallbackModel,
       maxToolCalls,
       autoCompressThreshold,
+      reasoningEffort,
     } = settings;
     // `contextLength`/`maxTokens` are reassigned below (Ollama context bump,
     // default maxTokens), so these two stay `let` unlike the rest.
@@ -116,8 +126,6 @@ export async function POST(req: Request) {
     const resolution = await resolveModelCandidates({
       requestedModel: model,
       fallbackModel,
-      bodyOpenrouterApiKey,
-      bodyNvidiaNimApiKey,
       userId,
     });
     if (!resolution.ok) {
@@ -133,7 +141,7 @@ export async function POST(req: Request) {
     for (const servedModel of candidateModels) {
     let modelConfig: ReturnType<typeof getModel> | null = null;
     try {
-      modelConfig = getModel(servedModel);
+      modelConfig = getModel(servedModel, resolution.creds);
     } catch {
       console.error(
         `[chat] model config unavailable for ${servedModel} — skipping fallback candidate`,
@@ -141,7 +149,12 @@ export async function POST(req: Request) {
       continue;
     }
     if (!maxTokens) maxTokens = 8192;
-    const useTools = modelConfig.supportsTools && !chatOnlyMode;
+    // Generative UI (inline json-render mode) and normal tool-calling
+    // haven't been proven to coexist reliably in one streamText() call —
+    // a spike showed a tool-capable model silently ignoring an available
+    // tool once catalog.prompt()'s inline-mode instructions were also in
+    // the system prompt. Disable tools for the turn rather than risk that.
+    const useTools = modelConfig.supportsTools && !chatOnlyMode && !generativeUiEnabled;
     const activeToolIds = resolveActiveToolIds(explicitToolIds, skillIds, kbId);
 
     const { text: finalSystemPrompt, sections } = await buildSystemPrompt({
@@ -154,6 +167,7 @@ export async function POST(req: Request) {
       ragContext,
       messages,
       memoryDisabled,
+      generativeUiEnabled,
       userId,
       mode: toolMode,
     });
@@ -165,7 +179,8 @@ export async function POST(req: Request) {
         `tools=${(sections.tools?.length || 0)}ch ` +
         `memory=${(sections.memory?.length || 0)}ch ` +
         `compressed=${(sections.compressed?.length || 0)}ch ` +
-        `kb=${(sections.kb?.length || 0)}ch`,
+        `kb=${(sections.kb?.length || 0)}ch ` +
+        `generativeUi=${(sections.generativeUi?.length || 0)}ch`,
     );
 
     const sanitizedMessages = normalizeMessageToolParts(
@@ -244,6 +259,14 @@ export async function POST(req: Request) {
           num_predict: maxTokens || -1,
         }
       : {};
+    // CLI-backed models (claude-code/…, codex/…, opencode/…) take the
+    // conversation's reasoning effort as a provider option.
+    const cliProvider = cliProviderForModel(servedModel);
+    const providerOptions = isOllama
+      ? { ollama: ollamaOptions }
+      : cliProvider && reasoningEffort
+        ? { [cliProvider.id]: { effort: reasoningEffort } }
+        : undefined;
 
     // Per-candidate retry loop (transient errors + Ollama context overflow).
     const RETRIES_PER_MODEL = 2;
@@ -252,6 +275,10 @@ export async function POST(req: Request) {
     let assistantPersisted = false;
     let traceRecorded = false;
     let partialText = "";
+    // Captured from streamText's own onFinish so the generative-UI path can
+    // still record real token usage even though it persists from
+    // createUIMessageStream's onFinish instead (see below).
+    let capturedFinishEvent: { steps: any[]; totalUsage?: any } | null = null;
     const partialParts: any[] = [];
     const partialToolOutputs = new Map<string, { name: string; input: any; start: number }>();
     // Per-tool observations (name/input/output/latency) collected during streaming.
@@ -270,6 +297,12 @@ export async function POST(req: Request) {
           messages: modelMessages,
           temperature,
           topP,
+          // Hard cap on response length. Previously only applied to Ollama
+          // (via providerOptions.ollama.num_predict below) — every other
+          // provider had no cap at all, so a model that got stuck looping
+          // (e.g. never satisfying its own "self-check" instructions) could
+          // stream indefinitely, leaving the request permanently pending.
+          maxOutputTokens: maxTokens,
           // Break the loop if the model calls the SAME tool with the SAME
           // arguments twice in a row. llama3.2 in particular will keep
           // re-issuing a failed tool call up to 3 times; we'd rather have
@@ -366,7 +399,7 @@ export async function POST(req: Request) {
           toolChoice: "auto",
           maxRetries: 0,
           abortSignal: req.signal,
-          ...(isOllama ? { providerOptions: { ollama: ollamaOptions } } : {}),
+          ...(providerOptions ? { providerOptions } : {}),
           onChunk: ({ chunk }) => {
             if (chunk.type === "text-delta") {
               partialText += chunk.text;
@@ -408,8 +441,15 @@ export async function POST(req: Request) {
           },
           onFinish: (event) => {
             if (!conversationId) return;
-            assistantPersisted = true;
-            safePersistAssistantMessage(event, { conversationId, model: servedModel, autoCompressThreshold, systemPrompt: finalSystemPrompt, messageId: bodyAssistantMessageId });
+            capturedFinishEvent = event;
+            // Generative-UI turns persist from createUIMessageStream's own
+            // onFinish instead (below), using the post-pipeJsonRender
+            // text/data-spec split rather than this raw pre-split text —
+            // otherwise reload would show literal JSONL patch lines.
+            if (!generativeUiEnabled) {
+              assistantPersisted = true;
+              safePersistAssistantMessage(event, { conversationId, model: servedModel, autoCompressThreshold, systemPrompt: finalSystemPrompt, messageId: bodyAssistantMessageId });
+            }
 
             const text = (event as { text?: string }).text ?? "";
             const stepCount =
@@ -473,8 +513,8 @@ export async function POST(req: Request) {
         console.log(
           `[chat] model=${servedModel} tools=${Object.keys(aiTools).join(",")} ` +
             `kbId=${kbId || "none"} activeToolIds=${[...activeToolIds].join(",")} ` +
-            `mode=${toolMode} chatOnlyMode=${chatOnlyMode} supportsTools=${modelConfig.supportsTools} ` +
-            `useTools=${useTools}`,
+            `mode=${toolMode} chatOnlyMode=${chatOnlyMode} generativeUiEnabled=${generativeUiEnabled} ` +
+            `supportsTools=${modelConfig.supportsTools} useTools=${useTools}`,
         );
 
         // The AI SDK swallows stream errors into a generic "An error
@@ -482,14 +522,41 @@ export async function POST(req: Request) {
         // client. Auth failures happen mid-stream (after headers are already
         // sent, so the try/catch below never sees them) — surface a message
         // the user can actually act on instead of a silent/opaque toast.
-        const response = result.toUIMessageStreamResponse({
-          onError: (streamError) => {
-            const rawMsg =
-              streamError instanceof Error ? streamError.message : String(streamError);
-            console.error(`[chat] stream error on ${servedModel}:`, rawMsg);
-            return friendlyProviderErrorMessage(rawMsg, { servedModel, isOllama }) ?? rawMsg;
-          },
-        });
+        const onStreamError = (streamError: unknown) => {
+          const rawMsg =
+            streamError instanceof Error ? streamError.message : String(streamError);
+          console.error(`[chat] stream error on ${servedModel}:`, rawMsg);
+          return friendlyProviderErrorMessage(rawMsg, { servedModel, isOllama }) ?? rawMsg;
+        };
+
+        // Generative UI (json-render inline mode) needs its response built
+        // through createUIMessageStream so pipeJsonRender can split prose
+        // from JSONL patches into separate `text`/`data-spec` parts before
+        // the client ever sees them. Every other turn keeps the direct,
+        // unchanged path.
+        const response = generativeUiEnabled
+          ? createUIMessageStreamResponse({
+              stream: createUIMessageStream({
+                execute: async ({ writer }) => {
+                  writer.merge(pipeJsonRender(result.toUIMessageStream()));
+                },
+                onError: onStreamError,
+                onFinish: ({ messages: finishedMessages }) => {
+                  if (!conversationId || assistantPersisted) return;
+                  assistantPersisted = true;
+                  const last = finishedMessages[finishedMessages.length - 1];
+                  safePersistAssistantMessage(capturedFinishEvent ?? { steps: [] }, {
+                    conversationId,
+                    model: servedModel,
+                    autoCompressThreshold,
+                    systemPrompt: finalSystemPrompt,
+                    messageId: bodyAssistantMessageId,
+                    overrideParts: (last?.parts as any[]) ?? [],
+                  });
+                },
+              }),
+            })
+          : result.toUIMessageStreamResponse({ onError: onStreamError });
 
         // If the client stops the generation, onFinish may not fire. Persist
         // whatever partial content we've accumulated so it isn't lost on refresh.
@@ -555,6 +622,7 @@ export async function POST(req: Request) {
         debugHeaders.set("X-Debug-Model", servedModel);
         debugHeaders.set("X-Debug-Chat-Only-Mode", String(chatOnlyMode));
         debugHeaders.set("X-Debug-Tool-Mode", toolMode);
+        debugHeaders.set("X-Debug-Generative-Ui-Enabled", String(generativeUiEnabled));
         debugHeaders.set("X-Debug-Supports-Tools", String(modelConfig.supportsTools));
         debugHeaders.set("X-Debug-Use-Tools", String(useTools));
         debugHeaders.set(

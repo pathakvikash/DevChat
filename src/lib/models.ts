@@ -1,165 +1,18 @@
+import { createHash } from "crypto";
 import { createOpenAI } from "@ai-sdk/openai";
 import { createOllama } from "ollama-ai-provider-v2";
+import {
+  PROVIDERS,
+  providerForModel,
+  bareModelId,
+  isChatModel,
+  type ProviderDef,
+} from "./providers";
+import { listCliModels, cliProviderForModel, createCliModel, type CliCatalogEntry } from "./cliProviders";
+import { detectionAvailable } from "./providerDetect";
 
 const ollamaUrl = process.env.OLLAMA_BASE_URL || "http://localhost:11434";
 const ollama = createOllama({ baseURL: `${ollamaUrl}/api` });
-
-// ----- OpenAI-Compatible External Providers -----
-interface ExternalProviderDef {
-  envKey: string;
-  envBaseUrl?: string;
-  defaultBaseUrl: string;
-  name: string;
-  providerLabel: string;
-  modelPrefix: string;
-  extraHeaders?: Record<string, string>;
-}
-
-function createExternalProvider(def: ExternalProviderDef) {
-  const envKey = process.env[def.envKey] || "";
-  const baseUrl = process.env[def.envBaseUrl || ""] || def.defaultBaseUrl;
-  let overrideKey: string | undefined;
-  let provider: ReturnType<typeof createOpenAI> | null = null;
-  const modelCache: Record<string, ModelConfig> = {};
-  let modelCatalog: ModelCatalogEntry[] = [];
-
-  function getEffectiveKey() {
-    return overrideKey || envKey;
-  }
-
-  function setKey(key?: string) {
-    const next = key || undefined;
-    if (next === overrideKey) return;
-    overrideKey = next;
-    provider = null;
-    // Cached model configs bind `model:` to the provider instance that was
-    // active when they were first added (see addModel). If the key changes
-    // (e.g. a valid key is added in Settings after an earlier request ran
-    // with no/invalid key), those cached configs would keep using the old
-    // key forever unless we drop them so they get rebuilt against the new
-    // provider on next use.
-    for (const id of Object.keys(modelCache)) delete modelCache[id];
-    modelCatalog = [];
-  }
-
-  function getProvider() {
-    const key = getEffectiveKey();
-    if (!provider) {
-      if (!key) {
-        throw new Error(`${def.envKey} is not set`);
-      }
-      provider = createOpenAI({
-        baseURL: baseUrl,
-        apiKey: key,
-        name: def.name,
-        fetch: async (url, init) => {
-          const headers = new Headers(init?.headers);
-          if (def.extraHeaders) {
-            for (const [k, v] of Object.entries(def.extraHeaders)) {
-              headers.set(k, v);
-            }
-          }
-          return fetch(url, { ...init, headers });
-        },
-      });
-    }
-    return provider;
-  }
-
-  function supportsToolsFromName(id: string, name: string): boolean {
-    // For external API providers (OpenRouter, NVIDIA NIM), virtually all
-    // models support tool calling. Assume true unless the name explicitly
-    // indicates no-tool models like "instruct" or "chat-bison".
-    const full = `${id} ${name}`.toLowerCase();
-    if (full.includes("instruct") || full.includes("chat-bison")) return false;
-    return true;
-  }
-
-  function addModel(
-    id: string,
-    name: string,
-    contextWindow: number,
-    pricing?: { prompt: string; completion: string },
-  ) {
-    const modelId = `${def.modelPrefix}/${id}`;
-    if (!modelCache[modelId]) {
-      const supportsTools =
-        getSupportsTools(id) ||
-        getSupportsTools(name) ||
-        getSupportsTools(`${id} ${name}`) ||
-        supportsToolsFromName(id, name);
-      const supportsVision = getSupportsVision(id) || getSupportsVision(name);
-      const supportsThinking =
-        getSupportsThinking(id) || getSupportsThinking(name);
-      modelCache[modelId] = {
-        id: modelId,
-        name,
-        provider: def.providerLabel,
-        model: getProvider().chat(id),
-        costPer1kInputTokens: pricing ? parseFloat(pricing.prompt) || 0 : 0,
-        costPer1kOutputTokens: pricing
-          ? parseFloat(pricing.completion) || 0
-          : 0,
-        maxTokens: 4096,
-        contextWindow,
-        supportsTools,
-        supportsVision,
-        supportsThinking,
-      };
-      modelCatalog.push({
-        id: modelId,
-        name,
-        provider: def.providerLabel,
-        contextWindow,
-        supportsTools,
-        supportsVision,
-        supportsThinking,
-      });
-    }
-  }
-
-  return {
-    get isAvailable() {
-      return !!getEffectiveKey();
-    },
-    get envKey() {
-      return def.envKey;
-    },
-    get modelPrefix() {
-      return def.modelPrefix;
-    },
-    get modelCache() {
-      return modelCache;
-    },
-    get modelCatalog() {
-      return modelCatalog;
-    },
-    getProvider,
-    setKey,
-    addModel,
-  };
-}
-
-const openRouter = createExternalProvider({
-  envKey: "OPENROUTER_API_KEY",
-  defaultBaseUrl: "https://openrouter.ai/api/v1",
-  name: "openrouter",
-  providerLabel: "OpenRouter",
-  modelPrefix: "openrouter",
-  extraHeaders: {
-    "HTTP-Referer": "http://localhost:3000",
-    "X-Title": "DevChat",
-  },
-});
-
-export const nvidiaNim = createExternalProvider({
-  envKey: "NVIDIA_NIM_API_KEY",
-  envBaseUrl: "NVIDIA_NIM_BASE_URL",
-  defaultBaseUrl: "https://integrate.api.nvidia.com/v1",
-  name: "nvidia-nim",
-  providerLabel: "NVIDIA NIM",
-  modelPrefix: "nvidia-nim",
-});
 
 export interface ModelConfig {
   id: string;
@@ -175,6 +28,16 @@ export interface ModelConfig {
   supportsThinking?: boolean;
 }
 
+export interface ModelCatalogEntry {
+  id: string;
+  name: string;
+  provider: string;
+  contextWindow: number;
+  supportsTools?: boolean;
+  supportsVision?: boolean;
+  supportsThinking?: boolean;
+}
+
 export interface OllamaModelInfo {
   name: string;
   size: number;
@@ -184,73 +47,7 @@ export interface OllamaModelInfo {
   contextWindow?: number;
 }
 
-const STATIC_MODELS: Record<string, ModelConfig> = {
-  // "gpt-4o": {
-  //   id: "gpt-4o",
-  //   name: "GPT-4o",
-  //   provider: "openai",
-  //   model: openai("gpt-4o"),
-  //   costPer1kInputTokens: 0.005,
-  //   costPer1kOutputTokens: 0.015,
-  //   maxTokens: 4096,
-  //   contextWindow: 128000,
-  // },
-  // "gpt-4o-mini": {
-  //   id: "gpt-4o-mini",
-  //   name: "GPT-4o Mini",
-  //   provider: "openai",
-  //   model: openai("gpt-4o-mini"),
-  //   costPer1kInputTokens: 0.00015,
-  //   costPer1kOutputTokens: 0.0006,
-  //   maxTokens: 4096,
-  //   contextWindow: 128000,
-  // },
-  // "claude-sonnet": {
-  //   id: "claude-sonnet",
-  //   name: "Claude 3.5 Sonnet",
-  //   provider: "anthropic",
-  //   model: anthropic("claude-3-5-sonnet-20241022"),
-  //   costPer1kInputTokens: 0.003,
-  //   costPer1kOutputTokens: 0.015,
-  //   maxTokens: 4096,
-  //   contextWindow: 200000,
-  // },
-  // "claude-opus": {
-  //   id: "claude-opus",
-  //   name: "Claude 3 Opus",
-  //   provider: "anthropic",
-  //   model: anthropic("claude-3-opus-20250219"),
-  //   costPer1kInputTokens: 0.015,
-  //   costPer1kOutputTokens: 0.075,
-  //   maxTokens: 4096,
-  //   contextWindow: 200000,
-  // },
-  // "gemini-pro": {
-  //   id: "gemini-pro",
-  //   name: "Gemini 1.5 Pro",
-  //   provider: "google",
-  //   model: google("gemini-1.5-pro"),
-  //   costPer1kInputTokens: 0.00075,
-  //   costPer1kOutputTokens: 0.003,
-  //   maxTokens: 4096,
-  //   contextWindow: 1000000,
-  // },
-  // "gemini-flash": {
-  //   id: "gemini-flash",
-  //   name: "Gemini 1.5 Flash",
-  //   provider: "google",
-  //   model: google("gemini-1.5-flash"),
-  //   costPer1kInputTokens: 0.000075,
-  //   costPer1kOutputTokens: 0.0003,
-  //   maxTokens: 4096,
-  //   contextWindow: 1000000,
-  // },
-};
-
-const ollamaModelCache: Record<string, ModelConfig> = {};
-let ollamaModelInfoCache: OllamaModelInfo[] = [];
-let ollamaModelsFetchedAt = 0;
-const OLLAMA_CACHE_TTL = 30_000; // 30 seconds
+// ─── Capability heuristics (shared by Ollama and hosted providers) ──────────
 
 function getDefaultContextWindow(modelName: string): number {
   const name = modelName.toLowerCase();
@@ -317,8 +114,16 @@ export function getSupportsThinking(modelName: string): boolean {
     return true;
   if (name.includes("qwq")) return true;
   if (name.includes("thinking")) return true;
+  if (/^o\d/.test(name)) return true; // OpenAI o1/o3/o4 reasoning models
   return false;
 }
+
+// ─── Ollama (local, discovered via /api/tags) ───────────────────────────────
+
+const ollamaModelCache: Record<string, ModelConfig> = {};
+let ollamaModelInfoCache: OllamaModelInfo[] = [];
+let ollamaModelsFetchedAt = 0;
+const OLLAMA_CACHE_TTL = 30_000; // 30 seconds
 
 function createOllamaModelConfig(modelInfo: OllamaModelInfo): ModelConfig {
   const modelName = modelInfo.name;
@@ -327,7 +132,7 @@ function createOllamaModelConfig(modelInfo: OllamaModelInfo): ModelConfig {
   return {
     id: `ollama/${modelName}`,
     name: modelName.replace(":latest", ""),
-    provider: "ollama",
+    provider: "Ollama",
     model: ollama(modelName),
     costPer1kInputTokens: 0,
     costPer1kOutputTokens: 0,
@@ -434,114 +239,204 @@ export async function fetchOllamaModels(): Promise<OllamaModelInfo[]> {
   }
 }
 
-export function getOllamaModelInfos(): OllamaModelInfo[] {
-  return ollamaModelInfoCache;
+export async function initializeOllamaModels(): Promise<void> {
+  const models = await fetchOllamaModels();
+  for (const modelInfo of models) {
+    const modelId = `ollama/${modelInfo.name}`;
+    ollamaModelCache[modelId] = createOllamaModelConfig(modelInfo);
+  }
 }
 
-interface ProviderModelItem {
+// ─── Hosted providers (OpenAI-compatible, bring-your-own-key) ───────────────
+
+/** Resolved credentials per provider id. Built per request in apiKeys.ts. */
+export type ProviderCreds = Record<string, { apiKey: string; baseUrl: string }>;
+
+export interface ProviderStatus {
+  id: string;
+  label: string;
+  configured: boolean;
+  modelCount: number;
+  error?: string;
+  /** "cli" = an installed coding-agent CLI run locally, not a keyed API. */
+  kind?: "cli";
+}
+
+function cliModelConfig(e: CliCatalogEntry): ModelConfig {
+  return {
+    id: e.id,
+    name: e.name,
+    provider: e.provider,
+    model: e.model,
+    costPer1kInputTokens: 0,
+    costPer1kOutputTokens: 0,
+    maxTokens: 4096,
+    contextWindow: e.contextWindow,
+    // DevChat's tools reach the CLI through a prompt protocol (see
+    // cliProviders.ts); the CLI's own file/shell tools stay disabled.
+    supportsTools: true,
+    supportsVision: false,
+    // Thinking is surfaced where the CLI exposes it (OpenCode text, Claude
+    // Code token count) and "reasoning effort" applies to all three.
+    supportsThinking: true,
+  };
+}
+
+/** Server-wide credentials from env vars, or undefined when not set. */
+export function envCredsFor(def: ProviderDef): { apiKey: string; baseUrl: string } | undefined {
+  const apiKey = process.env[def.envKey] || "";
+  const baseUrl = (def.envBaseUrl && process.env[def.envBaseUrl]) || def.baseUrl || "";
+  if (!baseUrl) return undefined;
+  if (!apiKey && !def.keyOptional) return undefined;
+  return { apiKey, baseUrl };
+}
+
+// Each provider's /models response, cached per (provider, base URL, key) so a
+// chat turn doesn't re-download OpenRouter's ~1 MB catalog every time. Keyed
+// by a hash so raw keys never sit in a Map.
+const catalogCache = new Map<string, { at: number; entries: ModelCatalogEntry[] }>();
+const CATALOG_TTL = 5 * 60_000;
+
+function cacheKey(def: ProviderDef, cred: { apiKey: string; baseUrl: string }): string {
+  const digest = createHash("sha256").update(cred.apiKey).digest("hex").slice(0, 16);
+  return `${def.id}|${cred.baseUrl}|${digest}`;
+}
+
+function requestHeaders(def: ProviderDef, apiKey: string): Record<string, string> {
+  return { Authorization: `Bearer ${apiKey}`, ...def.headers?.(apiKey) };
+}
+
+interface UpstreamModel {
   id?: string;
   name?: string;
+  display_name?: string;
   context_length?: number;
-  pricing?: { prompt: string; completion: string };
+  pricing?: { prompt?: string; completion?: string };
 }
 
-async function initializeProviderModels(opts: {
-  apiKey?: string;
-  provider: { envKey: string; setKey: (key?: string) => void };
-  url: string;
-  buildHeaders: (key: string) => Record<string, string>;
-  httpErrorLabel: string;
-  logLabel: string;
-  onModel: (m: ProviderModelItem) => void;
-}): Promise<void> {
-  const key = opts.apiKey || process.env[opts.provider.envKey] || "";
-  if (!key) return;
-  if (opts.apiKey) opts.provider.setKey(opts.apiKey);
-  try {
-    const response = await fetch(opts.url, {
-      headers: opts.buildHeaders(key),
-      signal: AbortSignal.timeout(10000),
-    });
-    if (!response.ok)
-      throw new Error(`${opts.httpErrorLabel} API error: ${response.status}`);
-
-    const data = await response.json();
-    for (const m of data.data || []) {
-      opts.onModel(m);
-    }
-  } catch (error) {
-    console.error(`Failed to fetch ${opts.logLabel} models:`, error);
+function toCatalogEntry(def: ProviderDef, m: UpstreamModel): ModelCatalogEntry | null {
+  if (!m.id) return null;
+  // Gemini's compat endpoint returns "models/gemini-..." but accepts bare ids.
+  const upstreamId = m.id.replace(/^models\//, "");
+  if (!isChatModel(def.id, upstreamId)) return null;
+  if (def.id === "openrouter" && !upstreamId.includes("/")) return null;
+  if (def.freeOnly) {
+    const p = m.pricing || {};
+    if (parseFloat(p.prompt || "0") !== 0 || parseFloat(p.completion || "0") !== 0) return null;
   }
+  const name = m.display_name || m.name || upstreamId;
+  const haystack = `${upstreamId} ${name}`;
+  return {
+    id: `${def.id}/${upstreamId}`,
+    name,
+    provider: def.label,
+    contextWindow: m.context_length || def.defaultContextWindow,
+    // Hosted chat models nearly all support tool calling; only the explicit
+    // completion-style ones don't.
+    supportsTools: getSupportsTools(haystack) || !/instruct|chat-bison/i.test(haystack),
+    supportsVision: def.vision || getSupportsVision(haystack),
+    supportsThinking: getSupportsThinking(haystack),
+  };
 }
 
-export async function initializeOpenRouterModels(apiKey?: string): Promise<void> {
-  await initializeProviderModels({
-    apiKey,
-    provider: openRouter,
-    url: "https://openrouter.ai/api/v1/models",
-    buildHeaders: (key) => ({
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${key}`,
+async function fetchCatalog(
+  def: ProviderDef,
+  cred: { apiKey: string; baseUrl: string },
+): Promise<ModelCatalogEntry[]> {
+  const key = cacheKey(def, cred);
+  const hit = catalogCache.get(key);
+  if (hit && Date.now() - hit.at < CATALOG_TTL) return hit.entries;
+
+  const res = await fetch(`${cred.baseUrl.replace(/\/$/, "")}/models`, {
+    headers: requestHeaders(def, cred.apiKey),
+    signal: AbortSignal.timeout(10000),
+  });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  const data = await res.json();
+  // OpenAI-style `{ data: [...] }`; a few servers return a bare array.
+  const items: UpstreamModel[] = Array.isArray(data) ? data : data.data || [];
+  const entries = items
+    .map((m) => toCatalogEntry(def, m))
+    .filter((e): e is ModelCatalogEntry => e !== null);
+  catalogCache.set(key, { at: Date.now(), entries });
+  return entries;
+}
+
+function cachedEntry(def: ProviderDef, cred: { apiKey: string; baseUrl: string }, modelId: string) {
+  return catalogCache.get(cacheKey(def, cred))?.entries.find((e) => e.id === modelId);
+}
+
+function providerClient(def: ProviderDef, cred: { apiKey: string; baseUrl: string }) {
+  return createOpenAI({
+    baseURL: cred.baseUrl,
+    apiKey: cred.apiKey,
+    name: def.id,
+    headers: def.headers?.(cred.apiKey),
+  });
+}
+
+function toModelConfig(
+  def: ProviderDef,
+  entry: ModelCatalogEntry,
+  client: ReturnType<typeof createOpenAI>,
+): ModelConfig {
+  return {
+    ...entry,
+    model: client.chat(bareModelId(entry.id)),
+    costPer1kInputTokens: 0,
+    costPer1kOutputTokens: 0,
+    maxTokens: 4096,
+    supportsTools: entry.supportsTools ?? true,
+  };
+}
+
+/**
+ * Every model the given credentials can reach: local Ollama plus each hosted
+ * provider's live catalog. Provider failures (bad key, network) are reported
+ * in `status` rather than thrown so one broken key doesn't hide the rest.
+ */
+export async function listModels(
+  creds: ProviderCreds,
+): Promise<{ models: ModelConfig[]; status: ProviderStatus[] }> {
+  await initializeOllamaModels();
+  const models: ModelConfig[] = Object.values(ollamaModelCache);
+
+  // Coding-agent CLIs installed on this machine (local server only).
+  const cliStatus: ProviderStatus[] = [];
+  if (detectionAvailable()) {
+    const cli = await listCliModels();
+    for (const e of cli.entries) models.push(cliModelConfig(e));
+    cliStatus.push(...cli.status);
+  }
+
+  const status = await Promise.all(
+    PROVIDERS.map(async (def): Promise<ProviderStatus> => {
+      const cred = creds[def.id];
+      if (!cred) return { id: def.id, label: def.label, configured: false, modelCount: 0 };
+      try {
+        const entries = await fetchCatalog(def, cred);
+        const client = providerClient(def, cred);
+        for (const e of entries) models.push(toModelConfig(def, e, client));
+        return { id: def.id, label: def.label, configured: true, modelCount: entries.length };
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        console.warn(`[models] ${def.label} unavailable: ${message}`);
+        return { id: def.id, label: def.label, configured: true, modelCount: 0, error: message };
+      }
     }),
-    httpErrorLabel: "OpenRouter",
-    logLabel: "OpenRouter",
-    onModel: (m) => {
-      const p = m.pricing || { prompt: "0", completion: "0" };
-      const isFree =
-        parseFloat(p.prompt) === 0 && parseFloat(p.completion) === 0;
-      if (!isFree) return;
-      if (!m.id || !m.id.includes("/")) return;
-      openRouter.addModel(m.id, m.name || m.id, m.context_length || 128000, p);
-    },
-  });
+  );
+
+  return { models, status: [...status, ...cliStatus] };
 }
 
-export async function initializeNvidiaNimModels(apiKey?: string): Promise<void> {
-  const baseUrl =
-    process.env.NVIDIA_NIM_BASE_URL || "https://integrate.api.nvidia.com/v1";
-  await initializeProviderModels({
-    apiKey,
-    provider: nvidiaNim,
-    url: `${baseUrl}/models`,
-    buildHeaders: (key) => ({ Authorization: `Bearer ${key}` }),
-    httpErrorLabel: "NVIDIA",
-    logLabel: "NVIDIA NIM",
-    onModel: (m) => {
-      if (!m.id) return;
-      nvidiaNim.addModel(m.id, m.id, m.context_length || 128000);
-    },
-  });
-}
-
-export function getAllModels(): ModelConfig[] {
-  const staticModels = Object.values(STATIC_MODELS);
-  const ollamaModels = Object.values(ollamaModelCache);
-  const openRouterModels = Object.values(openRouter.modelCache);
-  const nvidiaModels = Object.values(nvidiaNim.modelCache);
-  return [
-    ...staticModels,
-    ...ollamaModels,
-    ...openRouterModels,
-    ...nvidiaModels,
-  ];
-}
-
-export function getModel(modelId: string): ModelConfig {
-  if (STATIC_MODELS[modelId]) {
-    return STATIC_MODELS[modelId];
-  }
-
-  if (ollamaModelCache[modelId]) {
-    return ollamaModelCache[modelId];
-  }
-
-  if (openRouter.modelCache[modelId]) {
-    return openRouter.modelCache[modelId];
-  }
-
-  if (nvidiaNim.modelCache[modelId]) {
-    return nvidiaNim.modelCache[modelId];
-  }
+/**
+ * Build the runnable config for one model id. Hosted models are constructed
+ * fresh from `creds` (falling back to env vars) so concurrent requests from
+ * different users never share a client or a key. Throws when the id is
+ * unknown or its provider has no credentials.
+ */
+export function getModel(modelId: string, creds: ProviderCreds = {}): ModelConfig {
+  if (ollamaModelCache[modelId]) return ollamaModelCache[modelId];
 
   if (modelId.startsWith("ollama/")) {
     const modelName = modelId.replace("ollama/", "");
@@ -554,68 +449,38 @@ export function getModel(modelId: string): ModelConfig {
       ollamaModelCache[modelId] = config;
       return config;
     }
+    throw new Error(`Model ${modelId} not found in Ollama`);
   }
 
-  if (modelId.startsWith("openrouter/") && openRouter.isAvailable) {
-    const bareId = modelId.replace("openrouter/", "");
-    openRouter.addModel(bareId, bareId, 128000);
-    return openRouter.modelCache[modelId];
+  const cliDef = cliProviderForModel(modelId);
+  if (cliDef) {
+    if (!detectionAvailable()) {
+      throw new Error(`${cliDef.label} is only available when DevChat runs on your own machine`);
+    }
+    const upstreamId = bareModelId(modelId);
+    return cliModelConfig({
+      id: modelId,
+      name: upstreamId,
+      provider: cliDef.label,
+      contextWindow: cliDef.contextWindow,
+      model: createCliModel(cliDef, upstreamId),
+    });
   }
 
-  if (modelId.startsWith("nvidia-nim/") && nvidiaNim.isAvailable) {
-    const bareId = modelId.replace("nvidia-nim/", "");
-    nvidiaNim.addModel(bareId, bareId, 128000);
-    return nvidiaNim.modelCache[modelId];
-  }
+  const def = providerForModel(modelId);
+  if (!def) throw new Error(`Model ${modelId} not found`);
+  const cred = creds[def.id] ?? envCredsFor(def);
+  if (!cred) throw new Error(`${def.label} is not configured`);
 
-  throw new Error(
-    `Model ${modelId} not found. Available: ${[
-      ...Object.keys(STATIC_MODELS),
-      ...Object.keys(ollamaModelCache),
-      ...Object.keys(openRouter.modelCache),
-      ...Object.keys(nvidiaNim.modelCache),
-    ].join(", ")}`,
-  );
-}
-
-export async function initializeOllamaModels(): Promise<void> {
-  const models = await fetchOllamaModels();
-  for (const modelInfo of models) {
-    const modelId = `ollama/${modelInfo.name}`;
-    ollamaModelCache[modelId] = createOllamaModelConfig(modelInfo);
-  }
-}
-
-export interface ModelCatalogEntry {
-  id: string;
-  name: string;
-  provider: string;
-  contextWindow: number;
-  supportsTools?: boolean;
-  supportsVision?: boolean;
-  supportsThinking?: boolean;
-}
-
-export function getDefaultOllamaContextWindow(modelName: string): number {
-  const name = modelName.toLowerCase();
-  if (name.includes("llama3.2") || name.includes("llama3.1")) return 131072;
-  if (name.includes("llama3")) return 8192;
-  if (name.includes("qwen") || name.includes("ministral")) return 32768;
-  if (name.includes("gemma")) return 8192;
-  if (name.includes("phi3")) return 4096;
-  return 8192;
-}
-
-export function mergeAndDedupeModels<T extends { id: string }>(
-  staticEntries: T[],
-  dynamicEntries: T[],
-): T[] {
-  const seen = new Set<string>();
-  const out: T[] = [];
-  for (const entry of [...staticEntries, ...dynamicEntries]) {
-    if (seen.has(entry.id)) continue;
-    seen.add(entry.id);
-    out.push(entry);
-  }
-  return out;
+  const upstreamId = bareModelId(modelId);
+  const entry: ModelCatalogEntry = cachedEntry(def, cred, modelId) ?? {
+    id: modelId,
+    name: upstreamId,
+    provider: def.label,
+    contextWindow: def.defaultContextWindow,
+    supportsTools: true,
+    supportsVision: def.vision || getSupportsVision(upstreamId),
+    supportsThinking: getSupportsThinking(upstreamId),
+  };
+  return toModelConfig(def, entry, providerClient(def, cred));
 }

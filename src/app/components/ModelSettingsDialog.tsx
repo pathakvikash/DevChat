@@ -32,10 +32,12 @@ interface ModelSettingsDialogProps {
   currentTopP: number | undefined;
   currentMaxTokens: number | undefined;
   currentChatOnlyMode: boolean;
+  currentGenerativeUiEnabled?: boolean;
   currentKbId: string | null;
   currentMaxToolCalls?: number;
   currentFallbackModel?: string | null;
   currentPersona?: string | null;
+  currentReasoningEffort?: string | null;
   onSave: (settings: {
     model?: string;
     systemPrompt?: string;
@@ -44,10 +46,12 @@ interface ModelSettingsDialogProps {
     topP?: number;
     maxTokens?: number;
     chatOnlyMode?: boolean;
+    generativeUiEnabled?: boolean;
     kbId?: string | null;
     maxToolCalls?: number;
     fallbackModel?: string | null;
     persona?: string | null;
+    reasoningEffort?: string | null;
   }) => void;
 }
 
@@ -62,10 +66,12 @@ export default function ModelSettingsDialog({
   currentTopP,
   currentMaxTokens,
   currentChatOnlyMode,
+  currentGenerativeUiEnabled,
   currentKbId,
   currentMaxToolCalls,
   currentFallbackModel,
   currentPersona,
+  currentReasoningEffort,
   onSave,
 }: ModelSettingsDialogProps) {
   const [selectedModel, setSelectedModel] = useState(currentModel);
@@ -80,8 +86,10 @@ export default function ModelSettingsDialog({
     currentMaxTokens ? String(currentMaxTokens) : "",
   );
   const [chatOnlyMode, setChatOnlyMode] = useState(currentChatOnlyMode);
+  const [generativeUiEnabled, setGenerativeUiEnabled] = useState(currentGenerativeUiEnabled ?? false);
   const [maxToolCalls, setMaxToolCalls] = useState(currentMaxToolCalls ?? 5);
   const [fallbackModel, setFallbackModel] = useState<string>(currentFallbackModel || "");
+  const [reasoningEffort, setReasoningEffort] = useState<string>(currentReasoningEffort || "");
   const [kbId, setKbId] = useState<string>(currentKbId || "");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -114,13 +122,15 @@ export default function ModelSettingsDialog({
       setTopP(currentTopP ?? 0.9);
       setMaxTokens(currentMaxTokens ? String(currentMaxTokens) : "");
       setChatOnlyMode(currentChatOnlyMode);
+      setGenerativeUiEnabled(currentGenerativeUiEnabled ?? false);
       setMaxToolCalls(currentMaxToolCalls ?? 5);
       setFallbackModel(currentFallbackModel || "");
       setKbId(currentKbId || "");
       setPersona(currentPersona || "");
+      setReasoningEffort(currentReasoningEffort || "");
       setError(null);
     }
-  }, [isOpen, currentModel, currentSystemPrompt, currentTemperature, currentContextLength, currentTopP, currentMaxTokens, currentChatOnlyMode, currentKbId, currentMaxToolCalls, currentFallbackModel, currentPersona, models]);
+  }, [isOpen, currentModel, currentSystemPrompt, currentTemperature, currentContextLength, currentTopP, currentMaxTokens, currentChatOnlyMode, currentGenerativeUiEnabled, currentKbId, currentMaxToolCalls, currentFallbackModel, currentPersona, currentReasoningEffort, models]);
   const modelInfo = useMemo<ModelInfo | null>(
     () => models.find((m) => m.id === selectedModel) || null,
     [selectedModel, models],
@@ -159,10 +169,12 @@ export default function ModelSettingsDialog({
           topP,
           maxTokens: maxTokens ? parseInt(maxTokens, 10) : undefined,
           chatOnlyMode,
+          generativeUiEnabled,
           kbId: kbId || null,
           maxToolCalls,
           fallbackModel: fallbackModel || null,
           persona: persona || null,
+          reasoningEffort: reasoningEffort || null,
         }),
       });
       if (!res.ok) throw new Error("Failed to save settings");
@@ -174,10 +186,12 @@ export default function ModelSettingsDialog({
         topP,
         maxTokens: maxTokens ? parseInt(maxTokens, 10) : undefined,
         chatOnlyMode,
+        generativeUiEnabled,
         kbId: kbId || null,
         maxToolCalls,
         fallbackModel: fallbackModel || null,
         persona: persona || null,
+        reasoningEffort: reasoningEffort || null,
       });
       toast("Conversation saved", "success");
       onClose();
@@ -347,8 +361,13 @@ export default function ModelSettingsDialog({
             maxContextWindow={modelInfo?.contextWindow ?? 0}
             chatOnlyMode={chatOnlyMode}
             onChatOnlyModeChange={setChatOnlyMode}
+            generativeUiEnabled={generativeUiEnabled}
+            onGenerativeUiEnabledChange={setGenerativeUiEnabled}
             maxToolCalls={maxToolCalls}
             onMaxToolCallsChange={setMaxToolCalls}
+            reasoningEffort={reasoningEffort}
+            onReasoningEffortChange={setReasoningEffort}
+            showReasoningEffort={!!modelInfo?.supportsThinking}
           />
 
           {error && <ErrorBanner>{error}</ErrorBanner>}

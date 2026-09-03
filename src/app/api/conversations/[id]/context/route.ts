@@ -4,6 +4,7 @@ import { calculateDetailedContextUsage } from "@/lib/tokens";
 import { buildSystemPrompt } from "@/lib/chat/buildSystemPrompt";
 import { resolveActiveToolIds } from "@/lib/chat/buildTools";
 import { getModel } from "@/lib/models";
+import { resolveProviderCreds } from "@/lib/apiKeys";
 import { requireUserId } from "@/lib/auth";
 
 function parseListParam(raw: string | null): string[] {
@@ -46,7 +47,7 @@ export async function GET(
 
     let modelConfig;
     try {
-      modelConfig = getModel(conversation.model);
+      modelConfig = getModel(conversation.model, await resolveProviderCreds(userId));
     } catch {
       modelConfig = null;
     }

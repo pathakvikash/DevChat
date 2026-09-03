@@ -32,7 +32,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   try {
     const userId = await requireUserId();
     const { id } = await params;
-    const { title, model, persona, systemPrompt, webSearch, temperature, maxTokens, kbId, contextLength, topP, chatOnlyMode, pinned, archived, note, maxToolCalls, fallbackModel } =
+    const { title, model, persona, systemPrompt, webSearch, temperature, maxTokens, kbId, contextLength, topP, chatOnlyMode, generativeUiEnabled, pinned, archived, note, maxToolCalls, fallbackModel, reasoningEffort } =
       await req.json();
 
     if (kbId) {
@@ -59,11 +59,13 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
         ...(contextLength !== undefined && { contextLength }),
         ...(topP !== undefined && { topP }),
         ...(chatOnlyMode !== undefined && { chatOnlyMode }),
+        ...(generativeUiEnabled !== undefined && { generativeUiEnabled }),
         ...(pinned !== undefined && { pinned }),
         ...(archived !== undefined && { archived }),
         ...(note !== undefined && { note }),
         ...(maxToolCalls !== undefined && { maxToolCalls }),
         ...(fallbackModel !== undefined && { fallbackModel: fallbackModel || null }),
+        ...(reasoningEffort !== undefined && { reasoningEffort: reasoningEffort || null }),
       },
     });
 

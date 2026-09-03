@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getModel } from "@/lib/models";
+import { resolveProviderCreds } from "@/lib/apiKeys";
+import { requireUserId } from "@/lib/auth";
 import { extractKnownFileText, validateFileSize } from "@/lib/file-extract";
 
 export const runtime = "nodejs";
@@ -13,6 +15,7 @@ const ABSOLUTE_MAX_CHARS = 200_000;
 
 export async function POST(req: NextRequest) {
   try {
+    const userId = await requireUserId();
     const formData = await req.formData();
     const file = formData.get("file") as File | null;
     const modelId = (formData.get("modelId") as string | null) || undefined;
@@ -56,7 +59,7 @@ export async function POST(req: NextRequest) {
     let contextWindow = 8192;
     if (modelId) {
       try {
-        contextWindow = getModel(modelId).contextWindow;
+        contextWindow = getModel(modelId, await resolveProviderCreds(userId)).contextWindow;
       } catch {
         // modelId might be unknown to getModel (e.g. deleted). Fall through.
       }
