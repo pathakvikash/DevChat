@@ -452,7 +452,10 @@ export function flattenPrompt(prompt: Prompt): { system: string; user: string; w
     turns.length <= 1 && !sawTools
       ? (turns[0]?.text ?? "")
       : "Continue this conversation as the Assistant. Reply with only your next Assistant message; do not repeat the transcript." +
-        (sawTools ? " Tool results below are the outcomes of tool calls you made; use them to answer." : "") +
+        (sawTools
+          ? " Tool results below are the outcomes of tool calls you made; use them to answer in prose now," +
+            " and do not repeat a tool call you already made with the same arguments."
+          : "") +
         "\n\n" +
         turns.map((t) => `${t.role}: ${t.text}`).join("\n\n") +
         "\n\nAssistant:";
@@ -465,13 +468,13 @@ export function flattenPrompt(prompt: Prompt): { system: string; user: string; w
 }
 
 // ─── Tool calling over plain text ────────────────────────────────────────────
-//
-// CLIs return text, and their own tools are switched off, so DevChat's tools
-// are offered as a prompt protocol: the model ends its reply with one fenced
-// ```tool_call block; the scanner below turns that into an AI SDK tool call,
-// the SDK runs the tool, and the next turn's transcript carries the result.
+
+// CLIs return text with their own tools off, so DevChat's tools are a prompt protocol:
+// the model emits a ```tool_call fence, the scanner below turns it into an SDK call.
 
 const FENCE = "```tool_call";
+/** Shown in place of a block that opened like a tool call but could not be read as one. */
+const BAD_CALL = "(tool call could not be parsed)";
 
 type FunctionTool = Extract<NonNullable<LanguageModelV3CallOptions["tools"]>[number], { type: "function" }>;
 
@@ -497,22 +500,54 @@ export interface ParsedToolCall {
   args: unknown;
 }
 
-/** Length of the longest suffix of `s` that could be the start of FENCE. */
-function partialFenceLen(s: string): number {
-  for (let n = Math.min(FENCE.length - 1, s.length); n > 0; n--) {
-    if (FENCE.startsWith(s.slice(-n))) return n;
+// Models fluff the protocol, so markers are read loosely: fenced or bare, Cyrillic
+// lookalikes folded, plus Anthropic's `<function_calls>` wrapper, else calls leak as text.
+const XML_MARKER = "<function_calls>";
+const MARKER_RE = /(?:`{3,}[ \t]*|\n[ \t]*)tool_call\b[ \t]*|<function_calls>[ \t]*/i;
+/** Whatever closes a call block, stripped once its arguments have been read. */
+const CLOSER_RE = /^[ \t]*\n?[ \t]*(?:`{3,}|<\/function_calls>)[ \t]*/;
+const HOMOGLYPHS: Record<string, string> = { "т": "t", "о": "o", "а": "a", "с": "c", "ӏ": "l" };
+const deHomoglyph = (s: string) => s.replace(/[тоасӏ]/g, (c) => HOMOGLYPHS[c]);
+
+/** Length of the tail of `s` that could still grow into a marker. */
+function partialMarkerLen(s: string): number {
+  const n = deHomoglyph(s);
+  const lineAt = n.lastIndexOf("\n") + 1;
+  for (let k = Math.min(Math.max(FENCE.length, XML_MARKER.length) - 1, n.length); k > 0; k--) {
+    const tail = n.slice(-k);
+    // A fenced marker can start mid-line; a bare one only at a line start.
+    if (FENCE.startsWith(tail) || XML_MARKER.startsWith(tail)) return k;
+    if ("tool_call".startsWith(tail) && /^[ \t]*$/.test(n.slice(lineAt, n.length - k))) return k;
   }
   return 0;
 }
 
-/**
- * Splits streamed text into displayable text and at most one tool call.
- * Holds back a possible partial fence at the tail so the marker never leaks
- * to the reader; anything after a completed call is dropped.
- */
+/** Index just past the balanced object starting at `start`, or 0 if it is still incomplete. */
+function objectEnd(s: string, start: number): number {
+  let depth = 0;
+  let str = false;
+  let esc = false;
+  for (let i = start; i < s.length; i++) {
+    const c = s[i];
+    if (esc) esc = false;
+    else if (str) {
+      if (c === "\\") esc = true;
+      else if (c === '"') str = false;
+    } else if (c === '"') str = true;
+    else if (c === "{") depth++;
+    else if (c === "}" && --depth === 0) return i + 1;
+  }
+  return 0;
+}
+
+/** Splits streamed text into text and at most one tool call, holding back partial markers.
+ *  Anything after a completed call is dropped — it predates the tool result. */
 export class ToolCallScanner {
   private buf = "";
+  /** The marker text itself, kept so a block that turns out not to be a call reads normally. */
+  private head = "";
   private inTool = false;
+  private lineStart = true;
   private done = false;
 
   constructor(private readonly names: Set<string>) {}
@@ -520,54 +555,70 @@ export class ToolCallScanner {
   push(delta: string): { text: string; call?: ParsedToolCall } {
     if (this.done) return { text: "" };
     this.buf += delta;
-    if (!this.inTool) {
-      const i = this.buf.indexOf(FENCE);
-      if (i < 0) {
-        // Hold back a possible partial fence at the tail, and the whitespace
-        // just before it, so neither leaks if a tool_call block follows.
-        let keep = partialFenceLen(this.buf);
-        const before = this.buf.slice(0, this.buf.length - keep);
-        keep += before.length - before.trimEnd().length;
-        const text = this.buf.slice(0, this.buf.length - keep);
-        this.buf = this.buf.slice(this.buf.length - keep);
-        return { text };
-      }
-      const text = this.buf.slice(0, i).replace(/\s+$/, "");
-      this.buf = this.buf.slice(i);
-      this.inTool = true;
-      return { text, ...this.tryClose() };
+    if (this.inTool) {
+      const r = this.tryClose();
+      return { text: r.text ?? "", call: r.call };
     }
-    return { text: "", ...this.tryClose() };
+    // One character of context, so a marker at the very start of the buffer
+    // counts as line-initial only when the buffer really is at a line start.
+    const m = MARKER_RE.exec((this.lineStart ? "\n" : " ") + deHomoglyph(this.buf));
+    if (!m) {
+      // Hold back a possible partial marker at the tail, and the whitespace
+      // just before it, so neither leaks if a tool call follows.
+      let keep = partialMarkerLen(this.buf);
+      const before = this.buf.slice(0, this.buf.length - keep);
+      keep += before.length - before.trimEnd().length;
+      const text = this.buf.slice(0, this.buf.length - keep);
+      this.buf = this.buf.slice(this.buf.length - keep);
+      if (text) this.lineStart = text.endsWith("\n");
+      return { text };
+    }
+    const at = Math.max(0, m.index - 1);
+    const bodyAt = m.index + m[0].length - 1;
+    const text = this.buf.slice(0, at).replace(/\s+$/, "");
+    this.head = this.buf.slice(at, bodyAt);
+    this.buf = this.buf.slice(bodyAt);
+    this.inTool = true;
+    const r = this.tryClose();
+    return { text: text + (r.text ?? ""), call: r.call };
   }
 
   end(): { text: string; call?: ParsedToolCall } {
     if (this.done) return { text: "" };
-    const buf = this.buf;
-    this.buf = "";
-    if (!this.inTool) return { text: buf };
-    // Unterminated block: accept it if it parses, otherwise show it as text.
-    const nl = buf.indexOf("\n");
-    const call = nl >= 0 ? this.parse(buf.slice(nl + 1).replace(/```\s*$/, "")) : null;
+    if (!this.inTool) {
+      const text = this.buf;
+      this.buf = "";
+      return { text };
+    }
+    const raw = this.head + this.buf;
+    const started = this.buf.includes("{");
+    const r = this.tryClose();
     this.done = true;
-    return call ? { text: "", call } : { text: buf };
+    this.buf = "";
+    if (r.call) return { text: "", call: r.call };
+    if (r.text) return { text: r.text };
+    // Truncated arguments are a failed call; a marker with no JSON at all was
+    // never one, so keep that as text.
+    return { text: started ? BAD_CALL : raw };
   }
 
   private tryClose(): { text?: string; call?: ParsedToolCall } {
-    const nl = this.buf.indexOf("\n");
-    if (nl < 0) return {};
-    const close = this.buf.indexOf("```", nl + 1);
-    if (close < 0) return {};
-    const call = this.parse(this.buf.slice(nl + 1, close));
+    const start = this.buf.indexOf("{");
+    const end = start < 0 ? 0 : objectEnd(this.buf, start);
+    if (end <= 0) return {}; // no arguments yet, or still arriving
+    const call = this.parse(this.buf.slice(start, end));
     if (call) {
       this.done = true;
       this.buf = "";
       return { call };
     }
-    // Not a valid call: pass the block through as ordinary text and carry on.
-    const raw = this.buf.slice(0, close + 3);
-    this.buf = this.buf.slice(close + 3);
+    // It clearly was an attempted call, so say so rather than leak the
+    // protocol into the answer, and keep scanning after it.
+    this.buf = this.buf.slice(end).replace(CLOSER_RE, "");
+    this.head = "";
     this.inTool = false;
-    return { text: raw };
+    this.lineStart = false;
+    return { text: BAD_CALL };
   }
 
   private parse(body: string): ParsedToolCall | null {

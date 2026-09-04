@@ -1,7 +1,6 @@
 import {
   convertToModelMessages,
   streamText,
-  stepCountIs,
   createUIMessageStream,
   createUIMessageStreamResponse,
 } from "ai";
@@ -369,17 +368,17 @@ export async function POST(req: Request) {
                 return true;
               }
             }
-            // Local models (qwen3.5, llama3.1, etc.) often emit their chat
-            // template's stop token right after tool results, even after we've
-            // told them to "complete your response". The reliable workaround
-            // is to NOT honor that premature stop: keep the loop going, feed
-            // the model's own short text back in on the next step, and let it
-            // continue from where it cut off ("Based" → "Based on the …").
-            if (hadToolResult && text.length < 60) {
-              console.warn(
-                `[chat] Short response (${text.length} chars) after tool ` +
-                  `result — forcing continuation. text="${text.slice(0, 60).replace(/\n/g, " ")}"`,
-              );
+            // A step that ran tools needs a following step to read the results, or the
+            // turn ends on a bare tool card. Bounded by maxToolCalls and the loop guard.
+            if (hadToolResult) {
+              if (text.length < 60) {
+                // Local models often emit their chat template's stop token right
+                // after tool results; feeding the short text back lets them continue.
+                console.warn(
+                  `[chat] Short response (${text.length} chars) after tool ` +
+                    `result — forcing continuation. text="${text.slice(0, 60).replace(/\n/g, " ")}"`,
+                );
+              }
               return false;
             }
             // qwen and other small local models sometimes emit just "..." or a
@@ -538,7 +537,9 @@ export async function POST(req: Request) {
           ? createUIMessageStreamResponse({
               stream: createUIMessageStream({
                 execute: async ({ writer }) => {
-                  writer.merge(pipeJsonRender(result.toUIMessageStream()));
+                  // `toUIMessageStream` needs its own onError: it turns `error` parts into
+                  // text itself, so createUIMessageStream's onError never sees them.
+                  writer.merge(pipeJsonRender(result.toUIMessageStream({ onError: onStreamError })));
                 },
                 onError: onStreamError,
                 onFinish: ({ messages: finishedMessages }) => {

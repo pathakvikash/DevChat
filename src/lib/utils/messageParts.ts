@@ -51,6 +51,17 @@ function isToolPart(part: AnyPart): part is AnyPart & ToolPart {
   return typeof part?.type === "string" && part.type.startsWith("tool-");
 }
 
+/** Fire a follow-up after `executeCode` only; trailing reasoning/step-start parts don't
+ *  count as an answer. `askClarification` is excluded — the user's own reply sends it. */
+export function shouldAutoContinue(parts: AnyPart[] | undefined): boolean {
+  const tail = (parts ?? [])
+    .filter((p) => p?.type !== "reasoning" && p?.type !== "step-start")
+    .pop();
+  if (tail?.type !== "tool-executeCode") return false;
+  const { state } = tail as ToolPart;
+  return state === "output-available" || state === "result";
+}
+
 /**
  * Synthetic marker inserted by `buildMessagesFromConversation` so the
  * chat timeline can show a `CompressionEvent` card at the right point.

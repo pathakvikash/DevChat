@@ -5,6 +5,7 @@ import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport, generateId } from "ai";
 
 import { runCode } from "@/lib/sandbox";
+import { shouldAutoContinue, type AnyPart } from "@/lib/utils/messageParts";
 
 // Tracks the client-generated assistant message id per conversation so the
 // server can persist the DB message under the same id (see captureGenerateId).
@@ -103,17 +104,8 @@ export function useChatTransport(opts: ChatTransportOptions) {
     generateId: captureGenerateId,
     transport,
     sendAutomaticallyWhen: ({ messages: msgs }) => {
-      try {
-        const last = msgs[msgs.length - 1];
-        if (!last || last.role !== "assistant") return false;
-        const parts = (last.parts || []) as any[];
-        const tail = parts[parts.length - 1];
-        if (!tail || typeof tail.type !== "string") return false;
-        if (tail.type !== "tool-executeCode") return false;
-        return tail.state === "output-available" || tail.state === "result";
-      } catch {
-        return false;
-      }
+      const last = msgs[msgs.length - 1];
+      return last?.role === "assistant" && shouldAutoContinue(last.parts as AnyPart[]);
     },
     onToolCall: async ({ toolCall }) => {
       if (toolCall.toolName === "askClarification") return;

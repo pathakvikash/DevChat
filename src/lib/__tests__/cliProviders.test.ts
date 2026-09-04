@@ -199,9 +199,93 @@ describe("ToolCallScanner", () => {
     expect(r.text).toBe("");
   });
 
-  it("shows an invalid or unknown block as ordinary text", () => {
-    expect(feed(["```tool_call\n{not json}\n```", " after"]).text).toBe("```tool_call\n{not json}\n``` after");
-    expect(feed(['```tool_call\n{"name":"rm -rf","arguments":{}}\n```']).call).toBeUndefined();
+  it("reports an invalid or unknown block instead of leaking the protocol", () => {
+    expect(feed(["```tool_call\n{not json}\n```", " after"])).toEqual({
+      text: "(tool call could not be parsed) after",
+      call: undefined,
+    });
+    expect(feed(['```tool_call\n{"name":"rm -rf","arguments":{}}\n```'])).toEqual({
+      text: "(tool call could not be parsed)",
+      call: undefined,
+    });
+  });
+
+  it("accepts the arguments on the fence line, with or without a closing fence", () => {
+    const want = { name: "webSearch", args: { query: "bb agent" } };
+    expect(feed(['```tool_call {"name":"webSearch","arguments":{"query":"bb agent"}}\n```'])).toEqual({ text: "", call: want });
+    expect(feed(['```tool_call {"name":"webSearch","arguments":{"query":"bb agent"}}```'])).toEqual({ text: "", call: want });
+    expect(feed(['```tool_call {"name":"webSearch","arguments":{"query":"bb agent"}}'])).toEqual({ text: "", call: want });
+    // No newline before the closing fence, and none after it either.
+    expect(feed(['Looking.\n```tool_call\n{"name":"webSearch","arguments":{"query":"bb agent"}}```'])).toEqual({
+      text: "Looking.",
+      call: want,
+    });
+  });
+
+  it("takes a bare or homoglyphed marker as a call so it can never leak as text", () => {
+    // The reported failure: sonnet opened with a fence-less, Cyrillic-т marker
+    // and then repeated the call properly; the first copy leaked into the answer.
+    const raw =
+      'тool_call\n{"name":"webSearch","arguments":{"query":"GPT-6 Astra"}}\n\n' +
+      '```tool_call\n{"name":"webSearch","arguments":{"query":"GPT-6 Astra"}}\n```';
+    expect(feed([raw])).toEqual({ text: "", call: { name: "webSearch", args: { query: "GPT-6 Astra" } } });
+    expect(feed(["Let me look.\n", 'tool_call\n{"name":"webSearch","arguments":{}}'])).toEqual({
+      text: "Let me look.",
+      call: { name: "webSearch", args: {} },
+    });
+    // Mid-sentence, "tool_call" is just a word: no fence, no line start, no call.
+    expect(feed(["We call that a tool_call in the protocol."])).toEqual({
+      text: "We call that a tool_call in the protocol.",
+      call: undefined,
+    });
+  });
+
+  it("takes Anthropic's own <function_calls> wrapper as a call", () => {
+    // Models fall back to native tool-use syntax instead of the fence; unhandled, the
+    // calls leak into the answer as text and no tool runs.
+    const raw =
+      '<function_calls>\n[{"name": "webSearch", "arguments": {"query": "GPT-6 Astra"}}]\n</function_calls>' +
+      '<function_calls>\n[{"name": "webSearch", "arguments": {"query": "again"}}]\n</function_calls>\n\nI could not find it.';
+    expect(feed([raw])).toEqual({ text: "", call: { name: "webSearch", args: { query: "GPT-6 Astra" } } });
+    // Split across deltas, and with prose in front.
+    expect(feed(["Let me look.<function", "_calls>[{\"name\":\"webSearch\",", '"arguments":{}}]</function_calls>'])).toEqual({
+      text: "Let me look.",
+      call: { name: "webSearch", args: {} },
+    });
+    // An unparseable one still must not leak the wrapper.
+    expect(feed(["<function_calls>\n{not json}\n</function_calls>\nafter"])).toEqual({
+      text: "(tool call could not be parsed)\nafter",
+      call: undefined,
+    });
+  });
+
+  it("passes a ```spec fence through intact alongside a tool call", () => {
+    const spec =
+      "```spec\n" +
+      '{"op":"add","path":"/root","value":"main"}\n' +
+      '{"op":"add","path":"/elements/main","value":{"type":"Table","props":{"dataArtifactId":"art_1"}}}\n' +
+      "```";
+    // Spec first, then the call: the spec must survive byte-for-byte.
+    const r = feed([`Here it is:\n\n${spec}\n\n`, '```tool_call\n{"name":"webSearch","arguments":{"query":"x"}}\n```']);
+    expect(r.text).toBe(`Here it is:\n\n${spec}`);
+    expect(r.call).toEqual({ name: "webSearch", args: { query: "x" } });
+    // A bare spec fence with no call is untouched, even split mid-fence.
+    expect(feed([`Look:\n\n${spec.slice(0, 20)}`, `${spec.slice(20)}\n\nDone.`])).toEqual({
+      text: `Look:\n\n${spec}\n\nDone.`,
+      call: undefined,
+    });
+    // Call first, spec after: the spec is dropped on purpose — it predates the tool
+    // result, and the next step emits its own patches for the same store.
+    const r2 = feed([`\`\`\`tool_call\n{"name":"webSearch","arguments":{}}\n\`\`\`\n\n${spec}`]);
+    expect(r2.call).toEqual({ name: "webSearch", args: {} });
+    expect(r2.text).not.toContain("```spec");
+  });
+
+  it("keeps a fenced block that is not a call at all as text", () => {
+    expect(feed(["```tool_call\nnot even JSON, just prose\n```"])).toEqual({
+      text: "```tool_call\nnot even JSON, just prose\n```",
+      call: undefined,
+    });
   });
 
   it("never leaks a partial fence before knowing what it is", () => {
@@ -231,7 +315,8 @@ describe("tool prompt plumbing", () => {
     ] as any);
     expect(r.user).toContain('Assistant: Looking.\n```tool_call\n{"name":"webSearch","arguments":{"query":"bb"}}\n```');
     expect(r.user).toContain('Tool result: (webSearch) {"hits":3}');
-    expect(r.user).toMatch(/use them to answer/);
+    expect(r.user).toMatch(/use them to answer in prose now/);
+    expect(r.user).toMatch(/do not repeat a tool call you already made with the same arguments/);
     expect(r.user.endsWith("Assistant:")).toBe(true);
   });
 });
