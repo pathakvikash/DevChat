@@ -57,6 +57,11 @@ function loadPyodide(): Promise<any> {
 
 async function runPython(code: string): Promise<string> {
   const py = await loadPyodide();
+  try {
+    await py.loadPackagesFromImports(code);
+  } catch (e: any) {
+    return `Could not load package(s) for imports: ${e?.message || String(e)}`;
+  }
   py.runPython(`
 import sys, io
 sys.stdout = io.StringIO()
