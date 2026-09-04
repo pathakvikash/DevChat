@@ -291,9 +291,8 @@ export function envCredsFor(def: ProviderDef): { apiKey: string; baseUrl: string
   return { apiKey, baseUrl };
 }
 
-// Each provider's /models response, cached per (provider, base URL, key) so a
-// chat turn doesn't re-download OpenRouter's ~1 MB catalog every time. Keyed
-// by a hash so raw keys never sit in a Map.
+// Per-provider /models cache, keyed by a hash of (provider, base URL, key) so raw keys
+// never sit in a Map and a chat turn doesn't re-download a ~1 MB catalog.
 const catalogCache = new Map<string, { at: number; entries: ModelCatalogEntry[] }>();
 const CATALOG_TTL = 5 * 60_000;
 
@@ -390,11 +389,8 @@ function toModelConfig(
   };
 }
 
-/**
- * Every model the given credentials can reach: local Ollama plus each hosted
- * provider's live catalog. Provider failures (bad key, network) are reported
- * in `status` rather than thrown so one broken key doesn't hide the rest.
- */
+/** Every model these creds can reach. Provider failures land in `status` rather than
+ *  throwing, so one broken key doesn't hide the rest. */
 export async function listModels(
   creds: ProviderCreds,
 ): Promise<{ models: ModelConfig[]; status: ProviderStatus[] }> {
@@ -429,12 +425,8 @@ export async function listModels(
   return { models, status: [...status, ...cliStatus] };
 }
 
-/**
- * Build the runnable config for one model id. Hosted models are constructed
- * fresh from `creds` (falling back to env vars) so concurrent requests from
- * different users never share a client or a key. Throws when the id is
- * unknown or its provider has no credentials.
- */
+/** Runnable config for one model id. Hosted models are built fresh from `creds` so
+ *  concurrent users never share a client or a key. Throws on unknown id or no creds. */
 export function getModel(modelId: string, creds: ProviderCreds = {}): ModelConfig {
   if (ollamaModelCache[modelId]) return ollamaModelCache[modelId];
 

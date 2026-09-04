@@ -1,12 +1,8 @@
 import { getModel, listModels, type ModelConfig } from "@/lib/models";
 import { resolveProviderCreds } from "@/lib/apiKeys";
 
-/**
- * Resolve a usable model for a server-side utility call (planning, self-eval,
- * memory consolidation, goal cycles, titles) using this user's providers.
- * Falls back to a tool-capable local model, then any available model,
- * mirroring the default-selection logic in /api/chat.
- */
+/** A usable model for a server-side utility call, from this user's providers. Falls back to
+ *  a tool-capable local model, then any model, mirroring /api/chat's default selection. */
 export async function resolveModel(
   preferredId: string | undefined,
   userId: string,

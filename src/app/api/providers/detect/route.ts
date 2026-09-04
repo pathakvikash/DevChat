@@ -4,15 +4,8 @@ import { PROVIDERS } from "@/lib/providers";
 import { detectionAvailable, scanLocalCredentials } from "@/lib/providerDetect";
 import { setSettingsKey, maskKey } from "@/lib/settings";
 
-/**
- * Two-step, consent-based import of API keys other local tools already store.
- *
- *   POST {}                       → scan; returns masked candidates, saves nothing
- *   POST { import: [{providerId, source}] } → re-scan and save only those items
- *
- * Raw keys never leave the server: the client only ever sees masked values
- * and identifies an item by (provider, source file).
- */
+/** Consent-based key import: POST {} scans, POST { import } saves only those items.
+ *  Raw keys never leave the server — the client sees masked values and (provider, source). */
 export async function POST(req: NextRequest) {
   const userId = await requireUserId();
   if (!detectionAvailable()) {

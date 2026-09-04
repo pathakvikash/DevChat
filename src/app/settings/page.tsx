@@ -56,9 +56,8 @@ export default function SettingsPage() {
   const [detectError, setDetectError] = useState<string | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
 
-  // Hosted deployments can't see the user's machine, so "connect this
-  // computer" hands them a one-line terminal command with a one-time code and
-  // waits for keys to arrive.
+  // Hosted deployments can't see the user's machine, so "connect this computer" hands
+  // over a terminal command with a one-time code and polls for the keys to arrive.
   const [pairing, setPairing] = useState<PairingInfo | null>(null);
   const [pairingError, setPairingError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);

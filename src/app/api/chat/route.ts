@@ -289,11 +289,8 @@ export async function POST(req: Request) {
           messages: modelMessages,
           temperature,
           topP,
-          // Hard cap on response length. Previously only applied to Ollama
-          // (via providerOptions.ollama.num_predict below) — every other
-          // provider had no cap at all, so a model that got stuck looping
-          // (e.g. never satisfying its own "self-check" instructions) could
-          // stream indefinitely, leaving the request permanently pending.
+          // Hard cap on response length: without it a looping model streams
+          // indefinitely and leaves the request permanently pending.
           maxOutputTokens: maxTokens,
           // Break the loop if the model calls the SAME tool with the SAME
           // arguments twice in a row. llama3.2 in particular will keep

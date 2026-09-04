@@ -12,11 +12,8 @@ export type ResolveModelCandidatesResult =
   | { ok: true; model: string; candidateModels: string[]; creds: ProviderCreds }
   | { ok: false; missingKeyProvider: string };
 
-/**
- * Resolves this user's provider credentials, picks a default model when none
- * was requested, and builds the candidate fallback chain (primary model,
- * conversation fallback, VAS_FALLBACK_MODEL env var).
- */
+/** Resolves this user's creds, defaults the model when unrequested, and builds the fallback
+ *  chain: primary model, conversation fallback, then VAS_FALLBACK_MODEL. */
 export async function resolveModelCandidates(
   opts: ResolveModelCandidatesOptions,
 ): Promise<ResolveModelCandidatesResult> {

@@ -5,15 +5,8 @@ import { setSettingsKey } from "./settings";
 import { PROVIDERS } from "./providers";
 import { ENV_ALIASES, OPENCODE_IDS, SCAN_FILES, KEY_VALUE, PLACEHOLDER } from "./providerDetect";
 
-/**
- * "Connect this computer" for hosted deployments, where the server cannot see
- * the user's machine. The browser asks for a one-time pairing code; the user
- * runs a one-line command in a terminal; the script scans the same files as
- * providerDetect.ts, asks about each key it finds, and sends only the approved
- * ones back with the code. The code is the only auth on that request, so it is
- * short-lived, single-use, and can only ADD API keys for known providers —
- * never a custom base URL that could redirect the user's chats elsewhere.
- */
+/** "Connect this computer" for hosted deployments: a terminal script sends approved keys
+ *  back. The code is the only auth, so it is short-lived, single-use, and add-key-only. */
 
 const PAIR_TTL_MS = 10 * 60_000;
 const PREFIX = "pairingCode:";
@@ -31,11 +24,8 @@ export async function createPairingCode(userId: string): Promise<string> {
   return code;
 }
 
-/**
- * Saves the approved keys for the code's owner. Returns the imported provider
- * labels, or null when the code is unknown, already used, or expired. The code
- * is consumed on first use either way.
- */
+/** Saves approved keys for the code's owner; null when the code is unknown, used, or
+ *  expired. The code is consumed on first use either way. */
 export async function redeemPairingCode(
   code: string,
   items: Array<{ providerId?: unknown; apiKey?: unknown }>,
@@ -70,11 +60,8 @@ export function appOrigin(req: NextRequest): string {
   return `${proto}://${host}`;
 }
 
-/**
- * The script the user runs. Plain Node, no dependencies, works on Node 18+.
- * Provider data and match patterns are injected from providerDetect.ts so
- * there is one source of truth for what counts as a key.
- */
+/** The script the user runs: plain Node, no dependencies. Provider data and patterns come
+ *  from providerDetect.ts so there is one source of truth for what counts as a key. */
 export function buildConnectScript(origin: string): string {
   const providers = PROVIDERS.map(({ id, label, envKey }) => ({ id, label, envKey }));
   return `#!/usr/bin/env node

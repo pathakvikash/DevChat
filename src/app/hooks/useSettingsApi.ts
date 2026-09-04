@@ -2,12 +2,8 @@
 
 const BASE = "/api/settings/keys";
 
-/**
- * Server-side settings. Provider API keys come back masked; keys are named
- * by `PROVIDERS[].settingKey` (e.g. `openaiApiKey`) plus `customBaseUrl`.
- * `envProviders` lists provider ids already configured by the deployment's
- * env vars.
- */
+/** Server-side settings: provider keys come back masked, named by `PROVIDERS[].settingKey`.
+ *  `envProviders` lists ids already configured by the deployment's env vars. */
 export interface SettingsData {
   [key: string]: string | null | string[] | boolean | undefined;
   defaultModel: string | null;

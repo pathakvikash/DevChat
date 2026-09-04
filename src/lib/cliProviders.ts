@@ -12,18 +12,8 @@ import { PROVIDERS, ENV_ALIASES } from "./providers";
 type LanguageModelV3 = Extract<Exclude<LanguageModel, string>, { specificationVersion: "v3" }>;
 type LanguageModelV3CallOptions = Parameters<LanguageModelV3["doStream"]>[0];
 
-/**
- * Coding-agent CLIs as chat providers, the way bb does it: instead of reading
- * their credentials (subscription logins are licensed to the tool that issued
- * them), DevChat launches the tool itself in headless mode and streams its
- * output. Each tool uses whatever login it already has.
- *
- * Only meaningful when the DevChat server runs on the user's own machine —
- * callers gate on detectionAvailable(). Tools run with their own file/shell
- * tools disabled, in a scratch directory, so a chat here can't touch the
- * user's files. DevChat's own tools ARE available to these models, through
- * the text protocol in the "Tool calling over plain text" section below.
- */
+/** Coding-agent CLIs as chat providers: launched headless so each keeps its own login
+ *  (subscription logins are licensed to the issuing tool). Local server only. */
 
 type StreamPart = Awaited<ReturnType<LanguageModelV3["doStream"]>>["stream"] extends ReadableStream<infer P>
   ? P
@@ -447,11 +437,8 @@ export async function listCliModels(): Promise<{ entries: CliCatalogEntry[]; sta
 
 // ─── Prompt → CLI input ─────────────────────────────────────────────────────
 
-/**
- * CLIs take one prompt string, so the chat history is flattened into a
- * transcript. System messages go separately (Claude Code has a flag; the
- * others get it prepended by `invoke`).
- */
+/** CLIs take one prompt string, so history is flattened into a transcript. System
+ *  messages go separately, via a flag or prepended by `invoke`. */
 const MAX_TOOL_RESULT_CHARS = 8_000;
 
 function toolOutputText(output: { type: string; value?: unknown; reason?: string }): string {

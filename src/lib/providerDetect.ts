@@ -5,16 +5,8 @@ import { PROVIDERS, ENV_ALIASES } from "./providers";
 export { ENV_ALIASES };
 import { findCliBins } from "./cliProviders";
 
-/**
- * Finds provider API keys that other tools on this machine already store, so
- * a local DevChat can offer to reuse them (bb-style "pick up your existing
- * credentials"). Only runs on the user's own machine — see detectionAvailable().
- *
- * Deliberately limited to API keys the user typed into those tools. OAuth
- * tokens (Claude Code's ~/.claude/.credentials.json, Codex's `tokens`, Gemini
- * CLI's oauth_creds.json) are never read: their terms restrict them to the
- * tool that issued them.
- */
+/** Finds API keys other local tools already store, so DevChat can offer to reuse them.
+ *  API keys only — OAuth tokens are never read: their terms bind them to the issuing tool. */
 export interface DetectedCredential {
   providerId: string;
   /** File it came from, with the home directory shown as `~`. */
@@ -22,9 +14,8 @@ export interface DetectedCredential {
   apiKey: string;
 }
 
-// The data and patterns below are also injected into the pairing script that
-// runs on a user's machine when DevChat is hosted (see providerPair.ts), so
-// both scanners stay in sync. That script mirrors extractCredentials().
+// The data and patterns below are injected into the pairing script (providerPair.ts),
+// which mirrors extractCredentials(), so both scanners stay in sync.
 
 // OpenCode's auth.json is keyed by its own provider ids.
 export const OPENCODE_IDS: Record<string, string> = {
@@ -49,9 +40,8 @@ export const SCAN_FILES = [
   "~/.config/fish/config.fish",
 ];
 
-// `OPENAI_API_KEY=sk-…`, `"OPENAI_API_KEY": "sk-…"`, `export X=…`, `set -gx X …`.
-// ponytail: one regex over every file instead of per-format parsers; add a
-// parser only for a format this misses (OpenCode's JSON below is the one so far).
+// Matches `KEY=val`, `"KEY": "val"`, `export KEY=val`, `set -gx KEY val`.
+// ponytail: one regex, not per-format parsers; add a parser only for a format it misses.
 export const KEY_VALUE = /["']?\b([A-Z][A-Z0-9_]*_API_KEY)["']?(?:\s*[=:]\s*|\s+)["']?([A-Za-z0-9_\-.]{20,})/g;
 export const PLACEHOLDER = /your|xxx|placeholder|example|changeme|redacted/i;
 
@@ -95,22 +85,15 @@ export function extractCredentials(
   return out;
 }
 
-/**
- * Scanning reads the server's home directory, so it must only run when the
- * server IS the user's machine. `next dev` is the documented local path; a
- * local production build can opt in. Never on Vercel or any shared host,
- * where it would expose the host operator's files to every signed-in user.
- */
+/** Scanning reads the server's home directory, so it must only run when the server IS the
+ *  user's machine — on a shared host it would expose the operator's files to every user. */
 export function detectionAvailable(): boolean {
   if (process.env.VERCEL) return false;
   return process.env.NODE_ENV === "development" || process.env.ALLOW_PROVIDER_DETECTION === "1";
 }
 
-/**
- * Per-tool explanation of the scan, so "nothing found" tells the user why:
- * most coding tools sign in with a subscription (OAuth) that no other app is
- * allowed to reuse, and that is not the same as having an API key.
- */
+/** Per-tool explanation of the scan, so "nothing found" says why — a subscription (OAuth)
+ *  login no other app may reuse is not the same as a missing API key. */
 export interface ToolReport {
   tool: string;
   status: "keys" | "oauth" | "none" | "absent";

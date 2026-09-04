@@ -1,13 +1,5 @@
-// Registry of hosted LLM providers DevChat can talk to. Every entry speaks the
-// OpenAI Chat Completions wire format, so one code path (`@ai-sdk/openai` with a
-// custom baseURL) serves all of them and adding a provider is one more row.
-//
-// Pure data — safe to import from client components. Credential lookup lives
-// in `apiKeys.ts`, model construction in `models.ts`.
-//
-// A model id is `<provider.id>/<upstream model id>`, e.g. `openai/gpt-4o`,
-// `openrouter/meta-llama/llama-3.3-70b-instruct`. Ollama (`ollama/...`) is
-// handled separately in models.ts because it is discovered, not keyed.
+// Hosted providers, all speaking OpenAI Chat Completions, so one code path serves them all.
+// Pure data, client-safe; model ids are `<provider.id>/<upstream id>`.
 
 export interface ProviderDef {
   /** Model-id prefix and stable identifier. */
@@ -56,9 +48,8 @@ export const PROVIDERS: readonly ProviderDef[] = [
     label: "Anthropic",
     envKey: "ANTHROPIC_API_KEY",
     settingKey: "anthropicApiKey",
-    // Anthropic's OpenAI SDK compatibility layer. `/v1/models` is native and
-    // needs x-api-key + anthropic-version; the compat chat endpoint accepts
-    // the Bearer header the SDK sends and ignores the extras.
+    // Anthropic's OpenAI compat layer: `/v1/models` is native and needs x-api-key plus
+    // anthropic-version, while the compat chat endpoint ignores those extras.
     baseUrl: "https://api.anthropic.com/v1",
     defaultContextWindow: 200_000,
     vision: true,
@@ -142,10 +133,8 @@ export function bareModelId(modelId: string): string {
 
 const NON_CHAT_MODEL = /embedding|embed-|whisper|tts|audio|realtime|transcribe|moderation|dall-e|image|imagen|veo|aqa|babbage|davinci|search-preview|computer-use/i;
 
-/**
- * Providers' /models endpoints list everything they sell (embeddings, speech,
- * image generation). Keep only what can hold a chat.
- */
+/** Providers' /models endpoints list everything they sell (embeddings, speech, images);
+ *  keep only what can hold a chat. */
 export function isChatModel(providerId: string, upstreamId: string): boolean {
   if (NON_CHAT_MODEL.test(upstreamId)) return false;
   if (providerId === "openai") return /^(gpt-|o\d|chatgpt-)/.test(upstreamId);
