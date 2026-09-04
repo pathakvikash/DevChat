@@ -46,6 +46,16 @@ servers right now.
 Never claim to have done any of those things. If the user asks for one, say it
 needs Agent mode and offer to do the read-only part now.`;
 
+/** Extra rules appended to the json-render catalog prompt. Exported so tests
+ *  exercise the same wording the chat route ships. */
+export const GENERATIVE_UI_RULES = [
+  "When the user asks for a table, chart, graph, comparison, or anything visual, render it with the `Table` / `Chart` components. Never draw charts with Python/matplotlib, never print ASCII tables, and never describe a chart in prose instead of rendering it.",
+  "Get the facts with tools first (`webSearch` etc.) when you don't already have them — tools and UI components work together in the same turn.",
+  'HARD LIMIT: never type more than 12 values (cells or chart points) into a spec, and never put the same dataset in two components. Past that — including data you got from a tool result or already know — first save it once: `executeCode` with `saveAs: { title }` (the code MUST print the dataset as its last statement: `print(json.dumps({"columns": [...], "rows": [[...]]}))` or CSV — only stdout is captured, so returning or assigning it saves nothing) or `createArtifact` type "data". Both return an artifact id; reference it from every component with `dataArtifactId` (Chart also takes `labelColumn`/`valueColumn`; Table takes `columns` to pick a subset), and let one Table and one Chart share that id instead of each carrying its own copy of the rows.',
+  "Only generate a UI component when it clearly helps — e.g. the user asks to see/show/display something structured. Plain questions get plain text answers.",
+  "The JSONL patch fence MUST be exactly a markdown code fence: an opening line of exactly ```spec and a closing line of exactly ``` (three backticks, nothing else on those lines). Do NOT use any other wrapper — no <spec> tags, no other XML/HTML-style tags, no custom delimiters. Only ```spec ... ``` is recognized; anything else will be shown to the user as literal broken text.",
+];
+
 export interface BuildSystemPromptOptions {
   useTools: boolean;
   systemPrompt?: string;
@@ -56,7 +66,6 @@ export interface BuildSystemPromptOptions {
   ragContext?: string;
   messages: unknown[];
   memoryDisabled?: boolean;
-  generativeUiEnabled?: boolean;
   userId: string;
   /** Chat withholds mutating tools; the prompt must not advertise them. */
   mode?: ToolMode;
@@ -155,15 +164,10 @@ export async function buildSystemPrompt(
 
   const kb = await retrieveKbContext({ kbId, ragContext, messages });
 
-  const generativeUi = opts.generativeUiEnabled
-    ? generativeUiCatalog.prompt({
-        mode: "inline",
-        customRules: [
-          "Only generate a UI component when it clearly helps — e.g. the user asks to see/show/display something structured. Plain questions get plain text answers.",
-          "The JSONL patch fence MUST be exactly a markdown code fence: an opening line of exactly ```spec and a closing line of exactly ``` (three backticks, nothing else on those lines). Do NOT use any other wrapper — no <spec> tags, no other XML/HTML-style tags, no custom delimiters. Only ```spec ... ``` is recognized; anything else will be shown to the user as literal broken text.",
-        ],
-      })
-    : null;
+  const generativeUi = generativeUiCatalog.prompt({
+    mode: "inline",
+    customRules: GENERATIVE_UI_RULES,
+  });
 
   const sections: SystemPromptSections = { base, instructions, persona, skills, tools, memory, compressed, kb, generativeUi };
   const text = [base, instructions, persona, skills, tools, memory, compressed, kb, generativeUi]

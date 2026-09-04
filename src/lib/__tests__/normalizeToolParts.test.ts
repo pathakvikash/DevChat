@@ -135,3 +135,42 @@ describe("normalizeMessageToolParts + convertToModelMessages", () => {
     expect(userText).toEqual(["first question", "second question"]);
   });
 });
+
+describe("summarizeSpecParts", () => {
+  const specPart = (path: string, value: unknown) => ({
+    type: "data-spec",
+    data: { type: "patch", patch: { op: "add", path, value } },
+  });
+
+  const rendered = [
+    { type: "text", text: "Here are the benchmarks." },
+    specPart("/root", "el-0"),
+    specPart("/elements/el-0", { type: "Stack", props: {}, children: ["el-1", "el-2"] }),
+    specPart("/elements/el-1", { type: "Table", props: { dataArtifactId: "art_1" }, children: [] }),
+    specPart("/elements/el-2", { type: "Chart", props: { dataArtifactId: "art_1" }, children: [] }),
+    specPart("/elements/el-3", { type: "Chart", props: {}, children: [] }),
+  ];
+
+  it("tells the next turn what was rendered instead of losing it", async () => {
+    const model = await convertToModelMessages(
+      normalizeMessageToolParts([{ id: "a1", role: "assistant", parts: rendered }]) as any,
+    );
+    const text = (model[0].content as any[]).map((c) => c.text ?? "").join("\n");
+    expect(text).toContain("Here are the benchmarks.");
+    expect(text).toContain("Stack, Table, Chart ×2");
+    expect(text).toContain("art_1");
+  });
+
+  it("drops the raw JSONL patches rather than replaying them", async () => {
+    const model = await convertToModelMessages(
+      normalizeMessageToolParts([{ id: "a1", role: "assistant", parts: rendered }]) as any,
+    );
+    const text = (model[0].content as any[]).map((c) => c.text ?? "").join("\n");
+    expect(text).not.toContain('"op"');
+  });
+
+  it("leaves a reply with no spec untouched", () => {
+    const parts = [{ type: "text", text: "plain answer" }];
+    expect(normalizeMessageToolParts([{ parts }])[0].parts).toEqual(parts);
+  });
+});

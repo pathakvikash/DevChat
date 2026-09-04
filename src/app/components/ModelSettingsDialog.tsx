@@ -34,7 +34,6 @@ interface ModelSettingsDialogProps {
   currentTopP: number | undefined;
   currentMaxTokens: number | undefined;
   currentChatOnlyMode: boolean;
-  currentGenerativeUiEnabled?: boolean;
   currentKbId: string | null;
   currentMaxToolCalls?: number;
   currentFallbackModel?: string | null;
@@ -49,7 +48,6 @@ interface ModelSettingsDialogProps {
     topP?: number;
     maxTokens?: number;
     chatOnlyMode?: boolean;
-    generativeUiEnabled?: boolean;
     kbId?: string | null;
     maxToolCalls?: number;
     fallbackModel?: string | null;
@@ -70,7 +68,6 @@ export default function ModelSettingsDialog({
   currentTopP,
   currentMaxTokens,
   currentChatOnlyMode,
-  currentGenerativeUiEnabled,
   currentKbId,
   currentMaxToolCalls,
   currentFallbackModel,
@@ -91,7 +88,6 @@ export default function ModelSettingsDialog({
     currentMaxTokens ? String(currentMaxTokens) : "",
   );
   const [chatOnlyMode, setChatOnlyMode] = useState(currentChatOnlyMode);
-  const [generativeUiEnabled, setGenerativeUiEnabled] = useState(currentGenerativeUiEnabled ?? false);
   const [maxToolCalls, setMaxToolCalls] = useState(currentMaxToolCalls ?? 5);
   const [fallbackModel, setFallbackModel] = useState<string>(currentFallbackModel || "");
   const [reasoningEffort, setReasoningEffort] = useState<string>(currentReasoningEffort || "");
@@ -128,7 +124,6 @@ export default function ModelSettingsDialog({
       setTopP(currentTopP ?? 0.9);
       setMaxTokens(currentMaxTokens ? String(currentMaxTokens) : "");
       setChatOnlyMode(currentChatOnlyMode);
-      setGenerativeUiEnabled(currentGenerativeUiEnabled ?? false);
       setMaxToolCalls(currentMaxToolCalls ?? 5);
       setFallbackModel(currentFallbackModel || "");
       setKbId(currentKbId || "");
@@ -181,7 +176,6 @@ export default function ModelSettingsDialog({
           topP,
           maxTokens: maxTokens ? parseInt(maxTokens, 10) : undefined,
           chatOnlyMode,
-          generativeUiEnabled,
           kbId: kbId || null,
           maxToolCalls,
           fallbackModel: fallbackModel || null,
@@ -199,7 +193,6 @@ export default function ModelSettingsDialog({
         topP,
         maxTokens: maxTokens ? parseInt(maxTokens, 10) : undefined,
         chatOnlyMode,
-        generativeUiEnabled,
         kbId: kbId || null,
         maxToolCalls,
         fallbackModel: fallbackModel || null,
@@ -401,8 +394,6 @@ export default function ModelSettingsDialog({
             maxContextWindow={modelInfo?.contextWindow ?? 0}
             chatOnlyMode={chatOnlyMode}
             onChatOnlyModeChange={setChatOnlyMode}
-            generativeUiEnabled={generativeUiEnabled}
-            onGenerativeUiEnabledChange={setGenerativeUiEnabled}
             maxToolCalls={maxToolCalls}
             onMaxToolCallsChange={setMaxToolCalls}
             reasoningEffort={reasoningEffort}

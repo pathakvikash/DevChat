@@ -69,7 +69,6 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
         ...(contextLength !== undefined && { contextLength }),
         ...(topP !== undefined && { topP }),
         ...(chatOnlyMode !== undefined && { chatOnlyMode }),
-        ...(generativeUiEnabled !== undefined && { generativeUiEnabled }),
         ...(pinned !== undefined && { pinned }),
         ...(archived !== undefined && { archived }),
         ...(note !== undefined && { note }),

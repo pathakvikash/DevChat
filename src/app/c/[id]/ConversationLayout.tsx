@@ -206,7 +206,6 @@ export default function ConversationLayout({ conversationId, initialPrompt }: Pr
         currentTopP={p.conversation.topP}
         currentMaxTokens={p.conversation.maxTokens}
         currentChatOnlyMode={p.conversation.chatOnlyMode || false}
-                currentGenerativeUiEnabled={p.conversation.generativeUiEnabled || false}
         currentKbId={p.selectedKbId || null}
         currentMaxToolCalls={p.conversation.maxToolCalls}
         currentFallbackModel={p.conversation.fallbackModel || null}

@@ -23,13 +23,14 @@ import {
 import CenteredDialog from "./ui/CenteredDialog";
 import SidePanel from "./ui/SidePanel";
 import { resolveLanguage, highlightCode } from "@/lib/utils/highlight";
+import { parseDataArtifact } from "@/lib/generativeUi/data";
 import CodeRunner from "./CodeRunner";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
 interface Artifact {
   id: string;
-  type: "code" | "document" | "report" | "table" | "svg" | "mermaid" | "html";
+  type: "code" | "document" | "report" | "table" | "svg" | "mermaid" | "html" | "data";
   title: string;
   content: string;
   version: number;
@@ -54,6 +55,7 @@ const TYPE_BADGE: Record<string, { label: string; bg: string; text: string; bord
   svg: { label: "SVG", bg: "bg-cyan-500/20", text: "text-cyan-300", border: "border-cyan-500/30" },
   mermaid: { label: "Mermaid", bg: "bg-pink-500/20", text: "text-pink-300", border: "border-pink-500/30" },
   html: { label: "HTML", bg: "bg-orange-500/20", text: "text-orange-300", border: "border-orange-500/30" },
+  data: { label: "Data", bg: "bg-teal-500/20", text: "text-teal-300", border: "border-teal-500/30" },
 };
 
 const TYPE_ICONS: Record<string, typeof FileCode> = {
@@ -64,7 +66,47 @@ const TYPE_ICONS: Record<string, typeof FileCode> = {
   svg: Image,
   mermaid: GitBranch,
   html: Globe,
+  data: FileSpreadsheet,
 };
+
+/** Renders a data artifact as a plain table, or null if it isn't tabular. */
+function renderDataTable(content: string) {
+  let table: { columns: string[]; rows: (string | number | null)[][] };
+  try {
+    table = parseDataArtifact(content);
+  } catch {
+    return null; // caller falls back to the raw <pre>
+  }
+  return (
+    <div className="overflow-x-auto rounded-[var(--glass-radius-md)] glass-card">
+      <table className="w-full text-sm border-collapse">
+        <thead>
+          <tr>
+            {table.columns.map((c, i) => (
+              <th
+                key={i}
+                className="text-left px-3 py-2 border-b border-[var(--glass-border)] text-zinc-400 font-medium whitespace-nowrap"
+              >
+                {c}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {table.rows.map((row, ri) => (
+            <tr key={ri}>
+              {table.columns.map((_, ci) => (
+                <td key={ci} className="px-3 py-2 border-b border-[var(--glass-border)] text-zinc-300 whitespace-nowrap">
+                  {row[ci] === null || row[ci] === undefined ? "" : String(row[ci])}
+                </td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
 
 function timeAgo(dateStr: string): string {
   const diff = Date.now() - new Date(dateStr).getTime();
@@ -371,6 +413,11 @@ export default function ArtifactPanel({
           )}
         </div>
       );
+    }
+
+    if (artifact.type === "data") {
+      const table = renderDataTable(artifact.content);
+      if (table) return table;
     }
 
     if (artifact.type === "mermaid") {

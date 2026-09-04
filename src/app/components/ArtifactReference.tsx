@@ -10,6 +10,7 @@ const TYPE_ICONS: Record<string, typeof FileCode> = {
   svg: Image,
   mermaid: GitBranch,
   html: Globe,
+  data: FileSpreadsheet,
 };
 
 const TYPE_COLORS: Record<string, string> = {
@@ -20,6 +21,7 @@ const TYPE_COLORS: Record<string, string> = {
   svg: "text-cyan-400",
   mermaid: "text-pink-400",
   html: "text-orange-400",
+  data: "text-teal-400",
 };
 
 interface ArtifactReferenceProps {

@@ -1,6 +1,62 @@
 import { defineRegistry, useBoundProp } from "@json-render/react";
+import { useResource } from "@/app/hooks/useResource";
 import { catalog } from "./catalog";
+import { parseDataArtifact, type DataArtifactTable, type DataCell } from "./data";
 import Chart from "./Chart";
+
+/** Loads a `type: "data"` artifact body so Chart/Table can reference a large result by
+ *  id instead of inlining it. Kept out of Chart.tsx, which stays presentational. */
+function useArtifactData(id: string | null | undefined) {
+  const { data, loading, error } = useResource<DataArtifactTable>(
+    async () => {
+      const res = await fetch(`/api/artifacts/${id}`);
+      if (!res.ok) throw new Error(res.status === 404 ? "Data artifact not found" : `Request failed (${res.status})`);
+      const artifact = (await res.json()) as { content: string };
+      return parseDataArtifact(artifact.content);
+    },
+    [id],
+    { enabled: !!id },
+  );
+  return { table: data, loading: !!id && loading, error };
+}
+
+const DataPending = () => <p className="text-xs text-zinc-500">Loading data…</p>;
+const DataError = ({ error }: { error: Error }) => (
+  <p className="text-xs text-red-400">Could not load data: {error.message}</p>
+);
+
+function toNumber(v: DataCell): number | null {
+  if (typeof v === "number") return Number.isFinite(v) ? v : null;
+  const s = String(v ?? "").replace(/,/g, "").trim();
+  if (!s) return null;
+  const n = Number(s);
+  return Number.isFinite(n) ? n : null;
+}
+
+function chartDataFrom(t: DataArtifactTable, labelColumn: string | null, valueColumn: string | null) {
+  const li = Math.max(t.columns.indexOf(labelColumn ?? ""), 0);
+  let vi = valueColumn ? t.columns.indexOf(valueColumn) : -1;
+  // Default: first *other* column that holds numbers — the label column is
+  // often numeric too (years, ids) and plotting it against itself is useless.
+  if (vi < 0) vi = t.columns.findIndex((_, i) => i !== li && t.rows.some((r) => toNumber(r[i]) !== null));
+  if (vi < 0) return [];
+  return t.rows.map((r) => ({ label: String(r[li] ?? ""), value: toNumber(r[vi]) ?? 0 }));
+}
+
+// ponytail: hard row cap so a 100k-row artifact can't hang the chat bubble.
+// Raise it or paginate if someone actually wants to scroll that far.
+const MAX_TABLE_ROWS = 200;
+
+function tableFrom(t: DataArtifactTable, columns: string[] | null) {
+  const idx = columns?.length
+    ? columns.map((c) => t.columns.indexOf(c)).filter((i) => i >= 0)
+    : t.columns.map((_, i) => i);
+  return {
+    headers: idx.map((i) => t.columns[i]),
+    rows: t.rows.slice(0, MAX_TABLE_ROWS).map((r) => idx.map((i) => (r[i] === null || r[i] === undefined ? "" : String(r[i])))),
+    truncated: Math.max(t.rows.length - MAX_TABLE_ROWS, 0),
+  };
+}
 
 const HEADING_CLASSES: Record<1 | 2 | 3, string> = {
   1: "text-xl font-semibold text-zinc-100",
@@ -85,35 +141,46 @@ export const { registry } = defineRegistry(catalog, {
         <p>{props.message}</p>
       </div>
     ),
-    Table: ({ props }) => (
-      <div className="overflow-x-auto">
-        <table className="w-full text-sm border-collapse">
-          <thead>
-            <tr>
-              {props.headers.map((h, i) => (
-                <th
-                  key={i}
-                  className="text-left px-3 py-2 border-b border-[var(--glass-border)] text-zinc-400 font-medium"
-                >
-                  {h}
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {props.rows.map((row, ri) => (
-              <tr key={ri}>
-                {row.map((cell, ci) => (
-                  <td key={ci} className="px-3 py-2 border-b border-[var(--glass-border)] text-zinc-300">
-                    {cell}
-                  </td>
+    Table: ({ props }) => {
+      const { table, loading, error } = useArtifactData(props.dataArtifactId);
+      if (loading) return <DataPending />;
+      if (error) return <DataError error={error} />;
+      const { headers, rows, truncated } = table
+        ? tableFrom(table, props.columns)
+        : { headers: props.headers ?? [], rows: props.rows ?? [], truncated: 0 };
+      return (
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm border-collapse">
+            <thead>
+              <tr>
+                {headers.map((h, i) => (
+                  <th
+                    key={i}
+                    className="text-left px-3 py-2 border-b border-[var(--glass-border)] text-zinc-400 font-medium"
+                  >
+                    {h}
+                  </th>
                 ))}
               </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    ),
+            </thead>
+            <tbody>
+              {rows.map((row, ri) => (
+                <tr key={ri}>
+                  {row.map((cell, ci) => (
+                    <td key={ci} className="px-3 py-2 border-b border-[var(--glass-border)] text-zinc-300">
+                      {cell}
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {truncated > 0 && (
+            <p className="text-xs text-zinc-500 mt-1">…{truncated} more rows not shown.</p>
+          )}
+        </div>
+      );
+    },
     Link: ({ props }) =>
       SAFE_URL_RE.test(props.href) ? (
         <a
@@ -177,6 +244,14 @@ export const { registry } = defineRegistry(catalog, {
         </label>
       );
     },
-    Chart: ({ props }) => <Chart type={props.type} title={props.title} data={props.data} />,
+    Chart: ({ props }) => {
+      const { table, loading, error } = useArtifactData(props.dataArtifactId);
+      if (loading) return <DataPending />;
+      if (error) return <DataError error={error} />;
+      const data = table
+        ? chartDataFrom(table, props.labelColumn, props.valueColumn)
+        : props.data ?? [];
+      return <Chart type={props.type} title={props.title} data={data} />;
+    },
   },
 });

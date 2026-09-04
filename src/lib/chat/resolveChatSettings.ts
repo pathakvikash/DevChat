@@ -14,7 +14,6 @@ export interface ResolveChatSettingsOptions {
   bodyEnabledSkills: unknown;
   bodyChatOnlyMode: boolean | undefined;
   bodyMemoryDisabled: boolean | undefined;
-  bodyGenerativeUiEnabled: boolean | undefined;
   bodyAutoCompressThreshold: number | undefined;
   bodyMaxToolCalls: number | undefined;
 }
@@ -32,7 +31,6 @@ export interface ResolvedChatSettings {
   maxTokens: number | undefined;
   chatOnlyMode: boolean;
   memoryDisabled: boolean;
-  generativeUiEnabled: boolean;
   fallbackModel: string | undefined;
   autoCompressThreshold: number;
   maxToolCalls: number;
@@ -67,7 +65,6 @@ export async function resolveChatSettings(
   let maxTokens: number | undefined;
   let chatOnlyMode = opts.bodyChatOnlyMode ?? false;
   let memoryDisabled = opts.bodyMemoryDisabled ?? false;
-  let generativeUiEnabled = opts.bodyGenerativeUiEnabled ?? false;
   let fallbackModel: string | undefined;
   const autoCompressThreshold = opts.bodyAutoCompressThreshold ?? 85;
   let maxToolCalls = opts.bodyMaxToolCalls ?? 5;
@@ -87,7 +84,6 @@ export async function resolveChatSettings(
         maxTokens: true,
         chatOnlyMode: true,
         memoryDisabled: true,
-        generativeUiEnabled: true,
         maxToolCalls: true,
         fallbackModel: true,
         reasoningEffort: true,
@@ -104,7 +100,6 @@ export async function resolveChatSettings(
       maxTokens = conv.maxTokens ?? undefined;
       chatOnlyMode = conv.chatOnlyMode ?? chatOnlyMode;
       memoryDisabled = conv.memoryDisabled ?? memoryDisabled;
-      generativeUiEnabled = conv.generativeUiEnabled ?? generativeUiEnabled;
       maxToolCalls = conv.maxToolCalls ?? maxToolCalls;
       reasoningEffort = conv.reasoningEffort ?? undefined;
       workingFolder = conv.workingFolder ?? undefined;
@@ -125,7 +120,6 @@ export async function resolveChatSettings(
     maxTokens,
     chatOnlyMode,
     memoryDisabled,
-    generativeUiEnabled,
     fallbackModel,
     autoCompressThreshold,
     maxToolCalls,

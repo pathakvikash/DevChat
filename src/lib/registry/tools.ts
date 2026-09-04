@@ -2,6 +2,7 @@ import { z } from "zod";
 import type { ToolDefinition } from "./types";
 import { prisma } from "@/lib/db";
 import { embed, scoreDocumentChunks, type ScoredChunk } from "@/lib/rag";
+import { parseDataArtifact } from "@/lib/generativeUi/data";
 import { evaluate } from "mathjs";
 
 function isPrivateUrl(url: string): boolean {
@@ -41,13 +42,13 @@ export const TOOL_REGISTRY: Record<string, ToolDefinition> = {
     mutates: true,
     name: "Create Artifact",
     description:
-      "Create an artifact — a reusable document, code file, report, table, or other structured content that will be shown in a side panel.",
+      "Create an artifact — a reusable document, code file, report, table, dataset, or other structured content that will be shown in a side panel.",
     modelDescription:
-      "Create an artifact — a reusable document, code file, report, table, or other structured content that will be shown in a side panel. Use this INSTEAD of printing large code blocks or documents in chat. The artifact is saved and can be updated later.",
+      'Create an artifact — a reusable document, code file, report, table, dataset, or other structured content that will be shown in a side panel. Use this INSTEAD of printing large code blocks or documents in chat. The artifact is saved and can be updated later. Type `data` is a dataset: content must be a JSON {"columns":[...],"rows":[[...]]} object or CSV, and you then reference it from a Chart or Table component with `dataArtifactId` instead of retyping the rows.',
     category: "Utility",
     internal: true,
     inputSchema: z.object({
-      type: z.enum(["code", "document", "report", "table", "svg", "mermaid", "html"]),
+      type: z.enum(["code", "document", "report", "table", "svg", "mermaid", "html", "data"]),
       title: z.string().min(1).describe("Descriptive title for the artifact"),
       content: z.string().min(1).describe("The full content of the artifact"),
       language: z
@@ -58,6 +59,15 @@ export const TOOL_REGISTRY: Record<string, ToolDefinition> = {
     execute: async ({ type, title, content, language }, ctx) => {
       try {
         if (!ctx.conversationId) return "Error: no active conversation.";
+        // A data artifact only exists to be read back by Chart/Table — reject
+        // an unparseable one now so the model can fix it in the same turn.
+        if (type === "data") {
+          try {
+            parseDataArtifact(content);
+          } catch (e: any) {
+            return `Error creating data artifact: ${e?.message || String(e)}`;
+          }
+        }
         const artifact = await prisma.artifact.create({
           data: { conversationId: ctx.conversationId, type, title, content },
         });
@@ -118,12 +128,18 @@ export const TOOL_REGISTRY: Record<string, ToolDefinition> = {
     name: "Execute Code (sandbox)",
     description: "Run Python (Pyodide) or JavaScript in a browser sandbox.",
     modelDescription:
-      "Execute Python or JavaScript code in a secure browser sandbox. Python runs in Pyodide (numpy/pandas pre-loaded; other PyPI via `import micropip; await micropip.install('pkg')`). JavaScript runs in a sandboxed iframe (5s timeout). Returns stdout/stderr/return value.",
+      "Execute Python or JavaScript code in a secure browser sandbox. Python runs in Pyodide (numpy/pandas pre-loaded; other PyPI via `import micropip; await micropip.install('pkg')`). JavaScript runs in a sandboxed iframe (5s timeout). Returns stdout/stderr/return value. Pass `saveAs: { title }` to store the printed output as a data artifact and get back an id to reference from a Chart or Table via `dataArtifactId` — use it for any dataset you'd otherwise retype into a component spec.",
     category: "Code",
     internal: true,
     inputSchema: z.object({
       language: z.enum(["python", "javascript"]),
       code: z.string().describe("Self-contained code. Use print() / console.log() for visible output."),
+      saveAs: z
+        .object({ title: z.string().min(1) })
+        .optional()
+        .describe(
+          'When set, the code MUST print the dataset as its last statement — print(json.dumps({"columns": [...], "rows": [[...]]})) or CSV. Only stdout is captured: returning, assigning or displaying the data saves nothing and the call comes back with no artifact. It is saved as a data artifact and the tool result returns its id; reference it in Chart/Table with dataArtifactId.',
+        ),
     }),
     // No execute — client-side via onToolCall in app/c/[id]/page.tsx.
     enabledByDefault: true,

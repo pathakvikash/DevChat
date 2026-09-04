@@ -52,13 +52,54 @@ export function normalizeToolParts(parts: unknown): unknown {
   return out;
 }
 
-/** Apply {@link normalizeToolParts} across a list of UI messages. */
+/** One RFC-6902 patch line the model wrote inside a ```spec fence. */
+const SPEC_PART = "data-spec";
+/** `/elements/<key>` — a whole element, so `value.type` is its component name. */
+const ELEMENT_PATH_RE = /^\/elements\/[^/]+$/;
+
+/** Replace `data-spec` parts with a one-line note: `convertToModelMessages` drops `data-*`
+ *  parts, and re-sending raw JSONL would burn context and invite stale patch streams. */
+export function summarizeSpecParts(parts: unknown): unknown {
+  if (!Array.isArray(parts)) return parts;
+  const at = parts.findIndex((p) => p?.type === SPEC_PART);
+  if (at < 0) return parts;
+
+  const counts = new Map<string, number>();
+  const dataIds = new Set<string>();
+  for (const p of parts) {
+    if (p?.type !== SPEC_PART) continue;
+    const patch = p.data?.patch ?? p.data;
+    const path = String(patch?.path ?? "");
+    const value = patch?.value;
+    if (path.endsWith("/props/dataArtifactId") && typeof value === "string") dataIds.add(value);
+    if (!value || typeof value !== "object") continue;
+    if (typeof value.type === "string" && ELEMENT_PATH_RE.test(path)) {
+      counts.set(value.type, (counts.get(value.type) ?? 0) + 1);
+    }
+    if (typeof value.props?.dataArtifactId === "string") dataIds.add(value.props.dataArtifactId);
+  }
+
+  const components = [...counts]
+    .map(([name, n]) => (n > 1 ? `${name} ×${n}` : name))
+    .join(", ");
+  const note =
+    `[You rendered a UI here: ${components || "no components"}` +
+    `${dataIds.size ? ` from data artifact ${[...dataIds].join(", ")}` : ""}. ` +
+    "The spec's JSONL is not kept in this transcript — to change what is shown, " +
+    "emit a new complete ```spec block.]";
+
+  const out = parts.filter((p) => p?.type !== SPEC_PART);
+  out.splice(at, 0, { type: "text", text: note });
+  return out;
+}
+
+/** Prepare UI messages for `convertToModelMessages`. */
 export function normalizeMessageToolParts<T extends { parts?: unknown }>(
   messages: T[],
 ): T[] {
   return messages.map((m) =>
     m && Array.isArray((m as any).parts)
-      ? ({ ...m, parts: normalizeToolParts((m as any).parts) } as T)
+      ? ({ ...m, parts: summarizeSpecParts(normalizeToolParts((m as any).parts)) } as T)
       : m,
   );
 }

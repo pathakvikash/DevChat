@@ -65,10 +65,13 @@ export const catalog = defineCatalog(schema, {
     },
     Table: {
       props: z.object({
-        headers: z.array(z.string()),
-        rows: z.array(z.array(z.string())),
+        headers: z.array(z.string()).nullable(),
+        rows: z.array(z.array(z.string())).nullable(),
+        dataArtifactId: z.string().nullable(),
+        columns: z.array(z.string()).nullable(),
       }),
-      description: "A simple data table. `rows` is an array of arrays, one per row, matching `headers` length.",
+      description:
+        "A data table. Prefer `dataArtifactId` (id of a saved data artifact), with `columns` to show only some of its columns. Use inline `headers` + `rows` (one array per row) only for a few hand-typed values.",
     },
     Link: {
       props: z.object({
@@ -107,15 +110,20 @@ export const catalog = defineCatalog(schema, {
       props: z.object({
         type: z.union([z.literal("bar"), z.literal("line"), z.literal("pie")]),
         title: z.string().nullable(),
-        data: z.array(
-          z.object({
-            label: z.string(),
-            value: z.number(),
-          }),
-        ),
+        data: z
+          .array(
+            z.object({
+              label: z.string(),
+              value: z.number(),
+            }),
+          )
+          .nullable(),
+        dataArtifactId: z.string().nullable(),
+        labelColumn: z.string().nullable(),
+        valueColumn: z.string().nullable(),
       }),
       description:
-        "A chart. Use 'bar' to compare values across categories, 'line' for a trend over an ordered sequence, 'pie' for parts of a whole. Keep data to 3-8 points for readability.",
+        "A chart. Use 'bar' to compare values across categories, 'line' for a trend over an ordered sequence, 'pie' for parts of a whole. Prefer `dataArtifactId` (id of a saved data artifact) with `labelColumn`/`valueColumn` naming which of its columns to plot; use inline `data` only for a few hand-typed points. Keep to 3-8 points for readability.",
     },
   },
   actions: {},

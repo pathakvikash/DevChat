@@ -53,7 +53,6 @@ export async function POST(req: Request) {
     enabledTools: bodyEnabledTools,
     enabledSkills: bodyEnabledSkills,
     chatOnlyMode: bodyChatOnlyMode,
-    generativeUiEnabled: bodyGenerativeUiEnabled,
     memoryDisabled: bodyMemoryDisabled,
     autoCompressThreshold: bodyAutoCompressThreshold,
     maxToolCalls: bodyMaxToolCalls,
@@ -89,7 +88,6 @@ export async function POST(req: Request) {
       bodyEnabledSkills,
       bodyChatOnlyMode,
       bodyMemoryDisabled,
-      bodyGenerativeUiEnabled,
       bodyAutoCompressThreshold,
       bodyMaxToolCalls,
     });
@@ -103,7 +101,6 @@ export async function POST(req: Request) {
       topP,
       chatOnlyMode,
       memoryDisabled,
-      generativeUiEnabled,
       fallbackModel,
       maxToolCalls,
       autoCompressThreshold,
@@ -150,12 +147,7 @@ export async function POST(req: Request) {
       continue;
     }
     if (!maxTokens) maxTokens = 8192;
-    // Generative UI (inline json-render mode) and normal tool-calling
-    // haven't been proven to coexist reliably in one streamText() call —
-    // a spike showed a tool-capable model silently ignoring an available
-    // tool once catalog.prompt()'s inline-mode instructions were also in
-    // the system prompt. Disable tools for the turn rather than risk that.
-    const useTools = modelConfig.supportsTools && !chatOnlyMode && !generativeUiEnabled;
+    const useTools = modelConfig.supportsTools && !chatOnlyMode;
     const activeToolIds = resolveActiveToolIds(explicitToolIds, skillIds, kbId);
 
     const { text: finalSystemPrompt, sections } = await buildSystemPrompt({
@@ -168,7 +160,6 @@ export async function POST(req: Request) {
       ragContext,
       messages,
       memoryDisabled,
-      generativeUiEnabled,
       userId,
       mode: toolMode,
     });
@@ -277,9 +268,8 @@ export async function POST(req: Request) {
     let assistantPersisted = false;
     let traceRecorded = false;
     let partialText = "";
-    // Captured from streamText's own onFinish so the generative-UI path can
-    // still record real token usage even though it persists from
-    // createUIMessageStream's onFinish instead (see below).
+    // Captured from streamText's onFinish so the later createUIMessageStream onFinish,
+    // which does the persisting, can still record real token usage.
     let capturedFinishEvent: { steps: any[]; totalUsage?: any } | null = null;
     const partialParts: any[] = [];
     const partialToolOutputs = new Map<string, { name: string; input: any; start: number }>();
@@ -444,14 +434,8 @@ export async function POST(req: Request) {
           onFinish: (event) => {
             if (!conversationId) return;
             capturedFinishEvent = event;
-            // Generative-UI turns persist from createUIMessageStream's own
-            // onFinish instead (below), using the post-pipeJsonRender
-            // text/data-spec split rather than this raw pre-split text —
-            // otherwise reload would show literal JSONL patch lines.
-            if (!generativeUiEnabled) {
-              assistantPersisted = true;
-              safePersistAssistantMessage(event, { conversationId, model: servedModel, autoCompressThreshold, systemPrompt: finalSystemPrompt, messageId: bodyAssistantMessageId });
-            }
+            // Persistence happens in createUIMessageStream's onFinish below, on the
+            // post-pipeJsonRender split — this raw text would reload as JSONL lines.
 
             const text = (event as { text?: string }).text ?? "";
             const stepCount =
@@ -515,7 +499,7 @@ export async function POST(req: Request) {
         console.log(
           `[chat] model=${servedModel} tools=${Object.keys(aiTools).join(",")} ` +
             `kbId=${kbId || "none"} activeToolIds=${[...activeToolIds].join(",")} ` +
-            `mode=${toolMode} chatOnlyMode=${chatOnlyMode} generativeUiEnabled=${generativeUiEnabled} ` +
+            `mode=${toolMode} chatOnlyMode=${chatOnlyMode} ` +
             `supportsTools=${modelConfig.supportsTools} useTools=${useTools}`,
         );
 
@@ -531,36 +515,31 @@ export async function POST(req: Request) {
           return friendlyProviderErrorMessage(rawMsg, { servedModel, isOllama }) ?? rawMsg;
         };
 
-        // Generative UI (json-render inline mode) needs its response built
-        // through createUIMessageStream so pipeJsonRender can split prose
-        // from JSONL patches into separate `text`/`data-spec` parts before
-        // the client ever sees them. Every other turn keeps the direct,
-        // unchanged path.
-        const response = generativeUiEnabled
-          ? createUIMessageStreamResponse({
-              stream: createUIMessageStream({
-                execute: async ({ writer }) => {
-                  // `toUIMessageStream` needs its own onError: it turns `error` parts into
-                  // text itself, so createUIMessageStream's onError never sees them.
-                  writer.merge(pipeJsonRender(result.toUIMessageStream({ onError: onStreamError })));
-                },
-                onError: onStreamError,
-                onFinish: ({ messages: finishedMessages }) => {
-                  if (!conversationId || assistantPersisted) return;
-                  assistantPersisted = true;
-                  const last = finishedMessages[finishedMessages.length - 1];
-                  safePersistAssistantMessage(capturedFinishEvent ?? { steps: [] }, {
-                    conversationId,
-                    model: servedModel,
-                    autoCompressThreshold,
-                    systemPrompt: finalSystemPrompt,
-                    messageId: bodyAssistantMessageId,
-                    overrideParts: (last?.parts as any[]) ?? [],
-                  });
-                },
-              }),
-            })
-          : result.toUIMessageStreamResponse({ onError: onStreamError });
+        // Generative UI is always on, so every response goes through pipeJsonRender,
+        // which splits prose from JSONL patches into `text`/`data-spec` parts.
+        const response = createUIMessageStreamResponse({
+          stream: createUIMessageStream({
+            execute: async ({ writer }) => {
+              // `toUIMessageStream` needs its own onError: it turns `error` parts into
+              // text itself, so createUIMessageStream's onError never sees them.
+              writer.merge(pipeJsonRender(result.toUIMessageStream({ onError: onStreamError })));
+            },
+            onError: onStreamError,
+            onFinish: ({ messages: finishedMessages }) => {
+              if (!conversationId || assistantPersisted) return;
+              assistantPersisted = true;
+              const last = finishedMessages[finishedMessages.length - 1];
+              safePersistAssistantMessage(capturedFinishEvent ?? { steps: [] }, {
+                conversationId,
+                model: servedModel,
+                autoCompressThreshold,
+                systemPrompt: finalSystemPrompt,
+                messageId: bodyAssistantMessageId,
+                overrideParts: (last?.parts as any[]) ?? [],
+              });
+            },
+          }),
+        });
 
         // If the client stops the generation, onFinish may not fire. Persist
         // whatever partial content we've accumulated so it isn't lost on refresh.
@@ -626,7 +605,6 @@ export async function POST(req: Request) {
         debugHeaders.set("X-Debug-Model", servedModel);
         debugHeaders.set("X-Debug-Chat-Only-Mode", String(chatOnlyMode));
         debugHeaders.set("X-Debug-Tool-Mode", toolMode);
-        debugHeaders.set("X-Debug-Generative-Ui-Enabled", String(generativeUiEnabled));
         debugHeaders.set("X-Debug-Supports-Tools", String(modelConfig.supportsTools));
         debugHeaders.set("X-Debug-Use-Tools", String(useTools));
         debugHeaders.set(
