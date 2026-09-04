@@ -85,12 +85,20 @@ headless mode for each turn and streams its reply, so the tool uses its own
 login, including a Claude or ChatGPT subscription, and no API key is involved.
 This is how [bb](https://github.com/get-bb/bb) works too. Details:
 
-- The tool runs with its own file, shell and web tools disabled, in a scratch
-  directory. DevChat's own tools (web search, knowledge bases, todos, MCP, ...)
-  still work: they are described to the model in the prompt, a reply ending in
-  a ```tool_call block is run by DevChat, and the result goes back in the next
-  turn. Each tool step is a fresh run of the CLI, so tool-heavy turns are
-  slower than with an API provider.
+- By default the tool runs sandboxed: its own file, shell and web tools are off
+  and it sits in an empty scratch directory. DevChat's own tools (web search,
+  knowledge bases, todos, MCP, ...) still work: they are described to the model
+  in the prompt, a reply ending in a ```tool_call block is run by DevChat, and
+  the result goes back in the next turn. Each tool step is a fresh run of the
+  CLI, so tool-heavy turns are slower than with an API provider.
+- **Working folder** (model settings dialog, CLI models only): pick one of the
+  folders you have used Claude Code in. With a folder set, the tool's own tools
+  come on, scoped by the chat/agent toggle: **Chat** = read and search there
+  (Read, Glob, Grep, web search and fetch); **Agent** = also create and edit
+  files (Claude Code runs with `--permission-mode acceptEdits`). Shell commands
+  are never allowed, other folders are denied by Claude Code itself, and every
+  tool call the CLI makes is shown in the message. OpenCode and Codex get the
+  same policy through their own permission settings.
 - Claude Code is started with your hooks and settings skipped and DevChat's
   system prompt in place of its coding-agent prompt.
 - DevChat's own provider keys from `.env` are kept out of the tool's

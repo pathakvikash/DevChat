@@ -34,6 +34,14 @@ describe("claudeParser", () => {
     expect((events.find((e) => e.type === "reasoning") as any).text).toMatch(/about 80 tokens/);
   });
 
+  it("announces thinking as soon as a thinking block starts", () => {
+    const parse = claudeParser();
+    expect(parse(`{"type":"stream_event","event":{"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":""}}}`)).toEqual([
+      { type: "reasoning", text: "Thinking…" },
+    ]);
+    expect(parse(`{"type":"stream_event","event":{"type":"content_block_start","index":1,"content_block":{"type":"text","text":""}}}`)).toEqual([]);
+  });
+
   it("flags upstream retries so the runner can stop a stuck tool", () => {
     const parse = claudeParser();
     expect(parse(`{"type":"system","subtype":"api_retry","attempt":1}`)).toEqual([{ type: "retry" }]);
@@ -318,5 +326,74 @@ describe("tool prompt plumbing", () => {
     expect(r.user).toMatch(/use them to answer in prose now/);
     expect(r.user).toMatch(/do not repeat a tool call you already made with the same arguments/);
     expect(r.user.endsWith("Assistant:")).toBe(true);
+  });
+});
+
+describe("working folder and access", () => {
+  const claude = CLI_PROVIDERS.find((d) => d.id === "claude-code")!;
+  const base = { model: "sonnet", system: "", user: "U" };
+
+  it("keeps Claude Code sandboxed without a folder", () => {
+    const a = claude.invoke(base).args;
+    expect(a.slice(a.indexOf("--tools"), a.indexOf("--tools") + 2)).toEqual(["--tools", ""]);
+    expect(a).not.toContain("--permission-mode");
+    expect(claude.invoke(base).cwd).toBeUndefined();
+  });
+
+  it("gives read-only tools in chat mode and edits in agent mode", () => {
+    const chat = claude.invoke({ ...base, cwd: "/repo", access: "chat" });
+    expect(chat.args).toEqual(expect.arrayContaining(["--tools", "Read", "Glob", "Grep", "WebSearch", "WebFetch"]));
+    expect(chat.args).not.toContain("--permission-mode");
+    expect(chat.cwd).toBe("/repo");
+
+    const agent = claude.invoke({ ...base, cwd: "/repo", access: "agent" });
+    expect(agent.args).toEqual(expect.arrayContaining(["--tools", "default", "--permission-mode", "acceptEdits"]));
+    expect(agent.args).not.toContain("bypassPermissions");
+  });
+
+  it("maps the same policy onto OpenCode and Codex", () => {
+    const oc = CLI_PROVIDERS.find((d) => d.id === "opencode")!;
+    const perm = (inv: ReturnType<typeof oc.invoke>) => JSON.parse(inv.env!.OPENCODE_CONFIG_CONTENT).permission;
+    expect(perm(oc.invoke({ ...base, model: "default" }))).toEqual({ bash: "deny", edit: "deny", webfetch: "deny" });
+    expect(perm(oc.invoke({ ...base, model: "default", cwd: "/repo", access: "chat" }))).toEqual({ bash: "deny", edit: "deny", webfetch: "allow" });
+    expect(perm(oc.invoke({ ...base, model: "default", cwd: "/repo", access: "agent" }))).toEqual({ bash: "deny", edit: "allow", webfetch: "allow" });
+    expect(oc.invoke({ ...base, model: "default", cwd: "/repo" }).args).toEqual(expect.arrayContaining(["--dir", "/repo"]));
+
+    const codex = CLI_PROVIDERS.find((d) => d.id === "codex")!;
+    expect(codex.invoke({ ...base, model: "default", cwd: "/repo", access: "agent" }).args).toEqual(expect.arrayContaining(["--sandbox", "workspace-write", "-C", "/repo"]));
+    expect(codex.invoke({ ...base, model: "default", cwd: "/repo", access: "chat" }).args).toEqual(expect.arrayContaining(["--sandbox", "read-only"]));
+  });
+
+  it("surfaces the tools Claude Code ran, with names on the results", () => {
+    // Real lines from a read-only run on 2026-09-04.
+    const parse = claudeParser();
+    const events = [
+      `{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_01","name":"Read","input":{"file_path":"notes.txt"}}]}}`,
+      `{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_01","content":"1\\tThe secret word is PINEAPPLE.\\n"}]}}`,
+      `{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_02","is_error":true,"content":"denied"}]}}`,
+      `{"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"text_delta","text":"PINEAPPLE."}}}`,
+    ].flatMap(parse);
+    expect(events).toEqual([
+      { type: "tool-call", id: "toolu_01", name: "Read", input: { file_path: "notes.txt" } },
+      { type: "tool-result", id: "toolu_01", name: "Read", result: "1\tThe secret word is PINEAPPLE.\n", isError: false },
+      { type: "tool-result", id: "toolu_02", name: "tool", result: "denied", isError: true },
+      { type: "text", text: "PINEAPPLE." },
+    ]);
+  });
+
+  it("strips nested-session markers the way the /claude runner does", () => {
+    const saved = { ...process.env };
+    process.env.CLAUDE_CODE_SSE_PORT = "1";
+    process.env.CLAUDE_PID = "2";
+    process.env.ANTHROPIC_API_URL = "x";
+    try {
+      const env = childEnv();
+      expect(env.CLAUDE_CODE_SSE_PORT).toBeUndefined();
+      expect(env.CLAUDE_PID).toBeUndefined();
+      expect(env.ANTHROPIC_API_URL).toBeUndefined();
+    } finally {
+      for (const k of Object.keys(process.env)) if (!(k in saved)) delete process.env[k];
+      Object.assign(process.env, saved);
+    }
   });
 });

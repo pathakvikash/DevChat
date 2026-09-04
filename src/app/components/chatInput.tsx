@@ -7,6 +7,8 @@ import AttachmentChip from "./AttachmentChip";
 import DragOverlay from "./DragOverlay";
 import ContextUsageCircle from "./ContextUsageCircle";
 import ModelSelector from "./conversation/ModelSelector";
+import WorkingFolderPicker from "./conversation/WorkingFolderPicker";
+import { isCliModelId } from "@/lib/providers";
 import VoiceWaveform from "./VoiceWaveform";
 import {
   activeCommandQuery,
@@ -41,6 +43,9 @@ interface ChatInputProps {
   model: string;
   onModelChange: (modelId: string) => void;
   onOpenSettings: () => void;
+  /** CLI-backed models only: folder the tool may read (chat) or edit (agent). */
+  workingFolder?: string | null;
+  onWorkingFolderChange?: (folder: string | null) => void;
   onKbToggle: () => void;
   searchProvider: "duckduckgo" | "tavily";
   onToggleSearchProvider: () => void;
@@ -65,6 +70,8 @@ export default function ChatInput({
   model,
   onModelChange,
   onOpenSettings,
+  workingFolder,
+  onWorkingFolderChange,
   onKbToggle,
   searchProvider,
   onToggleSearchProvider,
@@ -527,6 +534,16 @@ export default function ChatInput({
                 size="sm"
               />
             </div>
+
+            {isCliModelId(model) && onWorkingFolderChange && (
+              <div className="hidden md:block">
+                <WorkingFolderPicker
+                  value={workingFolder ?? null}
+                  onChange={onWorkingFolderChange}
+                  disabled={isLoading}
+                />
+              </div>
+            )}
 
             {voiceSupported && (
               <button

@@ -3,6 +3,7 @@
 import { memo, useState, useCallback } from "react";
 import FileAttachments from "./FileAttachments";
 import ThinkingBlock from "./ThinkingBlock";
+import TypingIndicator from "./TypingIndicator";
 import MessageContent from "./MessageContent";
 import MessageActions from "./MessageActions";
 import MessageEditor from "./MessageEditor";
@@ -126,7 +127,10 @@ function MessageBubble({
           <FileAttachments fileParts={fileParts} />
 
           {!isUser && combinedThinking && (
-            <ThinkingBlock text={combinedThinking} />
+            <ThinkingBlock
+              text={combinedThinking}
+              streaming={isStreaming && !cleanContent}
+            />
           )}
 
           {showEditor ? (
@@ -187,9 +191,15 @@ function MessageBubble({
             fileParts.length === 0 &&
             toolParts.length === 0 &&
             !showEditor && (
-              <div className="text-zinc-400 italic">
-                {isUser ? "(empty message)" : "..."}
-              </div>
+              // A streaming assistant bubble with nothing to show yet: the model
+              // is still starting or thinking, so say so instead of "...".
+              isStreaming && !isUser ? (
+                <TypingIndicator isVisible compact label="Thinking…" />
+              ) : (
+                <div className="text-zinc-400 italic">
+                  {isUser ? "(empty message)" : "..."}
+                </div>
+              )
             )}
         </div>
 
@@ -229,7 +239,11 @@ const MessageBubbleMemo = memo(MessageBubble, (prev, next) => {
     if (a.type === "text" && a.text !== b.text) return false;
     if (a.type === "reasoning" && (a.text ?? a.reasoning) !== (b.text ?? b.reasoning)) return false;
     if (a.type === "file" && (a.url !== b.url || a.name !== b.name)) return false;
-    if (typeof a.type === "string" && a.type.startsWith("tool-") && a.toolCallId !== b.toolCallId) return false;
+    if (typeof a.type === "string" && a.type.startsWith("tool-")) {
+      // Re-render when a tool call finishes (running → done), not only when
+      // a new call appears.
+      if (a.toolCallId !== b.toolCallId || a.state !== b.state || a.output !== b.output || a.errorText !== b.errorText) return false;
+    }
   }
   return (
     prev.onEdit === next.onEdit &&

@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/db";
 import { NextRequest, NextResponse } from "next/server";
 import { requireUserId } from "@/lib/auth";
+import { isRunnableCwd } from "@/lib/claude/sessions";
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
@@ -32,8 +33,17 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   try {
     const userId = await requireUserId();
     const { id } = await params;
-    const { title, model, persona, systemPrompt, webSearch, temperature, maxTokens, kbId, contextLength, topP, chatOnlyMode, generativeUiEnabled, pinned, archived, note, maxToolCalls, fallbackModel, reasoningEffort } =
+    const { title, model, persona, systemPrompt, webSearch, temperature, maxTokens, kbId, contextLength, topP, chatOnlyMode, pinned, archived, note, maxToolCalls, fallbackModel, reasoningEffort, workingFolder } =
       await req.json();
+
+    // A working folder lets a CLI-backed model read (or, in agent mode, edit)
+    // files there, so it is confined to folders Claude Code already knows.
+    if (workingFolder && !(await isRunnableCwd(workingFolder))) {
+      return NextResponse.json(
+        { error: "Working folder must be one of your Claude Code project folders" },
+        { status: 400 },
+      );
+    }
 
     if (kbId) {
       const kb = await prisma.knowledgeBase.findUnique({
@@ -66,6 +76,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
         ...(maxToolCalls !== undefined && { maxToolCalls }),
         ...(fallbackModel !== undefined && { fallbackModel: fallbackModel || null }),
         ...(reasoningEffort !== undefined && { reasoningEffort: reasoningEffort || null }),
+        ...(workingFolder !== undefined && { workingFolder: workingFolder || null }),
       },
     });
 

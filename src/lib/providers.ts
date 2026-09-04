@@ -119,6 +119,14 @@ export const ENV_ALIASES: Record<string, string> = {
   GOOGLE_GENERATIVE_AI_API_KEY: "google",
 };
 
+/** Model-id prefixes of CLI-backed providers (see cliProviders.ts); client-safe. */
+export const CLI_PROVIDER_IDS = ["claude-code", "codex", "opencode"] as const;
+
+export function isCliModelId(modelId: string): boolean {
+  const prefix = modelId.slice(0, modelId.indexOf("/"));
+  return (CLI_PROVIDER_IDS as readonly string[]).includes(prefix);
+}
+
 /** The provider that owns a model id, or undefined for Ollama/unknown ids. */
 export function providerForModel(modelId: string): ProviderDef | undefined {
   const slash = modelId.indexOf("/");

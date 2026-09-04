@@ -37,6 +37,7 @@ export interface ResolvedChatSettings {
   autoCompressThreshold: number;
   maxToolCalls: number;
   reasoningEffort: string | undefined;
+  workingFolder: string | undefined;
 }
 
 /**
@@ -71,6 +72,7 @@ export async function resolveChatSettings(
   const autoCompressThreshold = opts.bodyAutoCompressThreshold ?? 85;
   let maxToolCalls = opts.bodyMaxToolCalls ?? 5;
   let reasoningEffort: string | undefined;
+  let workingFolder: string | undefined;
 
   if (opts.conversationId) {
     const conv = await prisma.conversation.findUnique({
@@ -89,6 +91,7 @@ export async function resolveChatSettings(
         maxToolCalls: true,
         fallbackModel: true,
         reasoningEffort: true,
+        workingFolder: true,
       },
     });
     if (conv) {
@@ -104,6 +107,7 @@ export async function resolveChatSettings(
       generativeUiEnabled = conv.generativeUiEnabled ?? generativeUiEnabled;
       maxToolCalls = conv.maxToolCalls ?? maxToolCalls;
       reasoningEffort = conv.reasoningEffort ?? undefined;
+      workingFolder = conv.workingFolder ?? undefined;
       if (conv.fallbackModel) fallbackModel = conv.fallbackModel;
     }
   }
@@ -126,5 +130,6 @@ export async function resolveChatSettings(
     autoCompressThreshold,
     maxToolCalls,
     reasoningEffort,
+    workingFolder,
   };
 }

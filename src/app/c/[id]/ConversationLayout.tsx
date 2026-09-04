@@ -126,6 +126,7 @@ export default function ConversationLayout({ conversationId, initialPrompt }: Pr
               onOpenArtifact={(id: string) => { p.setSelectedArtifactId(id); p.setArtifactPanelOpen(true); }}
               onClarificationAnswer={p.handleClarificationAnswer}
               scrollRef={p.scrollRef}
+              statusLabel={p.currentModelName ? `Waiting for ${p.currentModelName}…` : undefined}
             />
           )}
 
@@ -157,6 +158,8 @@ export default function ConversationLayout({ conversationId, initialPrompt }: Pr
           isCompressing={p.isCompressing}
           model={p.conversation.model}
           onModelChange={p.handleModelChange}
+          workingFolder={p.conversation.workingFolder ?? null}
+          onWorkingFolderChange={p.handleWorkingFolderChange}
           onOpenSettings={() => p.setModelSettingsOpen(true)}
           onKbToggle={p.handleKbToggle}
           searchProvider={p.searchProvider}
@@ -209,6 +212,7 @@ export default function ConversationLayout({ conversationId, initialPrompt }: Pr
         currentFallbackModel={p.conversation.fallbackModel || null}
         currentPersona={p.conversation.persona || null}
         currentReasoningEffort={p.conversation.reasoningEffort ?? null}
+        currentWorkingFolder={p.conversation.workingFolder ?? null}
         onSave={p.handleModelSettingsSave}
       />
       <ContextDetailsPanel

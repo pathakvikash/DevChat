@@ -114,7 +114,7 @@ export function useConversationPage(conversationId: string, initialPrompt?: stri
 
   const {
     fetchConversation, refreshConversation, refreshConversationAndMessages,
-    fetchContextUsage, handleModelSettingsSave, handleModelChange, handleKbToggle,
+    fetchContextUsage, handleModelSettingsSave, handleModelChange, handleWorkingFolderChange, handleKbToggle,
   } = dataActions;
 
   onFinishRef.current = useCallback((finish?: ChatFinish) => {
@@ -308,7 +308,7 @@ export function useConversationPage(conversationId: string, initialPrompt?: stri
     messages, sendMessage, status, stop, regenerate, error, setMessages, addToolResult,
     isLoading, currentModelName,
     fetchConversation, refreshConversation, refreshConversationAndMessages,
-    fetchContextUsage, handleModelSettingsSave, handleModelChange, handleKbToggle,
+    fetchContextUsage, handleModelSettingsSave, handleModelChange, handleWorkingFolderChange, handleKbToggle,
     handleClarificationAnswer, handleEditMessage, handleDeleteMessage, handleCopyMessage,
     handleRegenerateMessage, handleRegenExecute, regenModal, setRegenModal,
     handleSubmit,

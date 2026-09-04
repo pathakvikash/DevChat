@@ -52,7 +52,10 @@ export type CliEvent =
   | { type: "usage"; usage: CliUsage }
   | { type: "error"; message: string }
   /** The tool is retrying its upstream API call; several in a row with no reply means it's stuck. */
-  | { type: "retry" };
+  | { type: "retry" }
+  /** A tool the CLI ran itself (Claude Code's Read/Edit/…), shown as a provider-executed call. */
+  | { type: "tool-call"; id: string; name: string; input: unknown }
+  | { type: "tool-result"; id: string; name: string; result: unknown; isError: boolean };
 
 export interface CliInvocation {
   model: string;
@@ -60,6 +63,10 @@ export interface CliInvocation {
   user: string;
   /** low | medium | high | max, from the conversation's reasoning-effort setting. */
   effort?: string;
+  /** Working folder the tool may use; absent = sandboxed scratch dir, no file tools. */
+  cwd?: string;
+  /** chat = read-only tools in `cwd`; agent = may also create/edit files there. */
+  access?: "chat" | "agent";
 }
 
 export interface CliProviderDef {
@@ -70,7 +77,7 @@ export interface CliProviderDef {
   contextWindow: number;
   /** Fixed list, or "discover" to ask the tool (currently `opencode models`). */
   models: CliModel[] | "discover";
-  invoke(p: CliInvocation): { args: string[]; stdin?: string; env?: Record<string, string> };
+  invoke(p: CliInvocation): { args: string[]; stdin?: string; env?: Record<string, string>; cwd?: string };
   /** Stateful line parser factory: one instance per run. */
   parser(): (line: string) => CliEvent[];
 }
@@ -88,25 +95,56 @@ function json(line: string): Record<string, any> | null {
 /** `claude -p --output-format stream-json --include-partial-messages` */
 export function claudeParser(): (line: string) => CliEvent[] {
   let streamed = false;
+  // tool_use id → tool name, so results (which only carry the id) can be labelled.
+  const toolNames = new Map<string, string>();
   return (line) => {
     const e = json(line);
     if (!e) return [];
     if (e.type === "stream_event") {
-      const d = e.event?.delta;
-      if (e.event?.type === "content_block_delta" && d?.type === "text_delta" && typeof d.text === "string") {
+      const ev = e.event;
+      const d = ev?.delta;
+      if (ev?.type === "content_block_delta" && d?.type === "text_delta" && typeof d.text === "string") {
         streamed = true;
         return [{ type: "text", text: d.text }];
+      }
+      // Thinking content is redacted, but knowing it started lets the UI show
+      // a live "Thinking…" block instead of an empty bubble.
+      if (ev?.type === "content_block_start" && ev.content_block?.type === "thinking") {
+        return [{ type: "reasoning", text: "Thinking…" }];
       }
       return [];
     }
     if (e.type === "system") return e.subtype === "api_retry" ? [{ type: "retry" }] : [];
-    // Older versions without partial messages: whole assistant messages.
-    if (e.type === "assistant" && !streamed) {
-      const text = (e.message?.content ?? [])
-        .filter((p: any) => p?.type === "text" && typeof p.text === "string")
-        .map((p: any) => p.text)
-        .join("");
-      return text ? [{ type: "text", text }] : [];
+    if (e.type === "assistant") {
+      const blocks: any[] = e.message?.content ?? [];
+      const out: CliEvent[] = [];
+      for (const b of blocks) {
+        if (b?.type === "tool_use" && typeof b.id === "string" && typeof b.name === "string") {
+          toolNames.set(b.id, b.name);
+          out.push({ type: "tool-call", id: b.id, name: b.name, input: b.input ?? {} });
+        }
+      }
+      // Older versions without partial messages: whole assistant messages.
+      if (!streamed) {
+        const text = blocks
+          .filter((p) => p?.type === "text" && typeof p.text === "string")
+          .map((p) => p.text)
+          .join("");
+        if (text) out.push({ type: "text", text });
+      }
+      return out;
+    }
+    if (e.type === "user") {
+      // Results of the tools Claude Code ran come back as user-role messages.
+      return ((e.message?.content ?? []) as any[])
+        .filter((b) => b?.type === "tool_result" && typeof b.tool_use_id === "string")
+        .map((b) => ({
+          type: "tool-result" as const,
+          id: b.tool_use_id as string,
+          name: toolNames.get(b.tool_use_id) ?? "tool",
+          result: b.content ?? "",
+          isError: !!b.is_error,
+        }));
     }
     if (e.type === "result") {
       const u = e.usage ?? {};
@@ -188,10 +226,9 @@ export const CLI_PROVIDERS: readonly CliProviderDef[] = [
       { id: "opus", name: "Opus" },
       { id: "haiku", name: "Haiku" },
     ],
-    // --setting-sources "" skips the user's hooks and settings; --tools "" keeps
-    // Claude Code from touching this machine; --system-prompt replaces its
-    // coding-agent prompt with DevChat's (drops ~12k tokens of default prompt).
-    invoke: ({ model, system, user, effort }) => ({
+    // --setting-sources "" skips the user's hooks/settings; --system-prompt replaces the
+    // coding-agent prompt. Tool access widens with the working folder and mode.
+    invoke: ({ model, system, user, effort, cwd, access }) => ({
       args: [
         "-p",
         "--output-format", "stream-json",
@@ -199,12 +236,17 @@ export const CLI_PROVIDERS: readonly CliProviderDef[] = [
         "--include-partial-messages",
         "--no-session-persistence",
         "--setting-sources", "",
-        "--tools", "",
+        ...(!cwd
+          ? ["--tools", ""]
+          : access === "agent"
+            ? ["--tools", "default", "--permission-mode", "acceptEdits"]
+            : ["--tools", "Read", "Glob", "Grep", "WebSearch", "WebFetch"]),
         ...(system ? ["--system-prompt", system] : []),
         ...(model !== "default" ? ["--model", model] : []),
         ...(effort ? ["--effort", effort] : []),
       ],
       stdin: user,
+      cwd,
     }),
     parser: claudeParser,
   },
@@ -214,17 +256,19 @@ export const CLI_PROVIDERS: readonly CliProviderDef[] = [
     bin: "codex",
     contextWindow: 200_000,
     models: [{ id: "default", name: "Default (your Codex setting)" }],
-    invoke: ({ model, system, user, effort }) => ({
+    invoke: ({ model, system, user, effort, cwd, access }) => ({
       args: [
         "exec",
         "--json",
         "--skip-git-repo-check",
-        "--sandbox", "read-only",
+        "--sandbox", cwd && access === "agent" ? "workspace-write" : "read-only",
+        ...(cwd ? ["-C", cwd] : []),
         ...(model !== "default" ? ["--model", model] : []),
         ...(effort ? ["-c", `model_reasoning_effort="${effort === "max" ? "high" : effort}"`] : []),
         "-",
       ],
       stdin: withSystem(system, user),
+      cwd,
     }),
     parser: codexParser,
   },
@@ -234,20 +278,30 @@ export const CLI_PROVIDERS: readonly CliProviderDef[] = [
     bin: "opencode",
     contextWindow: 128_000,
     models: "discover",
-    invoke: ({ model, system, user, effort }) => ({
+    invoke: ({ model, system, user, effort, cwd, access }) => ({
       args: [
         "run",
         "--format", "json",
         "--pure",
         "--thinking",
+        ...(cwd ? ["--dir", cwd] : []),
         ...(model !== "default" ? ["--model", model] : []),
         ...(effort ? ["--variant", effort] : []),
         "--",
         withSystem(system, user),
       ],
       env: {
-        OPENCODE_CONFIG_CONTENT: JSON.stringify({ permission: { edit: "deny", bash: "deny", webfetch: "deny" } }),
+        // Shell is never allowed; edits only with a folder in agent mode; web
+        // fetch only with a folder (mirrors Claude Code's tool set above).
+        OPENCODE_CONFIG_CONTENT: JSON.stringify({
+          permission: {
+            bash: "deny",
+            edit: cwd && access === "agent" ? "allow" : "deny",
+            webfetch: cwd ? "allow" : "deny",
+          },
+        }),
       },
+      cwd,
     }),
     parser: opencodeParser,
   },
@@ -274,22 +328,30 @@ function searchPath(): string {
   return [...(process.env.PATH ?? "").split(delimiter), ...EXTRA_BIN_DIRS].filter(Boolean).join(delimiter);
 }
 
-// DevChat's own provider configuration (from .env) must not leak into the
-// tool: Claude Code, for one, prefers ANTHROPIC_API_KEY over its subscription
-// login and then retries a bad key forever. The tool must use its own login.
+// DevChat's own provider env must not leak into the tool: Claude Code prefers
+// ANTHROPIC_API_KEY over its subscription login and then retries a bad key forever.
 const STRIPPED_ENV = new Set([
   ...PROVIDERS.map((p) => p.envKey),
   ...PROVIDERS.flatMap((p) => (p.envBaseUrl ? [p.envBaseUrl] : [])),
   ...Object.keys(ENV_ALIASES),
   "ANTHROPIC_AUTH_TOKEN",
-  // Claude Code refuses to start inside another Claude Code session.
-  "CLAUDECODE",
-  "CLAUDE_CODE_ENTRYPOINT",
+  "ANTHROPIC_API_URL",
 ]);
+
+/** Start the dev server from inside Claude Code and these leak in, making the
+ *  spawned run think it is a nested child instead of a fresh session. */
+function isSessionVar(key: string): boolean {
+  return (
+    key === "CLAUDECODE" ||
+    key === "CLAUDE_PID" ||
+    key.startsWith("CLAUDE_CODE_") ||
+    key.startsWith("CLAUDE_AGENT_")
+  );
+}
 
 export function childEnv(extra?: Record<string, string>): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = { ...process.env, ...extra, PATH: searchPath() };
-  for (const k of STRIPPED_ENV) delete env[k];
+  for (const k of Object.keys(env)) if (STRIPPED_ENV.has(k) || isSessionVar(k)) delete env[k];
   return env;
 }
 
@@ -667,15 +729,20 @@ function runCli(
   return new ReadableStream<StreamPart>({
     async start(controller) {
       controller.enqueue({ type: "stream-start", warnings });
-      const cwd = join(tmpdir(), "devchat-cli");
-      await mkdir(cwd, { recursive: true });
+      const scratch = join(tmpdir(), "devchat-cli");
+      await mkdir(scratch, { recursive: true });
+      const cwd = spec.cwd || scratch;
 
       child = spawn(def.bin, spec.args, { cwd, env: childEnv(spec.env), stdio: ["pipe", "pipe", "pipe"] });
       const proc = child;
       const parse = def.parser();
       const scanner = toolNames?.size ? new ToolCallScanner(toolNames) : null;
-      const textId = "text-1";
-      const reasoningId = "reasoning-1";
+      // Text and reasoning parts can open and close several times around
+      // provider-run tool calls; each needs a fresh id.
+      let textSeq = 0;
+      let reasoningSeq = 0;
+      let textId = "";
+      let reasoningId = "";
       let textOpen = false;
       let sawOutput = false;
       let toolCalled = false;
@@ -706,23 +773,36 @@ function runCli(
           reasoningOpen = false;
         }
       };
+      const emitReasoning = (text: string) => {
+        if (!text) return;
+        if (!reasoningOpen) {
+          reasoningId = `reasoning-${++reasoningSeq}`;
+          controller.enqueue({ type: "reasoning-start", id: reasoningId });
+          reasoningOpen = true;
+        }
+        controller.enqueue({ type: "reasoning-delta", id: reasoningId, delta: text });
+      };
       const emitText = (text: string) => {
         if (!text) return;
         closeReasoning();
         sawOutput = true;
         if (!textOpen) {
+          textId = `text-${++textSeq}`;
           controller.enqueue({ type: "text-start", id: textId });
           textOpen = true;
         }
         controller.enqueue({ type: "text-delta", id: textId, delta: text });
       };
-      const emitScan = ({ text, call }: { text: string; call?: ParsedToolCall }) => {
-        emitText(text);
-        if (!call) return;
+      const closeText = () => {
         if (textOpen) {
           controller.enqueue({ type: "text-end", id: textId });
           textOpen = false;
         }
+      };
+      const emitScan = ({ text, call }: { text: string; call?: ParsedToolCall }) => {
+        emitText(text);
+        if (!call) return;
+        closeText();
         sawOutput = true;
         toolCalled = true;
         controller.enqueue({
@@ -738,7 +818,7 @@ function runCli(
         clearInterval(watchdog);
         if (scanner) emitScan(scanner.end());
         closeReasoning();
-        if (textOpen) controller.enqueue({ type: "text-end", id: textId });
+        closeText();
         const failed = !!errorMsg || (exitCode !== 0 && !sawOutput);
         if (failed) {
           const tail = stderr.trim().slice(-600);
@@ -764,15 +844,32 @@ function runCli(
             if (scanner) emitScan(scanner.push(ev.text));
             else emitText(ev.text);
           } else if (ev.type === "reasoning") {
-            // May arrive after the answer (Claude Code reports its thinking
-            // token count in the final event); the UI groups reasoning parts
-            // into one block regardless of order.
-            if (!ev.text) continue;
-            if (!reasoningOpen) {
-              controller.enqueue({ type: "reasoning-start", id: reasoningId });
-              reasoningOpen = true;
-            }
-            controller.enqueue({ type: "reasoning-delta", id: reasoningId, delta: ev.text });
+            // May arrive after the answer; the UI groups reasoning parts into one
+            // block regardless of order.
+            emitReasoning(ev.text);
+          } else if (ev.type === "tool-call") {
+            // The CLI ran this itself; `dynamic` because it isn't one of the
+            // tools DevChat handed to streamText.
+            closeReasoning();
+            closeText();
+            sawOutput = true;
+            controller.enqueue({
+              type: "tool-call",
+              toolCallId: ev.id,
+              toolName: ev.name,
+              input: JSON.stringify(ev.input ?? {}),
+              providerExecuted: true,
+              dynamic: true,
+            });
+          } else if (ev.type === "tool-result") {
+            controller.enqueue({
+              type: "tool-result",
+              toolCallId: ev.id,
+              toolName: ev.name,
+              result: (ev.result ?? "") as NonNullable<Extract<StreamPart, { type: "tool-result" }>["result"]>,
+              isError: ev.isError,
+              dynamic: true,
+            });
           } else if (ev.type === "usage") {
             for (const k of Object.keys(ev.usage) as (keyof CliUsage)[]) {
               const v = ev.usage[k];
@@ -780,6 +877,9 @@ function runCli(
             }
           } else if (ev.type === "retry") {
             retries++;
+            // Otherwise the bubble just sits there: the tool is alive but its
+            // upstream API isn't answering, and only we can see that.
+            emitReasoning(`Waiting for ${def.label}'s API (retry ${retries})…\n`);
             if (retries >= MAX_RETRIES && !sawOutput) {
               stop(`${def.label} keeps retrying its API call (${retries}×) without answering. Run \`${def.bin}\` in a terminal to check its login.`);
             }
@@ -832,14 +932,21 @@ export function createCliModel(def: CliProviderDef, modelArg: string): LanguageM
     if ((options.tools ?? []).some((t) => t.type !== "function")) {
       warnings.push({ type: "unsupported", feature: "provider-defined tools", details: "CLI providers only support function tools" });
     }
-    const system = [flat.system, tools.length ? buildToolInstructions(tools) : ""].filter(Boolean).join("\n\n");
-    const effort = options.providerOptions?.[def.id]?.effort;
-    const spec = def.invoke({
-      model: modelArg,
-      system,
-      user: flat.user,
-      effort: typeof effort === "string" && effort ? effort : undefined,
-    });
+    const po = options.providerOptions?.[def.id] ?? {};
+    const effort = typeof po.effort === "string" && po.effort ? po.effort : undefined;
+    const cwd = typeof po.cwd === "string" && po.cwd ? po.cwd : undefined;
+    const access: "chat" | "agent" = po.access === "agent" ? "agent" : "chat";
+    const folderNote = cwd
+      ? `## Working folder\nYou are working in the folder ${cwd}. Use paths relative to it or absolute paths inside it; other locations are not accessible.${
+          access === "agent"
+            ? " You may read, create and edit files here. Shell commands are not available."
+            : " You may read and search files here but not change them."
+        }`
+      : "";
+    const system = [flat.system, tools.length ? buildToolInstructions(tools) : "", folderNote]
+      .filter(Boolean)
+      .join("\n\n");
+    const spec = def.invoke({ model: modelArg, system, user: flat.user, effort, cwd, access });
     const toolNames = new Set(tools.map((t) => t.name));
     return { stream: runCli(def, spec, warnings, options.abortSignal, toolNames) };
   };

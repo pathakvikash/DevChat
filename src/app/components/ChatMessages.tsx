@@ -15,6 +15,16 @@ interface ChatMessagesProps {
   onOpenArtifact?: (id: string) => void;
   onClarificationAnswer?: (toolCallId: string, answer: string) => void;
   scrollRef?: React.RefObject<HTMLDivElement | null>;
+  /** Shown with the indicator before the assistant bubble exists, e.g. "Waiting for Claude Code…". */
+  statusLabel?: string;
+}
+
+/** Provider-run tools arrive as "dynamic-tool" parts; everything downstream keys on
+ *  `tool-<name>`, so rename once here. */
+function normalizeParts(parts: any[]): any[] {
+  return parts.map((p) =>
+    p?.type === "dynamic-tool" && typeof p.toolName === "string" ? { ...p, type: `tool-${p.toolName}` } : p,
+  );
 }
 
 function ChatMessages({
@@ -27,6 +37,7 @@ function ChatMessages({
   onOpenArtifact,
   onClarificationAnswer,
   scrollRef,
+  statusLabel,
 }: ChatMessagesProps) {
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -46,7 +57,7 @@ function ChatMessages({
             unique.push(m);
           }
           return unique.map((message, idx) => {
-            const parts = (message.parts || []) as any[];
+            const parts = normalizeParts((message.parts || []) as any[]);
             const content = parts
               .filter((p) => p.type === "text")
               .map((p) => p.text)
@@ -89,7 +100,7 @@ function ChatMessages({
         {isLoading &&
           messages.length > 0 &&
           messages[messages.length - 1]?.role === "user" && (
-            <TypingIndicator isVisible={true} />
+            <TypingIndicator isVisible={true} label={statusLabel} />
           )}
       </div>
 

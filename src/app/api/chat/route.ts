@@ -27,6 +27,7 @@ import {
 import { resolveChatSettings } from "@/lib/chat/resolveChatSettings";
 import { resolveModelCandidates } from "@/lib/chat/resolveModelCandidates";
 import { cliProviderForModel } from "@/lib/cliProviders";
+import { isRunnableCwd } from "@/lib/claude/sessions";
 import { recordTrace } from "@/lib/observability";
 import {
   estimatePromptTokens,
@@ -107,6 +108,7 @@ export async function POST(req: Request) {
       maxToolCalls,
       autoCompressThreshold,
       reasoningEffort,
+      workingFolder,
     } = settings;
     // `contextLength`/`maxTokens` are reassigned below (Ollama context bump,
     // default maxTokens), so these two stay `let` unlike the rest.
@@ -258,13 +260,14 @@ export async function POST(req: Request) {
           num_predict: maxTokens || -1,
         }
       : {};
-    // CLI-backed models (claude-code/…, codex/…, opencode/…) take the
-    // conversation's reasoning effort as a provider option.
+    // CLI-backed models take effort/folder/mode as provider options. The folder is
+    // re-checked every turn; chat mode is read-only there, agent mode may edit.
     const cliProvider = cliProviderForModel(servedModel);
+    const cliCwd = workingFolder && (await isRunnableCwd(workingFolder)) ? workingFolder : "";
     const providerOptions = isOllama
       ? { ollama: ollamaOptions }
-      : cliProvider && reasoningEffort
-        ? { [cliProvider.id]: { effort: reasoningEffort } }
+      : cliProvider
+        ? { [cliProvider.id]: { effort: reasoningEffort ?? "", cwd: cliCwd, access: toolMode } }
         : undefined;
 
     // Per-candidate retry loop (transient errors + Ollama context overflow).

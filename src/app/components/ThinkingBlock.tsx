@@ -5,9 +5,11 @@ import { Brain, ChevronDown, ChevronRight } from "lucide-react";
 
 interface ThinkingBlockProps {
   text: string;
+  /** Still working and nothing written yet — show that the block is alive. */
+  streaming?: boolean;
 }
 
-export default function ThinkingBlock({ text }: ThinkingBlockProps) {
+export default function ThinkingBlock({ text, streaming = false }: ThinkingBlockProps) {
   const [open, setOpen] = useState(false);
   if (!text) return null;
   return (
@@ -19,6 +21,12 @@ export default function ThinkingBlock({ text }: ThinkingBlockProps) {
         {open ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
         <Brain size={14} className="text-purple-400" />
         <span className="font-medium">Thinking</span>
+        {streaming && (
+          <span
+            aria-label="working"
+            className="w-1.5 h-1.5 rounded-full bg-purple-400 animate-pulse"
+          />
+        )}
         <span className="text-zinc-500 ml-1">
           {open ? "(hide)" : `(${text.length} chars)`}
         </span>

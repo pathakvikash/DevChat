@@ -21,6 +21,7 @@ export interface Conversation {
   maxToolCalls?: number;
   fallbackModel?: string | null;
   reasoningEffort?: string | null;
+  workingFolder?: string | null;
   compressedSummary?: string;
   compressedAt?: string;
   compressedBeforeTokens?: number;

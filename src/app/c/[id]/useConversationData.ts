@@ -21,6 +21,7 @@ export interface DataActions {
   fetchContextUsage: () => Promise<void>;
   handleModelSettingsSave: (settings: any) => Promise<void>;
   handleModelChange: (modelId: string) => Promise<void>;
+  handleWorkingFolderChange: (folder: string | null) => Promise<void>;
   handleKbToggle: () => Promise<void>;
 }
 
@@ -147,6 +148,30 @@ export function useConversationData(
     [conversation, conversationId, setConversation, toast],
   );
 
+  const handleWorkingFolderChange = useCallback(
+    async (folder: string | null) => {
+      if (!conversation) return;
+      const previous = conversation.workingFolder ?? null;
+      setConversation({ ...conversation, workingFolder: folder });
+      try {
+        const res = await fetch(`/api/conversations/${conversationId}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ workingFolder: folder }),
+        });
+        if (!res.ok) {
+          const body = await res.json().catch(() => ({}));
+          throw new Error(body.error || "Failed to change working folder");
+        }
+        toast(folder ? `Working folder: ${folder}` : "Working folder cleared", "success");
+      } catch (e) {
+        setConversation({ ...conversation, workingFolder: previous });
+        toast(e instanceof Error ? e.message : "Failed to change working folder", "error");
+      }
+    },
+    [conversation, conversationId, setConversation, toast],
+  );
+
   const handleKbToggle = useCallback(async () => {
     if (conversation?.kbId) {
       fetch(`/api/conversations/${conversationId}`, {
@@ -168,6 +193,7 @@ export function useConversationData(
     fetchContextUsage,
     handleModelSettingsSave,
     handleModelChange,
+    handleWorkingFolderChange,
     handleKbToggle,
   };
 }
