@@ -9,6 +9,9 @@ export interface ConversationPageState extends DataActions {
   setLoading: React.Dispatch<React.SetStateAction<boolean>>;
   input: string;
   setInput: React.Dispatch<React.SetStateAction<string>>;
+  /** Suggested next message shown greyed in the box after a reply. */
+  suggestion: string | null;
+  setSuggestion: React.Dispatch<React.SetStateAction<string | null>>;
   files: File[];
   setFiles: React.Dispatch<React.SetStateAction<File[]>>;
   scratchpadOpen: boolean;

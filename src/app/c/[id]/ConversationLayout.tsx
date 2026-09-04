@@ -44,10 +44,10 @@ export default function ConversationLayout({ conversationId, initialPrompt }: Pr
       if (!p.input.trim() && p.files.length === 0) return;
       if (p.status === "streaming" || p.status === "submitted") return;
       buildMessageParts(p.input, p.files, p.conversation?.model).then(({ parts, attachments }) => {
-        p.sendMessage({ parts }, { body: { attachments } }).then(() => {
-          p.setInput("");
-          p.setFiles([]);
-        });
+        p.setInput("");
+        p.setFiles([]);
+        p.setSuggestion(null);
+        void p.sendMessage({ parts }, { body: { attachments } });
       });
     },
     isDialogOpen: p.isDialogOpen,
@@ -161,6 +161,11 @@ export default function ConversationLayout({ conversationId, initialPrompt }: Pr
           onKbToggle={p.handleKbToggle}
           searchProvider={p.searchProvider}
           onToggleSearchProvider={p.toggleSearchProvider}
+          suggestion={p.suggestion}
+          onAcceptSuggestion={() => {
+            if (p.suggestion) p.setInput(p.suggestion);
+            p.setSuggestion(null);
+          }}
         />
       </main>
       <ArtifactPanel

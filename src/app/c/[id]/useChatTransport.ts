@@ -2,10 +2,19 @@
 
 import { useEffect, useMemo, useRef } from "react";
 import { useChat } from "@ai-sdk/react";
-import { DefaultChatTransport, generateId } from "ai";
+import { DefaultChatTransport, generateId, type UIMessage } from "ai";
 
 import { runCode } from "@/lib/sandbox";
 import { shouldAutoContinue, type AnyPart } from "@/lib/utils/messageParts";
+
+/** What `useChat`'s `onFinish` hands over. Use its `messages` (the store's own array):
+ *  React has not re-rendered yet, so render-closure state is stale here. */
+export interface ChatFinish {
+  message?: UIMessage;
+  messages?: UIMessage[];
+  isAbort?: boolean;
+  isError?: boolean;
+}
 
 // Tracks the client-generated assistant message id per conversation so the
 // server can persist the DB message under the same id (see captureGenerateId).
@@ -19,7 +28,7 @@ interface ChatTransportOptions {
   enabledSkills: string[];
   /** Chat = read-only tools, Agent = read + write tools. */
   mode: "chat" | "agent";
-  onFinishRef: React.MutableRefObject<() => void>;
+  onFinishRef: React.MutableRefObject<(finish: ChatFinish) => void>;
   onErrorRef: React.MutableRefObject<(err: Error) => void>;
 }
 
@@ -120,7 +129,7 @@ export function useChatTransport(opts: ChatTransportOptions) {
       }
     },
     onError: (err) => { onErrorRef.current(err); },
-    onFinish: () => { onFinishRef.current(); },
+    onFinish: (finish) => { onFinishRef.current(finish); },
   });
 
   const isLoading = chat.status === "submitted" || chat.status === "streaming";

@@ -71,6 +71,12 @@ those are licensed to the tool that issued them.
   code can only add API keys for known providers; it can never change a base
   URL, so a leaked code can't redirect your chats.
 
+**Chat box behaviour.** Sending clears the box immediately and you can type the
+next message while the reply streams (Enter sends once it finishes). After a
+reply, a suggested next message appears greyed in the box; press → or the
+"Use suggestion" button to fill it in. Suggestions come from the conversation's
+own model.
+
 **Using Claude Code, Codex or OpenCode directly.** When DevChat runs on your
 own machine and one of those commands is installed, it shows up as a provider in
 the model selector (Claude Code: Default/Sonnet/Opus/Haiku; Codex: your default;

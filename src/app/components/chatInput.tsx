@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, useCallback } from "react";
-import { Plus, Upload, Globe, BookOpen, Settings, X, Slash, Mic, MicOff } from "lucide-react";
+import { Plus, Upload, Globe, BookOpen, Settings, X, Slash, Mic, MicOff, ArrowRight } from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
 import AttachmentChip from "./AttachmentChip";
 import DragOverlay from "./DragOverlay";
@@ -44,6 +44,9 @@ interface ChatInputProps {
   onKbToggle: () => void;
   searchProvider: "duckduckgo" | "tavily";
   onToggleSearchProvider: () => void;
+  /** Suggested next message, shown as the placeholder while the box is empty. */
+  suggestion?: string | null;
+  onAcceptSuggestion?: () => void;
 }
 
 export default function ChatInput({
@@ -65,6 +68,8 @@ export default function ChatInput({
   onKbToggle,
   searchProvider,
   onToggleSearchProvider,
+  suggestion,
+  onAcceptSuggestion,
 }: ChatInputProps) {
   // Read-only here; the sidebar and header toggles do the actual switching.
   const { mode } = useChatMode();
@@ -199,6 +204,7 @@ export default function ChatInput({
   }, []);
 
   const canSubmit = input.trim() || files.length > 0;
+  const showSuggestion = Boolean(suggestion && !input && !isLoading && onAcceptSuggestion);
 
   useEffect(() => {
     if (!isLoading) submitLockRef.current = false;
@@ -318,7 +324,7 @@ export default function ChatInput({
           )}
 
           {/* One row until the text wraps, then the input takes the full width. */}
-          <div className={`min-w-0 flex flex-col ${expanded ? "order-1 w-full" : "order-2 flex-1"}`}>
+          <div className={`relative min-w-0 flex flex-col ${expanded ? "order-1 w-full" : "order-2 flex-1"}`}>
             <textarea
               ref={textareaRef}
               value={input}
@@ -326,11 +332,13 @@ export default function ChatInput({
               placeholder={
                 isListening
                   ? ""
-                  : mode === "agent"
+                  : suggestion && !input
+                    ? suggestion
+                    : mode === "agent"
                     ? "Agent mode — can write artifacts, todos, memories..."
                     : "Type a message, / for commands, or drop files..."
               }
-              className="w-full resize-none bg-transparent text-sm text-[var(--foreground)] outline-none placeholder:text-zinc-500 placeholder:truncate disabled:opacity-50 py-1.5 overflow-y-auto"
+              className={`w-full resize-none bg-transparent text-sm text-[var(--foreground)] outline-none placeholder:text-zinc-500 placeholder:truncate disabled:opacity-50 py-1.5 overflow-y-auto ${showSuggestion ? "pr-7" : ""}`}
               rows={1}
               onKeyDown={(e) => {
                 if (showCommands) {
@@ -356,6 +364,11 @@ export default function ChatInput({
                     return;
                   }
                 }
+                if (e.key === "ArrowRight" && !input && suggestion && onAcceptSuggestion) {
+                  e.preventDefault();
+                  onAcceptSuggestion();
+                  return;
+                }
                 if (e.key === "Enter" && !e.shiftKey) {
                   e.preventDefault();
                   if (canSubmit && !isLoading && !submitLockRef.current) {
@@ -369,6 +382,23 @@ export default function ChatInput({
                 maxHeight: `${MAX_INPUT_HEIGHT}px`,
               }}
             />
+
+            {/* Suggested next message: fill the box with it (→ key does the same). */}
+            {showSuggestion && (
+              <button
+                type="button"
+                tabIndex={-1}
+                onClick={() => {
+                  onAcceptSuggestion?.();
+                  textareaRef.current?.focus();
+                }}
+                aria-label="Use suggestion"
+                title="Use suggestion (→)"
+                className="absolute right-2 top-2 text-zinc-500 hover:text-zinc-200 transition"
+              >
+                <ArrowRight size={14} />
+              </button>
+            )}
 
             <AnimatePresence>
               {isListening && (

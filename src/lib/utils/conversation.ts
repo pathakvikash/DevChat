@@ -50,6 +50,18 @@ export function joinTextParts(parts: unknown): string {
     .join("");
 }
 
+/** Tail user→assistant pair as plain text. Null unless the list ends in an assistant
+ *  turn with actual text (mid-stream, tool-only and aborted replies don't count). */
+export function lastExchange(messages: unknown): { user: string; assistant: string } | null {
+  if (!Array.isArray(messages) || messages.length === 0) return null;
+  const last = messages[messages.length - 1];
+  if (last?.role !== "assistant") return null;
+  const assistant = joinTextParts(last.parts).trim();
+  if (!assistant) return null;
+  const user = [...messages].reverse().find((m: any) => m?.role === "user");
+  return { user: joinTextParts(user?.parts).trim(), assistant };
+}
+
 /**
  * Find the last fenced code block whose language is python or javascript,
  * and return its code body. Useful for piping a model's last code snippet

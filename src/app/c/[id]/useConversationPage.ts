@@ -7,11 +7,12 @@ import { useChatMode } from "@/app/contexts/ChatModeContext";
 import type { MinimapMessage } from "@/app/components/MinimapNavigator";
 import { parseCommand } from "@/lib/commands";
 import { buildMessageParts } from "@/lib/utils/messageParts";
+import { lastExchange } from "@/lib/utils/conversation";
 
 import { fetchSettings as apiFetchSettings, saveSettings as apiSaveSettings } from "@/app/hooks/useSettingsApi";
 import { runCommandAction } from "./runCommandAction";
 import { useConversationData } from "./useConversationData";
-import { useChatTransport } from "./useChatTransport";
+import { useChatTransport, type ChatFinish } from "./useChatTransport";
 import { useMessageActions } from "./useMessageActions";
 import type { ConversationPageState } from "./types";
 
@@ -25,6 +26,8 @@ export function useConversationPage(conversationId: string, initialPrompt?: stri
   const [conversation, setConversation] = useState<Conversation | null>(null);
   const [input, setInput] = useState("");
   const [files, setFiles] = useState<File[]>([]);
+  /** Suggested next message, shown greyed in the box after a reply. */
+  const [suggestion, setSuggestion] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const scrollRef = useRef<HTMLDivElement>(null);
   const [selectedKbId, setSelectedKbId] = useState<string>("");
@@ -84,7 +87,7 @@ export function useConversationPage(conversationId: string, initialPrompt?: stri
 
   /* ─── Transport + useChat ──────────────────────────────────────────────── */
 
-  const onFinishRef = useRef<() => void>(() => {});
+  const onFinishRef = useRef<(finish: ChatFinish) => void>(() => {});
   const onErrorRef = useRef<(err: Error) => void>(() => {});
 
   const chatTransport = useChatTransport({
@@ -114,10 +117,13 @@ export function useConversationPage(conversationId: string, initialPrompt?: stri
     fetchContextUsage, handleModelSettingsSave, handleModelChange, handleKbToggle,
   } = dataActions;
 
-  onFinishRef.current = useCallback(() => {
+  onFinishRef.current = useCallback((finish?: ChatFinish) => {
     refreshConversation().finally(() => setIsCompressing(false));
     fetchContextUsage();
-    const parts = (messages[messages.length - 1]?.parts || []) as any[];
+    // `finish.messages` is the chat store's live array; the `messages` closure
+    // is from the last render, which has not happened yet when onFinish runs.
+    const all = finish?.messages ?? messages;
+    const parts = (finish?.message?.parts ?? all[all.length - 1]?.parts ?? []) as any[];
     for (const p of parts) {
       const output = p.output || "";
       if (typeof output === "string" && (output.startsWith("Artifact created:") || output.startsWith("Artifact updated:"))) {
@@ -127,13 +133,31 @@ export function useConversationPage(conversationId: string, initialPrompt?: stri
       }
     }
     // Auto-consolidate memory every 10 messages
-    if (messages.length > 0 && messages.length % 10 === 0) {
+    if (all.length > 0 && all.length % 10 === 0) {
       fetch(`/api/memory/consolidate`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ conversationId, model: conversation?.model }),
       }).catch(() => {});
     }
+    // Suggest a next message from the last exchange; shown greyed in the box,
+    // accepted with the arrow button or the → key.
+    const exchange = finish?.isAbort ? null : lastExchange(all);
+    if (!exchange) {
+      if (!finish?.isAbort) console.debug("[suggest] skipped: no completed assistant turn to suggest from");
+      return;
+    }
+    fetch(`/api/conversations/${conversationId}/suggest`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(exchange),
+    })
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
+      .then((d) => {
+        if (d?.suggestion) setSuggestion(d.suggestion);
+        else console.warn("[suggest] no suggestion returned");
+      })
+      .catch((e) => console.warn("[suggest] request failed:", e?.message || e));
   }, [refreshConversation, fetchContextUsage, messages, setSelectedArtifactId, setArtifactPanelOpen, setIsCompressing, conversationId, conversation?.model]);
 
   onErrorRef.current = useCallback((err: Error) => {
@@ -215,9 +239,13 @@ export function useConversationPage(conversationId: string, initialPrompt?: stri
     }
 
     const { parts, attachments } = await buildMessageParts(input, files, conversation?.model);
+    // Clear the box the moment the message leaves; sendMessage only resolves
+    // after the whole reply has streamed.
+    setInput("");
+    setFiles([]);
+    setSuggestion(null);
     try { await sendMessage({ parts }, { body: { attachments } }); }
     catch (err) { console.error("[handleSubmit] sendMessage failed:", err); toast("Failed to send message", "error"); }
-    finally { setInput(""); setFiles([]); }
   }
 
   /* ─── Dialog management ────────────────────────────────────────────────── */
@@ -263,7 +291,7 @@ export function useConversationPage(conversationId: string, initialPrompt?: stri
 
   return {
     conversation, setConversation, loading, setLoading,
-    input, setInput, files, setFiles,
+    input, setInput, files, setFiles, suggestion, setSuggestion,
     scratchpadOpen, setScratchpadOpen,
     todoPanelOpen, setTodoPanelOpen,
     advancedOpen, setAdvancedOpen,
