@@ -34,6 +34,18 @@ describe("providers registry", () => {
     expect(isChatModel("anthropic", "claude-sonnet-4-5")).toBe(true);
     expect(isChatModel("custom", "anything-goes")).toBe(true);
   });
+
+  it("marks only OpenAI and Anthropic for native SDKs", () => {
+    const native = Object.fromEntries(PROVIDERS.map((p) => [p.id, p.native]));
+    expect(native).toEqual({
+      openai: "openai",
+      anthropic: "anthropic",
+      google: undefined,
+      openrouter: undefined,
+      "nvidia-nim": undefined,
+      custom: undefined,
+    });
+  });
 });
 
 describe("isCliModelId", () => {
