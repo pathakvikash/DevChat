@@ -1,5 +1,6 @@
+import { execFileSync } from "child_process";
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { mkdtempSync, realpathSync, rmSync, writeFileSync } from "fs";
+import { mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import {
@@ -10,6 +11,9 @@ import {
   cliProviderForModel,
   childEnv,
   CLI_PROVIDERS,
+  createCliModel,
+  type CliProviderDef,
+  type CliInvocation,
 } from "@/lib/cliProviders";
 
 // Real lines captured from `claude -p --output-format stream-json --include-partial-messages`
@@ -49,6 +53,22 @@ describe("claudeParser", () => {
     const parse = claudeParser();
     expect(parse(`{"type":"system","subtype":"api_retry","attempt":1}`)).toEqual([{ type: "retry" }]);
     expect(parse(`{"type":"system","subtype":"status","status":"requesting"}`)).toEqual([]);
+  });
+
+  it("says why the API is being retried, using Claude Code's no_response and error_status fields", () => {
+    const parse = claudeParser();
+    expect(
+      parse(`{"type":"system","subtype":"api_retry","attempt":1,"max_retries":3,"retry_delay_ms":500,"error_status":null,"no_response":{"waited_ms":30000,"retry_wait_ms":60000}}`),
+    ).toEqual([{ type: "retry", detail: "no response after 30s" }]);
+    expect(parse(`{"type":"system","subtype":"api_retry","attempt":1,"error_status":529}`)).toEqual([{ type: "retry", detail: "HTTP 529" }]);
+  });
+
+  it("turns permission_denied into a non-fatal notice", () => {
+    // Shape captured from claude 2.1.296 with --permission-prompts none.
+    const line = `{"type":"system","subtype":"permission_denied","tool_name":"WebFetch","tool_use_id":"toolu_01","decision_reason_type":"asyncAgent","message":"Permission for this tool use was denied."}`;
+    expect(claudeParser()(line)).toEqual([
+      { type: "notice", text: "Claude Code was not allowed to use WebFetch (no one can approve prompts here).\n" },
+    ]);
   });
 
   it("falls back to whole assistant messages when no deltas were streamed", () => {
@@ -163,13 +183,13 @@ describe("codexParser", () => {
       `{"type":"thread.started","thread_id":"t"}`,
       `{"type":"item.completed","item":{"id":"r","type":"reasoning","text":"Thinking about it."}}`,
       `{"type":"item.completed","item":{"id":"i","type":"agent_message","text":"Hello there."}}`,
-      `{"type":"turn.completed","usage":{"input_tokens":12,"cached_input_tokens":4,"output_tokens":3}}`,
+      `{"type":"turn.completed","usage":{"input_tokens":12,"cached_input_tokens":4,"output_tokens":3,"reasoning_output_tokens":2}}`,
       `{"type":"error","message":"boom"}`,
     ].flatMap(parse);
     expect(events).toEqual([
       { type: "reasoning", text: "Thinking about it." },
       { type: "text", text: "Hello there." },
-      { type: "usage", usage: { input: 12, cacheRead: 4, output: 3 } },
+      { type: "usage", usage: { input: 12, cacheRead: 4, output: 3, reasoning: 2 } },
       { type: "error", message: "boom" },
     ]);
   });
@@ -445,7 +465,8 @@ describe("working folder and access", () => {
   it("keeps Claude Code sandboxed without a folder", () => {
     const a = claude.invoke(base).args;
     expect(a.slice(a.indexOf("--tools"), a.indexOf("--tools") + 2)).toEqual(["--tools", ""]);
-    expect(a).not.toContain("--permission-mode");
+    expect(a).toEqual(expect.arrayContaining(["--permission-mode", "manual", "--permission-prompts", "none", "--disable-slash-commands"]));
+    expect(a).not.toContain("--bare"); // --bare never reads the subscription login
     expect(claude.invoke(base).cwd).toBeUndefined();
     // No folder: none of the user's own MCP servers start either.
     expect(a).toContain("--strict-mcp-config");
@@ -461,11 +482,12 @@ describe("working folder and access", () => {
   it("gives read-only tools in chat mode and edits in agent mode", () => {
     const chat = claude.invoke({ ...base, cwd: "/repo", access: "chat" });
     expect(chat.args).toEqual(expect.arrayContaining(["--tools", "Read", "Glob", "Grep", "WebSearch", "WebFetch"]));
-    expect(chat.args).not.toContain("--permission-mode");
+    expect(chat.args).toEqual(expect.arrayContaining(["--permission-mode", "manual", "--permission-prompts", "none"]));
     expect(chat.cwd).toBe("/repo");
 
     const agent = claude.invoke({ ...base, cwd: "/repo", access: "agent" });
     expect(agent.args).toEqual(expect.arrayContaining(["--tools", "default", "--permission-mode", "acceptEdits"]));
+    expect(agent.args).toEqual(expect.arrayContaining(["--permission-prompts", "none"]));
     expect(agent.args).not.toContain("bypassPermissions");
   });
 
@@ -483,12 +505,19 @@ describe("working folder and access", () => {
     expect(codex.invoke({ ...base, model: "default", cwd: "/repo", access: "plan" }).args).toEqual(expect.arrayContaining(["--sandbox", "read-only"]));
   });
 
+  it("stops chat text from expanding @path mentions in Claude Code", () => {
+    const stdin = claude.invoke({ ...base, user: "read @secrets.txt and @/etc/hosts, mail me@x.io or @ alone" }).stdin!;
+    expect(stdin).not.toMatch(/@[^\u200b\s]/);
+    expect(stdin).toContain("@\u200bsecrets.txt");
+    expect(stdin).toContain("@ alone");
+  });
+
   it("maps the same policy onto OpenCode and Codex", () => {
     const oc = CLI_PROVIDERS.find((d) => d.id === "opencode")!;
     const perm = (inv: ReturnType<typeof oc.invoke>) => JSON.parse(inv.env!.OPENCODE_CONFIG_CONTENT).permission;
-    expect(perm(oc.invoke({ ...base, model: "default" }))).toEqual({ ...NEVER_ASK, bash: "deny", edit: "deny", webfetch: "deny", websearch: "deny" });
-    expect(perm(oc.invoke({ ...base, model: "default", cwd: "/repo", access: "chat" }))).toEqual({ ...NEVER_ASK, bash: "deny", edit: "deny", webfetch: "allow", websearch: "allow" });
-    expect(perm(oc.invoke({ ...base, model: "default", cwd: "/repo", access: "agent" }))).toEqual({ ...NEVER_ASK, bash: "deny", edit: "allow", webfetch: "allow", websearch: "allow" });
+    expect(perm(oc.invoke({ ...base, model: "default" }))).toEqual({ ...NEVER_ASK, bash: "deny", shell: "deny", edit: "deny", webfetch: "deny", websearch: "deny" });
+    expect(perm(oc.invoke({ ...base, model: "default", cwd: "/repo", access: "chat" }))).toEqual({ ...NEVER_ASK, bash: "deny", shell: "deny", edit: "deny", webfetch: "allow", websearch: "allow" });
+    expect(perm(oc.invoke({ ...base, model: "default", cwd: "/repo", access: "agent" }))).toEqual({ ...NEVER_ASK, bash: "deny", shell: "deny", edit: "allow", webfetch: "allow", websearch: "allow" });
     expect(oc.invoke({ ...base, model: "default", cwd: "/repo" }).args).toEqual(expect.arrayContaining(["--dir", "/repo"]));
     // A model that repeats a denied call forever is cut off.
     expect(JSON.parse(oc.invoke({ ...base, model: "default" }).env!.OPENCODE_CONFIG_CONTENT).agent.build.steps).toBe(50);
@@ -499,6 +528,9 @@ describe("working folder and access", () => {
     const codex = CLI_PROVIDERS.find((d) => d.id === "codex")!;
     expect(codex.invoke({ ...base, model: "default", cwd: "/repo", access: "agent" }).args).toEqual(expect.arrayContaining(["--sandbox", "workspace-write", "-C", "/repo"]));
     expect(codex.invoke({ ...base, model: "default", cwd: "/repo", access: "chat" }).args).toEqual(expect.arrayContaining(["--sandbox", "read-only"]));
+    expect(codex.invoke({ ...base, model: "default" }).args).toEqual(expect.arrayContaining(["--sandbox", "read-only"]));
+    expect(codex.invoke({ ...base, model: "default", cwd: "/repo", access: "agent" }).args).not.toContain("--full-auto");
+    expect(oc.invoke({ ...base, model: "default", cwd: "/repo" }).args).not.toContain("--port");
   });
 
   it("surfaces the tools Claude Code ran, with names on the results", () => {
@@ -609,5 +641,105 @@ describe("working folder and access", () => {
       for (const k of Object.keys(process.env)) if (!(k in saved)) delete process.env[k];
       Object.assign(process.env, saved);
     }
+  });
+});
+
+// A fake CLI standing in for one that drops its final usage event, as OpenCode 2.x can.
+function fakeDef(script: string): CliProviderDef {
+  return {
+    id: "fake",
+    label: "Fake",
+    bin: process.execPath,
+    contextWindow: 1000,
+    models: [{ id: "m", name: "m" }],
+    invoke: () => ({ args: ["-e", script] }),
+    parser: opencodeParser,
+  };
+}
+
+describe("turn end", () => {
+  const run = async (script: string) => {
+    const { stream } = await createCliModel(fakeDef(script), "m").doStream({ prompt: [{ role: "user", content: [{ type: "text", text: "hi" }] }] } as any);
+    const parts: any[] = [];
+    for (const r = stream.getReader(); ; ) {
+      const { done, value } = await r.read();
+      if (done) return parts;
+      parts.push(value);
+    }
+  };
+
+  it("ends on process exit with the text so far when the final step_finish never arrives", async () => {
+    const parts = await run(`console.log(JSON.stringify({type:"text",part:{text:"hello"}}))`);
+    expect(parts.filter((p) => p.type === "text-delta").map((p) => p.delta).join("")).toBe("hello");
+    const fin = parts.at(-1);
+    expect(fin.type).toBe("finish");
+    expect(fin.finishReason.unified).toBe("stop");
+    expect(parts.some((p) => p.type === "error")).toBe(false);
+  });
+});
+
+// Live probes spawn the real, logged-in binaries; skipped where a CLI is not installed.
+// Live probes spend real tokens and need a logged-in CLI, so they only run with DEVCHAT_LIVE_CLI=1.
+const installed = (bin: string) => {
+  if (process.env.DEVCHAT_LIVE_CLI !== "1") return false;
+  try {
+    execFileSync(bin, ["--version"], { stdio: "ignore", env: childEnv(), timeout: 20_000 });
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+async function liveTurn(id: string, model: string, user: string, extra: Partial<CliInvocation> = {}) {
+  const def = CLI_PROVIDERS.find((d) => d.id === id)!;
+  const { stream } = await createCliModel(def, model).doStream({
+    prompt: [{ role: "user", content: [{ type: "text", text: user }] }],
+    providerOptions: { [id]: extra as any },
+  } as any);
+  const parts: any[] = [];
+  for (const r = stream.getReader(); ; ) {
+    const { done, value } = await r.read();
+    if (done) return parts;
+    parts.push(value);
+  }
+}
+const textOf = (parts: any[]) => parts.filter((p) => p.type === "text-delta").map((p) => p.delta).join("");
+
+describe.skipIf(!installed("claude"))("live: Claude Code", () => {
+  it("accepts every flag we pass and answers without expanding @file mentions", { timeout: 120_000 }, async () => {
+    const parts = await liveTurn("claude-code", "haiku", "@/etc/hosts Reply with exactly the word PONG. Do not read anything.", { effort: "low" });
+    expect(parts.some((p) => p.type === "error")).toBe(false);
+    expect(textOf(parts)).toMatch(/PONG/);
+  });
+
+  it("runs a read-only tool in the working folder and reports it as a provider-executed call", { timeout: 120_000 }, async () => {
+    const parts = await liveTurn("claude-code", "haiku", "Use the Read tool on package.json and tell me the package name.", { cwd: process.cwd(), access: "chat" });
+    expect(parts.some((p) => p.type === "tool-call" && p.toolName === "Read" && p.providerExecuted)).toBe(true);
+    expect(parts.some((p) => p.type === "tool-result" && !p.isError)).toBe(true);
+  });
+});
+
+describe.skipIf(!installed("claude"))("live: Claude Code agent mode", () => {
+  it("still writes files under --permission-prompts none,", { timeout: 120_000 }, async () => {
+    const dir = mkdtempSync(join(tmpdir(), "devchat-agent-"));
+    const parts = await liveTurn("claude-code", "haiku", "Create a file named out.txt containing exactly the word DONE using the Write tool.", { cwd: dir, access: "agent" });
+    expect(parts.some((p) => p.type === "error")).toBe(false);
+    expect(readFileSync(join(dir, "out.txt"), "utf8").trim()).toBe("DONE");
+  });
+});
+
+describe.skipIf(!installed("opencode"))("live: OpenCode", () => {
+  it("accepts every flag we pass and answers", { timeout: 120_000 }, async () => {
+    const parts = await liveTurn("opencode", "opencode/big-pickle", "Reply with exactly the word PONG.");
+    expect(parts.some((p) => p.type === "error")).toBe(false);
+    expect(textOf(parts)).toMatch(/PONG/);
+  });
+});
+
+describe.skipIf(!installed("codex"))("live: Codex", () => {
+  it("accepts every flag we pass and answers", { timeout: 120_000 }, async () => {
+    const parts = await liveTurn("codex", "default", "Reply with exactly the word PONG.");
+    expect(parts.some((p) => p.type === "error")).toBe(false);
+    expect(textOf(parts)).toMatch(/PONG/);
   });
 });
