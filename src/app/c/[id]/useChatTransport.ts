@@ -8,6 +8,7 @@ import { runCode } from "@/lib/sandbox";
 import { parseDataArtifact } from "@/lib/generativeUi/data";
 import { shouldAutoContinue, type AnyPart } from "@/lib/utils/messageParts";
 import type { ChatMode } from "@/lib/chat/modes";
+import type { AgentPane } from "@/lib/chat/agentMessages";
 
 /** Python tracebacks and our sandbox's own failures both start this way. */
 const CODE_FAILED_RE = /^(Error|Traceback)/;
@@ -70,10 +71,21 @@ interface ChatTransportOptions {
   onErrorRef: React.MutableRefObject<(err: Error) => void>;
   /** A queued message was delivered into the reply (its marker arrived). */
   onQueuedDeliveredRef: React.MutableRefObject<(queuedId: string) => void>;
+  /** The other open chat panes, sent with each request so the model knows whom it can message. */
+  openPanes: AgentPane[];
+  /** The sendToChat tool: resolves to the result the model reads. */
+  onSendToChatRef: React.MutableRefObject<(input: { to: string; message: string }) => Promise<string>>;
+}
+
+/** The tool call is the last part of the reply, finished: the model answers after it. */
+function endsWithSendToChat(parts: AnyPart[]): boolean {
+  const list = parts.filter((p) => p?.type !== "reasoning" && p?.type !== "step-start");
+  const tail = list[list.length - 1] as { type?: string; state?: string } | undefined;
+  return tail?.type === "tool-sendToChat" && tail.state === "output-available";
 }
 
 export function useChatTransport(opts: ChatTransportOptions) {
-  const { conversationId, conversation, selectedKbId, searchProvider, enabledTools, enabledSkills, mode, allowedTools, setIsCompressing, onFinishRef, onErrorRef, onQueuedDeliveredRef } = opts;
+  const { conversationId, conversation, selectedKbId, searchProvider, enabledTools, enabledSkills, mode, allowedTools, setIsCompressing, onFinishRef, onErrorRef, onQueuedDeliveredRef, openPanes, onSendToChatRef } = opts;
 
   const transportBodyRef = useRef({
     conversationId,
@@ -90,6 +102,7 @@ export function useChatTransport(opts: ChatTransportOptions) {
     memoryDisabled: conversation?.memoryDisabled ?? false,
     maxToolCalls: conversation?.maxToolCalls ?? 5,
     autoCompressThreshold: 85,
+    openPanes,
   });
 
   useEffect(() => {
@@ -111,8 +124,9 @@ export function useChatTransport(opts: ChatTransportOptions) {
       memoryDisabled: conversation?.memoryDisabled ?? false,
       maxToolCalls: conversation?.maxToolCalls ?? 5,
       autoCompressThreshold: threshold,
+      openPanes,
     };
-  }, [conversationId, conversation?.model, conversation?.systemPrompt, conversation?.temperature, selectedKbId, searchProvider, enabledTools, enabledSkills, mode, allowedTools, conversation?.chatOnlyMode, conversation?.memoryDisabled, conversation?.maxToolCalls]);
+  }, [conversationId, conversation?.model, conversation?.systemPrompt, conversation?.temperature, selectedKbId, searchProvider, enabledTools, enabledSkills, mode, allowedTools, conversation?.chatOnlyMode, conversation?.memoryDisabled, conversation?.maxToolCalls, openPanes]);
 
   const transport = useMemo(
     () =>
@@ -142,10 +156,16 @@ export function useChatTransport(opts: ChatTransportOptions) {
     sendAutomaticallyWhen: ({ messages: msgs }) => {
       if (lastAssistantMessageIsCompleteWithApprovalResponses({ messages: msgs })) return true;
       const last = msgs[msgs.length - 1];
-      return last?.role === "assistant" && shouldAutoContinue(last.parts as AnyPart[]);
+      return last?.role === "assistant" && (shouldAutoContinue(last.parts as AnyPart[]) || endsWithSendToChat(last.parts as AnyPart[]));
     },
     onToolCall: async ({ toolCall }) => {
       if (toolCall.toolName === "askClarification") return;
+      if (toolCall.toolName === "sendToChat") {
+        const input = toolCall.input as { to: string; message: string };
+        const output = await onSendToChatRef.current(input).catch((e: unknown) => `Not sent: ${e instanceof Error ? e.message : String(e)}`);
+        chat.addToolResult({ tool: "sendToChat", toolCallId: toolCall.toolCallId, output });
+        return;
+      }
       if (toolCall.toolName === "executeCode") {
         const { language, code, saveAs } = toolCall.input as {
           language: "python" | "javascript";

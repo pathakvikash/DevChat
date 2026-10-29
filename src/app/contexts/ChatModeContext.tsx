@@ -8,8 +8,6 @@ import { useSplitViewOptional } from "@/app/c/SplitViewContext";
 /** What the current chat's model can do. The pane sets it; the mode switch reads it. */
 export interface ModelCaps {
   toolsAvailable: boolean;
-  /** A CLI-backed model: Ask runs read-only for now. */
-  cli: boolean;
 }
 
 export interface ChatModeValue {
@@ -67,7 +65,7 @@ export function useConversationMode(conversationId: string | null): { mode: Chat
   return { mode, setMode };
 }
 
-const DEFAULT_CAPS: ModelCaps = { toolsAvailable: true, cli: false };
+const DEFAULT_CAPS: ModelCaps = { toolsAvailable: true };
 
 /**
  * Layout-level value for the sidebar: the mode of the focused pane. Each pane provides its own

@@ -2,10 +2,21 @@
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import type { UIMessage } from "ai";
 import { useToast } from "@/app/components/Toast";
 import { fetchConversations } from "@/app/hooks/useConversationsApi";
 import { createSideChat, listSideChats, queueSideQuestion } from "@/lib/sideChat";
 import type { ModelCaps } from "@/app/contexts/ChatModeContext";
+import {
+  MAX_AGENT_HOPS,
+  buildAgentMessagePart,
+  canDeliver,
+  nextHop,
+  type AgentMessageData,
+  type AgentPane,
+  type AgentPaneKind,
+} from "@/lib/chat/agentMessages";
+import { AGENT_DELIVERED, AGENT_NOT_OPEN, raiseHop, routeAgentMessage } from "@/lib/utils/agentLink";
 import {
   closePane,
   fitsSideBySide,
@@ -25,6 +36,52 @@ export const CHAT_DRAG_TYPE = "application/x-devchat-chat";
 export interface PaneInfo {
   title: string;
   workingFolder: string | null;
+}
+
+/** What a chat pane publishes so other panes can message it (see useChatPane). */
+export interface AgentPaneHandle {
+  isLoading: () => boolean;
+  /** Starts a turn with an agent message; only for an idle pane. */
+  deliver: (parts: UIMessage["parts"]) => void;
+  /** Queues an agent message while the pane is replying. */
+  queueAgent: (text: string, agent: AgentMessageData) => void;
+  /** Drops this pane's queued agent messages (Stop all). */
+  dropAgentQueued: () => void;
+}
+
+/** A pane that is passing messages with another one, and the hop of the latest message. */
+export interface AgentTalk {
+  withId: string;
+  hop: number;
+}
+
+const CLOSE_A_PANE = "Close a pane first.";
+const REFUSED = `Not sent: the limit of ${MAX_AGENT_HOPS} agent messages for this user message is reached. Answer the user directly.`;
+
+function kindOf(id: string, kinds: Record<string, AgentPaneKind>, parentOf: Record<string, string>): AgentPaneKind {
+  return kinds[id] ?? (parentOf[id] ? "side" : "chat");
+}
+
+/** Open chat panes, sub-agent transcripts left out. */
+function chatPanesOf(
+  ids: string[],
+  info: Record<string, PaneInfo>,
+  kinds: Record<string, AgentPaneKind>,
+  parentOf: Record<string, string>,
+): AgentPane[] {
+  return ids
+    .map((id) => ({ id, title: info[id]?.title ?? "", kind: kindOf(id, kinds, parentOf) }))
+    .filter((p) => p.kind !== "subagent");
+}
+
+async function waitForHandle(map: Map<string, AgentPaneHandle>, id: string): Promise<AgentPaneHandle | undefined> {
+  // A side chat just opened mounts on the next render; its pane registers itself then.
+  for (let i = 0; i < 60; i++) {
+    const handle = map.get(id);
+    if (handle) return handle;
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  return undefined;
 }
 
 export interface PaneWarning {
@@ -56,7 +113,8 @@ interface SplitViewValue {
   replaceAt: (oldId: string, id: string) => void;
   closeChat: (id: string) => void;
   cycleFocus: (dir: 1 | -1) => void;
-  openSide: (parentId: string, question?: string) => Promise<void>;
+  /** Opens the side chat of `parentId`; resolves to its id, or null when it could not open. `quiet` keeps focus. */
+  openSide: (parentId: string, question?: string, quiet?: boolean) => Promise<string | null>;
   toggleSide: (parentId: string) => Promise<void>;
   toggleDock: (sideId: string, parentId: string) => void;
   /** Each pane publishes its model caps, parent and stop, like setPaneBusy. */
@@ -64,6 +122,21 @@ interface SplitViewValue {
   setPaneCaps: (id: string, value: ModelCaps) => void;
   setPaneParent: (id: string, parent: string | null) => void;
   registerStop: (id: string, stop: (() => void) | null) => void;
+  /** Agent messaging: open chat panes for the request, each pane's kind, and its message handle. */
+  chatPanes: AgentPane[];
+  setPaneKind: (id: string, kind: AgentPaneKind) => void;
+  setAgentPane: (id: string, handle: AgentPaneHandle | null) => void;
+  talk: Record<string, AgentTalk>;
+  /** A pane's own user send starts it again from hop 0. */
+  resetHop: (id: string) => void;
+  /** The sendToChat tool: resolves to what the model is told. */
+  sendToChat: (fromId: string, to: string, message: string) => Promise<string>;
+  /** Tool-less "Send to…": one message at hop 1, nothing goes back. */
+  deliverTo: (fromId: string, toId: string, message: string) => string;
+  /** Called when a pane's reply ends; the exchange ends once both panes are idle. */
+  agentIdle: (id: string) => void;
+  /** Stop all: every pane taking part stops and drops its agent messages. */
+  stopAgents: () => void;
 }
 
 const SplitViewContext = createContext<SplitViewValue | null>(null);
@@ -100,11 +173,16 @@ export function SplitViewProvider({ children }: { children: React.ReactNode }) {
   const [dragId, setDragId] = useState<string | null>(null);
   const [caps, setCaps] = useState<Record<string, ModelCaps>>({});
   const [parentOf, setParentOf] = useState<Record<string, string>>({});
+  const [kinds, setKinds] = useState<Record<string, AgentPaneKind>>({});
+  const [talk, setTalk] = useState<Record<string, AgentTalk>>({});
   const stoppers = useRef(new Map<string, () => void>());
+  const agentPanes = useRef(new Map<string, AgentPaneHandle>());
+  // Hop of each pane's current agent exchange; a pane's own user send clears it.
+  const hops = useRef(new Map<string, number>());
   // Latest committed state, for async steps (after an await) and for the close cascade.
-  const live = useRef({ ids, focus, parentOf });
+  const live = useRef({ ids, focus, parentOf, info, kinds, talk });
   useEffect(() => {
-    live.current = { ids, focus, parentOf };
+    live.current = { ids, focus, parentOf, info, kinds, talk };
   });
 
   useEffect(() => {
@@ -282,21 +360,22 @@ export function SplitViewProvider({ children }: { children: React.ReactNode }) {
     return list[0]?.id ?? (await createSideChat(parentId)).id;
   };
 
-  const openSide = async (parentId: string, question?: string) => {
+  const openSide = async (parentId: string, question?: string, quiet = false): Promise<string | null> => {
     const sideId = await sideFor(parentId);
     const now = live.current.ids; // read after the await: the panes may have changed meanwhile
     if (now.includes(sideId)) {
-      commit({ ids: now, focus: sideId });
-      return;
+      commit({ ids: now, focus: quiet ? live.current.focus : sideId });
+      return sideId;
     }
-    if (!now.includes(parentId)) return;
+    if (!now.includes(parentId)) return null;
     const next = openPane(now, sideId, { index: now.indexOf(parentId), side: readDock() }, limit);
     if (next === "full") {
       toast(`Close a pane first. Up to ${limit} fit at this width.`, "info");
-      return;
+      return null;
     }
     if (question) queueSideQuestion(sideId, question);
-    commit({ ids: next, focus: sideId });
+    commit({ ids: next, focus: quiet ? live.current.focus : sideId });
+    return sideId;
   };
 
   const toggleSide = async (parentId: string) => {
@@ -306,6 +385,104 @@ export function SplitViewProvider({ children }: { children: React.ReactNode }) {
       return;
     }
     await openSide(parentId);
+  };
+
+  /* ─── Agent messaging ──────────────────────────────────────────────────── */
+
+  const chatPanes = useMemo(() => chatPanesOf(ids, info, kinds, parentOf), [ids, info, kinds, parentOf]);
+
+  const setPaneKind = useCallback((id: string, kind: AgentPaneKind) => {
+    setKinds((prev) => (prev[id] === kind ? prev : { ...prev, [id]: kind }));
+  }, []);
+
+  const setAgentPane = useCallback((id: string, handle: AgentPaneHandle | null) => {
+    if (handle) agentPanes.current.set(id, handle);
+    else agentPanes.current.delete(id);
+  }, []);
+
+  const hopOf = (id: string) => hops.current.get(id) ?? 0;
+  const setHop = (id: string, hop: number) => {
+    if (hop > 0) hops.current.set(id, hop);
+    else hops.current.delete(id);
+  };
+  const resetHop = useCallback((id: string) => hops.current.delete(id), []);
+
+  const startTalk = (a: string, b: string, hop: number) =>
+    setTalk((prev) => ({ ...prev, [a]: { withId: b, hop }, [b]: { withId: a, hop } }));
+
+  const endTalkOf = (id: string) => {
+    const partner = live.current.talk[id]?.withId;
+    setTalk((prev) => {
+      const next = { ...prev };
+      delete next[id];
+      if (partner) delete next[partner];
+      return next;
+    });
+  };
+
+  /** Hands a message to an open pane: a new turn when it is idle, its queue while it replies. */
+  const dispatch = (fromId: string, toId: string, message: string, hop: number): string => {
+    const receiver = agentPanes.current.get(toId);
+    if (!receiver) return AGENT_NOT_OPEN;
+    const now = live.current;
+    const agent: AgentMessageData = {
+      from: kindOf(fromId, now.kinds, now.parentOf) === "side" ? "side" : "chat",
+      fromConversationId: fromId,
+      fromTitle: now.info[fromId]?.title ?? "",
+      hop,
+    };
+    setHop(fromId, raiseHop(hopOf(fromId), hop));
+    setHop(toId, raiseHop(hopOf(toId), hop));
+    if (receiver.isLoading()) receiver.queueAgent(message, agent);
+    else receiver.deliver([buildAgentMessagePart(agent), { type: "text", text: message }]);
+    startTalk(fromId, toId, hop);
+    return AGENT_DELIVERED;
+  };
+
+  const sendToChat = async (fromId: string, to: string, message: string): Promise<string> => {
+    const hop = nextHop(hopOf(fromId));
+    if (!canDeliver(hop)) {
+      endTalkOf(fromId);
+      return REFUSED;
+    }
+    const now = live.current;
+    const route = routeAgentMessage(to, fromId, chatPanesOf(now.ids, now.info, now.kinds, now.parentOf), now.parentOf);
+    if ("error" in route) return route.error;
+    const toId = "id" in route ? route.id : await openSide(route.openSideOf, undefined, true);
+    if (!toId) return CLOSE_A_PANE;
+    if (!(await waitForHandle(agentPanes.current, toId))) return AGENT_NOT_OPEN;
+    return dispatch(fromId, toId, message, hop);
+  };
+
+  const deliverTo = (fromId: string, toId: string, message: string): string => {
+    const now = live.current;
+    const open = chatPanesOf(now.ids, now.info, now.kinds, now.parentOf).some((p) => p.id === toId);
+    if (toId === fromId || !open) return AGENT_NOT_OPEN;
+    return dispatch(fromId, toId, message, 1);
+  };
+
+  /** A pane's reply ended: if the other pane of its exchange is idle too, the exchange is over. */
+  const agentIdle = (id: string) => {
+    const partner = live.current.talk[id]?.withId;
+    if (!partner || agentPanes.current.get(partner)?.isLoading()) return;
+    hops.current.delete(id);
+    hops.current.delete(partner);
+    setTalk((prev) => {
+      const next = { ...prev };
+      delete next[id];
+      delete next[partner];
+      return next;
+    });
+  };
+
+  const stopAgents = () => {
+    const involved = new Set([...Object.keys(live.current.talk), ...hops.current.keys()]);
+    for (const id of involved) {
+      stoppers.current.get(id)?.();
+      agentPanes.current.get(id)?.dropAgentQueued();
+    }
+    hops.current.clear();
+    setTalk({});
   };
 
   /** Moves a side chat to the other side of its parent by swapping the two. */
@@ -323,9 +500,7 @@ export function SplitViewProvider({ children }: { children: React.ReactNode }) {
   };
 
   const setPaneCaps = useCallback((id: string, value: ModelCaps) => {
-    setCaps((prev) =>
-      prev[id]?.toolsAvailable === value.toolsAvailable && prev[id]?.cli === value.cli ? prev : { ...prev, [id]: value },
-    );
+    setCaps((prev) => (prev[id]?.toolsAvailable === value.toolsAvailable ? prev : { ...prev, [id]: value }));
   }, []);
 
   const setPaneParent = useCallback((id: string, parent: string | null) => {
@@ -374,6 +549,15 @@ export function SplitViewProvider({ children }: { children: React.ReactNode }) {
     setPaneCaps,
     setPaneParent,
     registerStop,
+    chatPanes,
+    setPaneKind,
+    setAgentPane,
+    talk,
+    resetHop,
+    sendToChat,
+    deliverTo,
+    agentIdle,
+    stopAgents,
   };
   return <SplitViewContext.Provider value={value}>{children}</SplitViewContext.Provider>;
 }

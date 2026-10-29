@@ -48,8 +48,6 @@ export default function ModeToggle({
   compact?: boolean;
   /** False for a model without tools: Ask and Agent stay visible but blocked (UX 2.6). */
   toolsAvailable?: boolean;
-  /** Set by the page for CLI models. The Ask tooltip no longer says read-only: Claude Code asks per change. */
-  cli?: boolean;
 }) {
   const { toast } = useToast();
   const blockedMode = (id: ChatMode) => !toolsAvailable && (id === "ask" || id === "agent");
