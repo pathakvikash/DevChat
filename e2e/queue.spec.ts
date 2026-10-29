@@ -82,6 +82,8 @@ test("a reload brings back a queued message the reply never took", async ({ page
   await composer(page).fill("keep this too");
   await page.keyboard.press("Enter");
   await expect(queued(page)).toContainText("keep this too");
+  // The chip shows before the server has it. Wait until the server stores it, or the reload can cut the POST short.
+  await expect.poll(async () => (await (await request.get(`/api/conversations/${id}/queue`)).json()).queued.length).toBe(1);
 
   await page.reload();
   await page.waitForLoadState("networkidle");

@@ -70,6 +70,7 @@ export default function HomePage() {
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && handleSubmit()}
+            aria-label="Message"
             placeholder="Ask anything..."
             className="flex-1 glass-input rounded-[var(--glass-radius-xl)] px-5 py-4 text-base outline-none"
           />

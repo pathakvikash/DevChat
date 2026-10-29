@@ -49,8 +49,9 @@ test("the files route refuses secrets, hidden and outside paths, and unknown cha
   const id = await chatInFolder(request, "Refusals");
 
   const list = await (await request.get(`/api/conversations/${id}/files`)).json();
-  expect(list.files).toContain("src/notes.ts");
-  expect(list.files).not.toContain(".env.local");
+  const paths = list.files.map((f: { path: string }) => f.path);
+  expect(paths).toContain("src/notes.ts");
+  expect(paths).not.toContain(".env.local");
 
   const secret = await request.get(`/api/conversations/${id}/files?path=${encodeURIComponent(".env.local")}`);
   expect(secret.status()).toBe(403);

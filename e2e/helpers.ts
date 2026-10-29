@@ -23,7 +23,7 @@ export async function openChat(page: Page, id: string) {
   await page.waitForLoadState("networkidle");
 }
 
-export const composer = (page: Page) => page.getByPlaceholder(/Type a message|Agent mode|Ask mode|Describe the task|Temporary chat\./);
+export const composer = (page: Page) => page.getByRole("textbox", { name: "Message", exact: true });
 
 /** Types into the composer and presses Enter. */
 export async function send(page: Page, text: string) {

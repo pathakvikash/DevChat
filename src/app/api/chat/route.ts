@@ -51,7 +51,7 @@ import {
   getNextContextTier,
 } from "@/lib/contextManager";
 import { requireUserId } from "@/lib/auth";
-import { effectiveToolMode, isChatMode, MODE_POLICY } from "@/lib/chat/modes";
+import { effectiveToolMode, isChatMode, MODE_POLICY, toolsWithAnsweredApproval } from "@/lib/chat/modes";
 
 // A helper run can take minutes: the 5-minute limit plus the parent's own steps.
 export const maxDuration = 600;
@@ -254,6 +254,8 @@ export async function POST(req: Request) {
       }
     }
 
+    // A tool answered in this request keeps needing approval for it (see toolsWithAnsweredApproval).
+    const answeredNow = new Set(toolsWithAnsweredApproval(sanitizedMessages));
     const aiTools: ToolSet = useTools
       ? await buildTools({
           activeToolIds,
@@ -263,7 +265,7 @@ export async function POST(req: Request) {
           mode: toolMode,
           memoryDisabled,
           allowedTools: Array.isArray(bodyAllowedTools)
-            ? bodyAllowedTools.filter((t: unknown): t is string => typeof t === "string")
+            ? bodyAllowedTools.filter((t: unknown): t is string => typeof t === "string" && !answeredNow.has(t))
             : [],
           contextWindow: contextWindowFor(servedModel, modelConfig, contextLength),
         })

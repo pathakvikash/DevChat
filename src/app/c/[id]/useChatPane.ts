@@ -248,8 +248,10 @@ export function useChatPane(conversationId: string, { focused, kind, searchProvi
   function queueMessage() {
     const text = composeQuoteMessage(quotes, input).trim();
     if (!text) return;
-    if (parseCommand(input)) {
-      toast("Wait for the reply to finish, then run the command", "info");
+    const command = parseCommand(input)?.command.action;
+    if (command) {
+      // Enter while a reply runs goes here, not to handleSubmit, so the /compress wording lives here too.
+      toast(command === "compress" ? "Wait for the reply to finish, then compress" : "Wait for the reply to finish, then run the command", "info");
       return;
     }
     const item: QueuedItem = { id: generateId(), seq: ++seqRef.current, text, status: "queued" };

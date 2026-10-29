@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { effectiveToolMode, isChatMode, MODE_POLICY, needsApproval, storedChatMode } from "@/lib/chat/modes";
+import { effectiveToolMode, isChatMode, MODE_POLICY, needsApproval, storedChatMode, toolsWithAnsweredApproval } from "@/lib/chat/modes";
 
 describe("effective tool mode", () => {
   it("runs Ask as Chat when no approval secret can sign the requests", () => {
@@ -56,5 +56,17 @@ describe("mode -> tool set", () => {
     expect(needsApproval("ask", "createTodo", allowed)).toBe(true);
     expect(needsApproval("agent", "createTodo", allowed)).toBe(false);
     expect(needsApproval("plan", "createTodo", allowed)).toBe(false);
+  });
+});
+
+describe("answered approvals", () => {
+  it("names the tools answered in these messages, and only those", () => {
+    const messages = [
+      { parts: [{ type: "tool-createArtifact", state: "output-available" }] },
+      { parts: [{ type: "step-start" }, { type: "tool-createArtifact", state: "approval-responded" }] },
+      { parts: [{ type: "tool-createTodo", state: "approval-requested" }] },
+    ];
+    expect(toolsWithAnsweredApproval(messages)).toEqual(["createArtifact"]);
+    expect(toolsWithAnsweredApproval([{ parts: undefined }, {}])).toEqual([]);
   });
 });

@@ -2,7 +2,7 @@ import { test, expect, type APIRequestContext, type Page } from "@playwright/tes
 import { createChat, deleteAllChats, openChat } from "./helpers";
 
 const pane = (page: Page, id: string) => page.locator(`[data-pane-id="${id}"]`);
-const composerIn = (page: Page, id: string) => pane(page, id).getByRole("textbox", { name: "Message" });
+const composerIn = (page: Page, id: string) => pane(page, id).getByRole("textbox", { name: "Message", exact: true });
 
 async function sideIdOf(request: APIRequestContext, mainId: string): Promise<string> {
   const res = await request.get(`/api/conversations/${mainId}/children?kind=side`);
