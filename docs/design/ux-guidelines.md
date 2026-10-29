@@ -19,7 +19,8 @@ For the agents building quote-reply, export, `/compress <focus>`, temporary chat
 7. Every new interactive element gets the focus ring in 2.5.
 8. A control never goes dead when the model can't use tools: replace it with the fallback, or disable it and say why (2.6).
 9. Motion is short (120–200ms), uses the existing springs, and turns off with reduced motion (1.5).
-10. Menus that open downward live in a bar with `relative z-20`. Overlay panels (`z-50`) always cover both chat panes (1.6).
+10. Menus that open downward live in a bar with `relative z-20`. Overlay panels (`z-50`) always cover every chat pane (1.6).
+11. Split view and the side chat are the same thing: a **chat pane** (3.8). Inside a pane, layout reacts to the pane's width (container queries), not the window's.
 
 ---
 
@@ -90,7 +91,7 @@ New buttons inside cards use `h-8 px-3 text-sm font-medium rounded-[var(--glass-
 | Progress pill | `TodoIndicator.tsx:47-59` | nothing new; keep it clear of the Reply pill |
 | Copy then "Copied!" swap, 1.5s | `CodeBlock.tsx:15-33` | "Send to main" turning into "Added" |
 | Toast (top right, 4s, success/error/info) | `Toast.tsx:52,73-83` | confirmations and errors |
-| Overlay panel (right, `z-50`, spring) | `SidePanel.tsx:17-35,49,63` | nothing new; it must keep covering both panes |
+| Overlay panel (right, `z-50`, spring) | `SidePanel.tsx:17-35,49,63` | nothing new; it must keep covering every pane |
 | Palette actions | `useCommandPaletteActions`, `CommandPalette.tsx:28`; usage `ConversationLayout.tsx:34-40` | new palette entries |
 | Slash command registry | `src/lib/commands.ts:31-173` | `/export`, `/recall`, `/side`, `/compress [focus]` |
 | Shortcut list | `KeyboardShortcutsDialog.tsx:10-39`, kbd style `:91` | new shortcuts and the slash command list |
@@ -105,7 +106,8 @@ Rules for new work:
 
 - Tray items: height `0 → auto` plus opacity, using the same 400/30 spring as `chatInput.tsx:413-416`, inside `<AnimatePresence initial={false}>`. Don't put `layout` props on tray items, because they fight the textarea's resize.
 - Reply pill: opacity 0→1 and scale 0.96→1 over 120ms. Exit 80ms.
-- Side pane (desktop): width animates over 0.2s `easeInOut`, like the sidebar. Narrow screens: `x: "100%" → 0` with the SidePanel spring. While dragging the divider: no transition.
+- Panes (split view and side chat): a pane opening or closing animates its width over 0.2s `easeInOut`, like the sidebar, and its neighbours give up or take back the space. While dragging a divider: no transition. In the one-pane-at-a-time layout (3.8.4), switching panes is instant, and a newly opened pane fades in over 150ms.
+- Split-view drop overlay: fades in over 120ms. A drop zone's border and background change over 100ms (CSS, like the cmdk items).
 - Inline cards: no entrance animation (they stream in). Expand and collapse with no animation, like `ToolInvocation`.
 - **Reduced motion.** `globals.css:436-444` only stops CSS animations. framer-motion ignores it. Add `<MotionConfig reducedMotion="user">` once around the children in `ThemeProvider.tsx` (a client component). Spinners freeze under reduced motion, which is fine because the status word carries the meaning.
 
@@ -114,11 +116,11 @@ Rules for new work:
 | Layer | z | Where |
 |---|---|---|
 | TodoIndicator in the transcript | 10 | `TodoIndicator.tsx:49` |
-| Side-pane divider | 10 | new |
+| Pane dividers (split view and side chat) | 10 | new |
 | **Reply pill** (absolute, inside the pane's `relative` transcript wrapper, `ConversationLayout.tsx:113`) | 20 | new |
-| **Headers that open menus downward** (`ConversationHeader` root, side-pane header) | `relative z-20` | new, see the pitfall below |
+| **Headers that open menus downward** (`ConversationHeader` root, every pane header) | `relative z-20` | new, see the pitfall below |
 | Sidebar collapse handle | 30 | `c/layout.tsx:53` |
-| **Side pane on narrow screens** (`fixed inset-0`) | 30 | new, from the companion doc |
+| **Split-view drop overlay** (absolute, inside the panes container, only while dragging a chat) | 30 | new, 3.8.2 |
 | Mobile sidebar | 40 | `c/layout.tsx:19` |
 | Overlay panels, dialogs, slash, @ and plus menus, model dropdown | 50 | `SidePanel.tsx:49`, `chatInput.tsx:303,435`, `ModelSelector.tsx:136` |
 | cmdk palette | 99/100 | `globals.css:290,300` |
@@ -131,6 +133,8 @@ Pitfall: every `glass*` class sets `backdrop-filter`, and that creates a stackin
 - `sm` (640px): header icon toggles move into the More menu (`ConversationHeader.tsx:101`), and ModeToggle shows icons only (`ModeToggle.tsx:58`).
 - `md` (768px): the sidebar becomes a drawer (`c/layout.tsx:19,41`). The composer hides the model picker, folder picker, context circle and hint (`chatInput.tsx:514,524,528,539`).
 - Review width for narrow screens: **400px**. No horizontal page scroll. Touch targets are at least 32px.
+- **Inside a chat pane, use container queries, not viewport breakpoints.** A 360px pane on a 1440px screen is "wide" to `md:` but narrow in practice. Each pane root gets `@container`. Responsive classes inside the pane (the composer at `chatInput.tsx:514,524,528,539`, its tray, the pane header) switch from `sm:`/`md:` to `@md:` (448px) / `@xl:` (576px). Tailwind v4 has this built in, with no plugin. With one full-width pane this behaves exactly like today.
+- Panes side by side, by window width: **3** at 1440px and up, **2** from 768px to 1439px, **1** below 768px. Each pane also needs at least 360px; see 3.8.2.
 
 ### 1.8 Existing gaps you must not copy
 
@@ -267,20 +271,22 @@ Why not hide everything: controls that vanish when you switch models look broken
 | ⌘↵ | quote card instruction box | sends only that card. Must `stopPropagation` (see the companion doc, 3.9) |
 | ↵ / ⇧↵ | main textarea | send everything, or queue while a reply runs / newline (unchanged) |
 | ↵ | quote card instruction box | send everything (same as ↵ in the textarea) |
-| ⌘\ | anywhere | toggle the side chat |
+| ⌘\ | anywhere | toggle the side chat of the focused pane's chat |
+| Ctrl+\` / Ctrl+⇧+\` | anywhere, two or more panes open | focus the next / previous pane (its textarea). The same keys on every platform: ⌘\` is taken by macOS, and ⌘1–9, ⌘[ and ⌘] are taken by the browser |
 | @ | textarea, at the start or after a space, with a working folder set | file picker |
 | ↑ ↓, Tab / ↵ | slash or @ picker | move, pick |
 | ← → | mode switch, plan "Run in" | move the selection (roving tabindex) |
-| ← → (⇧ for big steps) | side-pane divider | resize by 16px (64px with ⇧) |
+| ← → (⇧ for big steps) | a pane divider | resize by 16px (64px with ⇧) |
 
 **Esc**, first match wins:
 
-1. An open popover (slash, @, history, More): close it and return focus to its trigger or the textarea.
+0. Dragging a chat over the panes: the browser cancels the drag. Remove the drop overlay on `dragend`.
+1. An open popover (slash, @, history, More, mode or model chip, pane switcher): close it and return focus to its trigger or the textarea.
 2. An overlay panel or dialog: close it (existing `closeTopDialog`, `useConversationPage.ts:259`).
 3. The Reply pill is showing: hide it (keep the selection).
 4. Editing a queued message: cancel the edit.
 5. Focus is in a quote card's instruction box: move focus to the main textarea. The card stays.
-6. Otherwise nothing. Esc never closes the side chat and never stops a reply.
+6. Otherwise nothing. Esc never closes a pane (side chat included) and never stops a reply. ⌘W is never taken over: it closes the browser tab.
 
 ### 2.9 Discoverability
 
@@ -288,8 +294,9 @@ Why not hide everything: controls that vanish when you switch models look broken
   - **Chat:** New temporary chat · Toggle side chat (⌘\\) · New side chat · Search past chats (fills `/recall ` in the input) · Export as Markdown · Compress chat (fills `/compress ` in the input).
   - **Mode:** Mode: Chat · Mode: Plan · Mode: Ask · Mode: Agent. Disabled per 2.6, with the reason as the label suffix "· needs tools".
   - **Approvals** (shown only when something is allowed): Reset allowed tools.
+  - **Split view** (not shown in the one-pane-at-a-time layout): Open in split view, which lists the 8 most recent chats that aren't open (each item is the chat title with a 16px `Columns2` icon, and cmdk filters as you type) · Close this pane · Close other panes · Focus next pane (Ctrl+\`) · Focus previous pane (Ctrl+⇧+\`). At the pane limit the "Open in split view" items are disabled with the suffix "· close a pane first".
 - **`/help`** opens `KeyboardShortcutsDialog` with a new **Slash commands** group generated from `SLASH_COMMANDS` (usage in `font-mono`, then the description). This fixes the unhandled `/help`.
-- **Shortcuts dialog** (`KeyboardShortcutsDialog.tsx:10-39`), new rows: `Cmd \` Toggle side chat · `Cmd Enter` in a quote: send just that quote · `Enter` in a quote: send everything · `Esc` in a quote: back to the message box · `Enter` while a reply runs: queue · `@` mention a file (needs a working folder).
+- **Shortcuts dialog** (`KeyboardShortcutsDialog.tsx:10-39`), new rows: `Cmd \` Toggle side chat · `Cmd Enter` in a quote: send just that quote · `Enter` in a quote: send everything · `Esc` in a quote: back to the message box · `Enter` while a reply runs: queue · `@` mention a file (needs a working folder) · `` Ctrl ` `` Focus next pane · `` Ctrl Shift ` `` Focus previous pane · Drag a chat from the sidebar onto the chat area: open in split view.
 - **Palette Shortcuts group** (`CommandPalette.tsx:127-140`): add `Cmd+\` Toggle side chat.
 - **Tooltips carry the shortcut**: "Close side chat (⌘\\)", "New side chat".
 - **Empty state** (`EmptyState.tsx`): one tips line under the paragraph, `mt-4 text-xs text-zinc-400`, with kbd chips in the `KeyboardShortcutsDialog.tsx:91` style: `/ commands · @ files · ⌘\ side chat · select text to quote it`. No tours, no popups.
@@ -362,7 +369,7 @@ Why not hide everything: controls that vanish when you switch models look broken
 
 **Turning it on**
 
-- Header button, shown only while the chat has **no messages**, placed left of ModeToggle (`ConversationHeader.tsx:99`). It's a toggle with `aria-pressed`, 16px `MessageSquareDashed`, and the label **Temporary** (`hidden sm:inline`, icon only below sm). Style: off `glass-button text-[var(--foreground)]`; on `glass-strong border-dashed border-[var(--glass-border-strong)] text-[var(--foreground)]`. Same box as the header icon buttons (`p-1.5`, radius md; with label `px-2.5 h-7 text-xs gap-1.5` like ModeToggle).
+- Header button, shown only while the chat has **no messages**, placed left of ModeToggle (`ConversationHeader.tsx:99`). It's a toggle with `aria-pressed`, 16px `MessageSquareDashed`, and the label **Temporary** (`hidden sm:inline`, icon only below sm). Style: off `glass-button text-[var(--foreground)]`; on `glass-strong border-dashed border-[var(--glass-border-strong)] text-[var(--foreground)]`. Same box as the header icon buttons (`p-1.5`, radius md; with label `px-2.5 h-7 text-xs gap-1.5` like ModeToggle). With two or more panes open, the compact pane header has no room for this button, so it becomes the **Temporary chat** checkbox item in the pane's More menu (3.8.1).
 - Tooltip: **Temporary chat: not saved in your history, no memory. Deleted when you leave or after 24 hours.**
 - Palette: **New temporary chat** creates a chat with the flag on and opens it.
 - After the first message the toggle disappears. Turning it off later isn't offered: start a new chat.
@@ -419,7 +426,7 @@ Queued (2)                                   the model sees these at its next st
 - **Edit**: click the text or press Enter on the focused item. It becomes a `glass-input` textarea (auto-grows to 4 lines). ↵ saves, ⇧↵ adds a newline, Esc cancels. While saving: 12px `Loader2` next to ×.
 - **Delivered** (edit or remove got 409): the item turns read-only at 60% opacity with a 14px `Check` and **Delivered**, and leaves when its bubble appears.
 - **Failed to queue**: a 14px `AlertTriangle` (amber-400) and **Not queued** with a **Retry** text button. The text is never lost.
-- **From another agent** (3.12): a 14px `Bot` icon and the prefix **From side chat:**, not editable, × only.
+- **From another agent** (3.12): a 14px `Bot` icon and the prefix **From "<sender pane title>":**, not editable, × only.
 
 **Delivery in the transcript**: split the assistant bubble at the marker, so the transcript reads assistant, then user, then assistant: the reply so far, a normal right-aligned user bubble with the caption **Sent while replying** under it (`text-[11px] text-zinc-400`, right-aligned), and then the reply continuing in a new assistant bubble. Only the last segment gets MessageActions. Don't nest a blue bubble inside the grey reply card.
 
@@ -441,50 +448,162 @@ Queued (2)                                   the model sees these at its next st
 - **Trimmed content**: the chip gets a note line, 12px `AlertTriangle` (amber-400) and `text-xs text-zinc-400`, **Trimmed to fit <model>: <sent> of <size> sent**. The chip in the sent bubble shows the same note. If the trim is only known after sending, show it only on the sent chip.
 - **Pitfalls**: Esc closes the picker and keeps the typed `@text`. The slash and @ pickers never show together. Don't put file contents in the textarea.
 
-### 3.8 Side chat [P3]
+### 3.8 Chat panes: split view and side chat [P3]
 
-**Layout** (geometry from the companion doc 3.8)
+Split view puts several existing chats side by side (like the split view in the Claude desktop app). A side chat is one more pane, holding a child chat. Both use **one pane design**. 3.8.1 is shared, 3.8.2 is split view only, 3.8.3 is side chat only, and 3.8.4 covers narrow screens for both.
 
-- Desktop (`md` and up): a sibling of `<main>` in the flex row, docked right by default. Background `bg-[var(--background)]`, separated by the divider, no glass panel. It's a peer of the main chat, not an overlay. Default width 420px, min 320px, max 60% of the window. The main chat never goes below 360px. If both can't fit, use the narrow layout.
-- Divider: a 6px hit area with a 1px visible line `bg-[var(--glass-border)]`. On hover or drag the line becomes 2px `bg-[var(--glass-accent)]`. `cursor-col-resize`. Double-click resets to 420px. `role="separator" aria-orientation="vertical" aria-label="Resize side chat" aria-valuenow/min/max`, `tabIndex=0`, arrows per 2.8.
-- Narrow: `fixed inset-0 z-30`, full width, sliding in from the right with the SidePanel spring. No divider, no dock toggle.
+#### 3.8.1 The pane (shared)
 
-**Header** (`glass-nav relative z-20 px-3 py-2`)
+A pane is a full chat: header, transcript, composer, with its own model, mode, queue, quote cards and @ files. Panes sit in one flex row to the right of the sidebar, separated by dividers.
 
 ```
-[Title ▾ (history menu)]                     [ModelSelector sm] [SquarePen] [PanelLeft|PanelRight] [X]
-Sees the main chat live                                                         (text-[11px] text-zinc-400)
+<section role="region" aria-label="<title>" class="@container relative flex min-w-0 flex-col bg-[var(--background)]">
+  HEADER      glass-nav relative z-20 px-3 py-2
+    line 1    h-8  [title, text-sm font-semibold truncate]                 [line-1 actions, 28px icon buttons] [X]
+    line 2    flex flex-wrap items-center gap-1.5 min-h-6   [mode chip ▾] [model chip ▾]  meta items (text-[11px] text-zinc-400)
+  ERROR       the existing header error block (ConversationHeader.tsx:212-224), with mx-3 mt-2 text-xs
+  TRANSCRIPT  relative flex-1 min-h-0    (Reply pill, TodoIndicator)
+  COMPOSER    ChatInput with its tray (2.1)
+</section>
 ```
 
-- Title: `text-sm font-semibold truncate`, showing the side chat's title or **Side chat**. It's a button with a 12px `ChevronDown` that opens the history menu.
-- History menu (2.4): rows show the title (or the first message, cut at 40 characters) plus `getRelativeTime`. The current row has a 14px `Check`. Empty: **No older side chats**.
-- The model picker lives here (`ModelSelector size="sm"`), not in the side composer, because 320px is too narrow for the composer's button row.
-- Icon buttons are 28px like the main header: **New side chat** (`SquarePen`), **Dock left** / **Dock right** (the icon shows where it will go), **Close side chat (⌘\\)** (`X`).
-- Line 2 reads **Sees the main chat live**, or when trimmed **Sees the last <N> main messages** with the tooltip **Trimmed to fit <model>'s context**.
+**Header.** With **one pane open**, the existing `ConversationHeader` stays exactly as it is. As soon as a second pane opens, **every** pane, the first included, switches to this compact header so all panes look alike. Closing back to one pane brings `ConversationHeader` back.
 
-**Body**
+| | Chat pane | Side chat pane |
+|---|---|---|
+| Title (line 1) | chat title, `title` attribute holds the full text | side chat title, or **Side chat** |
+| Line-1 actions | More (`MoreHorizontal`), Close | Older side chats (`History`), New side chat (`SquarePen`), Dock left / Dock right (`PanelLeft` / `PanelRight`, showing where it will go), Close |
+| Mode chip | current mode; opens the four-mode menu | a static **Chat** chip, `aria-disabled`, tooltip **Side chats are always in Chat mode** |
+| Model chip | yes | yes |
+| Line-2 meta | **Temporary chat** (3.4), **Forked from …** (3.9), the two-writer warning (3.8.2) | **Sees "<parent title>" live** (3.8.3) |
+| More menu | the existing More items (`ConversationHeader.tsx:136-197`: Scratchpad, Artifacts, Memory, Advanced, Shortcuts, Export Markdown, Export JSON), Reset allowed tools (3.10), **Temporary chat** (a checkbox item, only while the chat is empty), **Close other panes** | none |
 
-- `ChatMessages` and the composer, with the same tray rules. No suggestion, no hint row below `md`.
-- Empty state: a 32px `PanelRight` icon (`text-zinc-400`), **Side chat**, and **Ask about the main chat. Nothing here is added to it.**
-- **Send to main** on each assistant reply, in its MessageActions row. A labelled button (icon plus text, since an icon alone would be unclear): `ArrowLeftRight` 12 and **Send to main**. For 1.5s after a click it shows `Check` and **Added**. On narrow screens it also closes the side overlay so the filled main input is visible. Focus goes to the main textarea.
-- Sub-agent viewer: the title is **Sub-agent: <title>**, with a `Read-only` badge (`ArtifactReference.tsx:54` style). There's no composer; in its place a footer `px-4 py-3 text-xs text-zinc-400 border-t border-[var(--glass-border)]` reads **Read-only transcript**, or **Still running. The card in the main chat shows live steps.**
+- **Mode chip**: `inline-flex h-6 items-center gap-1 rounded-[var(--glass-radius-sm)] glass-button px-2 text-[11px] font-medium text-zinc-300`, with the mode's 12px icon, its label and a 10px `ChevronDown`. It opens a 2.4 menu: `menuitemradio` rows with `aria-checked`, a 14px icon, the label, and the 3.10 tooltip text as a second line (`text-xs text-zinc-400`). Ask and Agent are disabled per 2.6. Why not the segmented ModeToggle: four segments, a model picker and a title don't fit in 360px.
+- **Model chip**: `ModelSelector` gets a `size="chip"` variant: the same box as the mode chip, the short model name truncated at 140px, the Eye icon kept. Its dropdown opens **downward** and is aligned `left-0` (not `right-0` as in `ModelSelector.tsx:136`), `w-72 max-w-[calc(100vw-2rem)]`, so it never runs off the leftmost pane.
+- Overlay panels opened from a pane's More menu (Artifacts, Scratchpad, Advanced, …) show that pane's chat title as their `subtitle` (`SidePanel.tsx:11,71`), so it's clear which chat they belong to.
 
-**Focus and keys**
+**Focused pane** (only with two or more panes; subtle on purpose):
 
-- Opening via ⌘\\, palette or `/side` focuses the side textarea. Closing returns focus to the main textarea.
-- The focused pane is the one that last got focus or a pointer-down. Its composer form gets `border-[var(--glass-border-strong)]`; the other pane's stays default. That's the only "active pane" signal.
-- `/side <question>` opens the pane and sends there; focus stays in the side textarea.
+- The focused pane is the one that last got focus or a pointer-down inside it. After a reload, it's the one saved in the URL, else the first.
+- Signal: its header title is `text-[var(--foreground)]` and its composer form has `border-[var(--glass-border-strong)]`. Other panes have a `text-zinc-400` title and the default form border. Nothing else: no accent bar, no glow, no tint, which would compete with the composer's own focus glow.
+- Shortcuts (⌘↵, ⌘\\, the queue) act on the focused pane. Put `data-focused` on the section so tests can check it.
+
+**Widths and dividers**
+
+- Every pane is at least **360px** wide, the side chat included (this replaces the side chat's earlier 320px minimum). There is no other maximum: a pane can grow until its neighbours reach 360px.
+- A new pane gets an equal share, and the others shrink in proportion. Widths are remembered per number of panes, as fractions (`localStorage`, read in try/catch), so resizing the window keeps the proportions.
+- Divider between two neighbouring panes: a 6px hit area with a 1px line `bg-[var(--glass-border)]`; on hover or drag the line becomes 2px `bg-[var(--glass-accent)]`; `cursor-col-resize`. Dragging resizes only those two panes. Double-click splits the two equally. `role="separator" aria-orientation="vertical" aria-label="Resize <left title> and <right title>"`, `aria-valuenow` = the left pane's share in %, `tabIndex=0`, arrow keys per 2.8.
+- If the open panes can't each get 360px (the window shrank, or the sidebar was expanded), switch to the one-pane-at-a-time layout (3.8.4). A resize never closes a pane.
+
+**The composer at 360px** (328px of content after `px-4`):
+
+- Tray (2.1): quotes clamp to 2 lines, file chips get `max-w-full` with truncated names, and the height cap is unchanged.
+- The button row holds +, the textarea, the mic, and Send (or Queue plus Stop). When they don't fit on one line, the existing wrap (`expanded`, `chatInput.tsx:229,334`) gives the textarea its own row. That's expected.
+- Below `@xl` (576px of pane width) these are hidden, the same as on phones today: the hint text, the context circle, the folder picker (it stays reachable in Model settings, as on phones, `WorkingFolderPicker.tsx:12-13`), and the quote-card key hint. MinimapNavigator is hidden below `@2xl` (672px).
+- With two or more panes, the composer hides its own ModelSelector, because the header's model chip replaces it.
+- Inline cards wrap their footers (2.3). Bubbles keep `max-w-[85%]`.
+
+**Pane states**
+
+- **Loading**: the pane appears at once (its width animates in) with a skeleton. Build it from the bars in `c/[id]/loading.tsx` (`bg-zinc-800 rounded animate-pulse`, which flips in light mode), but with percentage widths (`w-1/2`, `w-2/3`, `w-3/4`), because that file's fixed `w-72`/`w-80` bars overflow a 360px pane. The skeleton is a title bar `h-4 w-1/2`, two chip bars `h-6 w-16`, four message bars on alternating sides, and a composer bar `h-12 rounded-[var(--glass-radius-xl)]`. Set `aria-busy="true"` on the section while loading. Don't use the full-page "Loading conversation..." card (`ConversationLayout.tsx:58-66`).
+- **Empty chat**: EmptyState with a 32px icon. The tips line (2.9) shows only at `@lg` and up.
+- **Not found** (deleted somewhere else, or a stale id in the URL): centred in the pane body, **This chat no longer exists** (`text-sm text-zinc-400`) with a **Close pane** button (`glass-button h-8`).
+- **Load error**: **Couldn't load this chat**, with **Try again** (`glass-button-primary h-8`) and **Close pane** (`glass-button h-8`).
+
+**Closing**
+
+- ×: `X` 16px, `aria-label="Close <title>"`, title **Close pane** (on a side chat: **Close side chat (⌘\\)**). The last pane left has no ×.
+- A **busy** pane (a reply running, or unsent text, quote cards, files or queued items) asks first, using the existing native `confirm()` pattern (`Sidebar.tsx:80`): **Close "<title>"? Its reply will stop and unsent text will be lost.** An idle pane closes without asking.
+- Focus then goes to the left neighbour's textarea, else the right neighbour's.
+
+**Accessibility**: the panes row is `role="group" aria-label="Split view"`. Each pane is a `region` named after its chat (a side chat: "Side chat: <title>") and keeps its own live region (2.5).
+
+#### 3.8.2 Split view [P3]
+
+**Opening a chat in split view.** There are three ways, and each opens the chat as a new pane:
+
+1. **Drag** a chat from the sidebar onto the chat area (below).
+2. The sidebar row menu (`Sidebar.tsx:392-431`), with a new first item **Open in split view** (12px `Columns2`, same row style). Right-click on a row opens the same menu, anchored to the row's … button (`preventDefault` on `contextmenu`). The new pane opens to the right of the focused pane.
+3. The palette's Split view group (2.9).
+
+Options 2 and 3 are the keyboard alternative to dragging. Both work without a mouse.
+
+- A chat is never shown twice. If it's already open, its pane gets focus instead.
+- At the pane limit (1.7: 3, 2 or 1 by window width), the menu item and the palette items are `aria-disabled`, with the tooltip and tap toast **Close a pane first. Up to <n> fit at this width.**
+- In the one-pane-at-a-time layout (3.8.4), "Open in split view" is hidden.
+
+**The sidebar in split view**
+
+- Clicking a chat opens it **in the focused pane**, the same as today with one pane. If that chat is open in another pane, that pane gets focus instead. If the focused pane is busy, ask first: **Replace "<title>"? Its reply will stop and unsent text will be lost.**
+- New Chat opens in the focused pane.
+- Highlight: the focused pane's chat keeps today's `glass-strong` row (`Sidebar.tsx:327-329`). Other open chats show a 12px `Columns2` icon (`text-zinc-400`, title **Open in split view**) after their title.
+
+**Dragging and the drop zones**
+
+- Drag source: the whole sidebar row (`draggable`; the inner `<Link draggable={false}>`). `dragstart` sets a custom type `application/x-devchat-chat` (the id) and `text/uri-list` (`/c/<id>`). Use the browser's default drag image.
+- The overlay shows only while a drag of that type is over the panes area: `absolute inset-0 z-30` over the panes row, transparent, with no scrim, so the panes stay readable. Never over the sidebar, never for file drags. Close any open popover on `dragstart`.
+- **Below the limit**: each pane splits into a left-half zone and a right-half zone. Dropping on a half opens the chat as a new pane on that side of that pane. With one pane open, that gives two zones (left, right).
+- **At the limit (dropping a 4th pane)**: each pane is one whole zone, **Replace "<title>"**. A busy pane isn't a target: its zone is at `opacity-50`, `dropEffect = "none"`, labelled **Busy: replying or has a draft**. If every pane is busy, show one centred label instead: **Close a pane first. Up to <n> fit at this width.** A pane is only ever replaced when the user dropped onto that exact pane.
+- **Chat already open**: no zones. One centred label, **Already open**. Dropping focuses its pane.
+- Zone look. Idle: `m-2 rounded-[var(--glass-radius-lg)] border-2 border-dashed border-[var(--glass-border-strong)] bg-[var(--glass-bg)]`. Hovered: `border-[var(--glass-accent-strong)] bg-[var(--glass-bg-active)] shadow-[var(--glass-shadow-glow)]`. Only the hovered zone shows a label chip, centred: `inline-flex h-8 items-center gap-1.5 rounded-full glass-panel-strong px-3 text-xs font-medium text-[var(--foreground)]` with a 14px icon: `PanelLeft` **Open on the left**, `PanelRight` **Open on the right**, or `Replace` **Replace "<title>"**. Everything is built from tokens, so it works in both themes.
+- Motion: per 1.5 (overlay 120ms, zones 100ms, the new pane's width 0.2s). Reduced motion makes all of it instant.
+- **Drop**: the overlay goes away at once, the new pane animates in and its textarea gets focus. **Esc**, or dropping outside a zone (sidebar, a header), cancels and nothing changes.
+- **Announcements**, in one page-level `aria-live="polite"` region outside the panes:
+  - on entering the area: **Dragging "<title>". Drop on the left or right of a chat. Esc cancels.**
+  - on entering a zone: the zone's label
+  - on drop: **"<title>" opened. Pane 2 of 3.**
+  - on cancel: **Cancelled**
+
+**URL and reload**
+
+- Opening, closing and replacing panes use `router.replace`, never `push`, so Back leaves the page instead of stepping through pane changes. The URL format is in the companion doc.
+- A reload restores the same panes, order, widths and focused pane. A pane whose chat is gone shows the not-found state (3.8.1).
+
+**Two writers on one folder**
+
+- When two or more open panes are in **Ask or Agent** mode with the **same working folder** (not empty), each of them shows this item on header line 2: a 12px `AlertTriangle` (`text-amber-400`) and **Another open chat can edit this folder**.
+- It's a button styled `inline-flex items-center gap-1 text-[11px] text-zinc-400 hover:text-[var(--foreground)]`, with the tooltip **"<other title>" is in <Agent|Ask> mode on <short folder>. Click to go to it.** Clicking focuses the other pane (with three writers, the next one).
+- Keep it calm: no banner, no red, no modal, and it never blocks sending. It goes away as soon as either pane changes mode or folder, or closes. Chat and Plan panes and side chats never count (they're read-only).
+- Announce it once in each pane's live region when it appears.
 
 **Pitfalls**
 
-- Overlay panels (`z-50`) cover both panes. The mobile sidebar (`z-40`) covers the narrow side pane (`z-30`).
-- Keep the main chat's scroll position when the pane opens, and stay pinned to the bottom if it was at the bottom.
-- Two Stop buttons can be visible at once, one per pane. That's correct.
-- No MinimapNavigator, TodoIndicator or Fork in the side pane.
+- The composer's file overlay starts on any drag that carries items (`chatInput.tsx:172`), so dragging a chat over a composer would show "Drop files to attach". Show it only when `e.dataTransfer.types.includes("Files")`.
+- `dragover` must call `preventDefault()` over a valid zone, or `drop` never fires. Work out the zone from `clientX` in the overlay's `dragover`, not from enter/leave on each zone (those fire for every child).
+- Don't reuse `DragOverlay.tsx`: it covers the whole screen at `z-50`, handles files only, and uses `text-white`.
+- Each pane has its own chat state. Never share input, quote cards, queue or files between panes.
+
+#### 3.8.3 Side chat [P3]
+
+A side chat is a pane whose chat is a child of the pane next to it. It takes one pane slot, and 3.8.1 covers everything not listed here.
+
+- **Where**: next to its parent, on the right by default, or on the left when docked left. The dock button moves it to the other side of its parent.
+- **Open and close**: ⌘\\ toggles the side chat of the focused pane's chat (if the focused pane is a side chat, it closes it). The same works from the palette or with `/side`. At the pane limit, show the toast **Close a pane first. Up to <n> fit at this width.**
+- **Header**: the side-chat variant in 3.8.1. The title is plain text, because in 3.8.4 it becomes the switcher, so it can't also be the history menu. Older side chats live in the `History` button's menu (2.4): rows show the title (or the first message, cut at 40 characters) and `getRelativeTime`; the current row has a 14px `Check`; empty: **No older side chats**.
+- **Line 2**: **Sees "<parent title>" live**, or when the main chat is trimmed: **Sees the last <N> messages of "<parent title>"**, with the tooltip **Trimmed to fit <model>'s context**.
+- **Empty state**: a 32px `PanelRight` icon (`text-zinc-400`), **Side chat**, and **Ask about "<parent title>". Nothing here is added to it.**
+- **Send to main**: on each assistant reply, in its MessageActions row, a labelled button with a 12px `ArrowLeftRight` and **Send to main** (an icon alone would be unclear). Tooltip: **Add to the message box of "<parent title>"**. For 1.5s after a click it shows `Check` and **Added**. It fills the parent's textarea and focuses it. In the one-at-a-time layout, it also switches to the parent pane.
+- **Sub-agent viewer**: opens in the side-chat slot of the parent's pane (3.11 "Open"). The title is **Sub-agent: <title>**, with a `Read-only` badge (`ArtifactReference.tsx:54` style). There's no composer; in its place a footer (`px-4 py-3 text-xs text-zinc-400 border-t border-[var(--glass-border)]`) reads **Read-only transcript**, or **Still running. The card in the main chat shows live steps.**
+- **Not in a side chat**: suggestions, the mode menu, MinimapNavigator, TodoIndicator, Fork.
+- **Focus**: opening via ⌘\\, the palette or `/side` focuses the side textarea. Closing returns focus to the parent's textarea. `/side <question>` opens the side chat and sends the question there.
+- Keep the parent's scroll position when the side chat opens, and stay pinned to the bottom if it was there. Two Stop buttons at once (one per pane) is correct.
+
+#### 3.8.4 Narrow screens: one pane at a time
+
+- **When**: below 768px, or whenever the open panes can't each get 360px. Nothing closes. Widening the window or collapsing the sidebar brings the panes back side by side.
+- **Pick: a switcher, not tabs.**
+  - A tab row costs a 40px strip on a phone, where the header, composer and keyboard already take most of the height.
+  - Three tabs at 400px leave about 110px per title, which truncates to nothing.
+  - The header already has a title slot that can become a button, and the menu pattern exists (2.4).
+- **Switcher**: with two or more panes open, the visible pane's title becomes a button: the title, a count badge `1/3` (`text-[10px] font-semibold rounded glass px-1.5`, the `ArtifactReference.tsx:54` badge) and a 12px `ChevronDown`. Give it `aria-haspopup="menu"`, `aria-expanded`, and `aria-label="Switch chat, 1 of 3: <title>"`.
+  - Menu rows: a 14px mode icon (`PanelRight` for a side chat), the title (a side chat reads **Side chat · <title>**), a 6px `bg-blue-400` dot with sr-only "replying" for panes that are replying, and a `Check` on the current pane. Then a separator and **Close this pane**.
+- Choosing a pane shows it at once and focuses its textarea. Ctrl+\` cycles through panes. Hidden panes stay mounted with `hidden` (`display: none`), so their replies keep streaming.
+- No dividers, no dock button, no drag and drop, no "Open in split view". The side chat is an ordinary pane here: there's no longer a `fixed inset-0 z-30` overlay. Its × goes back to the parent.
+- With only one pane open: no switcher, and the normal `ConversationHeader`.
 
 ### 3.9 Fork from here [P3]
 
-- **Action**: in MessageActions, on any saved message in the main pane, a `GitFork` 12 button with `aria-label` and `title` **Fork from here**, placed after Copy. Hidden while streaming (existing rule, `MessageActions.tsx:84`) and in the side pane.
+- **Action**: in MessageActions, on any saved message in a chat pane, a `GitFork` 12 button with `aria-label` and `title` **Fork from here**, placed after Copy. Hidden while streaming (existing rule, `MessageActions.tsx:84`) and in side chat panes. In split view the fork opens in the focused pane, like any sidebar click (3.8.2).
 - **Click**: the icon swaps to a 12px `Loader2`. Then the new chat opens (its messages up to and including this one, titled "<title> (fork)") and appears at the top of the sidebar. Error toast: **Couldn't fork this chat**.
 - **Header of the fork**: the first item in the meta row is 12px `GitFork` plus **Forked from** and a link to the source (`text-xs text-zinc-400`; the title is a link, `hover:text-[var(--foreground)] hover:underline`, truncated at 200px). If the source is gone: **Forked from a deleted chat** (no link).
 - Forking a temporary chat makes a normal, saved chat.
@@ -553,7 +672,7 @@ An inline card (2.3), one per helper. Up to 3 stack with the normal `my-2` gap. 
 ```
 
 - Meta: `Step <n> · <m:ss> · <compact tokens>`, using `Intl.NumberFormat(undefined, { notation: "compact" })`, `font-mono tabular-nums`, and elapsed time ticking every 1s.
-- **Open**: a text button `inline-flex h-6 items-center gap-1 rounded-[var(--glass-radius-sm)] px-2 text-xs glass-button` with 12px `PanelRightOpen` and **Open**; tooltip **Open transcript in side chat**. It opens the side pane in viewer mode (3.8). On narrow screens that's the overlay.
+- **Open**: a text button `inline-flex h-6 items-center gap-1 rounded-[var(--glass-radius-sm)] px-2 text-xs glass-button` with 12px `PanelRightOpen` and **Open**; tooltip **Open transcript in side chat**. It opens the side-chat slot of the parent's pane in viewer mode (3.8.3). At the pane limit, show the 3.8.3 toast.
 - Expanded body: the steps, `max-h-60 overflow-y-auto`, following the newest step unless the user scrolled up. Each row is `flex gap-2 text-xs` with a 12px icon (`Search` web, `FileText` read, `Pencil` write, `Wrench` other), a label like **Read src/app/page.tsx** (`text-zinc-300 truncate`), and the duration (`ml-auto text-zinc-400 tabular-nums`).
 - Terminal meta words: **Done**, **Stopped at the 15-step limit** (`CheckCircle2`, it still reported), **Failed: <short reason>**, **Timed out after 5 min**, **Stopped**. On error or timeout, the body opens itself to show partial notes.
 - Follow-up (`messageAgent`): a new card titled **<title> · follow-up**.
@@ -562,10 +681,11 @@ An inline card (2.3), one per helper. Up to 3 stack with the normal `my-2` gap. 
 
 ### 3.12 Agents messaging [P6]
 
-- **Badge on a message from another agent** (user role, right-aligned): not the blue user style. Use `glass-card text-[var(--foreground)]` with the bubble's radius and padding, and above the text a badge row `mb-1 inline-flex items-center gap-1 text-[11px] font-medium text-zinc-400` with 12px `Bot` and **From main chat** / **From side chat** (sub-agent follow-ups: **From the main chat's assistant**). So users never mistake it for something they wrote. Delivered mid-reply, it splits the reply the same way as 3.6, with this neutral style.
-- **Talking indicator**: a status row at the top of the tray (2.1) in **both** panes while agents exchange messages. `flex items-center gap-2 text-xs text-zinc-400`, then the `TypingIndicator` dots (compact), then **Talking with side chat · 2 of 3** (in the side pane: **with main chat**), then on the right **Stop** (`glass-button-danger h-7 px-2.5 text-xs`, same text colour as the existing Stop). Stop stops both panes and drops pending agent messages. The row disappears when the exchange ends or hits 3.
-- **Queued while busy**: the receiver's queue shows it as an agent item (3.6).
-- The side pane opens on its own when main sends to it (focus doesn't move).
+- **Badge on a message from another agent** (user role, right-aligned): not the blue user style. Use `glass-card text-[var(--foreground)]` with the bubble's radius and padding, and above the text a badge row `mb-1 inline-flex items-center gap-1 text-[11px] font-medium text-zinc-400` with 12px `Bot` and **From "<sender pane title>"** (an untitled side chat reads **From side chat**; sub-agent follow-ups: **From the main chat's assistant**). Cut the title at 32 characters with `…`; the full title goes in `title`. So users never mistake it for something they wrote. Delivered mid-reply, it splits the reply the same way as 3.6, with this neutral style.
+- **Any open pane can be the target** (split panes and side chats). The model only sees open panes.
+- **Talking indicator**: a status row at the top of the tray (2.1) in **the two panes in the exchange** (other panes show nothing). `flex items-center gap-2 text-xs text-zinc-400`, then the `TypingIndicator` dots (compact), then **Talking with "<other pane title>" · 2 of 3**, then on the right **Stop** (`glass-button-danger h-7 px-2.5 text-xs`, same text colour as the existing Stop). Stop stops both panes and drops pending agent messages. The row disappears when the exchange ends or hits 3. In the one-at-a-time layout (3.8.4), the switcher's "replying" dots show the hidden pane's activity.
+- **Queued while busy**: the receiver's queue shows it as an agent item (3.6), with the prefix **From "<title>":**.
+- A message to a closed side chat opens it (focus doesn't move). Split panes that aren't open can't be messaged.
 
 ---
 
@@ -575,7 +695,7 @@ An inline card (2.3), one per helper. Up to 3 stack with the normal `my-2` gap. 
 
 | Feature | Tools available | No tools (older, small or local models) |
 |---|---|---|
-| Quote-reply, export, `/compress`, temporary, fork, side chat, @ files | same | same (@ files may show the trimmed note) |
+| Quote-reply, export, `/compress`, temporary, fork, side chat, split view, @ files | same | same (@ files may show the trimmed note) |
 | Search past chats | model calls `searchChats`; `/recall` also works | `/recall` only; same card |
 | Queue | delivered between steps; hint "the model sees it at its next step" | sent after the reply; hint "sends when the reply finishes" |
 | Modes | all four | Chat; Plan via an "Approve plan" button; Ask and Agent `aria-disabled` with the tooltip |
@@ -603,14 +723,19 @@ Tick per feature, from screenshots in light and dark, at desktop width and about
 - [ ] 12. No layout jump: tray items animate their height, live numbers use `tabular-nums`, card headers keep their height across states.
 - [ ] 13. With reduced motion on, transforms are off (`MotionConfig`) and nothing important depends on motion.
 - [ ] 14. At 400px: no horizontal scroll, nothing clipped, footers wrap, touch targets at least 32px.
-- [ ] 15. Menus aren't covered by transcript elements; overlay panels cover both panes; the narrow side pane sits under the mobile sidebar.
+- [ ] 15. Menus aren't covered by transcript elements or other panes; overlay panels cover every pane; the drop overlay sits above pane headers but below the mobile sidebar and overlay panels.
 - [ ] 16. Model without tools: the fallback replaces the control, or it's `aria-disabled` with the tooltip (and a toast on tap); nothing dead, nothing silently missing.
 - [ ] 17. Tray items: × always visible with an `aria-label`; containers are lists; one item shape for quotes and queue, `AttachmentChip` for files.
 - [ ] 18. Inline cards follow 2.3: header, body, footer; primary button last on the right; waiting cards get the amber border.
 - [ ] 19. Reply pill: only for single-message selections; never in the composer, cards or dialogs; doesn't clear the selection on click; code-block and card chrome stay out of the quote.
-- [ ] 20. Side chat: resize, dock left/right and width are remembered; ⌘\\ toggles; the focused pane is marked and gets ⌘Enter; "Send to main" fills and focuses the main input.
+- [ ] 20. Side chat: it sits next to its parent and takes one slot; dock left/right works; ⌘\\ toggles; "Send to main" fills and focuses the parent's input.
 - [ ] 21. Temporary chat: dashed composer, header meta note and empty state all show; not in the sidebar or search; Memory item disabled.
 - [ ] 22. Approval and plan: no focus stolen; Deny and Revise equally reachable; resolved state collapses to one row.
 - [ ] 23. Sub-agent card: live meta doesn't jitter; terminal states are correct; Open shows the read-only transcript.
 - [ ] 24. The screen reader live region announces quote added, queued, delivered, needs your OK, plan ready and sub-agent finished, each once.
 - [ ] 25. Discoverability: a palette entry, a `/help` listing and a shortcuts-dialog row exist where the feature has one; existing composer controls (plus menu, voice, model, folder, context circle) look and work as before.
+- [ ] 26. Panes: with two or more open, every pane uses the compact header (title, mode chip, model chip, ×). Only the focused pane has a full-colour title and a stronger composer border. ⌘Enter and Ctrl+\` act on or move between panes.
+- [ ] 27. Pane widths: no pane is under 360px; dividers resize two neighbours and work with arrow keys; widths and open panes survive a reload; a resize below the limit switches to the switcher and never closes a pane.
+- [ ] 28. A 360px pane at 1440px wide: the composer, tray, header line 2 and inline cards fit with no clipping, and the container-query rules hide the hint, context circle and folder picker.
+- [ ] 29. Drag and drop: half-pane zones below the limit; whole-pane "Replace" zones at the limit; busy panes refused; "Already open" focuses; Esc cancels; no file overlay during a chat drag; announcements fire. Menu and palette work without a mouse.
+- [ ] 30. Narrow (400px) with two or more panes: the switcher shows 1/n with "replying" dots and switches instantly; hidden panes keep streaming. The two-writer warning shows in both panes, stays calm, and focuses the other pane on click. Skeleton, not-found and error states fit the pane.

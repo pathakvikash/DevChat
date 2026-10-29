@@ -1,6 +1,6 @@
 # DevChat: chat upgrades, side chat, modes, sub-agents and agent messaging
 
-Spec and design. Branch `feat/providers-byok-cli`, 2026-10-29. Checked against `ai` 6.0.235, `@ai-sdk/react` 3.0.237, `next` 16.2.6, `@modelcontextprotocol/sdk` 1.29.0 and Claude Code 2.1.296 (section 8).
+Spec and design. Branch `feat/claude-style-chat`, 2026-10-29 (split view added later the same day). Checked against `ai` 6.0.235, `@ai-sdk/react` 3.0.237, `next` 16.2.6, `@modelcontextprotocol/sdk` 1.29.0 and Claude Code 2.1.296 (section 8).
 
 Implementation starts from section 4: each phase lists the exact files to touch and the vitest cases.
 
@@ -8,14 +8,14 @@ Implementation starts from section 4: each phase lists the exact files to touch 
 
 ## 1. Summary
 
-Thirteen features in six phases, mostly modelled on Claude Code. Small, text-only features come first. The bigger agent features build on them.
+Fourteen features in six phases, mostly modelled on Claude Code and the Claude desktop app. Small, text-only features come first. The bigger agent features build on them.
 
 - **Phase 1, quick wins**: quote-reply, export to Markdown, `/compress <focus>`, temporary chat, search past chats.
 - **Phase 2, input upgrades**: a message queue that reaches the model mid-reply, and `@` to attach files from the working folder.
-- **Phase 3**: one chat hook per pane, then a side chat next to the main chat, and "fork from here".
+- **Phase 3**: one chat hook per pane; a pane container with split view (several chats side by side); the side chat as a special pane; "fork from here".
 - **Phase 4**: two new modes, Ask (approve each action) and Plan (plan first, then approve).
 - **Phase 5**: sub-agents the model can start.
-- **Phase 6**: main chat, side chat and sub-agents can message each other.
+- **Phase 6**: open chats (any pane, including side chats) and sub-agents can message each other.
 
 Every feature works with API/BYOK models, older models and local Ollama models, not only Claude or the CLI providers. Claude Code-only extras sit on top of a generic path.
 
@@ -24,7 +24,7 @@ Every feature works with API/BYOK models, older models and local Ollama models, 
 | 0 | Compression fix (prerequisite) | none |
 | 1 | Quote-reply, export, `/compress <focus>`, temporary chat, search past chats | `Conversation.temporary` |
 | 2 | Message queue, `@` files | new `QueuedMessage` table |
-| 3 | Per-pane refactor, side chat, fork from here | `Conversation.parentId`, `kind`, `forkedFromId` (one migration) |
+| 3 | Per-pane refactor, split view, side chat, fork from here | `Conversation.parentId`, `kind`, `forkedFromId` (one migration) |
 | 4 | Ask before acting, plan mode | none |
 | 5 | Sub-agent | none |
 | 6 | Agent messaging | `QueuedMessage.agent` |
@@ -32,7 +32,7 @@ Every feature works with API/BYOK models, older models and local Ollama models, 
 
 ### Compatibility rule
 
-- Text-only features work for every provider: quote-reply, export, compress focus, temporary chat, `@` files, fork, side chat, queue.
+- Text-only features work for every provider: quote-reply, export, compress focus, temporary chat, `@` files, fork, split view, side chat, queue. Panes in a split can each use a different provider.
 - Text pulled in from elsewhere (the side chat's view of the main chat, `@` file contents, `readChat`) is trimmed to the receiving model's context window. Small Ollama windows get less. The user sees what was cut.
 - Tool features need `supportsTools` (`ModelConfig`, `src/lib/models.ts:26`). The route already sends no tools at all to a model without it (`useTools`, `route.ts:150`). Those models get a button or slash command instead:
 
@@ -44,7 +44,7 @@ Every feature works with API/BYOK models, older models and local Ollama models, 
 | Plan mode | `presentPlan` tool | "Approve plan" button on the last reply |
 | Sub-agent | `runAgent` tool | not offered |
 | Side chat → main | nothing | "Send to main" button (all models) |
-| Agent messaging | `sendToChat` tool | "Send to side chat" / "Send to main chat" buttons start one message; no replies back |
+| Agent messaging | `sendToChat` tool | a "Send to…" button on replies (lists the other open panes) starts one message; no replies back |
 
 ### Decision table
 
@@ -71,16 +71,16 @@ Product decisions (settled):
 | 17 | The queue is stored in a small `QueuedMessage` table in both Prisma schemas. |
 | 18 | The queue belongs to each pane's chat state, so the side chat gets one and agent messages reuse it. |
 | 19 | `@` files: only when the chat has a working folder. `@` opens a picker; picked files show as chips; on send their contents are inlined as fenced blocks with a path header, capped per file and in total to the model's context budget. The file route keeps paths inside the folder and refuses `.env*`, key and credential files. |
-| 20 | Side chat: a docked second pane on `/c/[id]`. It sees the main chat and never adds to it. |
+| 20 | Side chat: a pane on `/c/[id]` that hosts a child conversation and takes one split-view slot (decision 63). It sees the main chat and never adds to it. |
 | 21 | Live context: every side-chat send loads the main chat's saved messages. A main reply still streaming is not visible until saved. |
 | 22 | The side chat sees the main chat's own view: compression summary, messages since compression (with tool calls and results), working folder path, todo list, artifact titles (not contents), in a "Main conversation" system prompt section. |
 | 23 | Each side-chat reply has "Send to main", which fills the main chat's input box. Nothing is sent without the user. |
 | 24 | Side chats and sub-agent runs are child conversations: kept across reloads, deleted with the main chat, hidden from the sidebar. |
 | 25 | Many side chats per main chat. The pane shows the latest, with "New side chat" and a menu of older ones. |
 | 26 | The side chat has its own model picker (defaults to the main chat's model) and is always in chat mode. |
-| 27 | Layout: dock left or right, drag to resize, side and width remembered in browser storage. |
-| 28 | Open with Cmd+\ (Ctrl+\), `/side`, or the command palette. Narrow screens: full width over main. Overlay panels still open on top. |
-| 29 | Both panes can stream at once. Shortcuts act on the focused pane. |
+| 27 | Layout: the side chat docks left or right of its main chat (its place in the pane order) and resizes like any pane; the dock side is remembered in browser storage, widths as in decision 62. |
+| 28 | Open with Cmd+\ (Ctrl+\), `/side`, or the command palette. Narrow screens: one pane at a time with a switcher in the title (no full-screen overlay). Overlay panels still open on top. |
+| 29 | All open panes can stream at once. Shortcuts act on the focused pane. |
 | 30 | Side chats get no next-message suggestions and no memory consolidation; their own auto-compress and titles work as normal. |
 | 31 | Fork from here: on any message, a new normal chat (in the sidebar) with copies of the messages up to and including it and the same settings. `forkedFromId` with `onDelete: SetNull`, so deleting the original keeps the fork. The header shows "Forked from <title>". Not a child. The existing `branch` endpoint (truncate) stays for regenerate. |
 | 32 | Mode switch becomes Chat · Plan · Ask · Agent, per conversation. |
@@ -93,9 +93,9 @@ Product decisions (settled):
 | 39 | Same model as the parent. CLI models work as parent and as sub-agent; CLI parents run one sub-agent at a time. |
 | 40 | Foreground only. API-model parents may run up to 3 sub-agents in parallel in one step. |
 | 41 | Limits: 15 steps, 5 minutes, report capped at 8,000 characters, token use on its card. Stop stops sub-agents too. An error or timeout goes back to the parent as an error result; the parent carries on. |
-| 42 | A live card in the parent's message shows the sub-agent's steps. "Open" shows its saved transcript in the side pane. |
-| 43 | Messaging: main ↔ side chat, and parent → finished sub-agent (the follow-up resumes it from its saved transcript). |
-| 44 | A message from another agent is labelled "from main chat" / "from side chat" in the receiver's transcript, so the model knows it is not the user. |
+| 42 | A live card in the parent's message shows the sub-agent's steps. "Open" shows its saved transcript, read-only, in the side-chat slot next to the parent. |
+| 43 | Messaging: any open pane → any other open pane (main chats, split chats, side chats), and parent → finished sub-agent (the follow-up resumes it from its saved transcript). |
+| 44 | A message from another agent is labelled "From <chat title>" in the receiver's transcript, so the model knows it is not the user. |
 | 45 | The receiver replies on its own, up to 3 messages back and forth per user send, then waits for the user. A "talking" indicator and Stop show meanwhile. |
 | 46 | If the receiver is busy, the agent message waits in the receiver's queue (delivered between its steps, or right after its reply). Messaging runs in the browser; the server keeps no background state. |
 
@@ -105,15 +105,29 @@ Design decisions (made in this doc; 3.14 lists where they differ from the brief)
 |---|---|
 | 47 | `Conversation` gets `parentId` + `kind` (child conversations) and `forkedFromId` (forks). The sidebar lists `parentId: null, temporary: false`. |
 | 48 | A queued message delivered mid-reply stays inside the assistant message as a `data-queued-message` part (one row per reply). It is split back into its own user message only when history goes to a model. |
-| 49 | Agent messages are a `data-agent-message` part `{ from, fromConversationId, hop }` in the user message. No `Message` schema change. |
+| 49 | Agent messages are a `data-agent-message` part `{ from, fromConversationId, fromTitle, hop }` in the user message. No `Message` schema change. |
 | 50 | One shared helper, `contextWindowFor`, gives a model's usable window (the logic the Context route already has); all trimming budgets derive from it. |
 | 51 | `/api/chat` stays the only chat endpoint. The side chat's section is built inside `buildSystemPrompt`, so the Context panel counts it. |
 | 52 | Export reuses the existing (unused) server route `GET /api/conversations/[id]/export`, fixed for v6 tool parts. The header's inline builder is removed. |
 | 53 | Approvals use AI SDK v6's `needsApproval` with `experimental_toolApprovalSecret`, so the browser cannot change an approved tool's input. |
 | 54 | `runAgent` is built inside `buildTools` and runs a nested `streamText`. Progress travels as preliminary tool outputs, not `data-*` parts. |
 | 55 | Loop guards stop throwing or quitting mid-task. They force one text-only step (`toolChoice: "none"`) so a turn always ends with a written answer. |
-| 56 | Client: one hook per pane (`useChatPane`) plus one page hook. A hand-written split container, no new dependency. |
-| 57 | Messaging uses a browser-run `sendToChat` tool. Replies go back only when the receiver calls `sendToChat` too. Parent → sub-agent uses a server tool, `messageAgent`. |
+| 56 | Client: one hook per pane (`useChatPane`) inside one generic pane container (`SplitView`); split view and the side chat are both uses of it. Hand-written, no new dependency. |
+| 57 | Messaging uses a browser-run `sendToChat({ chatId, text })` tool. Replies go back only when the receiver calls `sendToChat` too. Parent → sub-agent uses a server tool, `messageAgent`. |
+
+Split view (owner-approved addition):
+
+| # | Decision |
+|---|---|
+| 58 | Split view, like the Claude desktop app: several existing chats side by side on `/c/[id]`. Each pane is a full chat with its own model, mode, input, queue, quote cards, `@` files and tools. |
+| 59 | Open a split by dragging a chat from the sidebar onto the chat area (left/right drop zones highlight), from the sidebar row menu or right-click ("Open in split view"), or from the command palette. Native HTML5 drag and drop, no library. At the limit, a drop shows whole-pane "Replace" zones; busy panes can't be dropped on. |
+| 60 | Opening limit by window width: 3 at 1440px and up, 2 from `md` (768px) to 1439px, 1 below `md`. When the open panes can't each get 360px, the page shows one pane at a time with a switcher in the title; hidden panes keep streaming. |
+| 61 | The open panes and the focused pane are in the URL, `/c/<first>?split=<id2>,<id3>&focus=<id>`, so a reload restores the layout. Pane changes replace the URL (no history entries), so Back leaves the page (`ux-guidelines.md` 3.8.2). |
+| 62 | Drag handles between panes. Every pane, the side chat included, is at least 360px; widths are fractions remembered per pane count in browser storage. Inside a pane, layout follows the pane's own width (container queries). |
+| 63 | The side chat is a pane hosting a child conversation. It uses one pane slot; split view is the generic container and the side chat a special case of it. |
+| 64 | The focused pane gets the keyboard shortcuts; Ctrl+` / Ctrl+Shift+` focus the next / previous pane. Each pane has a close button; closing the first pane promotes the next one into the path. Closing or replacing a busy pane asks first with the app's native `confirm()`. |
+| 65 | Two writers: when two open panes are in Agent or Ask mode with the same working folder, each shows "Another open chat can edit this folder". Not blocked. |
+| 66 | Each pane uses the normal per-conversation endpoints; nothing on the server is split-aware. Panes may use different providers, including Ollama and CLI; two CLI turns at once spawn two processes. |
 
 ---
 
@@ -314,33 +328,90 @@ As a user with a working folder, I type `@chat/route` and attach that file witho
 
 **Works with**: every model (contents are plain text in the message). CLI models could read the folder themselves; inlining still works the same.
 
-### Phase 3: side chat and fork
+### Phase 3: split view, side chat and fork
 
-#### 2.8 Side chat
+Order inside the phase: 3a per-pane refactor (no behaviour change), 3b pane container and split view, 3c side chat, 3d fork.
+
+#### 2.8 Split view
+
+As a user, I keep a research chat open while I work in another, compare two models' answers side by side, or watch a long agent run while chatting elsewhere.
+
+Look, copy and keys: `ux-guidelines.md` 3.8, which wins on anything visible.
+
+**Behaviour**
+
+- **Open a split** three ways:
+  - drag a chat from the sidebar onto the chat area. The left and right halves of each pane highlight as drop zones; dropping opens the chat on that side of that pane;
+  - the sidebar row menu, or right-click on a row: **Open in split view** opens it to the right of the focused pane;
+  - the command palette's Split view group.
+- **Each pane is a full chat**: its own model, mode, input, queue, quote cards, `@` files, tools and Stop. With one pane open the page looks as it does today; with two or more, every pane gets the same compact header. Overlay panels (artifacts, settings, todos, context, scratchpad) serve the pane they were opened from.
+- A chat is never open twice. Opening one that is open focuses its pane.
+- **Opening limit** by window width: 3 at 1440px and up, 2 from 768px to 1439px, 1 below 768px. At the limit:
+  - the menu and palette items are disabled with "Close a pane first. Up to <n> fit at this width.";
+  - a drag shows each pane as one whole **Replace "<title>"** zone instead of two halves. A busy pane is not a target. A pane is replaced only when the user drops on that exact pane.
+- **Widths**: every pane, the side chat included, is at least 360px; there is no other maximum. A new pane gets an equal share. A divider resizes its two neighbours; double-click makes them equal. Widths are remembered per pane count. Inside a pane, the layout follows the pane's own width (container queries), not the window's.
+- **One pane at a time**: below 768px, or whenever the open panes can't each get 360px (the window shrank, or the sidebar was expanded), only the focused pane shows. Its title becomes a switcher listing every open pane. Hidden panes stay mounted and keep streaming. Nothing closes; widening the window brings the panes back side by side.
+- **URL**: `/c/<first>?split=<second>,<third>&focus=<id>` (`focus` left out when the first pane is focused). Pane changes replace the URL instead of adding history entries, so Back leaves the page. A reload restores the panes, their order and the focused pane; widths come from browser storage.
+- **Sidebar**: a plain click opens the chat in the focused pane (if it is open in another pane, that pane gets focus instead). New Chat also opens in the focused pane. Cmd/Ctrl-click still opens a new tab.
+- **Focus**: the pane that last got focus or a pointer-down. Keyboard shortcuts (Cmd+Enter, Cmd+\, the queue, the Esc order) act on it. Ctrl+` / Ctrl+Shift+` focus the next / previous pane.
+- **Close**: each pane has × (the last pane has none). Closing the first pane promotes the next one into the path; the other panes keep their state. Focus moves to the left neighbour, else the right.
+- **Busy panes**: a pane is busy while a reply runs or while it holds unsent text, quote cards, files or queued items. Closing or replacing a busy pane asks first with the app's native `confirm()` (as `Sidebar.tsx:80` does for delete). Confirming stops its reply as Stop does (the partial reply is saved). Its undelivered queued messages stay on the server and come back into its input box the next time that chat opens.
+- **Two writers**: when two open panes are in Agent or Ask mode with the same working folder, each shows "Another open chat can edit this folder". Nothing is blocked. Chat and Plan panes and side chats never count.
+- `?q=` (send a first prompt) applies to the first pane only.
+- A temporary chat counts as "left" when its pane closes or is replaced, and is deleted then.
+
+**Edge cases**
+
+- An id in the URL that was deleted or is not the user's, or a chat deleted while open: that pane shows "This chat no longer exists" with a Close pane button; the other panes work normally. Duplicate ids in the URL are dropped.
+- More ids in the URL than the width allows (a link opened on a small screen): all open; the page uses one pane at a time.
+- Several panes streaming at once in dev: each stream holds one browser connection. Browsers allow about 6 HTTP/1.1 connections per host; 3 streams plus the dev server's hot-reload socket leave room for queue posts and fetches. Production over HTTP/2 shares one connection.
+- Two CLI panes streaming: two CLI processes, each with its own 120-second watchdog. Same folder in Agent mode shows the two-writer warning.
+- Side chats and sub-agent runs are not in the sidebar, so they open only through their own entry points (Cmd+\, "Open" on a card), never by drag.
+- A file dragged over a composer still attaches as today; a chat dragged over a composer does not trigger the file overlay.
+- Esc, or dropping outside a zone, cancels a drag. Every pane busy at the limit: no zones, one label "Close a pane first".
+- Touch screens: HTML5 drag and drop does not fire on touch; use the row menu.
+
+**Acceptance**
+
+- Dragging chat B onto the right half of chat A gives `/c/A?split=B&focus=B` with B on the right. Reload restores both panes and the focus.
+- Opening and closing panes adds no browser history entries: Back from a split leaves the page.
+- At 1440px three chats open side by side. Dragging a fourth shows whole-pane Replace zones, greyed out on a busy pane; dropping on an idle pane replaces it. The row-menu item is disabled with the message.
+- At 1000px with two panes, expanding the sidebar switches to one pane at a time; a reply streaming in the hidden pane is complete when switched to.
+- Two panes on different providers (for example an API model and an Ollama model) stream at once and both finish; Stop in one leaves the other running.
+- Closing the first of three panes gives `/c/B?split=C`; B and C are not reloaded and a running reply in C keeps streaming.
+- Closing a pane with a running reply or unsent text asks first; Cancel keeps it open and unchanged.
+- Ctrl+` moves focus to the next pane; Cmd+Enter sends only from the focused pane.
+- Two panes in Agent mode on the same folder both show the warning; switching one to Chat clears it in both.
+
+**Works with**: every model. Panes are independent chats, so a split can mix providers, including Ollama and CLI models.
+
+#### 2.9 Side chat
 
 As a user, I ask a side question about the main chat without cluttering it, try another model on the same context, and copy a good answer back.
 
 **Behaviour**
 
-- Open with Cmd+\ / Ctrl+\, `/side [question]` (opens the pane and sends the question there), or the palette entry "Toggle side chat".
+- The side chat is a pane (2.8) that hosts a child conversation of the chat it belongs to. It takes one pane slot; at the pane limit, opening it says "Close a pane first".
+- Open with Cmd+\ / Ctrl+\ (for the focused chat), `/side [question]` (opens the pane and sends the question there), or the palette entry "Toggle side chat".
 - The pane shows the latest side chat for this main chat, creating one if none exists. "New side chat" starts a fresh one (or reuses the latest if it is still empty). A menu lists older side chats by title, or by first message if untitled.
 - Every send re-reads the main chat from the DB and puts a "Main conversation" section in the side chat's system prompt.
-- The section fits the side chat's model: the summary, folder, todos and artifact titles always; then as many of the newest messages as fit. The pane shows "Main chat: last 12 of 40 messages fit" when something was cut.
+- The section fits the side chat's model: the summary, folder, todos and artifact titles always; then as many of the newest messages as fit. When something was cut, the pane's header says how many of the main chat's messages it sees (copy in `ux-guidelines.md` 3.8.3).
 - Always chat mode. Own model picker (defaults to main's model). Uses the main chat's working folder and knowledge base, read live.
 - "Send to main" on each side reply puts its text in the main input (after a blank line if not empty) and focuses it.
-- Both panes stream at once. Cmd+Enter sends from the focused pane.
-- Dock left/right, drag to resize; side and width remembered; open state is not.
-- Narrow screens: the pane covers the main chat, with a close button. Overlay panels open on top of both.
+- It streams alongside every other pane. Cmd+Enter sends from the focused pane.
+- Dock left or right of its main chat (its place in the pane order, kept in the URL like any pane); the dock side for the next opening is remembered; widths as in 2.8.
+- Narrow screens: one pane at a time (2.8). The side chat is an ordinary pane in the title switcher, and its × goes back to its parent. Overlay panels open on top.
+- In a split with several main chats, each side chat belongs to one of them and reads that one. Closing a main chat's pane also closes its side chat's pane.
 - No suggestions and no memory consolidation in side chats. Auto-compress works. Titles work as they do today: on request (`/title`, sidebar menu). There is no automatic title generation in the app today.
 
 **Edge cases**
 
-- Main chat deleted while the side pane is open (another tab): the side chat is deleted too; its next send gets "Conversation not found".
+- Main chat deleted while its side chat is open (another tab): the side chat is deleted too; its next send gets "Conversation not found".
 - Main chat mid-stream: the side chat sees the latest user message (saved when the request starts) but not the reply in progress; the section says a reply may still be running.
 - Main chat recently compressed: the side chat sees summary plus newer messages (needs phase 0).
 - CLI side chat, no working folder: no folder tools (Claude Code gets `--tools ""`); the section says "Working folder: none". With a folder: read-only CLI tools, even while main writes there.
-- `/c/<sideChatId>` opened directly: redirects to `/c/<mainId>?side=<sideChatId>`.
-- Reload: both panes reload from the DB; the pane is closed until reopened.
+- `/c/<sideChatId>` opened directly: redirects to `/c/<mainId>?split=<sideChatId>`.
+- Reload: every pane in the URL, side chat included, reloads from the DB.
 
 **Acceptance**
 
@@ -350,10 +421,12 @@ As a user, I ask a side question about the main chat without cluttering it, try 
 - Deleting the main chat deletes its side chats.
 - `GET /api/conversations` never returns a child.
 - "Send to main" fills the box and sends nothing.
+- With three chats open at 1440px, Cmd+\ says "Close a pane first" and opens nothing.
+- `/c/A?split=<sideChatOfA>` reloads with the side chat docked next to A.
 
 **Works with**: every model. On a small Ollama window the section is short and says so.
 
-#### 2.9 Fork from here
+#### 2.10 Fork from here
 
 As a user, I want to try a different direction from message 12 without losing the original.
 
@@ -362,7 +435,7 @@ As a user, I want to try a different direction from message 12 without losing th
 - "Fork from here" in any main-chat message's action menu.
 - Creates a new normal chat, shown in the sidebar, titled "Fork of <title>", with copies of every message up to and including that one (same order, same timestamps) and the same settings (model, persona, system prompt, KB, temperature, max tokens, context length, top-p, chat-only, memory, tool-call cap, reasoning effort, working folder, fallback model).
 - Artifacts are copied too, and artifact ids inside the copied messages are rewritten to the copies, so charts keep working if the original is deleted.
-- The new chat opens. Its header shows "Forked from <title>" (a link) while the original exists.
+- The new chat opens in the same pane (Back returns to the original; "Open in split view" puts them side by side). Its header shows "Forked from <title>" (a link) while the original exists.
 - Not copied: todos, side chats, sub-agent runs, queue rows, note, pinned and archived flags.
 - The existing `messages/[messageId]/branch` endpoint (truncate, used by regenerate) is unchanged.
 
@@ -389,7 +462,7 @@ The mode switch becomes **Chat · Plan · Ask · Agent**, per conversation (stor
 | Ask | read + write + MCP | yes, each write or MCP call needs Allow |
 | Agent | read + write + MCP | yes, without asking (today's Agent) |
 
-#### 2.10 Ask before acting
+#### 2.11 Ask before acting
 
 As a user, I let the model do things but want to OK each change.
 
@@ -414,7 +487,7 @@ As a user, I let the model do things but want to OK each change.
 
 **Works with**: tool models (API, Ollama with tools, CLI via its text tool protocol). Claude Code adds its own edits on top. Tool-less models: Ask = Chat.
 
-#### 2.11 Plan mode
+#### 2.12 Plan mode
 
 As a user, I want the model to look around and propose a plan before touching anything.
 
@@ -436,7 +509,7 @@ As a user, I want the model to look around and propose a plan before touching an
 
 ### Phase 5: sub-agent
 
-#### 2.12 Sub-agent
+#### 2.13 Sub-agent
 
 As a user, I ask "research these three libraries in parallel and compare them", or ask a CLI model to have a helper read the folder and summarise how X works.
 
@@ -449,7 +522,7 @@ As a user, I ask "research these three libraries in parallel and compare them", 
 - Limits: 15 steps (the 15th is forced to be a written report), 5 minutes.
 - Stop stops the parent and every helper; transcripts so far are saved.
 - Error or timeout: an error result with partial notes; the parent carries on.
-- "Open" shows the saved transcript in the side pane, read-only.
+- "Open" shows the saved transcript, read-only, in the side-chat slot next to the parent (2.9).
 
 **Edge cases**
 
@@ -466,25 +539,25 @@ As a user, I ask "research these three libraries in parallel and compare them", 
 
 ### Phase 6: agent messaging
 
-#### 2.13 Agents messaging
+#### 2.14 Agents messaging
 
-As a user, I tell the side chat "check this with the main chat", or ask the main model to follow up with the helper that researched library B.
+As a user, I tell the side chat "check this with the main chat", ask one chat in a split to hand its findings to another, or ask the main model to follow up with the helper that researched library B.
 
 **Behaviour**
 
-- Main and side chats get `sendToChat({ text })`, which sends to the other pane.
-- The receiver gets a user-role message with a "from main chat" / "from side chat" badge. Its model sees a label saying it came from another assistant.
+- Every chat pane (main, split or side) gets `sendToChat({ chatId, text })`. `chatId` is any other open pane (the model is told which chats are open, with titles and ids), or `"side"` for this chat's own side chat.
+- The receiver gets a user-role message with a "From <chat title>" badge (an untitled side chat reads "From Side chat"). Its model sees a label saying it came from another assistant.
 - The receiver answers on its own. To answer the sender, it calls `sendToChat` back. Plain text stays in its own pane.
-- Up to 3 agent messages per user send. A 4th `sendToChat` is refused with "answer the user directly".
-- A "talking" indicator and Stop show while agents talk. Stop stops both panes and drops pending agent messages.
+- Up to 3 agent messages per user send, across all panes. A 4th `sendToChat` is refused with "answer the user directly".
+- A "talking" indicator and Stop show while agents talk. Stop stops every pane taking part and drops pending agent messages.
 - Busy receiver: the message goes into its queue (2.6).
-- Side pane closed: it opens (creating a side chat if none).
+- `chatId: "side"` with no side pane open: it opens (creating a side chat if none). Any other id that is not an open pane: refused with "That chat is not open".
 - Parent → finished sub-agent: `messageAgent({ agentId, message })` resumes the helper from its saved transcript for one more run with the same limits, on a new card.
-- Tool-less models: a "Send to side chat" button on main replies (and "Send to main chat" on side replies, next to "Send to main") delivers that reply as an agent message. The receiver answers; nothing goes back.
+- Tool-less models: a "Send to…" button on replies lists the other open panes and delivers that reply as an agent message. The receiver answers; nothing goes back.
 
-**Edge cases**: hop cap reached → refusal, indicator clears; the user sends in a pane while agents talk → that pane starts again from hop 0; reload mid-talk → in-flight turns stop, queued agent chips are dropped (the user did not write them), delivered ones keep their badge; the side pane is showing a sub-agent transcript → it switches to the latest side chat; `messageAgent` on another chat's helper or on one running in the same step → refused.
+**Edge cases**: hop cap reached → refusal, indicator clears; the user sends in a pane while agents talk → that pane starts again from hop 0; reload mid-talk → in-flight turns stop, queued agent chips are dropped (the user did not write them), delivered ones keep their badge; the receiving pane is closed while a message is on its way → the sender gets "That chat is not open"; a pane showing a sub-agent transcript is never a target; at the pane limit, `"side"` is refused with "Close a pane first"; `messageAgent` on another chat's helper or on one running in the same step → refused.
 
-**Acceptance**: main → side → main → side, then refused; a side message to a busy main lands as a badged bubble mid-reply; badges survive reload; a `messageAgent` follow-up appends to the same child.
+**Acceptance**: main → side → main → side, then refused; in a three-pane split A → B → C → A, then refused; a message to a busy pane lands as a badged bubble mid-reply; badges survive reload; a `messageAgent` follow-up appends to the same child.
 
 **Works with**: tool models via `sendToChat`; every model via the buttons (one message, no replies back).
 
@@ -496,9 +569,13 @@ As a user, I tell the side chat "check this with the main chat", or ask the main
 
 ```mermaid
 flowchart LR
-  subgraph Browser["Browser: /c/[id]"]
-    MP["Main pane<br/>useChatPane(mainId)<br/>quotes, queue, @ files"]
-    SP["Side pane<br/>useChatPane(sideId)<br/>always chat mode"]
+  subgraph Browser["Browser: /c/[first]?split=[second],[third]"]
+    URL["URL<br/>pane ids, in order"]
+    subgraph SV["SplitView (in src/app/c/layout.tsx)"]
+      MP["Chat pane A<br/>useChatPane(A)<br/>own model, mode, queue"]
+      P2["Chat pane B<br/>useChatPane(B)"]
+      SP["Side chat pane<br/>useChatPane(sideOfA)<br/>always chat mode"]
+    end
     LINK["Agent link (phase 6)<br/>hop counts, Stop"]
   end
   subgraph Server["Next.js server"]
@@ -512,7 +589,9 @@ flowchart LR
   CLI["Claude Code process"]
   DB[("DB: Conversation, Message,<br/>QueuedMessage")]
 
+  URL <-- "pane changes: router.replace" --> SV
   MP -- "send" --> CHAT
+  P2 -- "send (own request, own abort)" --> CHAT
   SP -- "send" --> CHAT
   MP -- "queued msg" --> QUEUE --> DB
   MP -- "@ list / read" --> FILES
@@ -527,8 +606,11 @@ flowchart LR
   SP -- "create / list" --> CHILD --> DB
   SP -- "Send to main: fill input" --> MP
   MP <-- "sendToChat" --> LINK
+  P2 <-- "sendToChat" --> LINK
   LINK <-- "sendToChat" --> SP
 ```
+
+Every pane talks to the server on its own, with the normal per-conversation endpoints. Nothing on the server knows about splits.
 
 ### 3.2 Data model
 
@@ -573,12 +655,12 @@ model Conversation {
 
 `DELETE /api/conversations/[id]` already uses `deleteMany`; the foreign-key cascade removes children, their messages, artifacts and queue rows (`Message` relies on the same cascade today).
 
-**Phase 6**: `QueuedMessage.agent String?` (JSON `{ from, fromConversationId, hop }`).
+**Phase 6**: `QueuedMessage.agent String?` (JSON `{ from, fromConversationId, fromTitle, hop }`).
 
 **New part types inside `Message.parts`** (no `Message` change):
 
 - `data-queued-message` `{ queuedId, text, agent? }`: inside an assistant message where a queued message was delivered.
-- `data-agent-message` `{ from: "main" | "side" | "parent", fromConversationId, hop }`: inside a user message sent by another agent.
+- `data-agent-message` `{ from: "chat" | "side" | "parent", fromConversationId, fromTitle, hop }`: inside a user message sent by another agent.
 - `data-cli-approval` `{ id, toolName, input, state: "pending" | "allowed" | "denied" }`: a Claude Code permission card (phase 4b).
 
 **Why one assistant row plus a marker, not split rows** (decision 48):
@@ -774,7 +856,8 @@ From `src/lib/cliProviders.ts`. CLI models are local only (they spawn local bina
 - **Side chat**: always chat access; no folder → Claude Code `--tools ""` in a scratch folder.
 - **Sub-agent**: same CLI; each of up to 15 steps is a new process with the flattened transcript (`flattenPrompt`). The 120-second no-output watchdog (`INACTIVITY_MS` ~704) applies per process; the 5-minute limit is ours and kills the process through the abort listener (~902). Tool results to a CLI are cut at 8,000 characters (`MAX_TOOL_RESULT_CHARS` ~442); the report cap matches, and `toModelOutput` returns plain text so no JSON wrapping eats it. CLI parents make one tool call per reply, so helpers run one at a time.
 - **Queue**: between steps only; the next process sees the message as a `Human:` turn in place.
-- **Two writers on one folder**: cannot happen. Side chats are read-only; CLI parents wait while their one helper runs; API models have no folder access.
+- **Two writers on one folder**: within one chat it cannot happen (side chats are read-only; CLI parents wait while their one helper runs; API models have no folder access). Across a split it can: two CLI panes in Agent or Ask mode on the same folder are two CLI processes editing the same files. That gets the warning in 2.8, not a block.
+- **Two CLI panes streaming**: two processes, each with its own watchdog and abort signal (each pane's request has its own `req.signal`).
 
 **Phase 4b: Claude Code approvals bridge** (an extra on top of the generic Ask path):
 
@@ -790,24 +873,78 @@ From `src/lib/cliProviders.ts`. CLI models are local only (they spawn local bina
 
 ### 3.9 Client refactor (phase 3a, no behaviour change)
 
-Today `useConversationPage.ts` mixes per-chat state with page-wide effects.
+Today `useConversationPage.ts` mixes per-chat state with page-wide effects, and `ConversationLayout.tsx` renders one chat. 3a splits them so that 3b can render several chats; with one pane, nothing changes for the user.
 
-- New `src/app/c/[id]/useChatPane.ts`: `useChatPane(conversationId, { mode, enabledTools, enabledSkills, searchProvider, isSide })` owns the conversation, input, files, quote cards, queue chips, `@` mentions, suggestion (skipped when `isSide`), `useChatTransport`, `useConversationData`, `useMessageActions`, `handleSubmit`, slash commands, minimap data, context usage and the compressing flag. Its `onFinish` skips suggestion, memory consolidation and artifact auto-open when `isSide`.
-- `useConversationPage.ts` keeps page-wide parts: dialogs (they serve the main chat), enabled tools and skills (`vas:advancedSettings:<id>`, passed to both panes), search provider, `?q=` auto-send to main, `/api/seed` once, side-pane state, temporary-chat delete on leave.
-- **Mode**: stays per conversation in `ChatModeContext` (`vas:mode:<id>`). The main pane passes `useChatMode().mode`; the side pane passes `"chat"`, and the server forces it. `chatInput.tsx` reads the mode from a prop instead of `useChatMode()` (~82), so the side input shows the right placeholder.
-- **Focus**: `ConversationLayout` keeps `focusedPane` (`onFocusCapture` / `onPointerDown` on each pane). Cmd+Enter sends from it.
+- New `src/app/c/[id]/useChatPane.ts`: `useChatPane(conversationId, { searchProvider, isSide, settingsId })` owns everything one chat needs: the conversation, its mode (`useConversationMode`, below), input, files, quote cards, queue chips, `@` mentions, enabled tools and skills (`vas:advancedSettings:<settingsId>`; a side chat passes its parent's id), suggestion (skipped when `isSide`), `useChatTransport`, `useConversationData`, `useMessageActions`, `handleSubmit`, slash commands, minimap data, context usage, the compressing flag, and `stop()`. Its `onFinish` skips suggestion, memory consolidation and artifact auto-open when `isSide`.
+- New `src/app/c/[id]/ChatPane.tsx`: what `ConversationLayout` renders today for one chat (header, transcript, minimap, todo indicator, composer), driven by `useChatPane`. 3b renders several of these.
+- `useConversationPage.ts` becomes page-wide only: dialog state (dialogs serve the focused pane), the search provider (a global setting), `?q=` auto-send to the first pane, `/api/seed` once.
+- **Mode per conversation**: `ChatModeContext` today holds one mode for the route (`useParams()` id, `vas:mode:<id>`). Each pane needs its own, so it becomes `useConversationMode(conversationId)` over the same storage key, and the provider keeps `focusedPaneId` so the sidebar's compact mode switch (`Sidebar.tsx:243`) edits the focused pane. A side pane always uses `"chat"`; the server forces it. `chatInput.tsx` takes the mode as a prop instead of calling `useChatMode()` (~82).
+- **Focus**: `focusedPaneId` is set by `onFocusCapture` / `onPointerDown` on each pane. `useKeyboardShortcuts`' `onSend` and Esc order act on it; Ctrl+` / Ctrl+Shift+` move it to the next / previous pane.
 - **Scroll**: no change; each `ChatMessages` scrolls its own end marker (`ChatMessages.tsx` ~45).
-- `useChat` is keyed by conversation id (`useChatTransport.ts` ~146), so two panes are two chats. The side pane renders with `key={childId}`.
+- `useChat` is keyed by conversation id (`useChatTransport.ts` ~146), so panes are independent chats; each `stop()` aborts only its own request, which the server sees as that request's `req.signal`. A conversation is never open in two panes at once (the URL helper drops duplicates), so two `useChat` hooks never share an id.
 
-### 3.10 Layout (phase 3b)
+### 3.10 Pane container, split view and side chat layout (phases 3b-3d)
 
-- `ConversationLayout.tsx`: a `flex` row with main and side panes, `flex-row-reverse` when docked left. Side width inline (min 320 px, max 60% of the window). A 6 px divider with pointer events and `setPointerCapture`; width saved on pointer-up to `localStorage` `vas:sidePane` `{ side, width }` (read in try/catch).
-- Below `md`: side pane `fixed inset-0 z-30`. `SidePanel.tsx` overlays are `z-50` and the mobile sidebar `z-40`, so both stay on top.
-- New `src/app/c/[id]/SideChatPane.tsx`: header (title, older-chats menu, "New side chat", dock toggle, close, "last N of M fit" note), `ChatMessages` with `onSendToMain`, `ChatInput`. For a `kind: "subagent"` child: read-only viewer, no input.
-- `ChatInput`: `onOpenSettings`, `onKbToggle`, `onToggleSearchProvider`, `onContextClick`, `onWorkingFolderChange` become optional; buttons hide when absent. The side pane keeps the model picker (`PATCH` on the child).
-- Entry points: `useKeyboardShortcuts` `onToggleSidePane` (Cmd/Ctrl + `\`); `/side` in `src/lib/commands.ts` handled in `runCommandAction.ts`; "Toggle side chat" in `useCommandPaletteActions`; `KeyboardShortcutsDialog` lists Cmd+\.
-- A child id opened directly: once loaded, if `parentId` is set, `router.replace('/c/<parentId>?side=<id>')`; `page.tsx` reads `side`.
-- Fork: "Fork from here" in `MessageActions.tsx` → `POST …/fork` → `router.push('/c/<newId>')`; the sidebar refreshes as after "New chat". `ConversationHeader.tsx` shows "Forked from <title>".
+Look, sizes, copy, keys and motion: `docs/design/ux-guidelines.md` 3.8, which wins on anything visible. This section owns structure, state and URLs.
+
+**Where the container lives.** New `src/app/c/SplitView.tsx`, rendered by `src/app/c/layout.tsx` (already a client component) for `/c/<id>` paths; `/c/new` keeps rendering its page. `src/app/c/[id]/page.tsx` renders nothing. Reason: Next keeps layouts mounted across navigations ("On navigation, layouts preserve state, remain interactive, and do not rerender", `next/dist/docs/01-app/01-getting-started/03-layouts-and-pages.md:43`), so going from `/c/A?split=B,C` to `/c/B?split=C` keeps B and C mounted and streaming. Today `page.tsx` remounts the whole chat on every id change (`key={params.id}`), which would stop every pane on such a change.
+
+**URL format.** `/c/<first>?split=<second>,<third>&focus=<id>`. `focus` is left out when the first pane is focused; other params (`q`) are kept. `SplitView` reads `usePathname()` and `useSearchParams()` (wrapped in `Suspense`, as `use-search-params.md` recommends) and parses them with `parsePanes`. It does not use `useParams()` for this. Each id renders `<ChatPane key={id}>`; once loaded, a `kind: "side"` conversation renders `SideChatPane`, a `kind: "subagent"` one the read-only viewer.
+
+**URL changes.** Opening, closing, replacing and promoting call `router.replace(href, { scroll: false })` (`use-router.md`): no history entries, so Back leaves the page (UX doc 3.8.2). Focus changes call `window.history.replaceState`, which Next syncs with `useSearchParams` without a navigation (`01-getting-started/04-linking-and-navigating.md` ~341-400). Widths stay out of the URL.
+
+**Pure helpers**, new `src/lib/utils/splitPanes.ts` (unit-tested, no React):
+
+```ts
+parsePanes(pathname: string, params: URLSearchParams): { ids: string[]; focus: string } // dedupes, drops malformed ids
+serializePanes(ids: string[], focus: string, keep?: URLSearchParams): string            // "/c/A?split=B,C&focus=B"
+maxPanesForWidth(windowPx: number): 1 | 2 | 3                                           // opening limit: <768 → 1, <1440 → 2, else 3
+fitsSideBySide(count: number, areaPx: number, minPx = 360): boolean                    // false → one pane at a time
+openPane(ids, id, at: { index: number; side: "left" | "right" }, limit): string[] | "full"
+closePane(ids, id): { ids: string[]; focus: string }                                   // ids[0] closed → ids[1] promoted
+replacePane(ids, oldId, newId): { ids: string[]; focus: string }                        // newId already open → just focus it
+nextPane(ids, focus, dir: 1 | -1): string                                               // Ctrl+` / Ctrl+Shift+`, wraps
+clampWidths(fractions: number[], areaPx: number, minPx = 360): number[]
+equalShares(count: number): number[]
+isPaneBusy(p: { streaming: boolean; input: string; quotes: number; files: number; queued: number }): boolean
+writerConflicts(panes: { id: string; kind: string; mode: string; workingFolder: string | null }[]): Set<string>
+```
+
+**Side by side or one at a time.** The opening limit is `maxPanesForWidth(window.innerWidth)`. The layout is side by side while `fitsSideBySide(count, rowWidth)` holds, where `rowWidth` comes from a `ResizeObserver` on the panes row (so expanding the sidebar counts); otherwise one pane at a time. In that layout only the focused pane is shown; the others stay mounted with `hidden` (`display: none`), so their streams keep going, and the focused pane's title becomes the switcher.
+
+**Container queries.** Each pane is a `<section class="@container">` (Tailwind 4 container queries), so its header, composer and cards follow the pane's width, not the window's (UX doc 3.8.1).
+
+**Widths.** Fractions per pane count in `localStorage` `vas:split:widths` (`{ "2": [0.5, 0.5], "3": [...] }`, read in try/catch). A new pane starts from `equalShares`. A divider resizes only its two neighbours (pointer events with `setPointerCapture`, saved on pointer-up); double-click makes those two equal. `clampWidths` keeps every pane at 360px or more.
+
+**Drag and drop** (native HTML5, no library).
+
+- The whole sidebar row (`Sidebar.tsx` ~343) is `draggable`; its inner `Link` gets `draggable={false}`. `onDragStart` sets `application/x-devchat-chat` (the id) and `text/uri-list` (`/c/<id>`).
+- New `src/app/c/DropOverlay.tsx` covers the panes row while a drag of that type is over it. It works out the zone from `clientX` in its own `dragover` and calls `preventDefault()` only over a valid zone, or `drop` never fires.
+  - Below the limit: each pane has a left and a right zone → `openPane`.
+  - At the limit: each pane is one Replace zone → `replacePane`. A busy pane (`isPaneBusy`) gets `dropEffect = "none"`.
+  - Chat already open: no zones; a drop focuses its pane.
+- `chatInput.tsx` shows its file-drop overlay (~172) only when `e.dataTransfer.types` includes `"Files"`, so a chat drag never looks like a file drop.
+
+**Sidebar and palette.** **Open in split view** is the first item of the row menu and also opens on right-click (`contextmenu` with `preventDefault`). A plain click (no Cmd/Ctrl/Shift) calls `preventDefault()` and runs `replacePane(ids, focus, clicked)`; New Chat does the same with the new id. The palette gets a Split view group.
+
+**Closing and replacing.** If `isPaneBusy`, ask with `window.confirm(...)` (the pattern at `Sidebar.tsx:80`). Then call the pane's `stop()` if it is streaming, and `router.replace` with the new list. A temporary chat is deleted when its id leaves the list (the pane's unmount). Undelivered queued messages are left on the server; that chat's next load puts them in the input box (2.6).
+
+**Focus and page-wide UI.** `SplitView` provides `focusedPaneId`. Keyboard shortcuts (including Ctrl+` / Ctrl+Shift+` through `nextPane`), Cmd+\ and the sidebar's mode switch act on it. Overlay panels serve the pane they were opened from.
+
+**Two-writer warning.** `writerConflicts` runs over the open panes' kind, mode and `workingFolder`; each pane in the set shows the warning. Side chats never count. Nothing is blocked.
+
+**Browser connections.** Each streaming pane holds one fetch open. Browsers allow about 6 HTTP/1.1 connections per host, and `next dev` serves HTTP/1.1, so 3 streams plus the dev hot-reload socket leave about 2 for queue posts, `@` file reads and context fetches. Keep the cap at 3 and add no long-lived connection per pane (no polling streams). Over HTTP/2 in production all share one connection.
+
+**Side chat as a pane (3c).**
+
+- New `src/app/c/[id]/SideChatPane.tsx`: the side-chat header variant (title, older side chats, "New side chat", dock toggle, close, "Sees … live" line), `ChatMessages` with `onSendToMain`, `ChatInput`. For a `kind: "subagent"` child: the read-only viewer, no input. A sub-agent's "Open" puts the viewer in the side-chat slot next to its parent.
+- Cmd+\ toggles the side chat of the focused pane's chat; if the focused pane is a side chat, it closes it. Opening runs `openPane(ids, sideId, { index: indexOf(parent), side: dock })`, where `dock` is remembered in `localStorage` `vas:sideDock`; at the limit it shows the "Close a pane first" toast. The dock toggle moves the pane to the other side of its parent. Closing a parent's pane also closes its side chat's pane.
+- One pane at a time: the side chat is an ordinary pane in the switcher; its × goes back to its parent. There is no full-screen overlay.
+- `ChatInput`: `onOpenSettings`, `onKbToggle`, `onToggleSearchProvider`, `onContextClick`, `onWorkingFolderChange` become optional; buttons hide when absent. The side chat's model picker is the header's model chip (`PATCH` on the child).
+- Entry points: `useKeyboardShortcuts` `onToggleSidePane` (Cmd/Ctrl + `\`); `/side` in `src/lib/commands.ts` handled in `runCommandAction.ts`; "Toggle side chat" in the palette; `KeyboardShortcutsDialog` lists Cmd+\ and Ctrl+`.
+- A child id opened directly: once loaded, if `parentId` is set, `router.replace('/c/<parentId>?split=<id>&focus=<id>')`. The earlier `?side=` parameter is not needed.
+
+**Fork (3d).** "Fork from here" in `MessageActions.tsx` → `POST …/fork` → `router.replace` with `replacePane(ids, focus, newId)`; the sidebar refreshes as after "New chat". `ConversationHeader.tsx` (and the compact pane header) shows "Forked from <title>".
 
 ### 3.11 Input UI (phases 1-2)
 
@@ -840,13 +977,15 @@ Today `useConversationPage.ts` mixes per-chat state with page-wide effects.
 
 **Browser.**
 
-- `src/lib/registry/tools.ts`: `sendToChat` `{ text }`, no `execute` (browser-run), `internal`, not mutating; in `BUILTIN_TOOL_IDS`; main and side chats get it, helpers do not.
+- `src/lib/registry/tools.ts`: `sendToChat` `{ chatId, text }`, no `execute` (browser-run), `internal`, not mutating; in `BUILTIN_TOOL_IDS`; every chat pane gets it, helpers do not.
+- Each pane's request body carries `openPanes: [{ id, title, kind }]` (the other open chat panes, from `SplitView`). `buildSystemPrompt` turns it into one short section: "Other open chats you can message with sendToChat: "Pricing research" (id …), "Side chat" (id …)". No section when no other pane is open.
 - New `src/app/c/[id]/useAgentLink.ts` (page level): hop per pane, "talking" flag, Stop-all. Pure rules in new `src/lib/utils/agentLink.ts`.
-- `useChatTransport.ts` `onToolCall` for `sendToChat` in pane A: `hop = paneHop[A] + 1`; over 3 → `addToolResult` "Not sent: the limit of 3 agent messages for this user message is reached. Answer the user directly." Otherwise open the other pane if needed; idle receiver → `B.sendMessage({ role: "user", parts: [{ type: "data-agent-message", data }, { type: "text", text }] })`; busy receiver → `POST` to B's queue with `agent`; then `addToolResult` "Delivered. It may answer with sendToChat."
+- `useChatTransport.ts` `onToolCall` for `sendToChat` in pane A: `hop = paneHop[A] + 1`; over 3 → `addToolResult` "Not sent: the limit of 3 agent messages for this user message is reached. Answer the user directly." Resolve `chatId` with `resolveTarget` (an open chat pane other than A, or `"side"` → A's side chat, opened or created if needed); anything else → "That chat is not open". Idle receiver B → `B.sendMessage({ role: "user", parts: [{ type: "data-agent-message", data: { from, fromConversationId, fromTitle, hop } }, { type: "text", text }] })`; busy receiver → `POST` to B's queue with `agent`; then `addToolResult` "Delivered. It may answer with sendToChat." `SplitView` exposes each pane's `sendMessage` and status to the agent link through a ref map keyed by conversation id.
 - `shouldAutoContinue` accepts a finished `tool-sendToChat`.
 - A pane's own user send sets its hop to 0; a turn started by an agent message, or receiving one mid-reply (`onData`), takes the larger hop.
 - `MessageContent.tsx`: badge on user messages with `data-agent-message`.
-- Tool-less models: "Send to side chat" / "Send to main chat" buttons on replies deliver hop 1.
+- Tool-less models: a "Send to…" menu on replies lists the other open panes and delivers hop 1.
+- Stop-all stops every pane whose hop is above 0 and clears agent chips from their queues.
 
 **Server.** `convertDataPart` label and hop check (3.5); `splitAtQueuedMessages` gives a delivered agent marker its `data-agent-message` part; `messageAgent({ agentId, message })` in `buildTools`, loading the child by `{ id, parentId: this conversation, kind: "subagent", userId }`, refusing one running in this request, and calling `runSubAgent` with `resume` (saved messages via `buildMessagesFromConversation` plus a new user message with `data-agent-message { from: "parent" }`); one prompt line in each chat about `sendToChat`.
 
@@ -858,13 +997,14 @@ Today `useConversationPage.ts` mixes per-chat state with page-wide effects.
 - **Approvals**: signed with `experimental_toolApprovalSecret`; the CLI bridge accepts only its run token and answers only from the user's session.
 - **Claude Code `acceptEdits`** in Agent mode: edits without asking, as today.
 - **No recursion**: `runAgent` / `messageAgent` never in a helper's set; side chats have no `runAgent`.
-- **Hop cap**: checked in the browser and again on the server.
+- **Hop cap**: checked in the browser and again on the server. It counts across all panes, so a three-pane chain still stops after 3 messages.
+- **Split view**: no new server surface. Each pane's requests carry their own conversation id and pass the existing owner checks. Two panes writing one folder get a warning, not a lock (2.8).
 - **Temporary chats**: memory off both ways; deleted with their traces.
 - **Token cost**: side context up to 6,000 tokens per send (less on small windows); `@` files up to 35% of the window; each helper up to 15 steps, up to 3 at once. Helper tokens show on the card and in their own traces.
 
 ### 3.14 Where this differs from the brief
 
-1. Mode per conversation in the client: already true (`vas:mode:<id>`); no `ChatModeContext` rewrite. The side pane passes `"chat"`.
+1. Mode per conversation in the client: storage is already per chat (`vas:mode:<id>`), but `ChatModeContext` holds one value for the route. Split view needs one per pane, so it becomes `useConversationMode(id)` plus a focused-pane id for the sidebar switch (3.9).
 2. Side context built in `buildSystemPrompt`, so the Context panel counts it.
 3. Helpers reuse the parent's built tools; helper artifacts land in the main chat.
 4. Progress is a compact, throttled object, and `toModelOutput` needs `tools` passed to `convertToModelMessages`.
@@ -878,6 +1018,10 @@ Today `useConversationPage.ts` mixes per-chat state with page-wide effects.
 12. Export reuses the existing server route instead of a new browser builder (the route has DB access to all messages and artifact titles).
 13. The CLI approval registry lives in memory on `globalThis`, not the DB: the held MCP request and the chat stream run in the same local server process, and CLI models only run locally.
 14. Approval needs two existing-code fixes first: `normalizeToolParts` wipes approval states, and duplicate tool parts in `persistAssistantMessage` would overwrite them.
+15. The pane container lives in `src/app/c/layout.tsx`, not the page: Next keeps layouts mounted across navigation, so promoting a pane or clicking the sidebar does not remount the other panes. `page.tsx` stops keying the chat by id.
+16. The side chat's own `?side=` parameter and `vas:sidePane` storage are dropped; it is a pane in `?split=` with shared width storage, plus a remembered dock side.
+17. A plain sidebar click while a split is open opens the chat in the focused pane instead of closing the split (UX doc 3.8.2).
+18. Pane changes use `router.replace`, not `push` (UX doc 3.8.2): Back leaves the page instead of stepping through pane changes. The brief asked for a sensible Back button; this is the UX doc's answer.
 
 ---
 
@@ -937,21 +1081,47 @@ Each phase merges and works on its own. "New" marks new files. Every phase ends 
 
 **Ships on its own**: works in the single-pane page.
 
-### Phase 3: per-pane refactor, side chat, fork
+### Phase 3: per-pane refactor, split view, side chat, fork
 
-**3a refactor (no behaviour change)**: new `src/app/c/[id]/useChatPane.ts`; `useConversationPage.ts`; `ConversationLayout.tsx`; `src/app/c/[id]/types.ts`; `src/app/components/chatInput.tsx` (mode from a prop). Check every existing flow (send, stop, regenerate, edit, delete, slash commands, `?q=`, `executeCode`, clarification, artifact auto-open, suggestion, compression, quote cards, queue, `@` files). Ship 3a alone before 3b.
+Four steps, each merged on its own: 3a → 3b → 3c → 3d.
 
-**3b side chat and fork**
+**3a per-pane refactor (no behaviour change)**: new `src/app/c/[id]/useChatPane.ts`; new `src/app/c/[id]/ChatPane.tsx`; `useConversationPage.ts` (page-wide parts only); `ConversationLayout.tsx` (renders one `ChatPane`); `src/app/contexts/ChatModeContext.tsx` (`useConversationMode(id)`, `focusedPaneId`); `src/app/components/Sidebar.tsx` (mode switch edits the focused pane); `src/app/c/[id]/types.ts`; `src/app/components/chatInput.tsx` (mode from a prop). Check every existing flow (send, stop, regenerate, edit, delete, slash commands, `?q=`, `executeCode`, clarification, artifact auto-open, suggestion, compression, quote cards, queue, `@` files, mode switch in header and sidebar).
 
-| Feature | Files |
+**3b pane container and split view** (no schema change)
+
+| Area | Files |
 |---|---|
-| Schema | both schemas + new migration `add_conversation_links` (`parentId`, `kind`, `forkedFromId`) in each |
-| Side chat (server) | `src/app/api/conversations/route.ts` (`parentId: null`); new `src/app/api/conversations/[id]/children/route.ts`; `src/lib/chatSearch.ts` (`parentId: null`); `src/app/api/models/usage/route.ts`; `src/app/api/analytics/route.ts`; `src/lib/chat/resolveChatSettings.ts`; `src/app/api/chat/route.ts` (force chat, 400 for subagent); `src/lib/chat/buildSystemPrompt.ts` (`main` section); new `src/lib/chat/loadParentContext.ts`; `src/app/api/conversations/[id]/context/route.ts` (`mainContext`) |
-| Side chat (client) | `ConversationLayout.tsx` (split, divider, focus, Cmd+\); new `src/app/c/[id]/SideChatPane.tsx`; `src/app/c/[id]/page.tsx` (`?side=`); `chatInput.tsx` (optional props); `ChatMessages.tsx` (`onSendToMain`); `src/lib/commands.ts` + `runCommandAction.ts` (`/side`); `src/app/hooks/useKeyboardShortcuts.ts`; `src/app/components/KeyboardShortcutsDialog.tsx`; `src/app/components/conversation/types.ts` (`parentId`, `kind`, `forkedFrom`) |
-| Fork | new `src/lib/forkConversation.ts`; new `src/app/api/conversations/[id]/fork/route.ts`; `src/app/api/conversations/[id]/route.ts` (`GET` includes `forkedFrom`); `src/app/components/MessageActions.tsx`; `ConversationHeader.tsx` |
+| Container | new `src/app/c/SplitView.tsx`; `src/app/c/layout.tsx` (renders `SplitView` for `/c/<id>`, in `Suspense`); `src/app/c/[id]/page.tsx` (renders nothing; no `key={params.id}`); `ConversationLayout.tsx` (folded into `SplitView` + `ChatPane`, or deleted) |
+| Pure helpers | new `src/lib/utils/splitPanes.ts` (`parsePanes`, `serializePanes`, `maxPanesForWidth`, `fitsSideBySide`, `openPane`, `closePane`, `replacePane`, `nextPane`, `clampWidths`, `equalShares`, `isPaneBusy`, `writerConflicts`) |
+| Pane UI | `src/app/c/[id]/ChatPane.tsx` (`@container` section, focus capture, busy check, not-found and load-error states); new `src/app/c/[id]/PaneHeader.tsx` (the compact header used when two or more panes are open, per UX doc 3.8.1: title or switcher, mode chip, model chip, close, two-writer warning); `src/app/components/conversation/ModelSelector.tsx` (`size="chip"`); new `src/app/c/DropOverlay.tsx` (split and replace zones); `src/app/components/chatInput.tsx` (its file-drop overlay only for `Files` drags, ~172) |
+| Sidebar | `src/app/components/Sidebar.tsx` (whole row `draggable`, inner `Link` `draggable={false}`, `onDragStart` sets `application/x-devchat-chat` and `text/uri-list`; "Open in split view" first in the row menu and on right-click; plain click and New Chat open in the focused pane, with `confirm()` when it is busy; `Columns2` mark on other open chats) |
+| Shortcuts and palette | `src/app/hooks/useKeyboardShortcuts.ts` (focused pane; Ctrl+` / Ctrl+Shift+` next and previous pane); `src/app/components/KeyboardShortcutsDialog.tsx`; `useConversationPage.ts` (dialogs for the pane they were opened from); `useCommandPaletteActions` Split view group |
+| Temporary chats | `useChatPane.ts` (delete on unmount when the id has left the pane list) |
+
+**3c side chat**
+
+| Area | Files |
+|---|---|
+| Schema | both schemas + new migration `add_conversation_links` (`parentId`, `kind`, `forkedFromId`) in each; one migration for 3c and 3d |
+| Server | `src/app/api/conversations/route.ts` (`parentId: null`); new `src/app/api/conversations/[id]/children/route.ts`; `src/lib/chatSearch.ts` (`parentId: null`); `src/app/api/models/usage/route.ts`; `src/app/api/analytics/route.ts`; `src/lib/chat/resolveChatSettings.ts`; `src/app/api/chat/route.ts` (force chat, 400 for subagent); `src/lib/chat/buildSystemPrompt.ts` (`main` section); new `src/lib/chat/loadParentContext.ts`; `src/app/api/conversations/[id]/context/route.ts` (`mainContext`) |
+| Client | new `src/app/c/[id]/SideChatPane.tsx`; `SplitView.tsx` (side chat ids render `SideChatPane`; Cmd+\ toggle; dock side in `vas:sideDock`; closing a parent closes its side chat; sub-agent viewer in the side-chat slot; child id redirect to `?split=`); `chatInput.tsx` (optional props); `ChatMessages.tsx` (`onSendToMain`); `src/lib/commands.ts` + `runCommandAction.ts` (`/side`); `src/app/hooks/useKeyboardShortcuts.ts` (`onToggleSidePane`); `src/app/components/KeyboardShortcutsDialog.tsx`; `src/app/components/conversation/types.ts` (`parentId`, `kind`, `forkedFrom`) |
+
+**3d fork**: new `src/lib/forkConversation.ts`; new `src/app/api/conversations/[id]/fork/route.ts`; `src/app/api/conversations/[id]/route.ts` (`GET` includes `forkedFrom`); `src/app/components/MessageActions.tsx`; `ConversationHeader.tsx`; `SplitView.tsx` (fork replaces the focused pane).
 
 **Vitest**
 
+- new `splitPanes.test.ts`:
+  - `parsePanes`: `/c/A` → ids `[A]`, focus `A`; `/c/A` + `split=B,C&focus=C` → `[A, B, C]`, focus `C`; a focus not in the list falls back to the first; duplicates dropped (`split=A,B,B`); empty and malformed ids dropped; `/c/new` → `[]`.
+  - `serializePanes`: `[A]` → `/c/A`; `[A, B, C]` with focus `A` → `/c/A?split=B,C` (no `focus`); focus `B` → `…&focus=B`; keeps other params (`q`); drops an empty `split`; `parsePanes(serializePanes(x))` round-trips.
+  - `maxPanesForWidth`: 767 → 1, 768 → 2, 1439 → 2, 1440 → 3.
+  - `fitsSideBySide`: 2 panes in 720px → true, in 719px → false; 1 pane always true.
+  - `openPane`: right of index 0 → `[A, X]`; left of index 0 → `[X, A]` (X becomes the path); an id already open → unchanged; at the limit → `"full"`.
+  - `closePane`: a middle pane, focus to its left neighbour; `ids[0]` → `ids[1]` promoted, focus to the new first; the last remaining pane is a no-op.
+  - `replacePane`: swaps in place; replacing with an id already open leaves the list as is and focuses that id.
+  - `nextPane`: forward and backward with wrap-around; one pane returns itself.
+  - `clampWidths`: every pane at least 360px; fractions sum to 1; an area too small for all minimums returns equal shares (the layout then goes one-at-a-time). `equalShares(3)` → three thirds.
+  - `isPaneBusy`: streaming → true; unsent text, quote cards, files or queued items → true; idle and empty → false.
+  - `writerConflicts`: two agent panes on one folder → both ids; one agent and one chat → none; ask counts as a writer; `null` folders never conflict; side chats never count; three panes, two sharing → those two.
 - new `loadParentContext.test.ts` (mocked Prisma): null for a main chat; null when the parent has another user; includes summary, folder, todos, artifact titles and no artifact content; only messages since `compressedAt`; trims to the window's 25% with "last N of M"; "not saved yet" note when the last saved message is the user's; a parent queued-message marker shows as a user line.
 - `buildSystemPrompt.test.ts`: `sections.main` set for a side chat, null for a main chat.
 - new `resolveChatSettings.test.ts`: a side chat takes the parent's `workingFolder` and `kbId` and returns `kind`.
@@ -959,9 +1129,9 @@ Each phase merges and works on its own. "New" marks new files. Every phase ends 
 - `chatSearch.test.ts`: children excluded.
 - `commands.test.ts`: `/side`, `/side question`.
 
-**Browser**: the side-chat checks in 2.8 (Cmd+\, resize, dock, reload memory, live context, mid-stream, forced chat mode header, Send to main, both streaming, focus, overlays on top, narrow screen, delete cascade, sidebar/search, redirect), the small-window "last N of M" note on the Ollama model; fork of message 3 of 6, settings copied, original deleted → fork and its charts still work.
+**Browser**: 3a: every existing flow unchanged. 3b: the split-view checks in 2.8 and section 5. 3c: the side-chat checks in 2.9 (Cmd+\, resize, dock, reload, live context, mid-stream, forced chat mode header, Send to main, focus, overlays on top, narrow screen, delete cascade, sidebar/search, redirect, pane limit), the small-window "last N of M" note on the Ollama model. 3d: fork of message 3 of 6, settings copied, original deleted → fork and its charts still work.
 
-**Ships on its own**: 3a ships first; 3b needs only 3a.
+**Ships on its own**: 3a ships first; 3b needs only 3a; 3c needs 3b; 3d needs the 3c migration.
 
 ### Phase 4: Ask and Plan modes
 
@@ -999,18 +1169,19 @@ First step: check how continuation requests save (3.5) and fix if needed, with a
   - new `runSubAgent.test.ts` (`MockLanguageModelV3` from `ai/test`, mocked Prisma): yields `"running"` then `"done"` with the report; report over 8,000 chars is cut; a model that always calls a tool ends at 15 steps with a text-only last step and `hitStepLimit`; an injected short timeout gives `"timeout"`; a throwing tool does not end the run; creates a `kind: "subagent"` child and saves brief and assistant message with normalized parts; abort saves and does not yield `"done"`; yields are throttled (no yield per text delta).
   - `buildTools.test.ts`: `runAgent` only with `subAgents`; helper tool set lacks `runAgent`, `executeCode`, `askClarification`, todo tools, `presentPlan`; Ask/Plan helper set has no mutating or MCP tools; a 4th parallel call returns an error output; `toModelOutput` returns text for `"done"`, error text otherwise (including `"running"`).
 - **Browser**: 3 parallel helpers on the API model; one helper on the Ollama-with-tools model; a CLI parent running helpers one per step and still answering; Stop mid-run (cards "Stopped" after reload, transcripts saved); "Open"; a queued message during a helper run arrives after it; the tool-less model has no `runAgent`.
-- **Ships on its own**: needs phase 3's child conversations and side pane (for "Open").
+- **Ships on its own**: needs phase 3's child conversations and side-chat slot (for "Open").
 
 ### Phase 6: agent messaging
 
-- **Files**: both schemas + new migration `add_queued_message_agent` in each; `src/lib/registry/tools.ts` (`sendToChat`); `src/lib/chat/buildTools.ts` (`sendToChat` in `BUILTIN_TOOL_IDS`, `messageAgent`); `src/lib/chat/runSubAgent.ts` (`resume`); `src/app/api/chat/route.ts` (`agentLabel` via `convertDataPart`, hop check); `src/app/api/conversations/[id]/queue/route.ts` + `src/lib/chat/queue.ts` (`agent` field); `src/lib/chat/normalizeToolParts.ts` (agent part on split); `src/app/c/[id]/useChatTransport.ts` (`onToolCall`); `src/lib/utils/messageParts.ts` (`shouldAutoContinue`); new `src/app/c/[id]/useAgentLink.ts`; new `src/lib/utils/agentLink.ts`; `ConversationLayout.tsx`; `MessageContent.tsx` (badge); `MessageActions.tsx` ("Send to side chat" / "Send to main chat" for tool-less models); `src/lib/chat/buildSystemPrompt.ts` (one line); `src/lib/exportMarkdown.ts` (agent label).
+- **Files**: both schemas + new migration `add_queued_message_agent` in each; `src/lib/registry/tools.ts` (`sendToChat`); `src/lib/chat/buildTools.ts` (`sendToChat` in `BUILTIN_TOOL_IDS`, `messageAgent`); `src/lib/chat/runSubAgent.ts` (`resume`); `src/app/api/chat/route.ts` (`agentLabel` via `convertDataPart`, hop check); `src/app/api/conversations/[id]/queue/route.ts` + `src/lib/chat/queue.ts` (`agent` field); `src/lib/chat/normalizeToolParts.ts` (agent part on split); `src/app/c/[id]/useChatTransport.ts` (`onToolCall`; `openPanes` in the body); `src/lib/utils/messageParts.ts` (`shouldAutoContinue`); new `src/app/c/[id]/useAgentLink.ts`; new `src/lib/utils/agentLink.ts`; `src/app/c/SplitView.tsx` (pane ref map for the agent link); `MessageContent.tsx` (badge); `MessageActions.tsx` ("Send to…" menu for tool-less models); `src/lib/chat/buildSystemPrompt.ts` ("Other open chats" section); `src/lib/exportMarkdown.ts` (agent label).
 - **Vitest**
-  - new `agentLink.test.ts`: next hop from a user turn is 1; hop 4 refused; a mid-reply agent message raises the pane hop; a user send resets to 0.
+  - new `agentLink.test.ts`: next hop from a user turn is 1; hop 4 refused; a mid-reply agent message raises the pane hop; a user send resets to 0; `resolveTarget` accepts another open chat pane and `"side"`, refuses the sender itself, a closed id and a sub-agent viewer pane.
+  - `buildSystemPrompt.test.ts`: the "Other open chats" section lists `openPanes` and is absent when there are none.
   - `messageParts.test.ts`: `shouldAutoContinue` true for a finished `tool-sendToChat`.
   - `normalizeToolParts.test.ts`: an agent marker splits into a user message with a `data-agent-message` part.
-  - new `agentLabel.test.ts` (or in an existing route-helper test): label text per `from`; hop over 3 rejected.
+  - new `agentLabel.test.ts` (or in an existing route-helper test): the label reads "From <chat title>" for every sender kind; hop over 3 rejected.
   - `buildTools.test.ts`: `messageAgent` refuses a child of another chat or user; `runSubAgent` with `resume` sends saved history plus the new message.
-- **Browser**: main → side → main → side, then refused; side → busy main lands mid-reply with a badge; Stop during talk; reload keeps badges; `messageAgent` follow-up; tool-less "Send to side chat" button.
+- **Browser**: main → side → main → side, then refused; in a three-pane split A → B → C → A, then refused; side → busy main lands mid-reply with a badge; Stop during talk; reload keeps badges; `messageAgent` follow-up; tool-less "Send to…" menu.
 - **Ships on its own**: needs phases 2, 3 and 5.
 
 ---
@@ -1029,6 +1200,18 @@ First step: check how continuation requests save (3.5) and fix if needed, with a
 | CLI model | Claude Code (plus OpenCode for the Ask read-only note) | text tool protocol, per-step processes, working folder |
 
 For each phase, run that phase's browser checks once per slot where they apply, and note any feature that degrades differently from the "Works with" line.
+
+**Split view checks (phase 3b onward)**:
+
+- Two panes streaming at once with mixed slots: API + Ollama with tools, API + CLI, CLI + CLI (two processes; check both finish and both watchdogs are separate). Stop in one pane leaves the other streaming (network tab: only that request is cancelled).
+- Three panes at 1440px all streaming, while queueing a message in one and opening `@` files in another: in `next dev` (HTTP/1.1), the queue `POST` and file reads must not stall behind the streams (network tab shows no long "Stalled" time).
+- Drag from the sidebar onto left and right drop zones; at the limit, whole-pane Replace zones with busy panes greyed out; "Already open" for an open chat; "Open in split view" from the row menu and right-click; the palette group; the limit message at 1440, 1000 and 600px.
+- One pane at a time: at 600px, and at 1000px with two panes after expanding the sidebar. The title switcher lists all panes; a reply in a hidden pane keeps streaming (network tab) and is complete when shown.
+- Reload restores `/c/A?split=B,C&focus=C` (panes, order, focus) and widths; pane changes add no history entries (Back leaves the page); closing the first pane keeps the others mounted (a reply streaming in another pane does not restart).
+- Closing or replacing a busy pane asks with `confirm()`; Cancel keeps it.
+- Focus: Cmd+Enter, Cmd+\, Ctrl+` / Ctrl+Shift+` and the overlay panels act on the focused pane.
+- Two-writer warning: two CLI panes in Agent mode on one folder show it; switching one to Chat clears it.
+- Per pane: model, mode, queue, quote cards and `@` files are independent (change one, the other is untouched).
 
 **Regression after each phase**: send, stop, regenerate, edit, delete, `executeCode`, clarification, artifact panel, compression (auto and manual), suggestion, sidebar list and search.
 
@@ -1060,6 +1243,8 @@ Parked by the owner. Sketch only.
 - **Behaviour changes for every chat**: the loop guard (force a text step), the ordered abort save, memory tools off when memory is off, and `>` quote rendering in user bubbles.
 - **`/api/search` on SQLite**: likely fails today because of `mode: "insensitive"` (3.3); fixed by the shared helper in phase 1.
 - **`createUIMessageStream` `onFinish` also runs on cancel** (`index.mjs` ~6400). The route's `assistantPersisted` flag prevents a double save; keep it.
+- **Split view and Next routing**: the design relies on `src/app/c/layout.tsx` staying mounted across `/c/A` → `/c/B` navigations (documented for layouts). Check early in 3b that panes keyed by id are not remounted on promotion; if they are, panes reload from the DB and running replies stop.
+- **Browser connection limit in dev**: 3 streaming panes use 3 of about 6 HTTP/1.1 connections per host. Fine at the cap of 3; adding a long-lived connection per pane (for example a polling stream) would start stalling requests.
 - **Open questions for the owner**: agents reply to each other only via `sendToChat` (3.14 item 10); whether temporary chats should skip traces entirely (now: deleted with the chat).
 
 ## 8. Verified against
@@ -1073,6 +1258,7 @@ Parked by the owner. Sketch only.
 - `node_modules/@json-render/core/dist/chunk-AFLK3Q4T.mjs` ~485-545: non-text chunks pass through `pipeJsonRender`.
 - `node_modules/@modelcontextprotocol/sdk/dist/esm/server/webStandardStreamableHttp.d.ts` ~125-201: `WebStandardStreamableHTTPServerTransport.handleRequest(req: Request): Promise<Response>`, stateless mode.
 - `node_modules/.prisma/client/index.d.ts` (`StringFilter` has no `mode` in the generated SQLite client).
+- Next docs for split view: `node_modules/next/dist/docs/01-app/01-getting-started/03-layouts-and-pages.md:43` (layouts preserve state and do not rerender on navigation); `01-getting-started/04-linking-and-navigating.md` ~341-400 (native `history.pushState` / `replaceState` sync with `usePathname` / `useSearchParams`); `03-api-reference/04-functions/use-search-params.md` (wrap in `Suspense`); `03-api-reference/04-functions/use-router.md` (`push` / `replace` with `scroll: false`); `03-api-reference/03-file-conventions/layout.md` ~154-180 (layouts do not rerender, so search params are read in a client component).
 - Next docs: `node_modules/next/dist/docs/01-app/03-api-reference/03-file-conventions/02-route-segment-config/maxDuration.md` and `index.md`; `03-file-conventions/instrumentation.md` (`register`); `03-file-conventions/route.md` (route `params` is a Promise); `04-functions/after.md`.
 - `claude --help` (2.1.296): `--permission-mode` choices, `--permission-prompts` (names `--permission-prompt-tool`), `--mcp-config`, `--strict-mcp-config`, `--tools`, `--disallowedTools`.
 - Repo code read: `src/app/api/chat/route.ts`; `src/lib/chat/{buildTools,buildSystemPrompt,persistAssistantMessage,normalizeToolParts,resolveChatSettings}.ts`; `src/lib/registry/{types,tools}.ts`; `src/lib/cliProviders.ts`; `src/lib/compression.ts`; `src/lib/contextManager.ts`; `src/lib/models.ts`; `src/lib/utils/{conversation,messageParts}.ts`; `src/lib/commands.ts`; `src/app/c/[id]/{useChatTransport,useConversationPage,ConversationLayout,page,runCommandAction}.ts(x)`; `src/app/contexts/ChatModeContext.tsx`; `src/app/hooks/useKeyboardShortcuts.ts`; `src/app/components/{chatInput,MessageContent,MarkdownMessage,MessageBubble,ChatMessages,CodeBlock}.tsx`; `src/app/components/conversation/ConversationHeader.tsx`; `src/app/api/{conversations,search,analytics,models/usage,artifacts}/…` including `export`, `compress`, `context`; both Prisma schemas; the uncommitted diff in `.claude/worktrees/sweet-goldberg-5baa8e`.
