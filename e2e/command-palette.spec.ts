@@ -54,10 +54,7 @@ test("New Chat in the palette creates and opens a chat", async ({ page, request 
   await expect(page.getByText("0 messages")).toBeVisible();
 });
 
-// Known bug: createNewChat() in CommandPalette.tsx never calls setOpen(false), so the palette
-// stays open (and hides the page from assistive tech) after New Chat.
-// When this is fixed the test starts passing, test.fail() complains, and the line can go.
-test.fail("the palette closes after New Chat (known bug)", async ({ page, request }) => {
+test("the palette closes after New Chat", async ({ page, request }) => {
   await openChat(page, await createChat(request));
   await page.keyboard.press("ControlOrMeta+k");
   await palette(page).getByRole("option", { name: "New Chat" }).click();

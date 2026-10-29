@@ -18,7 +18,8 @@ import ConversationHeader from "@/app/components/conversation/ConversationHeader
 import EmptyState from "@/app/components/conversation/EmptyState";
 import { useKeyboardShortcuts } from "@/app/hooks/useKeyboardShortcuts";
 import { joinTextParts } from "@/lib/utils/conversation";
-import { StickyNote, FileCode, SlidersHorizontal, Settings, BarChart3, Target } from "lucide-react";
+import { exportChat } from "@/lib/utils/download";
+import { StickyNote, FileCode, SlidersHorizontal, Settings, BarChart3, Target, Download, History, Minimize2 } from "lucide-react";
 
 import { useConversationPage } from "./useConversationPage";
 
@@ -38,8 +39,14 @@ export default function ConversationLayout({ conversationId, initialPrompt }: Pr
     { id: "context", label: "Context Usage", icon: <BarChart3 size={16} />, onSelect: () => p.setContextPanelOpen(true) },
   ]);
 
+  useCommandPaletteActions("Chat", [
+    { id: "export-markdown", label: "Export as Markdown", icon: <Download size={16} />, onSelect: () => exportChat(conversationId, "markdown", p.toast) },
+    { id: "search-past-chats", label: "Search past chats", icon: <History size={16} />, onSelect: () => p.setInput("/recall ") },
+    { id: "compress-chat", label: "Compress chat", icon: <Minimize2 size={16} />, onSelect: () => p.setInput("/compress ") },
+  ]);
+
   useKeyboardShortcuts({
-    onSend: p.sendComposed,
+    onSend: () => p.handleSubmit(),
     isDialogOpen: p.isDialogOpen,
     onCloseDialog: p.closeTopDialog,
     onOpenKeyboardShortcuts: () => p.setKeyboardShortcutsOpen(true),
@@ -155,6 +162,7 @@ export default function ConversationLayout({ conversationId, initialPrompt }: Pr
           onContextClick={() => p.setContextPanelOpen(true)}
           isCompressed={!!p.conversation?.compressedSummary}
           isCompressing={p.isCompressing}
+          compressFocus={p.compressFocus}
           model={p.conversation.model}
           onModelChange={p.handleModelChange}
           workingFolder={p.conversation.workingFolder ?? null}

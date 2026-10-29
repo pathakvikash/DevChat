@@ -32,7 +32,7 @@ interface ChatInputProps {
   files: File[];
   setFiles: React.Dispatch<React.SetStateAction<File[]>>;
   isLoading: boolean;
-  onSubmit: (e: React.FormEvent<HTMLFormElement>) => void;
+  onSubmit: (e: React.FormEvent<HTMLFormElement>) => void | Promise<void>;
   onStop: () => void;
   kbId?: string;
   contextUsage?: {
@@ -43,6 +43,7 @@ interface ChatInputProps {
   onContextClick?: () => void;
   isCompressed?: boolean;
   isCompressing?: boolean;
+  compressFocus?: string;
   model: string;
   onModelChange: (modelId: string) => void;
   onOpenSettings: () => void;
@@ -83,6 +84,7 @@ export default function ChatInput({
   onContextClick,
   isCompressed,
   isCompressing,
+  compressFocus,
   model,
   onModelChange,
   onOpenSettings,
@@ -110,7 +112,6 @@ export default function ChatInput({
   const [isDragging, setIsDragging] = useState(false);
   const [, setDragCounter] = useState(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const submitLockRef = useRef(false);
   const [plusOpen, setPlusOpen] = useState(false);
   const [compressedDismissed, setCompressedDismissed] = useState(false);
   const plusRef = useRef<HTMLDivElement>(null);
@@ -285,10 +286,6 @@ export default function ChatInput({
   const canSubmit = input.trim() || files.length > 0 || mentions.length > 0 || quotes.length > 0;
   const showSuggestion = Boolean(suggestion && !input && !isLoading && onAcceptSuggestion);
 
-  useEffect(() => {
-    if (!isLoading) submitLockRef.current = false;
-  }, [isLoading]);
-
   // The textarea is disabled while a reply runs, so a focus request made then waits for the reply to end.
   const wantFocusRef = useRef(false);
   useEffect(() => {
@@ -305,8 +302,7 @@ export default function ChatInput({
 
   function submitFromKey(e: React.KeyboardEvent) {
     e.preventDefault();
-    if (canSubmit && !isLoading && !submitLockRef.current) {
-      submitLockRef.current = true;
+    if (canSubmit) {
       wantFocusRef.current = true;
       onSubmit(e as any);
     }
@@ -330,9 +326,11 @@ export default function ChatInput({
 
       <div className="glass-nav px-4 py-3">
         {isCompressing && (
-          <div className="mb-3 flex items-center gap-2 text-sm text-zinc-300">
+          <div className="mb-3 flex items-center gap-2 text-sm text-[var(--foreground)]">
             <Loader2 size={14} aria-hidden className="animate-spin motion-reduce:animate-none text-amber-400" />
-            Compressing chat…
+            {compressFocus
+              ? `Compressing chat, keeping "${compressFocus.length > 40 ? `${compressFocus.slice(0, 40)}…` : compressFocus}"…`
+              : "Compressing chat…"}
           </div>
         )}
 

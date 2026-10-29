@@ -26,5 +26,5 @@ test("a reload keeps every message, and the chat still works afterwards", async 
 
 test("opening a chat id that does not exist says so", async ({ page }) => {
   await page.goto("/c/does-not-exist");
-  await expect(page.getByText("Conversation not found")).toBeVisible();
+  await expect(page.getByText("This chat no longer exists")).toBeVisible();
 });

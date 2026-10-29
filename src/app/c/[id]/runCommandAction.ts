@@ -12,6 +12,7 @@ export interface RunCommandCtx {
   setMessages: (fn: (prev: any[]) => any[]) => void;
   setConversation: (fn: (prev: any) => any) => void;
   setIsCompressing: (v: boolean) => void;
+  setCompressFocus: (v: string) => void;
   setArtifactPanelOpen: (v: boolean) => void;
   setScratchpadOpen: (v: boolean) => void;
   setModelSettingsOpen: (v: boolean) => void;
@@ -73,6 +74,7 @@ export async function runCommandAction(
       break;
     }
     case "compress":
+      ctx.setCompressFocus(arg.trim());
       ctx.setIsCompressing(true);
       try {
         const res = await fetch(`/api/conversations/${ctx.conversationId}/compress`, {
@@ -92,6 +94,7 @@ export async function runCommandAction(
         ctx.toast("Couldn't compress the chat", "error");
       } finally {
         ctx.setIsCompressing(false);
+        ctx.setCompressFocus("");
       }
       break;
     case "export":

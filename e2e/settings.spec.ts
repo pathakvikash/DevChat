@@ -1,16 +1,17 @@
 import { test, expect } from "@playwright/test";
+import { PROVIDERS } from "../src/lib/providers";
 
 test("the settings page loads with its sections and the saved default model", async ({ page }) => {
   await page.goto("/settings");
   await expect(page.getByRole("heading", { name: "Settings & Analytics" })).toBeVisible();
-  for (const section of ["API Keys", "Default Model", "Auto-Compress", "MCP Servers", "Training Dataset Export", "Usage Statistics"]) {
+  for (const section of ["LLM Providers", "Default Model", "Auto-Compress", "MCP Servers", "Training Dataset Export", "Usage Statistics"]) {
     await expect(page.getByRole("heading", { name: section })).toBeVisible();
   }
   // auth.setup.ts saved mock/echo as the default model; the mock models are in the list.
   const defaultModel = page.locator("select").first();
   await expect(defaultModel).toHaveValue("mock/echo");
   await expect(defaultModel.locator("option", { hasText: "Mock Slow" })).toHaveCount(1);
-  await expect(page.getByText("Not configured")).toHaveCount(2); // no provider API keys
+  await expect(page.getByText("Not configured")).toHaveCount(PROVIDERS.length); // no provider API keys
 });
 
 test("Save Settings confirms and the choice sticks", async ({ page, request }) => {

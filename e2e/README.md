@@ -37,7 +37,7 @@ Every new feature adds its own `e2e/<feature>.spec.ts` before it is done.
 Gotchas:
 
 - In dev, React Strict Mode loads a page's data twice and the second load overwrites the first. After `goto`, wait for `networkidle` before typing or selecting (`openChat` does). Otherwise you lose messages in the test, not in real use.
-- A message you just sent has a client-made id that the server does not store, so edit and delete of it do not persist until a reload. Specs for those reload first. The `test.fail(…known bug)` specs mark this and the other known bugs; when one is fixed, its `test.fail` starts complaining and should be deleted.
+- A message you just sent is saved under its client-made id, so edit and delete of it persist at once. Mark a known bug with `test.fail(…known bug)`; when it is fixed, `test.fail` starts complaining and should become `test`.
 
 ## Visual baselines
 

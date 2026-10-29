@@ -12,6 +12,7 @@ interface CommandPaletteAction {
   id: string;
   label: string;
   icon: React.ReactNode;
+  shortcut?: string;
   onSelect: () => void;
 }
 
@@ -62,6 +63,7 @@ export default function CommandPaletteProvider({ children }: { children: React.R
         setOpen((v) => !v);
       }
       if (e.key === "Escape" && openRef.current) {
+        e.preventDefault();
         setOpen(false);
       }
     }
@@ -70,6 +72,7 @@ export default function CommandPaletteProvider({ children }: { children: React.R
   }, []);
 
   async function createNewChat(temporary = false) {
+    setOpen(false);
     try {
       const conv = await createConversation({ temporary });
       router.push(`/c/${conv.id}`);
@@ -122,6 +125,7 @@ export default function CommandPaletteProvider({ children }: { children: React.R
                   >
                     {action.icon}
                     {action.label}
+                    {action.shortcut && <span className="ml-auto text-[11px] text-zinc-400">{action.shortcut}</span>}
                   </Command.Item>
                 ))}
               </Command.Group>

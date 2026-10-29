@@ -236,7 +236,7 @@ export async function POST(req: Request) {
     // Ollama context window before the request if we're approaching the
     // current tier limit.
     if (isOllama && conversationId) {
-      const currentCtx = contextLength ?? 4096;
+      const currentCtx = contextLength ?? modelConfig.contextWindow;
       const promptTokens = estimatePromptTokens(
         finalSystemPrompt,
         sanitizedMessages,
@@ -549,7 +549,11 @@ export async function POST(req: Request) {
                       overrideParts: last?.parts ?? [],
                     });
                     if (saved && canAutoCompress(event, isAborted)) {
-                      await autoCompress(conversationId, autoCompressThreshold ?? 85, () =>
+                      await autoCompress(
+                        conversationId,
+                        autoCompressThreshold ?? 85,
+                        modelConfig ? contextWindowFor(servedModel, modelConfig, contextLength) : null,
+                        () =>
                         writer.write({ type: "data-compressing", data: true, transient: true }),
                       );
                     }
@@ -623,7 +627,7 @@ export async function POST(req: Request) {
           conversationId &&
           errMsg.includes("available context size")
         ) {
-          const nextCtx = getNextContextTier(contextLength ?? 4096);
+          const nextCtx = getNextContextTier(contextLength ?? modelConfig.contextWindow);
           if (nextCtx) {
             contextLength = nextCtx;
             ollamaOptions.num_ctx = nextCtx;

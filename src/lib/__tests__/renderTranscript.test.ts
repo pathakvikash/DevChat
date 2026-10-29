@@ -1,6 +1,9 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, beforeAll } from "vitest";
 import { renderTranscript } from "@/lib/chat/renderTranscript";
 import { countTokens, cutTokens } from "@/lib/tokens";
+
+// The tokenizer loads its tables on first use, which can outlast a test's default timeout.
+beforeAll(() => { countTokens("warm up"); }, 60_000);
 
 const turn = (role: string, text: string) => ({ role, parts: [{ type: "text", text }] });
 
