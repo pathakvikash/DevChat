@@ -30,15 +30,25 @@ describe("deleteExpiredTemporaryChats", () => {
         userId: "user-1",
         temporary: true,
         updatedAt: { lt: new Date(now - TEMPORARY_CHAT_TTL_MS) },
+        children: { none: { updatedAt: { gte: new Date(now - TEMPORARY_CHAT_TTL_MS) } } },
       },
       select: { id: true },
     });
   });
 
-  it("deletes the stale chats and their traces together", async () => {
-    db.conversation.findMany.mockResolvedValue([{ id: "a" }, { id: "b" }]);
+  it("keeps a temporary chat whose side chat was used within the last 24 hours", async () => {
+    // The side chat's recent use is part of the where clause, so the database keeps the parent.
+    const now = Date.parse("2026-10-29T12:00:00Z");
+    await deleteExpiredTemporaryChats("user-1", now);
+    const cutoff = new Date(now - TEMPORARY_CHAT_TTL_MS);
+    expect(db.conversation.findMany.mock.calls[0][0].where.children).toEqual({ none: { updatedAt: { gte: cutoff } } });
+  });
+
+  it("deletes the stale chats and their traces together, side chats' traces included", async () => {
+    db.conversation.findMany.mockResolvedValueOnce([{ id: "a" }, { id: "b" }]).mockResolvedValueOnce([{ id: "s1" }]);
     expect(await deleteExpiredTemporaryChats("user-1")).toBe(2);
-    expect(db.trace.deleteMany).toHaveBeenCalledWith({ where: { conversationId: { in: ["a", "b"] } } });
+    expect(db.conversation.findMany).toHaveBeenLastCalledWith({ where: { parentId: { in: ["a", "b"] } }, select: { id: true } });
+    expect(db.trace.deleteMany).toHaveBeenCalledWith({ where: { conversationId: { in: ["a", "b", "s1"] } } });
     // temporary: true again, so a chat that stopped being temporary meanwhile survives.
     expect(db.conversation.deleteMany).toHaveBeenCalledWith({
       where: { id: { in: ["a", "b"] }, userId: "user-1", temporary: true },
@@ -130,7 +140,7 @@ describe("DELETE /api/conversations/[id]", () => {
     db.conversation.findFirst.mockResolvedValue({ temporary: true });
     await del("?temporary=1");
     expect(db.conversation.deleteMany).toHaveBeenCalledWith({ where: { id: "c1", userId: "user-1", temporary: true } });
-    expect(db.trace.deleteMany).toHaveBeenCalledWith({ where: { conversationId: "c1" } });
+    expect(db.trace.deleteMany).toHaveBeenCalledWith({ where: { conversationId: { in: ["c1"] } } });
   });
 
   it("with ?temporary=1 leaves a chat that is no longer temporary alone", async () => {

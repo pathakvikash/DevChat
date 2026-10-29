@@ -36,6 +36,7 @@ export interface ResolvedChatSettings {
   maxToolCalls: number;
   reasoningEffort: string | undefined;
   workingFolder: string | undefined;
+  kind: string;
 }
 
 /**
@@ -70,6 +71,7 @@ export async function resolveChatSettings(
   let maxToolCalls = opts.bodyMaxToolCalls ?? 5;
   let reasoningEffort: string | undefined;
   let workingFolder: string | undefined;
+  let kind = "main";
 
   if (opts.conversationId) {
     const conv = await prisma.conversation.findUnique({
@@ -89,6 +91,8 @@ export async function resolveChatSettings(
         fallbackModel: true,
         reasoningEffort: true,
         workingFolder: true,
+        kind: true,
+        parent: { select: { userId: true, workingFolder: true, kbId: true, temporary: true } },
       },
     });
     if (conv) {
@@ -106,6 +110,13 @@ export async function resolveChatSettings(
       reasoningEffort = conv.reasoningEffort ?? undefined;
       workingFolder = conv.workingFolder ?? undefined;
       if (conv.fallbackModel) fallbackModel = conv.fallbackModel;
+      kind = conv.kind;
+      // A side chat works in its main chat's folder and knowledge base, read live.
+      if (conv.kind === "side" && conv.parent?.userId === opts.userId) {
+        kbId = conv.parent.kbId || undefined;
+        workingFolder = conv.parent.workingFolder || undefined;
+        memoryDisabled = memoryDisabled || conv.parent.temporary;
+      }
     }
   }
 
@@ -127,5 +138,6 @@ export async function resolveChatSettings(
     maxToolCalls,
     reasoningEffort,
     workingFolder,
+    kind,
   };
 }

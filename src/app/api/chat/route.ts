@@ -66,16 +66,17 @@ export async function POST(req: Request) {
   } = await req.json();
   let messages = bodyMessages;
   // Anything that isn't "agent" falls back to chat, the safer of the two.
-  const toolMode: ToolMode = bodyMode === "agent" ? "agent" : "chat";
+  const requestedMode: ToolMode = bodyMode === "agent" ? "agent" : "chat";
   let model: string | undefined = bodyModel;
   try {
     let compressedAt: Date | null = null;
     if (conversationId) {
       const owned = await prisma.conversation.findUnique({
         where: { id: conversationId },
-        select: { userId: true, compressedAt: true },
+        select: { userId: true, compressedAt: true, parent: { select: { userId: true } } },
       });
-      if (!owned || owned.userId !== userId) {
+      // A side chat is only ever read against a main chat of the same user.
+      if (!owned || owned.userId !== userId || (owned.parent && owned.parent.userId !== userId)) {
         return new Response(JSON.stringify({ error: "Conversation not found" }), {
           status: 404,
           headers: { "Content-Type": "application/json" },
@@ -129,6 +130,14 @@ export async function POST(req: Request) {
       reasoningEffort,
       workingFolder,
     } = settings;
+    if (settings.kind === "subagent") {
+      return new Response(JSON.stringify({ error: "Sub-agent runs cannot be sent to directly" }), {
+        status: 400,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+    // Side chats are read-only, whatever mode the request asks for.
+    const toolMode: ToolMode = settings.kind === "side" ? "chat" : requestedMode;
     // `contextLength`/`maxTokens` are reassigned below (Ollama context bump,
     // default maxTokens), so these two stay `let` unlike the rest.
     let { contextLength, maxTokens, kbId } = settings;
@@ -184,6 +193,7 @@ export async function POST(req: Request) {
       memoryDisabled,
       userId,
       mode: toolMode,
+      contextWindow: contextWindowFor(servedModel, modelConfig, contextLength),
     });
 
     console.log(

@@ -12,6 +12,8 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     const { id } = await params;
     const conversation = await getConversationOrNull(id, userId);
     if (!conversation) return NextResponse.json({ error: "Conversation not found" }, { status: 404 });
+    // Side chats get no next-message suggestions.
+    if (conversation.kind === "side") return NextResponse.json({ suggestion: null });
 
     const body = await req.json().catch(() => ({}));
     const user = typeof body.user === "string" ? body.user.slice(0, 4000) : "";

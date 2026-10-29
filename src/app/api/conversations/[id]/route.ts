@@ -2,6 +2,7 @@ import { prisma } from "@/lib/db";
 import { NextRequest, NextResponse } from "next/server";
 import { requireUserId } from "@/lib/auth";
 import { isRunnableCwd } from "@/lib/claude/sessions";
+import { deleteTraces } from "@/lib/temporaryChat";
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
@@ -120,7 +121,7 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
     const where = { id, userId, ...(new URL(req.url).searchParams.get("temporary") === "1" && { temporary: true }) };
     const chat = await prisma.conversation.findFirst({ where, select: { temporary: true } });
     // Traces hold no foreign key, so a temporary chat's have to go explicitly.
-    if (chat?.temporary) await prisma.trace.deleteMany({ where: { conversationId: id } });
+    if (chat?.temporary) await deleteTraces([id]);
 
     const result = await prisma.conversation.deleteMany({ where });
 

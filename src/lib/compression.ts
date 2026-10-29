@@ -4,6 +4,7 @@ import { resolveProviderCreds } from "@/lib/apiKeys";
 import { prisma } from "@/lib/db";
 import { countTokens } from "@/lib/tokens";
 import { liveSince } from "@/lib/liveSince";
+import { loadParentContext } from "@/lib/chat/loadParentContext";
 import { isSanityMode } from "@/lib/sanityMode";
 
 /**
@@ -213,7 +214,7 @@ export async function shouldAutoCompress(
 ): Promise<boolean> {
   const conversation = await prisma.conversation.findUnique({
     where: { id: conversationId },
-    select: { model: true, systemPrompt: true, compressedAt: true, compressedSummary: true },
+    select: { userId: true, model: true, systemPrompt: true, compressedAt: true, compressedSummary: true },
   });
 
   if (!conversation) return false;
@@ -232,7 +233,9 @@ export async function shouldAutoCompress(
   });
   // Compressing cuts at the newest user message, so it only helps if an older one exists to drop.
   if (messages.filter((m) => m.role === "user").length < 2) return false;
-  const systemPrompt = [conversation.systemPrompt, conversation.compressedSummary]
+  // A side chat's prompt also carries its main-conversation section.
+  const mainSection = (await loadParentContext(conversationId, conversation.userId ?? "", contextLength))?.text;
+  const systemPrompt = [conversation.systemPrompt, conversation.compressedSummary, mainSection]
     .filter(Boolean)
     .join("\n\n");
 

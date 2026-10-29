@@ -45,7 +45,7 @@ afterEach(() => {
 describe("searchUserChats", () => {
   it("only looks at the user's own non-temporary chats, minus the excluded one", async () => {
     await searchUserChats("u1", "cache", { excludeId: "current" });
-    const owned = { userId: "u1", temporary: false, id: { not: "current" } };
+    const owned = { userId: "u1", temporary: false, parentId: null, id: { not: "current" } };
     expect(db.conversation.findMany.mock.calls[0][0].where).toMatchObject(owned);
     expect(db.message.findMany.mock.calls[0][0].where.conversation).toEqual(owned);
   });
@@ -115,6 +115,7 @@ describe("readUserChat", () => {
       id: "someone-elses",
       userId: "u1",
       temporary: false,
+      parentId: null,
     });
     expect(db.message.findMany).not.toHaveBeenCalled();
   });

@@ -15,7 +15,7 @@ export async function GET(req: NextRequest) {
     } catch (e) {
       console.error("Temporary chat cleanup failed:", e); // never let it break the list
     }
-    const where = { userId, temporary: false, ...(hasNote ? { note: { not: null } } : {}) };
+    const where = { userId, temporary: false, parentId: null, ...(hasNote ? { note: { not: null } } : {}) };
 
     const conversations = await prisma.conversation.findMany({
       select: {

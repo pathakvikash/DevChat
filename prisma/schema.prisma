@@ -100,9 +100,14 @@ model Conversation {
   forkedFromId             String?
   forkedFrom               Conversation? @relation("Forks", fields: [forkedFromId], references: [id], onDelete: SetNull)
   forks                    Conversation[] @relation("Forks")
+  parentId                 String?
+  kind                     String     @default("main") // main | side | subagent
+  parent                   Conversation?  @relation("Children", fields: [parentId], references: [id], onDelete: Cascade)
+  children                 Conversation[] @relation("Children")
 
   @@index([updatedAt])
   @@index([userId])
+  @@index([parentId])
 }
 
 model Message {
