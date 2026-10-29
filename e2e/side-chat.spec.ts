@@ -4,10 +4,11 @@ import { createChat, deleteAllChats, openChat } from "./helpers";
 const pane = (page: Page, id: string) => page.locator(`[data-pane-id="${id}"]`);
 const composerIn = (page: Page, id: string) => pane(page, id).getByRole("textbox", { name: "Message", exact: true });
 
+// The side chat is created by an async POST after the key press or /side, so poll until it exists.
 async function sideIdOf(request: APIRequestContext, mainId: string): Promise<string> {
-  const res = await request.get(`/api/conversations/${mainId}/children?kind=side`);
-  const [side] = (await res.json()) as { id: string }[];
-  return side.id;
+  const list = async () => (await (await request.get(`/api/conversations/${mainId}/children?kind=side`)).json()) as { id: string }[];
+  await expect.poll(async () => (await list()).length, { message: "side chat created" }).toBeGreaterThan(0);
+  return (await list())[0].id;
 }
 
 test.beforeEach(async ({ request }) => {

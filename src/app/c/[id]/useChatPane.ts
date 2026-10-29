@@ -574,7 +574,11 @@ export function useChatPane(conversationId: string, { focused, kind, searchProvi
       .catch(() => {});
   }, [convLoaded]);
 
+  // Strict Mode runs this effect twice in dev; the second load would overwrite a send made after the first.
+  const loadedIdRef = useRef<string | null>(null);
   useEffect(() => {
+    if (loadedIdRef.current === conversationId) return;
+    loadedIdRef.current = conversationId;
     fetchConversation().then(() => setConvLoaded(true));
   }, [conversationId]);
   useEffect(() => {
@@ -583,7 +587,6 @@ export function useChatPane(conversationId: string, { focused, kind, searchProvi
     const prompt = initialPrompt ?? takeSideQuestion(conversationId);
     if (!prompt) return;
     autoSubmittedRef.current = true;
-    setInput(prompt);
     setTimeout(() => {
       sendMessage({ parts: [{ type: "text" as const, text: prompt }] }).catch((e) =>
         console.error("auto-submit failed:", e),

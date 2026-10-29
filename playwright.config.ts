@@ -1,8 +1,15 @@
 import path from "node:path";
 import { defineConfig, devices } from "@playwright/test";
+import { ENV_ALIASES, PROVIDERS } from "./src/lib/providers";
 
 const PORT = 3210;
 const live = process.env.SANITY_LIVE === "1";
+// Every env var that can make a provider look configured. Blank beats .env files: Next keeps a var set to "".
+const providerEnv = Object.fromEntries(
+  [...PROVIDERS.flatMap((p) => [p.envKey, p.envBaseUrl]), ...Object.keys(ENV_ALIASES)]
+    .filter((name): name is string => Boolean(name))
+    .map((name) => [name, ""]),
+);
 const storageState = path.join(__dirname, "e2e/.auth/user.json");
 // An absolute path keeps Prisma from resolving it against the schema folder, and keeps dev.db out of reach.
 const DB_URL = `file:${path.join(__dirname, "prisma/sanity.db")}`;
@@ -62,9 +69,8 @@ export default defineConfig({
       AUTH_TRUST_HOST: "true",
       GOOGLE_OAUTH_CLIENT_ID: "sanity",
       GOOGLE_OAUTH_CLIENT_SECRET: "sanity",
-      // Blank values stop a developer's .env.local from reaching real providers.
-      OPENROUTER_API_KEY: "",
-      NVIDIA_NIM_API_KEY: "",
+      // Blank values stop a developer's .env.local from reaching real providers (--live keeps its keys).
+      ...(live ? {} : providerEnv),
       TAVILY_API_KEY: "",
       OLLAMA_BASE_URL: live ? process.env.OLLAMA_BASE_URL || "http://localhost:11434" : "http://127.0.0.1:9",
       NEXT_TELEMETRY_DISABLED: "1",
