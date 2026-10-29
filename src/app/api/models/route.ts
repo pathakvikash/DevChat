@@ -12,6 +12,7 @@ import {
   type ModelCatalogEntry,
   type OllamaModelInfo,
 } from "@/lib/models";
+import { mockModelCatalog } from "@/lib/mockModels";
 import { resolveOpenRouterKey, resolveNvidiaNimKey } from "@/lib/apiKeys";
 import { requireUserId } from "@/lib/auth";
 
@@ -81,6 +82,7 @@ export async function GET() {
   }
 
   const allModels = mergeAndDedupeModels(ollamaModels, [
+    ...mockModelCatalog(),
     ...openRouterModels,
     ...nvidiaModels,
   ]);

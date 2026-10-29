@@ -1,5 +1,6 @@
 import { createOpenAI } from "@ai-sdk/openai";
 import { createOllama } from "ollama-ai-provider-v2";
+import { mockModelCatalog, mockModelConfig } from "@/lib/mockModels";
 
 const ollamaUrl = process.env.OLLAMA_BASE_URL || "http://localhost:11434";
 const ollama = createOllama({ baseURL: `${ollamaUrl}/api` });
@@ -519,6 +520,7 @@ export function getAllModels(): ModelConfig[] {
   const openRouterModels = Object.values(openRouter.modelCache);
   const nvidiaModels = Object.values(nvidiaNim.modelCache);
   return [
+    ...mockModelCatalog().map((m) => mockModelConfig(m.id)!),
     ...staticModels,
     ...ollamaModels,
     ...openRouterModels,
@@ -527,6 +529,9 @@ export function getAllModels(): ModelConfig[] {
 }
 
 export function getModel(modelId: string): ModelConfig {
+  const mock = mockModelConfig(modelId);
+  if (mock) return mock;
+
   if (STATIC_MODELS[modelId]) {
     return STATIC_MODELS[modelId];
   }

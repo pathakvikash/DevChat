@@ -1,6 +1,8 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  // The sanity suite builds elsewhere so it can run beside `next dev` in this checkout.
+  ...(process.env.SANITY_DIST_DIR && { distDir: process.env.SANITY_DIST_DIR }),
   devIndicators: false,
   async headers() {
     return [

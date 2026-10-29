@@ -2,6 +2,7 @@ import { generateText } from "ai";
 import { getModel, initializeOllamaModels } from "@/lib/models";
 import { prisma } from "@/lib/db";
 import { countTokens } from "@/lib/tokens";
+import { isSanityMode } from "@/lib/sanityMode";
 
 /**
  * Default model used for compaction. Picked to be a small, fast local model
@@ -67,7 +68,7 @@ export async function compressConversation(
   // Initialize Ollama models before getting the model config
   await initializeOllamaModels();
 
-  const modelConfig = getModel(modelId);
+  const modelConfig = getModel(isSanityMode() ? "mock/summary" : modelId); // sanity suite: never a real model
   const isOllama = modelId.startsWith("ollama/");
 
   const MAX_COMPRESSION_TOKENS = 4000;
