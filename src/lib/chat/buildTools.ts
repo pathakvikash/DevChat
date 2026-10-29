@@ -1,4 +1,4 @@
-import { tool, type Tool } from "ai";
+import { generateId, tool, type Tool, type UIMessage } from "ai";
 import { z } from "zod";
 import { TOOL_REGISTRY, getSkill } from "@/lib/registry";
 import { prisma } from "@/lib/db";
@@ -8,7 +8,8 @@ import type { ToolExecutionContext } from "@/lib/registry/types";
 import { searchUserChats, readUserChat } from "@/lib/chatSearch";
 import { budgetTokens } from "@/lib/chat/contextBudget";
 import { quoteSearchResults } from "@/lib/chat/quotePastChat";
-import type { AgentTarget } from "@/lib/chat/agentMessages";
+import { buildAgentMessagePart, type AgentTarget } from "@/lib/chat/agentMessages";
+import { buildMessagesFromConversation } from "@/lib/utils/conversation";
 import { MODE_POLICY, needsApproval, type ChatMode } from "@/lib/chat/modes";
 import {
   applySubAgentProgress,
@@ -327,6 +328,8 @@ export interface SubAgentToolOptions {
   providerOptions?: RunSubAgentOptions["providerOptions"];
   /** Helpers allowed to run in one step: 3 for API models, 1 for CLI models. */
   maxParallel: number;
+  /** Helper ids running in this request. runAgent and messageAgent share one set, so a helper runs once at a time. */
+  activeChildren?: Set<string>;
 }
 
 async function startSubAgentChild(opts: SubAgentToolOptions, title: string, task: string): Promise<string> {
@@ -367,14 +370,90 @@ async function finishSubAgentChild(childId: string, modelId: string, result: Sub
   });
 }
 
+/** The helpers' tool set: the parent's, minus the mutating tools in a read-only mode. */
+function helperToolSet(parentTools: Record<string, Tool>, mode: ToolMode): Record<string, Tool> {
+  return Object.fromEntries(Object.entries(parentTools).filter(([id]) => mode === "agent" || !isMutatingTool(id)));
+}
+
+/** A helper's saved messages as UI messages, oldest first. */
+async function loadChildHistory(childId: string): Promise<UIMessage[]> {
+  const rows = await prisma.message.findMany({
+    where: { conversationId: childId },
+    orderBy: { createdAt: "asc" },
+    select: { id: true, role: true, content: true, parts: true, createdAt: true },
+  });
+  return (buildMessagesFromConversation({ messages: rows }) as unknown as UIMessage[]).filter(
+    (m) => m.role === "user" || m.role === "assistant",
+  );
+}
+
+/** One helper card: progress as preliminary outputs, then the final result. The run saves itself. */
+async function* runChildCard(
+  opts: SubAgentToolOptions,
+  tools: Record<string, Tool>,
+  card: { childId: string; label: string; startedAt: number; brief: string; resume?: RunSubAgentOptions["resume"] },
+  signal: AbortSignal,
+): AsyncGenerator<SubAgentOutput> {
+  const { childId, label, startedAt, brief, resume } = card;
+  let out = startSubAgentOutput(label, startedAt, childId);
+  let dirty = true;
+  let wake: (() => void) | undefined;
+  let settled = false;
+  const onProgress = (event: SubAgentProgress) => {
+    out = applySubAgentProgress(out, event);
+    dirty = true;
+    wake?.();
+  };
+  // The save runs with the run, not in this generator, so it happens even if the consumer stops reading.
+  const run = runSubAgent({
+    brief,
+    model: opts.model,
+    mode: opts.mode,
+    workingFolder: opts.workingFolder,
+    tools,
+    providerOptions: opts.providerOptions,
+    abortSignal: signal,
+    onProgress,
+    resume,
+  })
+    .catch(
+      (err): SubAgentResult => ({
+        status: "error",
+        report: "",
+        steps: 0,
+        usage: { inputTokens: 0, outputTokens: 0 },
+        transcript: [],
+        error: err instanceof Error ? err.message : String(err),
+      }),
+    )
+    .then(async (result) => {
+      settled = true;
+      await finishSubAgentChild(childId, opts.model.id, result).catch((err) =>
+        console.error("[subagent] could not save the run:", err),
+      );
+      wake?.();
+      return result;
+    });
+
+  while (!settled) {
+    if (!dirty) await new Promise<void>((resolve) => (wake = resolve));
+    wake = undefined;
+    if (dirty) {
+      dirty = false;
+      yield out;
+    }
+  }
+  const result = await run;
+  yield finishSubAgentOutput(out, result, Date.now());
+}
+
 /**
  * The `runAgent` tool: one helper per call, run to completion, with progress as preliminary
  * outputs. Built from the parent's tools after `buildTools`, so it sees the same set.
  */
 export function runAgentTool(parentTools: Record<string, Tool>, opts: SubAgentToolOptions): Tool {
-  const helperTools = Object.fromEntries(
-    Object.entries(parentTools).filter(([id]) => opts.mode === "agent" || !isMutatingTool(id)),
-  );
+  const helperTools = helperToolSet(parentTools, opts.mode);
+  const active = opts.activeChildren ?? new Set<string>();
   let running = 0;
 
   return tool({
@@ -414,58 +493,91 @@ export function runAgentTool(parentTools: Record<string, Tool>, opts: SubAgentTo
           } satisfies SubAgentOutput;
           return;
         }
-
-        let out = startSubAgentOutput(label, startedAt, childId);
-        let dirty = true;
-        let wake: (() => void) | undefined;
-        let settled = false;
-        const onProgress = (event: SubAgentProgress) => {
-          out = applySubAgentProgress(out, event);
-          dirty = true;
-          wake?.();
-        };
-        // The save runs with the run, not in this generator, so it happens even if the consumer stops reading.
-        const run = runSubAgent({
-          brief: task,
-          model: opts.model,
-          mode: opts.mode,
-          workingFolder: opts.workingFolder,
-          tools: helperTools,
-          providerOptions: opts.providerOptions,
-          abortSignal: signal,
-          onProgress,
-        })
-          .catch(
-            (err): SubAgentResult => ({
-              status: "error",
-              report: "",
-              steps: 0,
-              usage: { inputTokens: 0, outputTokens: 0 },
-              transcript: [],
-              error: err instanceof Error ? err.message : String(err),
-            }),
-          )
-          .then(async (result) => {
-            settled = true;
-            await finishSubAgentChild(childId, opts.model.id, result).catch((err) =>
-              console.error("[subagent] could not save the run:", err),
-            );
-            wake?.();
-            return result;
-          });
-
-        while (!settled) {
-          if (!dirty) await new Promise<void>((resolve) => (wake = resolve));
-          wake = undefined;
-          if (dirty) {
-            dirty = false;
-            yield out;
-          }
+        active.add(childId);
+        try {
+          yield* runChildCard(opts, helperTools, { childId, label, startedAt, brief: task }, signal);
+        } finally {
+          active.delete(childId);
         }
-        const result = await run;
-        yield finishSubAgentOutput(out, result, Date.now());
       } finally {
         running--;
+      }
+    },
+    toModelOutput: ({ output }) => subAgentModelOutput(output as SubAgentOutput),
+  });
+}
+
+/**
+ * The `messageAgent` tool: one more run for a finished helper of this chat, resumed from its saved
+ * transcript, on a new card with the same limits as runAgent. Another chat's or user's helper, or one
+ * already running in this request, is refused.
+ */
+export function messageAgentTool(parentTools: Record<string, Tool>, opts: SubAgentToolOptions): Tool {
+  const helperTools = helperToolSet(parentTools, opts.mode);
+  const active = opts.activeChildren ?? new Set<string>();
+
+  return tool({
+    description:
+      "Send one more message to a helper that this chat started earlier (use the id from its runAgent result). The helper resumes from its saved work with your message and writes a new report. Use it to follow up on that helper's findings instead of starting a new helper.",
+    inputSchema: z.object({
+      agentId: z.string().min(1).describe("Id of a helper from an earlier runAgent result in this chat."),
+      message: z.string().min(1).max(8000).describe("What the helper should do next, with the facts it needs."),
+    }),
+    execute: async function* ({ agentId, message }, { abortSignal }) {
+      const signal = abortSignal ?? new AbortController().signal;
+      const startedAt = Date.now();
+      const refuse = (error: string): SubAgentOutput => ({
+        ...startSubAgentOutput("Sub-agent", startedAt),
+        status: "error",
+        endedAt: Date.now(),
+        error,
+      });
+      // Reserved before any await, so two calls for one helper in one step cannot both start.
+      if (active.has(agentId)) {
+        yield refuse("That sub-agent is already running. Wait for it to finish, then ask again.");
+        return;
+      }
+      if (active.size >= opts.maxParallel) {
+        yield refuse(`Only ${opts.maxParallel} sub-agent${opts.maxParallel === 1 ? " runs" : "s run"} at once here. Wait for the others, then ask again.`);
+        return;
+      }
+      active.add(agentId);
+      try {
+        const child = await prisma.conversation.findFirst({
+          where: { id: agentId, parentId: opts.parentId, kind: "subagent", userId: opts.userId },
+          select: { id: true, title: true },
+        });
+        if (!child) {
+          yield refuse("No sub-agent with that id in this chat.");
+          return;
+        }
+        const parent = await prisma.conversation.findUnique({ where: { id: opts.parentId }, select: { title: true } });
+        const userMessage: UIMessage = {
+          id: generateId(),
+          role: "user",
+          parts: [
+            buildAgentMessagePart({ from: "parent", fromConversationId: opts.parentId, fromTitle: parent?.title ?? "", hop: 1 }),
+            { type: "text", text: message },
+          ] as UIMessage["parts"],
+        };
+        let history: UIMessage[];
+        try {
+          // History first: the new message must not be in it twice.
+          history = await loadChildHistory(child.id);
+          await saveUserMessage({ conversationId: child.id, id: userMessage.id, text: message, parts: userMessage.parts });
+        } catch (err) {
+          console.error("[subagent] could not save the follow-up:", err);
+          yield { ...refuse("Could not send the follow-up."), childId: child.id };
+          return;
+        }
+        yield* runChildCard(
+          opts,
+          helperTools,
+          { childId: child.id, label: child.title || "Sub-agent", startedAt, brief: message, resume: { history, message: userMessage } },
+          signal,
+        );
+      } finally {
+        active.delete(agentId);
       }
     },
     toModelOutput: ({ output }) => subAgentModelOutput(output as SubAgentOutput),

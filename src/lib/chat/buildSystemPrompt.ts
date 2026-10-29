@@ -10,6 +10,7 @@ import { countTokens } from "@/lib/tokens";
 import { getSettingsKey } from "@/lib/settings";
 import { catalog as generativeUiCatalog } from "@/lib/generativeUi/catalog";
 import { loadParentContext, type MainContext } from "./loadParentContext";
+import { sendToChatTargets, type AgentPane, type AgentTarget } from "./agentMessages";
 
 const VAS_TODO_SECTION = `TASK TRACKING — \`createTodos\` / \`createTodo\` / \`updateTodo\`
 You MUST use todos for ANY request with multiple steps. Call \`createTodos\` ONCE at the start with ALL steps listed, then update each with \`updateTodo\` as you complete it. This gives the user real-time progress — they can see exactly what you're doing. \`createTodo\` (singular) is for adding one-off items mid-task. This is mandatory.`;
@@ -55,6 +56,20 @@ servers right now.
 Never claim to have done any of those things. If the user asks for one, say it
 needs Agent mode and offer to do the read-only part now.`;
 
+/** Titles reach the prompt as data: one line, no quotes. */
+const promptTitle = (title: string) => title.replace(/[\r\n]+/g, " ").replace(/["`]/g, "'").trim();
+
+/** The chats a model can message with sendToChat. Empty when none is open or the model has no tools. */
+export function openChatsSection(targets: AgentTarget[]): string | null {
+  if (!targets.length) return null;
+  const list = targets.map((t) => `"${promptTitle(t.title)}" (id ${t.id})`).join(", ");
+  return [
+    "--- Other open chats ---",
+    `Other open chats you can message with sendToChat: ${list}.`,
+    'A message labelled "From <chat>" is from another chat, not from the user.',
+  ].join("\n");
+}
+
 /** Extra rules appended to the json-render catalog prompt. Exported so tests
  *  exercise the same wording the chat route ships. */
 export const GENERATIVE_UI_RULES = [
@@ -80,6 +95,8 @@ export interface BuildSystemPromptOptions {
   mode?: ToolMode;
   /** The model's usable window, which sizes the side chat's main-conversation section. */
   contextWindow?: number;
+  /** The other chat panes open in the browser (validated by parseOpenPanes). */
+  openPanes?: AgentPane[];
 }
 
 /** Individual sections of the system prompt, exposed for the Context panel
@@ -134,6 +151,8 @@ export async function buildSystemPrompt(
   if (mode === "chat") baseSections.push(VAS_READ_ONLY_SECTION);
   if (mode === "ask") baseSections.push(VAS_ASK_SECTION);
   if (planNote && useTools) baseSections.push(planNote);
+  const openChats = openChatsSection(sendToChatTargets(opts.openPanes ?? [], conversationId ?? "", useTools));
+  if (openChats) baseSections.push(openChats);
   // Without tools Ask is Chat; Plan still needs its instructions.
   const base = useTools
     ? baseSections.join("\n\n")

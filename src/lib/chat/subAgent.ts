@@ -1,7 +1,7 @@
-import { generateId, readUIMessageStream, stepCountIs, streamText, type Tool, type UIMessage } from "ai";
+import { convertToModelMessages, generateId, readUIMessageStream, stepCountIs, streamText, type Tool, type UIMessage } from "ai";
 import type { ModelConfig } from "@/lib/models";
 import type { ToolMode } from "@/lib/chat/buildTools";
-import { normalizeToolParts } from "@/lib/chat/normalizeToolParts";
+import { normalizeMessageToolParts, normalizeToolParts } from "@/lib/chat/normalizeToolParts";
 import { nextStepSettings } from "@/lib/chat/loopGuard";
 import { quotePastChat } from "@/lib/chat/quotePastChat";
 
@@ -49,6 +49,8 @@ export interface RunSubAgentOptions {
   onProgress?: (event: SubAgentProgress) => void;
   /** The default is 5 minutes; tests pass a short one. */
   timeoutMs?: number;
+  /** A follow-up run: the helper's saved messages, then `message` as the new user turn (`brief` is unused). */
+  resume?: { history: UIMessage[]; message: UIMessage };
 }
 
 export interface SubAgentResult {
@@ -94,8 +96,8 @@ const errorMessage = (err: unknown) => (err instanceof Error ? err.message : Str
  * Never throws for a model or tool failure; the status says what happened.
  */
 export async function runSubAgent(opts: RunSubAgentOptions): Promise<SubAgentResult> {
-  const { brief, model, mode, workingFolder, onProgress = () => {}, timeoutMs = SUB_AGENT_TIMEOUT_MS } = opts;
-  const userMessage: UIMessage = { id: generateId(), role: "user", parts: [{ type: "text", text: brief }] };
+  const { brief, model, mode, workingFolder, onProgress = () => {}, timeoutMs = SUB_AGENT_TIMEOUT_MS, resume } = opts;
+  const userMessage: UIMessage = resume?.message ?? { id: generateId(), role: "user", parts: [{ type: "text", text: brief }] };
   const zeroUsage = { inputTokens: 0, outputTokens: 0 };
 
   // Text deltas: the first one goes out at once, then at most one per window; the last pending one goes at the window's end.
@@ -188,10 +190,13 @@ export async function runSubAgent(opts: RunSubAgentOptions): Promise<SubAgentRes
 
   let result: ReturnType<typeof streamText>;
   try {
+    const messages = resume
+      ? await convertToModelMessages(normalizeMessageToolParts([...resume.history, userMessage]), { tools })
+      : [{ role: "user" as const, content: brief }];
     result = streamText({
       model: model.model,
       system: helperPrompt(mode, workingFolder),
-      messages: [{ role: "user", content: brief }],
+      messages,
       ...(hasTools ? { tools } : {}),
       // The last step must write the report: no more tool calls. Models that ignore it
       // still stop at the cap, with a note.

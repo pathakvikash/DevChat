@@ -77,6 +77,7 @@ describe("mock model provider", () => {
       "mock/write",
       "mock/plan",
       "mock/subagent",
+      "mock/talker",
       "mock/notools",
       "mock/summary",
     ]);

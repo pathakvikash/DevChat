@@ -1,5 +1,5 @@
 import { quoteSearchResults } from "./quotePastChat";
-import { frameAgentMessageParts } from "./agentMessages";
+import { AGENT_MESSAGE_PART, buildAgentMessagePart, frameAgentMessageParts, parseAgentMessagePart } from "./agentMessages";
 
 /**
  * Collapse duplicate tool parts and fix bogus states so every call has a result. Providers reject
@@ -163,7 +163,9 @@ export function splitAtQueuedMessages<T extends { id?: string; role?: string; pa
     endReply();
     const queuedId = String(part.data?.queuedId ?? part.id ?? "");
     const text = String(part.data?.text ?? "");
-    out.push({ ...message, id: queuedId, role: "user", parts: [{ type: "text", text }] });
+    const agent = part.data?.agent ? parseAgentMessagePart({ type: AGENT_MESSAGE_PART, data: part.data.agent }) : null;
+    const body = [{ type: "text", text }];
+    out.push({ ...message, id: queuedId, role: "user", parts: agent ? [buildAgentMessagePart(agent), ...body] : body });
     replyId = `${message.id}:${queuedId}`;
   }
   endReply();

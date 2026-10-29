@@ -143,7 +143,8 @@ export function shouldAutoContinue(parts: AnyPart[] | undefined): boolean {
     const { state, output } = tail as ToolPart;
     return (state === "output-available" || state === "result") && (output as PlanDecision | undefined)?.action === "revise";
   }
-  if (tail?.type !== "tool-executeCode") return false;
+  // A sendToChat answer goes back to the model so it can carry on in this chat.
+  if (tail?.type !== "tool-executeCode" && tail?.type !== "tool-sendToChat") return false;
   const { state } = tail as ToolPart;
   return state === "output-available" || state === "result";
 }
