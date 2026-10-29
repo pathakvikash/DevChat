@@ -20,9 +20,14 @@ export async function GET(_req: NextRequest, { params }: Params) {
     const queued = await prisma.queuedMessage.findMany({
       where: { conversationId: id, deliveredAt: null },
       orderBy: { seq: "asc" },
-      select: { id: true, text: true, seq: true },
+      select: { id: true, text: true, seq: true, agent: true },
     });
-    return NextResponse.json({ queued });
+    return NextResponse.json({
+      queued: queued.map((q) => {
+        const agent = q.agent ? parseAgentMessagePart({ type: AGENT_MESSAGE_PART, data: JSON.parse(q.agent) }) : null;
+        return { id: q.id, text: q.text, seq: q.seq, ...(agent ? { agent } : {}) };
+      }),
+    });
   } catch (error) {
     console.error("Failed to load the queue:", error);
     return NextResponse.json({ error: "Failed to load the queue" }, { status: 500 });

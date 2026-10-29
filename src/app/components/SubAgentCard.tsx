@@ -137,7 +137,7 @@ export default function SubAgentCard({
         {out?.childId && (
           <button
             type="button"
-            title="Open transcript in side chat"
+            title="Open transcript next to this chat"
             onClick={() => {
               if (onOpen) onOpen(out.childId!);
               else if (split) split.openSplit(out.childId!);
