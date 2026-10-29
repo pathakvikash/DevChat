@@ -526,6 +526,24 @@ export const TOOL_REGISTRY: Record<string, ToolDefinition> = {
     enabledByDefault: true,
     builtIn: true,
   },
+
+  // ─── AGENTS (browser-run; buildTools offers it only with another open chat) ─
+  sendToChat: {
+    id: "sendToChat",
+    name: "Send to Chat",
+    description: "Send a message to another open chat or side chat.",
+    modelDescription:
+      "Send a message to another chat that is open in a pane right now. `to` is that chat's id or exact title, from the open chats listed below. The message arrives there labelled as from another chat, not from the user, and that chat may answer by calling sendToChat back. Use it only when the user asks you to pass something to another chat or to answer a message from one. At most 3 agent messages per user message, across all chats.",
+    category: "Agents",
+    internal: true,
+    inputSchema: z.object({
+      to: z.string().min(1).describe("Id or exact title of an open chat."),
+      message: z.string().min(1).describe("The message. The receiving chat shows it as from another chat, not the user."),
+    }),
+    // No execute — the chat pane sends it (like executeCode).
+    enabledByDefault: true,
+    builtIn: true,
+  },
 };
 
 export function listTools(): ToolDefinition[] {

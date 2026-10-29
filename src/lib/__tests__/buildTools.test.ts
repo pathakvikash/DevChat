@@ -407,3 +407,31 @@ describe("buildTools past-chat tools", () => {
     expect(await tools.readChat.execute!({ id: "c1" }, {} as any)).toBe(framed);
   });
 });
+
+describe("sendToChat", () => {
+  const targets = [{ id: "main", title: "Pricing research" }];
+
+  it("is offered with an open chat to reach, in chat mode too, and has no execute", async () => {
+    const tools = await buildTools({
+      activeToolIds: resolveActiveToolIds([], []),
+      searchProvider: "duckduckgo",
+      userId: "test-user",
+      contextWindow: 8192,
+      mode: "chat",
+      agentTargets: targets,
+    });
+    expect(tools).toHaveProperty("sendToChat");
+    expect(tools.sendToChat.execute).toBeUndefined();
+    expect(tools.sendToChat.description).toContain('"Pricing research" (id main)');
+  });
+
+  it("is absent when no other chat is open", async () => {
+    const tools = await buildTools({
+      activeToolIds: resolveActiveToolIds([], []),
+      searchProvider: "duckduckgo",
+      userId: "test-user",
+      contextWindow: 8192,
+    });
+    expect(tools).not.toHaveProperty("sendToChat");
+  });
+});
