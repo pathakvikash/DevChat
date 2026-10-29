@@ -10,6 +10,7 @@ import {
 } from "./providers";
 import { listCliModels, cliProviderForModel, createCliModel, type CliCatalogEntry } from "./cliProviders";
 import { detectionAvailable } from "./providerDetect";
+import { mockModelConfig } from "@/lib/mockModels";
 
 const ollamaUrl = process.env.OLLAMA_BASE_URL || "http://localhost:11434";
 const ollama = createOllama({ baseURL: `${ollamaUrl}/api` });
@@ -428,6 +429,8 @@ export async function listModels(
 /** Runnable config for one model id. Hosted models are built fresh from `creds` so
  *  concurrent users never share a client or a key. Throws on unknown id or no creds. */
 export function getModel(modelId: string, creds: ProviderCreds = {}): ModelConfig {
+  const mock = mockModelConfig(modelId);
+  if (mock) return mock;
   if (ollamaModelCache[modelId]) return ollamaModelCache[modelId];
 
   if (modelId.startsWith("ollama/")) {

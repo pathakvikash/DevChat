@@ -4,6 +4,7 @@ import { resolveProviderCreds } from "@/lib/apiKeys";
 import { prisma } from "@/lib/db";
 import { countTokens } from "@/lib/tokens";
 import { liveSince } from "@/lib/liveSince";
+import { isSanityMode } from "@/lib/sanityMode";
 
 /**
  * Default model used for compaction. Picked to be a small, fast local model
@@ -78,9 +79,10 @@ export async function compressConversation(
   // Initialize Ollama models before getting the model config
   await initializeOllamaModels();
 
+  const effectiveModelId = isSanityMode() ? "mock/summary" : modelId; // sanity suite: never a real model
   const creds = conversation.userId ? await resolveProviderCreds(conversation.userId) : {};
-  const modelConfig = getModel(modelId, creds);
-  const isOllama = modelId.startsWith("ollama/");
+  const modelConfig = getModel(effectiveModelId, creds);
+  const isOllama = effectiveModelId.startsWith("ollama/");
 
   const MAX_COMPRESSION_TOKENS = 4000;
 

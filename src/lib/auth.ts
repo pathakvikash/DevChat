@@ -2,6 +2,7 @@ import NextAuth from "next-auth";
 import Google from "next-auth/providers/google";
 import { PrismaAdapter } from "@auth/prisma-adapter";
 import { prisma } from "@/lib/db";
+import { sanityAuthProviders } from "@/lib/sanityAuth";
 
 const BACKFILL_MODELS = [
   "conversation",
@@ -19,7 +20,9 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       clientId: process.env.GOOGLE_OAUTH_CLIENT_ID,
       clientSecret: process.env.GOOGLE_OAUTH_CLIENT_SECRET,
     }),
+    ...sanityAuthProviders(),
   ],
+  // Credentials sign-in requires JWT sessions, which this app already uses.
   session: { strategy: "jwt" },
   pages: { signIn: "/login" },
   callbacks: {

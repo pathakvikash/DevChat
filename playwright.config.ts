@@ -1,0 +1,71 @@
+import path from "node:path";
+import { defineConfig, devices } from "@playwright/test";
+
+const PORT = 3210;
+const live = process.env.SANITY_LIVE === "1";
+const storageState = path.join(__dirname, "e2e/.auth/user.json");
+// An absolute path keeps Prisma from resolving it against the schema folder, and keeps dev.db out of reach.
+const DB_URL = `file:${path.join(__dirname, "prisma/sanity.db")}`;
+
+export default defineConfig({
+  testDir: "e2e",
+  snapshotPathTemplate: "{testDir}/__screenshots__/{testFilePath}/{arg}-{projectName}{-platform}{ext}",
+  // One shared DB and one fixed user, so specs run one at a time.
+  workers: 1,
+  retries: 1,
+  timeout: 60_000,
+  grepInvert: live ? undefined : /@live/,
+  reporter: [["list"], ["html", { open: "never" }]],
+  expect: {
+    timeout: 10_000,
+    toHaveScreenshot: { animations: "disabled", caret: "hide", maxDiffPixelRatio: 0.01 },
+  },
+  use: {
+    baseURL: `http://localhost:${PORT}`,
+    locale: "en-US",
+    timezoneId: "UTC",
+    trace: "retain-on-failure",
+    screenshot: "only-on-failure",
+  },
+  projects: [
+    { name: "setup", testMatch: /auth\.setup\.ts/ },
+    {
+      name: "desktop",
+      testIgnore: /auth\.setup\.ts/,
+      use: { ...devices["Desktop Chrome"], viewport: { width: 1280, height: 800 }, storageState },
+      dependencies: ["setup"],
+    },
+    {
+      name: "mobile",
+      testMatch: /visual\.spec\.ts/,
+      use: { ...devices["Desktop Chrome"], viewport: { width: 400, height: 800 }, storageState },
+      dependencies: ["setup"],
+    },
+  ],
+  webServer: {
+    command: `npx next dev --port ${PORT}`,
+    url: `http://localhost:${PORT}/login`,
+    reuseExistingServer: true,
+    timeout: 180_000,
+    // The app logs every failed Ollama lookup (expected here); SANITY_DEBUG=1 shows the server log.
+    stdout: process.env.SANITY_DEBUG ? "pipe" : "ignore",
+    stderr: process.env.SANITY_DEBUG ? "pipe" : "ignore",
+    env: {
+      // Playwright sets NODE_ENV=test for itself; the server must run as dev (never production).
+      NODE_ENV: "development",
+      SANITY_TEST_AUTH: "1",
+      DATABASE_URL: DB_URL,
+      SANITY_DIST_DIR: ".next-sanity",
+      AUTH_SECRET: "sanity-suite-secret-not-a-real-secret",
+      AUTH_TRUST_HOST: "true",
+      GOOGLE_OAUTH_CLIENT_ID: "sanity",
+      GOOGLE_OAUTH_CLIENT_SECRET: "sanity",
+      // Blank values stop a developer's .env.local from reaching real providers.
+      OPENROUTER_API_KEY: "",
+      NVIDIA_NIM_API_KEY: "",
+      TAVILY_API_KEY: "",
+      OLLAMA_BASE_URL: live ? process.env.OLLAMA_BASE_URL || "http://localhost:11434" : "http://127.0.0.1:9",
+      NEXT_TELEMETRY_DISABLED: "1",
+    },
+  },
+});

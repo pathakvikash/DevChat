@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
 import { auth, signIn } from "@/lib/auth";
+import { isSanityMode, SANITY_PROVIDER_ID } from "@/lib/sanityMode";
 import { MessageSquare } from "lucide-react";
 
 export default async function LoginPage({
@@ -48,6 +49,23 @@ export default async function LoginPage({
             Continue with Google
           </button>
         </form>
+
+        {isSanityMode() && (
+          <form
+            action={async () => {
+              "use server";
+              if (!isSanityMode()) return;
+              await signIn(SANITY_PROVIDER_ID, { redirectTo: callbackUrl || "/" });
+            }}
+          >
+            <button
+              type="submit"
+              className="w-full px-4 py-2.5 rounded-[var(--glass-radius-md)] glass-button text-sm font-medium transition"
+            >
+              Sign in as test user
+            </button>
+          </form>
+        )}
       </div>
     </main>
   );

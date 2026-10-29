@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { listModels } from "@/lib/models";
 import { resolveProviderCreds } from "@/lib/apiKeys";
+import { mockModelCatalog } from "@/lib/mockModels";
 import { requireUserId } from "@/lib/auth";
 
 export async function GET() {
@@ -11,10 +12,13 @@ export async function GET() {
   return NextResponse.json({
     // Strip the runtime `model` instance and cost fields; the client only
     // needs the catalog shape.
-    models: models.map(
-      ({ model: _m, costPer1kInputTokens: _i, costPer1kOutputTokens: _o, maxTokens: _t, ...entry }) =>
-        entry,
-    ),
+    models: [
+      ...mockModelCatalog(), // sanity suite only; empty otherwise
+      ...models.map(
+        ({ model: _m, costPer1kInputTokens: _i, costPer1kOutputTokens: _o, maxTokens: _t, ...entry }) =>
+          entry,
+      ),
+    ],
     providers: status,
     ollamaAvailable: models.some((m) => m.id.startsWith("ollama/")),
   });
