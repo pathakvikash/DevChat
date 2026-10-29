@@ -8,6 +8,7 @@ import type { MinimapMessage } from "@/app/components/MinimapNavigator";
 import { parseCommand, missingArg } from "@/lib/commands";
 import { buildMessageParts } from "@/lib/utils/messageParts";
 import { buildMessagesFromConversation, lastExchange, type RawConversation } from "@/lib/utils/conversation";
+import { composeQuoteMessage, type QuoteCard } from "@/lib/utils/quoteReply";
 
 import { fetchSettings as apiFetchSettings, saveSettings as apiSaveSettings } from "@/app/hooks/useSettingsApi";
 import { runCommandAction } from "./runCommandAction";
@@ -17,6 +18,17 @@ import { useMessageActions } from "./useMessageActions";
 import type { ConversationPageState } from "./types";
 
 export type { ConversationPageState };
+
+// Pending deletes of temporary chats we just left. Module-level, so a remount of the same chat
+// (Fast Refresh reset, error "Try again") finds and cancels its own.
+const pendingLeave = new Map<string, number>();
+const LEAVE_GRACE_MS = 5000;
+
+function discardTemporaryChat(id: string) {
+  // keepalive lets the request outlive the page on a full reload; ?temporary=1 means the server
+  // never deletes a chat that stopped being temporary.
+  fetch(`/api/conversations/${id}?temporary=1`, { method: "DELETE", keepalive: true }).catch(() => {});
+}
 
 export function useConversationPage(conversationId: string, initialPrompt?: string): ConversationPageState {
   const { toast } = useToast();
@@ -28,6 +40,9 @@ export function useConversationPage(conversationId: string, initialPrompt?: stri
   const [files, setFiles] = useState<File[]>([]);
   /** Suggested next message, shown greyed in the box after a reply. */
   const [suggestion, setSuggestion] = useState<string | null>(null);
+  const [quotes, setQuotes] = useState<QuoteCard[]>([]);
+  const [announcement, setAnnouncement] = useState("");
+  const quoteSeq = useRef(0);
   const [loading, setLoading] = useState(true);
   const scrollRef = useRef<HTMLDivElement>(null);
   const [selectedKbId, setSelectedKbId] = useState<string>("");
@@ -144,8 +159,8 @@ export function useConversationPage(conversationId: string, initialPrompt?: stri
         setArtifactPanelOpen(true);
       }
     }
-    // Auto-consolidate memory every 10 messages
-    if (all.length > 0 && all.length % 10 === 0) {
+    // Auto-consolidate memory every 10 messages, unless memory is off (temporary chats never save).
+    if (!conversation?.temporary && !conversation?.memoryDisabled && all.length > 0 && all.length % 10 === 0) {
       fetch(`/api/memory/consolidate`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -170,7 +185,7 @@ export function useConversationPage(conversationId: string, initialPrompt?: stri
         else console.warn("[suggest] no suggestion returned");
       })
       .catch((e) => console.warn("[suggest] request failed:", e?.message || e));
-  }, [refreshConversation, fetchContextUsage, messages, setSelectedArtifactId, setArtifactPanelOpen, setIsCompressing, conversationId, conversation?.model]);
+  }, [refreshConversation, fetchContextUsage, messages, setSelectedArtifactId, setArtifactPanelOpen, setIsCompressing, conversationId, conversation?.model, conversation?.temporary, conversation?.memoryDisabled]);
 
   onErrorRef.current = useCallback((err: Error) => {
     const msg = err?.message || String(err);
@@ -212,6 +227,55 @@ export function useConversationPage(conversationId: string, initialPrompt?: stri
     return () => window.removeEventListener("vas:title-updated", handleTitleUpdate);
   }, [conversationId]);
 
+  /* ─── Temporary chat ───────────────────────────────────────────────────── */
+
+  const temporaryRef = useRef(false);
+  useEffect(() => { temporaryRef.current = !!conversation?.temporary; }, [conversation?.temporary]);
+  useEffect(() => {
+    // A remount of this chat (Strict Mode, Fast Refresh, Try again) means we never left.
+    window.clearTimeout(pendingLeave.get(conversationId));
+    pendingLeave.delete(conversationId);
+    // Sidebar "New Chat" reloads the page, which skips cleanup, so it announces the leave first.
+    function onLeaving() {
+      if (!temporaryRef.current) return;
+      temporaryRef.current = false;
+      discardTemporaryChat(conversationId);
+    }
+    window.addEventListener("vas:leaving-chat", onLeaving);
+    return () => {
+      window.removeEventListener("vas:leaving-chat", onLeaving);
+      if (!temporaryRef.current) return;
+      pendingLeave.set(conversationId, window.setTimeout(() => {
+        pendingLeave.delete(conversationId);
+        discardTemporaryChat(conversationId);
+      }, LEAVE_GRACE_MS));
+    };
+  }, [conversationId]);
+
+  async function toggleTemporary() {
+    if (!conversation) return;
+    const next = !conversation.temporary;
+    // Turning it off wins immediately: a leave before the PATCH lands must not delete the chat.
+    if (!next) {
+      temporaryRef.current = false;
+      window.clearTimeout(pendingLeave.get(conversationId));
+      pendingLeave.delete(conversationId);
+    }
+    try {
+      const res = await fetch(`/api/conversations/${conversationId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ temporary: next }),
+      });
+      if (!res.ok) throw new Error(String(res.status));
+      setConversation((prev) => (prev ? { ...prev, temporary: next } : prev));
+      window.dispatchEvent(new CustomEvent("vas:temporary-changed", { detail: { id: conversationId, temporary: next } }));
+    } catch (e) {
+      console.error("Failed to toggle temporary chat:", e);
+      toast("Couldn't update this chat", "error");
+    }
+  }
+
   /* ─── Message actions ──────────────────────────────────────────────────── */
 
   const msgActions = useMessageActions({
@@ -224,11 +288,59 @@ export function useConversationPage(conversationId: string, initialPrompt?: stri
     handleRegenerateMessage, handleRegenExecute,
   } = msgActions;
 
+  /* ─── Quote cards ───────────────────────────────────────────────────────── */
+
+  function addQuote(text: string) {
+    setQuotes((prev) => [...prev, { id: `quote-${quoteSeq.current++}`, text, instruction: "" }]);
+    // The no-break space makes the live region change, so a second quote is announced too.
+    setAnnouncement((a) => (a === "Quote added" ? "Quote added\u00A0" : "Quote added"));
+  }
+  const updateQuote = (id: string, instruction: string) =>
+    setQuotes((prev) => prev.map((q) => (q.id === id ? { ...q, instruction } : q)));
+  const removeQuote = (id: string) => setQuotes((prev) => prev.filter((q) => q.id !== id));
+
+  /** Cmd/Ctrl+Enter in a card: sends just that card; the rest of the composer stays. */
+  async function sendQuote(id: string) {
+    const quote = quotes.find((q) => q.id === id);
+    if (!quote || isLoading) return;
+    try {
+      const sending = sendMessage({ parts: [{ type: "text" as const, text: composeQuoteMessage([quote], "") }] });
+      setQuotes((prev) => prev.filter((q) => q.id !== quote.id));
+      await sending;
+    } catch (err) {
+      console.error("[sendQuote] sendMessage failed:", err);
+      toast("Failed to send message", "error");
+      setQuotes((prev) => (prev.some((q) => q.id === quote.id) ? prev : [...prev, quote]));
+    }
+  }
+
   /* ─── Submit ────────────────────────────────────────────────────────────── */
+
+  /** Sends the typed text, files and every quote card as one message. */
+  async function sendComposed() {
+    if (!input.trim() && files.length === 0 && quotes.length === 0) return;
+    if (isLoading) return;
+    const sent = quotes;
+    try {
+      const { parts, attachments } = await buildMessageParts(composeQuoteMessage(sent, input), files, conversation?.model);
+      const sending = sendMessage({ parts }, { body: { attachments } });
+      // The message is in the transcript now, so the cards have done their job.
+      setQuotes((prev) => prev.filter((q) => !sent.some((s) => s.id === q.id)));
+      await sending;
+      setInput("");
+      setFiles([]);
+      setSuggestion(null);
+    } catch (err) {
+      console.error("[handleSubmit] sendMessage failed:", err);
+      toast("Failed to send message", "error");
+      // Whatever didn't get sent stays: put back any card that was already cleared.
+      setQuotes((prev) => [...sent.filter((s) => !prev.some((q) => q.id === s.id)), ...prev]);
+    }
+  }
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    if (!input.trim() && files.length === 0) return;
+    if (!input.trim() && files.length === 0 && quotes.length === 0) return;
     if (status === "streaming" || status === "submitted") return;
 
     const parsed = parseCommand(input);
@@ -250,14 +362,7 @@ export function useConversationPage(conversationId: string, initialPrompt?: stri
       return;
     }
 
-    const { parts, attachments } = await buildMessageParts(input, files, conversation?.model);
-    // Clear the box the moment the message leaves; sendMessage only resolves
-    // after the whole reply has streamed.
-    setInput("");
-    setFiles([]);
-    setSuggestion(null);
-    try { await sendMessage({ parts }, { body: { attachments } }); }
-    catch (err) { console.error("[handleSubmit] sendMessage failed:", err); toast("Failed to send message", "error"); }
+    await sendComposed();
   }
 
   /* ─── Dialog management ────────────────────────────────────────────────── */
@@ -304,6 +409,8 @@ export function useConversationPage(conversationId: string, initialPrompt?: stri
   return {
     conversation, setConversation, loading, setLoading,
     input, setInput, files, setFiles, suggestion, setSuggestion,
+    quotes, addQuote, updateQuote, removeQuote, sendQuote, sendComposed, announcement,
+    toggleTemporary,
     scratchpadOpen, setScratchpadOpen,
     todoPanelOpen, setTodoPanelOpen,
     advancedOpen, setAdvancedOpen,

@@ -84,6 +84,7 @@ export async function resolveChatSettings(
         maxTokens: true,
         chatOnlyMode: true,
         memoryDisabled: true,
+        temporary: true,
         maxToolCalls: true,
         fallbackModel: true,
         reasoningEffort: true,
@@ -99,7 +100,8 @@ export async function resolveChatSettings(
       topP = conv.topP ?? undefined;
       maxTokens = conv.maxTokens ?? undefined;
       chatOnlyMode = conv.chatOnlyMode ?? chatOnlyMode;
-      memoryDisabled = conv.memoryDisabled ?? memoryDisabled;
+      // Temporary chats never touch memory, whatever the toggle says.
+      memoryDisabled = conv.temporary || (conv.memoryDisabled ?? memoryDisabled);
       maxToolCalls = conv.maxToolCalls ?? maxToolCalls;
       reasoningEffort = conv.reasoningEffort ?? undefined;
       workingFolder = conv.workingFolder ?? undefined;

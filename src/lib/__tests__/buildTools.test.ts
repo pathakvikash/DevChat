@@ -294,6 +294,20 @@ describe("buildTools mode gating", () => {
     expect(tools).toHaveProperty("createArtifact");
   });
 
+  it("memoryDisabled drops the memory tools but keeps the other mutating ones", async () => {
+    const tools = await buildTools({
+      activeToolIds: ALL,
+      searchProvider: "duckduckgo",
+      userId: "test-user",
+      mode: "agent",
+      memoryDisabled: true,
+      contextWindow: 8192,
+    });
+    expect(tools).not.toHaveProperty("rememberFact");
+    expect(tools).not.toHaveProperty("forgetFact");
+    expect(tools).toHaveProperty("createArtifact");
+  });
+
   it("chat mode never queries MCP servers", async () => {
     const { prisma } = await import("@/lib/db");
     await buildTools({

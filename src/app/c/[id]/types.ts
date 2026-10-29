@@ -1,6 +1,7 @@
 import type { MinimapMessage } from "@/app/components/MinimapNavigator";
 import type { Conversation } from "@/app/components/conversation/types";
 import type { DataActions } from "./useConversationData";
+import type { QuoteCard } from "@/lib/utils/quoteReply";
 
 export interface ConversationPageState extends DataActions {
   conversation: Conversation | null;
@@ -14,6 +15,15 @@ export interface ConversationPageState extends DataActions {
   setSuggestion: React.Dispatch<React.SetStateAction<string | null>>;
   files: File[];
   setFiles: React.Dispatch<React.SetStateAction<File[]>>;
+  quotes: QuoteCard[];
+  addQuote: (text: string) => void;
+  updateQuote: (id: string, instruction: string) => void;
+  removeQuote: (id: string) => void;
+  sendQuote: (id: string) => Promise<void>;
+  sendComposed: () => Promise<void>;
+  /** Text for the pane's polite live region. */
+  announcement: string;
+  toggleTemporary: () => Promise<void>;
   scratchpadOpen: boolean;
   setScratchpadOpen: React.Dispatch<React.SetStateAction<boolean>>;
   todoPanelOpen: boolean;

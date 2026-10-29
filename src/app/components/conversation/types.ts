@@ -18,6 +18,7 @@ export interface Conversation {
   chatOnlyMode?: boolean;
   memoryDisabled?: boolean;
   generativeUiEnabled?: boolean;
+  temporary?: boolean;
   maxToolCalls?: number;
   fallbackModel?: string | null;
   reasoningEffort?: string | null;

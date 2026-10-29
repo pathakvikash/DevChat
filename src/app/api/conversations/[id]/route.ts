@@ -33,8 +33,16 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   try {
     const userId = await requireUserId();
     const { id } = await params;
-    const { title, model, persona, systemPrompt, webSearch, temperature, maxTokens, kbId, contextLength, topP, chatOnlyMode, pinned, archived, note, maxToolCalls, fallbackModel, reasoningEffort, workingFolder } =
+    const { title, model, persona, systemPrompt, webSearch, temperature, maxTokens, kbId, contextLength, topP, chatOnlyMode, memoryDisabled, temporary, pinned, archived, note, maxToolCalls, fallbackModel, reasoningEffort, workingFolder } =
       await req.json();
+
+    if (temporary !== undefined && typeof temporary !== "boolean") {
+      return NextResponse.json({ error: "temporary must be a boolean" }, { status: 400 });
+    }
+
+    if (memoryDisabled !== undefined && typeof memoryDisabled !== "boolean") {
+      return NextResponse.json({ error: "memoryDisabled must be a boolean" }, { status: 400 });
+    }
 
     // A working folder lets a CLI-backed model read (or, in agent mode, edit)
     // files there, so it is confined to folders Claude Code already knows.
@@ -55,8 +63,9 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       }
     }
 
+    // A chat can only become temporary before its first message.
     const conversation = await prisma.conversation.updateMany({
-      where: { id, userId },
+      where: { id, userId, ...(temporary === true && { messages: { none: {} } }) },
       data: {
         ...(title !== undefined && { title }),
         ...(model !== undefined && { model }),
@@ -69,6 +78,8 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
         ...(contextLength !== undefined && { contextLength }),
         ...(topP !== undefined && { topP }),
         ...(chatOnlyMode !== undefined && { chatOnlyMode }),
+        ...(memoryDisabled !== undefined && { memoryDisabled }),
+        ...(temporary !== undefined && { temporary }),
         ...(pinned !== undefined && { pinned }),
         ...(archived !== undefined && { archived }),
         ...(note !== undefined && { note }),
@@ -80,7 +91,10 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     });
 
     if (conversation.count === 0) {
-      return NextResponse.json({ error: "Conversation not found" }, { status: 404 });
+      const exists = temporary === true && (await prisma.conversation.findFirst({ where: { id, userId }, select: { id: true } }));
+      return exists
+        ? NextResponse.json({ error: "Only a chat with no messages can become temporary" }, { status: 409 })
+        : NextResponse.json({ error: "Conversation not found" }, { status: 404 });
     }
 
     const updated = await prisma.conversation.findUnique({ where: { id } });
@@ -96,9 +110,13 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
     const userId = await requireUserId();
     const { id } = await params;
 
-    const result = await prisma.conversation.deleteMany({
-      where: { id, userId },
-    });
+    // ?temporary=1 (the leave path) never deletes a chat that is no longer temporary.
+    const where = { id, userId, ...(new URL(req.url).searchParams.get("temporary") === "1" && { temporary: true }) };
+    const chat = await prisma.conversation.findFirst({ where, select: { temporary: true } });
+    // Traces hold no foreign key, so a temporary chat's have to go explicitly.
+    if (chat?.temporary) await prisma.trace.deleteMany({ where: { conversationId: id } });
+
+    const result = await prisma.conversation.deleteMany({ where });
 
     if (result.count === 0) {
       return NextResponse.json({ error: "Conversation not found" }, { status: 404 });

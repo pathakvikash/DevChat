@@ -86,7 +86,7 @@ export default function MessageActions({
   return (
     <div
       className={`
-        mt-1.5 flex items-center gap-1
+        mt-1.5 flex select-none items-center gap-1
         ${isUser ? "justify-end" : "justify-start"}
         opacity-100 sm:opacity-0 sm:group-hover:opacity-100 sm:focus-within:opacity-100
         transition-opacity duration-150

@@ -89,6 +89,11 @@ function truncate(value: unknown, max = 2000): unknown {
 
 export async function recordTrace(obs: TraceObservation): Promise<void> {
   try {
+    if (obs.conversationId) {
+      // Temporary chats leave no trace, and a chat deleted mid-stream has nothing to attach one to.
+      const chat = await prisma.conversation.findUnique({ where: { id: obs.conversationId }, select: { temporary: true } });
+      if (!chat || chat.temporary) return;
+    }
     const totalTokens = obs.promptTokens + obs.completionTokens;
     const cost = estimateCost(obs.model, obs.promptTokens, obs.completionTokens);
     const trace = await prisma.trace.create({

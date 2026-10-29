@@ -20,7 +20,7 @@ export default function CodeBlock({ language, code }: CodeBlockProps) {
 
   return (
     <div className="glass-card rounded-[var(--glass-radius-md)] my-2 overflow-hidden group">
-      <div className="flex items-center justify-between glass-surface px-4 py-2 text-xs text-zinc-400">
+      <div className="flex select-none items-center justify-between glass-surface px-4 py-2 text-xs text-zinc-400">
         <span>{language || "code"}</span>
         <div className="flex gap-2">
           <button

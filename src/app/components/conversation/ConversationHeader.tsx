@@ -1,6 +1,6 @@
 "use client";
 
-import { Code2, Settings2, AlertCircle, Download, FileCode, Menu, Keyboard, Brain, MoreHorizontal } from "lucide-react";
+import { Code2, Settings2, AlertCircle, Download, FileCode, Menu, Keyboard, Brain, MoreHorizontal, MessageSquareDashed } from "lucide-react";
 import { useState, useRef, useEffect } from "react";
 import { useSidebar } from "@/app/contexts/SidebarContext";
 import { useChatMode } from "@/app/contexts/ChatModeContext";
@@ -20,6 +20,7 @@ interface ConversationHeaderProps {
     topP?: number;
     maxTokens?: number;
     memoryDisabled?: boolean;
+    temporary?: boolean;
   };
   messagesCount: number;
   scratchpadOpen: boolean;
@@ -32,6 +33,7 @@ interface ConversationHeaderProps {
   onOpenKeyboardShortcuts?: () => void;
   error?: { message?: string } | null;
   onToggleMemory?: () => void;
+  onToggleTemporary?: () => void;
 }
 
 export default function ConversationHeader({
@@ -47,6 +49,7 @@ export default function ConversationHeader({
   onOpenKeyboardShortcuts,
   error,
   onToggleMemory,
+  onToggleTemporary,
 }: ConversationHeaderProps) {
   const { toggle } = useSidebar();
   const { toast } = useToast();
@@ -72,8 +75,27 @@ export default function ConversationHeader({
             <Menu size={18} />
           </button>
           {/* min-w-0 or the title refuses to truncate and squeezes the actions. */}
-          <h1 className="min-w-0 flex-1 text-lg font-bold truncate text-[var(--foreground)]">{conversation.title}</h1>
+          <h1 className="min-w-0 flex-1 text-lg font-bold truncate text-[var(--foreground)]">
+            {conversation.temporary && conversation.title === "New Chat" ? "Temporary chat" : conversation.title}
+          </h1>
           <div className="flex items-center gap-2 shrink-0">
+            {onToggleTemporary && messagesCount === 0 && (
+              <button
+                type="button"
+                onClick={onToggleTemporary}
+                aria-pressed={!!conversation.temporary}
+                aria-label="Temporary chat"
+                title="Temporary chat: not saved in your history, no memory. Deleted when you leave or after 24 hours."
+                className={`focus-ring flex h-7 items-center justify-center gap-1.5 rounded-[var(--glass-radius-md)] px-1.5 text-xs font-medium text-[var(--foreground)] transition shrink-0 sm:px-2.5 ${
+                  conversation.temporary
+                    ? "glass-strong border-dashed!"
+                    : "glass-button"
+                }`}
+              >
+                <MessageSquareDashed size={16} />
+                <span className="hidden sm:inline">Temporary</span>
+              </button>
+            )}
             <ModeToggle mode={mode} onModeChange={setMode} />
             {/* These move into the More menu on small screens. */}
             <div className="hidden sm:flex items-center gap-2">
@@ -128,15 +150,21 @@ export default function ConversationHeader({
                   <div className="sm:hidden border-t border-[var(--glass-border)]" />
                   {onToggleMemory && (
                     <button
-                      onClick={() => { setMoreOpen(false); onToggleMemory(); }}
+                      // aria-disabled, not disabled, so the label stays readable and focusable.
+                      aria-disabled={conversation.temporary || undefined}
+                      onClick={() => { if (conversation.temporary) return; setMoreOpen(false); onToggleMemory(); }}
                       className={`flex w-full items-center gap-3 px-4 py-3 text-sm transition ${
-                        conversation.memoryDisabled
+                        conversation.memoryDisabled || conversation.temporary
                           ? "text-[var(--foreground)]/50 hover:bg-[var(--glass-bg-hover)]"
                           : "text-[var(--foreground)] hover:bg-[var(--glass-bg-hover)]"
                       }`}
                     >
                       <Brain size={14} />
-                      <span>Memory {conversation.memoryDisabled ? "(off)" : "(on)"}</span>
+                      <span>
+                        {conversation.temporary
+                          ? "Memory (off in temporary chats)"
+                          : `Memory ${conversation.memoryDisabled ? "(off)" : "(on)"}`}
+                      </span>
                     </button>
                   )}
                   <button
@@ -179,6 +207,11 @@ export default function ConversationHeader({
           </div>
         </div>
         <div className="flex items-center gap-3 mt-1">
+          {conversation.temporary && (
+            <span className="inline-flex items-center gap-1 text-xs text-zinc-400">
+              <MessageSquareDashed size={12} /> Temporary chat · deleted when you leave
+            </span>
+          )}
           <p className="text-xs text-[var(--foreground)]/50">{messagesCount} messages</p>
           {conversation.contextLength && (
             <span className="text-xs text-[var(--foreground)]/40">

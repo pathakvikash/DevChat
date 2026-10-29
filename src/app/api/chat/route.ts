@@ -225,6 +225,7 @@ export async function POST(req: Request) {
           conversationId,
           userId,
           mode: toolMode,
+          memoryDisabled,
           contextWindow: contextWindowFor(servedModel, modelConfig, contextLength),
         })
       : {};

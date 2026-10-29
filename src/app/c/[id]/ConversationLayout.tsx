@@ -17,7 +17,6 @@ import { useCommandPaletteActions } from "@/app/components/CommandPalette";
 import ConversationHeader from "@/app/components/conversation/ConversationHeader";
 import EmptyState from "@/app/components/conversation/EmptyState";
 import { useKeyboardShortcuts } from "@/app/hooks/useKeyboardShortcuts";
-import { buildMessageParts } from "@/lib/utils/messageParts";
 import { joinTextParts } from "@/lib/utils/conversation";
 import { StickyNote, FileCode, SlidersHorizontal, Settings, BarChart3, Target } from "lucide-react";
 
@@ -40,16 +39,7 @@ export default function ConversationLayout({ conversationId, initialPrompt }: Pr
   ]);
 
   useKeyboardShortcuts({
-    onSend: () => {
-      if (!p.input.trim() && p.files.length === 0) return;
-      if (p.status === "streaming" || p.status === "submitted") return;
-      buildMessageParts(p.input, p.files, p.conversation?.model).then(({ parts, attachments }) => {
-        p.setInput("");
-        p.setFiles([]);
-        p.setSuggestion(null);
-        void p.sendMessage({ parts }, { body: { attachments } });
-      });
-    },
+    onSend: p.sendComposed,
     isDialogOpen: p.isDialogOpen,
     onCloseDialog: p.closeTopDialog,
     onOpenKeyboardShortcuts: () => p.setKeyboardShortcutsOpen(true),
@@ -69,7 +59,7 @@ export default function ConversationLayout({ conversationId, initialPrompt }: Pr
     return (
       <div className="flex h-screen items-center justify-center bg-[var(--background)] text-[var(--foreground)]">
         <div className="glass-card rounded-[var(--glass-radius-xl)] px-8 py-6">
-          Conversation not found
+          This chat no longer exists
         </div>
       </div>
     );
@@ -78,6 +68,7 @@ export default function ConversationLayout({ conversationId, initialPrompt }: Pr
   return (
     <div className="flex h-screen bg-[var(--background)]">
       <main className="flex h-screen flex-1 min-w-0 flex-col bg-[var(--background)] text-[var(--foreground)]">
+        <div aria-live="polite" className="sr-only">{p.announcement}</div>
         <ConversationHeader
           conversation={p.conversation}
           messagesCount={p.messages.length}
@@ -90,6 +81,7 @@ export default function ConversationLayout({ conversationId, initialPrompt }: Pr
           onOpenAdvanced={() => p.setAdvancedOpen(true)}
           onOpenKeyboardShortcuts={() => p.setKeyboardShortcutsOpen(true)}
           error={p.error}
+          onToggleTemporary={p.toggleTemporary}
           onToggleMemory={async () => {
             try {
               const next = !p.conversation?.memoryDisabled;
@@ -112,7 +104,7 @@ export default function ConversationLayout({ conversationId, initialPrompt }: Pr
 
         <div className="relative flex-1 flex min-h-0">
           {p.messages.length === 0 && !p.isLoading && (
-            <EmptyState modelName={p.currentModelName} />
+            <EmptyState modelName={p.currentModelName} temporary={p.conversation.temporary} />
           )}
 
           {p.messages.length > 0 && (
@@ -127,6 +119,8 @@ export default function ConversationLayout({ conversationId, initialPrompt }: Pr
               onClarificationAnswer={p.handleClarificationAnswer}
               scrollRef={p.scrollRef}
               statusLabel={p.currentModelName ? `Waiting for ${p.currentModelName}…` : undefined}
+              onQuote={p.addQuote}
+              quoteSuppressed={p.isDialogOpen}
             />
           )}
 
@@ -169,6 +163,11 @@ export default function ConversationLayout({ conversationId, initialPrompt }: Pr
             if (p.suggestion) p.setInput(p.suggestion);
             p.setSuggestion(null);
           }}
+          quotes={p.quotes}
+          onQuoteChange={p.updateQuote}
+          onQuoteRemove={p.removeQuote}
+          onSendQuote={p.sendQuote}
+          temporary={p.conversation.temporary}
         />
       </main>
       <ArtifactPanel

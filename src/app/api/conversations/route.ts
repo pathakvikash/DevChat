@@ -2,6 +2,7 @@ import { prisma } from "@/lib/db";
 import { NextRequest, NextResponse } from "next/server";
 import { getSettingsKey } from "@/lib/settings";
 import { requireUserId } from "@/lib/auth";
+import { deleteExpiredTemporaryChats } from "@/lib/temporaryChat";
 
 export async function GET(req: NextRequest) {
   try {
@@ -9,7 +10,12 @@ export async function GET(req: NextRequest) {
     const { searchParams } = new URL(req.url);
     const hasNote = searchParams.get("hasNote") === "true";
 
-    const where = { userId, ...(hasNote ? { note: { not: null } } : {}) };
+    try {
+      await deleteExpiredTemporaryChats(userId);
+    } catch (e) {
+      console.error("Temporary chat cleanup failed:", e); // never let it break the list
+    }
+    const where = { userId, temporary: false, ...(hasNote ? { note: { not: null } } : {}) };
 
     const conversations = await prisma.conversation.findMany({
       select: {
@@ -51,6 +57,7 @@ export async function POST(req: NextRequest) {
       temperature,
       topP,
       maxTokens,
+      temporary,
     } = await req.json();
 
     const model = bodyModel || await getSettingsKey(userId, "defaultModel") || undefined;
@@ -66,6 +73,7 @@ export async function POST(req: NextRequest) {
         temperature,
         topP,
         maxTokens,
+        temporary: temporary === true,
       },
     });
 

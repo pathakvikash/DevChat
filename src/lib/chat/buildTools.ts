@@ -54,6 +54,8 @@ export interface BuildToolsOptions {
   mode?: ToolMode;
   /** The model's context window in tokens; `readChat` sizes its result from it. */
   contextWindow: number;
+  /** Memory is off (temporary chat or the Memory toggle): no rememberFact / forgetFact. */
+  memoryDisabled?: boolean;
 }
 
 /** Convert a JSON Schema object to a Zod schema (supports basic types). */
@@ -92,6 +94,7 @@ export async function buildTools({
   userId,
   mode = "agent",
   contextWindow,
+  memoryDisabled = false,
 }: BuildToolsOptions): Promise<Record<string, Tool>> {
   const ctx: ToolExecutionContext = { conversationId };
   const aiTools: Record<string, Tool> = {};
@@ -171,7 +174,7 @@ export async function buildTools({
     }
   }
 
-  if (allowMutating && activeToolIds.has("rememberFact")) {
+  if (allowMutating && !memoryDisabled && activeToolIds.has("rememberFact")) {
     aiTools.rememberFact = tool({
       description: "Save a persistent fact about the user...",
       inputSchema: z.object({
@@ -195,7 +198,7 @@ export async function buildTools({
     });
   }
 
-  if (allowMutating && activeToolIds.has("forgetFact")) {
+  if (allowMutating && !memoryDisabled && activeToolIds.has("forgetFact")) {
     aiTools.forgetFact = tool({
       description: "Delete a stored memory by key...",
       inputSchema: z.object({

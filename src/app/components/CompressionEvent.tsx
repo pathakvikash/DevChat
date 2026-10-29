@@ -39,7 +39,7 @@ export default function CompressionEvent({
           type="button"
           onClick={() => setExpanded((v) => !v)}
           aria-expanded={expanded}
-          className="w-full flex items-center justify-between gap-3 px-4 py-3 text-left hover:bg-[var(--glass-bg-hover)] transition"
+          className="w-full flex select-none items-center justify-between gap-3 px-4 py-3 text-left hover:bg-[var(--glass-bg-hover)] transition"
         >
           <div className="flex items-center gap-3 min-w-0">
             <div className="shrink-0 w-8 h-8 rounded-full glass-strong border-emerald-700/50 flex items-center justify-center">

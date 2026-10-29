@@ -1,6 +1,7 @@
 "use client";
 
 import { createContext, useContext, useEffect, useState, useCallback } from "react";
+import { MotionConfig } from "framer-motion";
 
 type Theme = "dark" | "light";
 
@@ -35,14 +36,17 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
     document.documentElement.setAttribute("data-theme", theme);
   }, [theme]);
 
-  if (!mounted) {
-    return <>{children}</>;
-  }
-
+  // framer-motion ignores prefers-reduced-motion unless told to follow it.
   return (
-    <ThemeContext.Provider value={{ theme, setTheme }}>
-      {children}
-    </ThemeContext.Provider>
+    <MotionConfig reducedMotion="user">
+      {mounted ? (
+        <ThemeContext.Provider value={{ theme, setTheme }}>
+          {children}
+        </ThemeContext.Provider>
+      ) : (
+        children
+      )}
+    </MotionConfig>
   );
 }
 

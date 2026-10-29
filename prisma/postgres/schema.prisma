@@ -83,6 +83,7 @@ model Conversation {
   chatOnlyMode             Boolean    @default(false)
   memoryDisabled           Boolean    @default(false)
   generativeUiEnabled      Boolean    @default(false)
+  temporary                Boolean    @default(false) // hidden from lists, memory off, deleted on leave or after 24h
   maxToolCalls     Int          @default(5)
   reasoningEffort  String? // low | medium | high | max; honored by reasoning-capable providers (Claude Code --effort, Codex, OpenCode --variant)
   workingFolder    String? // CLI-backed models only: folder the tool may read (chat mode) or edit (agent mode); null = sandboxed
