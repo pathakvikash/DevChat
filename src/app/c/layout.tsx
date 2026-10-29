@@ -10,8 +10,9 @@ import { useCommandPaletteActions } from "@/app/components/CommandPalette";
 import { createConversation } from "@/app/hooks/useConversationsApi";
 import { clampWidths, dividersPx, equalShares, resizeDivider, SPLIT_MIN_PX } from "@/lib/splitPanes";
 import { SplitViewProvider, useSplitView } from "./SplitViewContext";
-import PaneBar from "./PaneBar";
-import PaneSlot from "./PaneSlot";
+import { useSearchParams } from "next/navigation";
+import { useConversationPage } from "./[id]/useConversationPage";
+import ConversationPane from "./[id]/ConversationPane";
 import DropOverlay from "./DropOverlay";
 
 const SIDEBAR_WIDTH = 256;
@@ -106,6 +107,8 @@ function SplitPaletteActions() {
 function PaneArea({ children }: { children: ReactNode }) {
   const split = useSplitView();
   const { ids, focus, multi, sideBySide, info, limit } = split;
+  const page = useConversationPage();
+  const initialPrompt = useSearchParams().get("q") ?? undefined;
   const n = ids.length;
   const rowRef = useRef<HTMLDivElement>(null);
   const [stored, setStored] = useState<Record<number, number[]>>({});
@@ -194,6 +197,7 @@ function PaneArea({ children }: { children: ReactNode }) {
         data-pane-id={id}
         data-focused={id && id === focus ? "true" : undefined}
         onPointerDownCapture={() => id && split.focusPane(id)}
+        onFocusCapture={() => id && split.focusPane(id)}
         className={`@container relative min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-[var(--background)] ${visible ? "flex" : "hidden"}`}
         style={sized ? { flex: `${shares[index]} 1 0px`, minWidth: SPLIT_MIN_PX } : undefined}
       >
@@ -227,29 +231,15 @@ function PaneArea({ children }: { children: ReactNode }) {
     );
   }
 
-  const first = ids[0];
-  const firstBody = (
-    <>
-      {multi && (
-        <PaneBar
-          title={titleOf(first)}
-          focused={first === focus}
-          onClose={() => split.closeChat(first)}
-          warning={split.warnings[first]}
-          onWarningClick={() => split.focusPane(split.warnings[first]?.otherId ?? first)}
-        />
-      )}
-      <div className="flex min-h-0 flex-1 flex-col">{children}</div>
-    </>
-  );
-  const extras = ids.slice(1).flatMap((id, j) => [
-    divider(j),
-    renderPane(id, id, j + 1, (
-      <PaneSlot
+  const rows = ids.flatMap((id, i) => [
+    ...(i > 0 ? [divider(i - 1)] : []),
+    renderPane(id, id, i, (
+      <ConversationPane
         conversationId={id}
         focused={id === focus}
-        onFocus={() => split.focusPane(id)}
-        onClose={() => split.closeChat(id)}
+        initialPrompt={i === 0 ? initialPrompt : undefined}
+        searchProvider={page.searchProvider}
+        onToggleSearchProvider={page.toggleSearchProvider}
       />
     )),
   ]);
@@ -312,10 +302,9 @@ function PaneArea({ children }: { children: ReactNode }) {
         ref={rowRef}
         role={multi ? "group" : undefined}
         aria-label={multi ? "Split view" : undefined}
-        className={`relative flex min-h-0 min-w-0 flex-1 ${multi ? "[&_.h-screen]:h-full!" : ""}`}
+        className="relative flex min-h-0 min-w-0 flex-1"
       >
-        {renderPane("first", first, 0, firstBody)}
-        {extras}
+        {ids.length ? rows : renderPane("none", undefined, 0, children)}
         {dragEnabled && split.dragId && (
           <DropOverlay
             rowRef={rowRef}
@@ -344,15 +333,15 @@ export default function ConversationLayout({
 }) {
   return (
     <SidebarProvider>
-      {/* Above LayoutInner so the sidebar and header share one mode state. */}
-      <ChatModeProvider>
-        {/* SplitViewProvider reads the URL with useSearchParams, which needs a Suspense boundary. */}
-        <Suspense fallback={null}>
-          <SplitViewProvider>
+      {/* SplitViewProvider reads the URL with useSearchParams, which needs a Suspense boundary. */}
+      <Suspense fallback={null}>
+        <SplitViewProvider>
+          {/* Inside SplitViewProvider: the sidebar's mode is the focused pane's. */}
+          <ChatModeProvider>
             <LayoutInner>{children}</LayoutInner>
-          </SplitViewProvider>
-        </Suspense>
-      </ChatModeProvider>
+          </ChatModeProvider>
+        </SplitViewProvider>
+      </Suspense>
     </SidebarProvider>
   );
 }

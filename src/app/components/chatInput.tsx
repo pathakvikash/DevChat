@@ -1,5 +1,6 @@
 "use client";
 
+import type { ChatMode } from "@/app/components/conversation/types";
 import { useEffect, useRef, useState, useCallback } from "react";
 import { Plus, Upload, Globe, BookOpen, Settings, X, Slash, Mic, MicOff, ArrowRight, Loader2, Paperclip, AtSign, FileText } from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
@@ -18,7 +19,6 @@ import {
   type SlashCommand,
 } from "@/lib/commands";
 import { useVoiceDictation } from "@/lib/useVoiceDictation";
-import { useChatMode } from "@/app/contexts/ChatModeContext";
 import type { QuoteCard } from "@/lib/utils/quoteReply";
 import { findMentionQuery, formatSize, matchMentionFiles } from "@/lib/utils/fileMentions";
 
@@ -28,6 +28,8 @@ const MAX_INPUT_HEIGHT = 200;
 const SINGLE_LINE_HEIGHT = 40;
 
 interface ChatInputProps {
+  /** The pane's mode. The sidebar and header toggles switch it. */
+  mode: ChatMode;
   input: string;
   setInput: (value: string) => void;
   files: File[];
@@ -82,6 +84,7 @@ interface ChatInputProps {
 }
 
 export default function ChatInput({
+  mode,
   input,
   setInput,
   files,
@@ -121,8 +124,6 @@ export default function ChatInput({
   onQueueRetry = () => {},
   toolsAvailable = true,
 }: ChatInputProps) {
-  // Read-only here; the sidebar and header toggles do the actual switching.
-  const { mode } = useChatMode();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const [expanded, setExpanded] = useState(false);
   const [isDragging, setIsDragging] = useState(false);

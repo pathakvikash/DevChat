@@ -1,38 +1,36 @@
 "use client";
 
-import { createContext, useCallback, useContext, useEffect, useState } from "react";
-import { useParams } from "next/navigation";
+import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import type { ChatMode } from "@/app/components/conversation/types";
 import { storedChatMode } from "@/lib/chat/modes";
+import { useSplitViewOptional } from "@/app/c/SplitViewContext";
 
-/** What the current chat's model can do. The page sets it; the mode switch reads it. */
+/** What the current chat's model can do. The pane sets it; the mode switch reads it. */
 export interface ModelCaps {
   toolsAvailable: boolean;
   /** A CLI-backed model: Ask runs read-only for now. */
   cli: boolean;
 }
 
-interface ChatModeValue {
+export interface ChatModeValue {
   mode: ChatMode;
   setMode: (next: ChatMode) => void;
   modelCaps: ModelCaps;
   setModelCaps: (next: ModelCaps) => void;
 }
 
-const ChatModeContext = createContext<ChatModeValue | null>(null);
+export const ChatModeContext = createContext<ChatModeValue | null>(null);
+
+const MODE_CHANGED = "vas:mode-changed";
 
 /**
- * Holds the chat/agent mode. Lives above the page so the sidebar and the header
- * toggles share one source of truth. Per-conversation, localStorage only.
+ * A chat's mode, kept per conversation in localStorage. Every hook on the same id stays in step
+ * through the `vas:mode-changed` event, so the sidebar's switch and a pane's own switch agree.
  */
-export function ChatModeProvider({ children }: { children: React.ReactNode }) {
-  const params = useParams();
-  const conversationId = typeof params?.id === "string" ? params.id : undefined;
+export function useConversationMode(conversationId: string | null): { mode: ChatMode; setMode: (next: ChatMode) => void } {
   const storageKey = conversationId ? `vas:mode:${conversationId}` : null;
   const [mode, setModeState] = useState<ChatMode>("chat");
-  const [modelCaps, setModelCaps] = useState<ModelCaps>({ toolsAvailable: true, cli: false });
 
-  // Re-read on route change so mode doesn't leak between conversations.
   useEffect(() => {
     if (!storageKey) {
       setModeState("chat");
@@ -45,22 +43,44 @@ export function ChatModeProvider({ children }: { children: React.ReactNode }) {
     }
   }, [storageKey]);
 
+  useEffect(() => {
+    function onChanged(e: Event) {
+      const detail = (e as CustomEvent<{ id: string; mode: ChatMode }>).detail;
+      if (detail.id === conversationId) setModeState(detail.mode);
+    }
+    window.addEventListener(MODE_CHANGED, onChanged);
+    return () => window.removeEventListener(MODE_CHANGED, onChanged);
+  }, [conversationId]);
+
   const setMode = useCallback(
     (next: ChatMode) => {
       setModeState(next);
-      if (!storageKey) return;
+      if (!storageKey || !conversationId) return;
       try {
         localStorage.setItem(storageKey, next);
       } catch {}
+      window.dispatchEvent(new CustomEvent(MODE_CHANGED, { detail: { id: conversationId, mode: next } }));
     },
-    [storageKey],
+    [storageKey, conversationId],
   );
 
-  return (
-    <ChatModeContext.Provider value={{ mode, setMode, modelCaps, setModelCaps }}>
-      {children}
-    </ChatModeContext.Provider>
+  return { mode, setMode };
+}
+
+const DEFAULT_CAPS: ModelCaps = { toolsAvailable: true, cli: false };
+
+/**
+ * Layout-level value for the sidebar: the mode of the focused pane. Each pane provides its own
+ * value below this for its header and composer (see ConversationPane).
+ */
+export function ChatModeProvider({ children }: { children: React.ReactNode }) {
+  const focus = useSplitViewOptional()?.focus || null;
+  const { mode, setMode } = useConversationMode(focus);
+  const value = useMemo<ChatModeValue>(
+    () => ({ mode, setMode, modelCaps: DEFAULT_CAPS, setModelCaps: () => {} }),
+    [mode, setMode],
   );
+  return <ChatModeContext.Provider value={value}>{children}</ChatModeContext.Provider>;
 }
 
 /** For components that only render inside a conversation. */
