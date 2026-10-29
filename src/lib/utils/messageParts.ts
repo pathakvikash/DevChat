@@ -87,6 +87,21 @@ export function settleStaleParts<T extends { type?: string; state?: string; appr
   });
 }
 
+/** Claude Code tools that may be allowed for the rest of a chat. Bash and everything else always asks. */
+export const CHAT_ALLOWABLE_TOOLS: ReadonlySet<string> = new Set(["Edit", "Write", "MultiEdit", "NotebookEdit"]);
+
+/** A short preview of an edit: at most `max` removed and `max` added lines, each cut side ends in "…". */
+export function editPreview(input: unknown, max = 6): { minus: string[]; plus: string[] } {
+  const i = (input ?? {}) as Record<string, unknown>;
+  if (typeof i.old_string !== "string" || typeof i.new_string !== "string") return { minus: [], plus: [] };
+  const side = (text: string, mark: string) => {
+    const lines = text.split("\n");
+    const cut = lines.length > max;
+    return [...(cut ? lines.slice(0, max) : lines).map((l) => `${mark} ${l}`), ...(cut ? ["…"] : [])];
+  };
+  return { minus: side(i.old_string, "-"), plus: side(i.new_string, "+") };
+}
+
 /** Approval reasons the page writes: shown as "Allowed for this chat", "Denied", "Stopped". */
 export const ALLOWED_FOR_CHAT = "Allowed for this chat";
 export const DENIED_BY_USER = "The user denied this action.";

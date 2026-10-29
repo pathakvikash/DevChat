@@ -33,7 +33,7 @@ vi.mock("@/lib/chat/persistAssistantMessage", () => ({ safePersistAssistantMessa
 vi.mock("@/lib/chat/autoCompress", () => ({ autoCompress: vi.fn(), canAutoCompress: vi.fn(() => false) }));
 vi.mock("@/lib/observability", () => ({ recordTrace: vi.fn().mockResolvedValue(undefined) }));
 vi.mock("@/lib/claude/sessions", () => ({ isRunnableCwd: vi.fn(async () => false) }));
-vi.mock("@/lib/cliProviders", () => ({ cliProviderForModel: vi.fn(() => undefined) }));
+vi.mock("@/lib/cliProviders", () => ({ cliProviderForModel: vi.fn(() => undefined), dropParkedRuns: vi.fn() }));
 vi.mock("ai", async (importOriginal) => ({
   ...(await importOriginal<typeof import("ai")>()),
   streamText: vi.fn(() => ({

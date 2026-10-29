@@ -8,7 +8,7 @@ import {
 import { pipeJsonRender } from "@json-render/core";
 import { prisma } from "@/lib/db";
 import { getModel } from "@/lib/models";
-import { denyOpenApprovals, extractText, stripFileParts } from "@/lib/utils/messageParts";
+import { CHAT_ALLOWABLE_TOOLS, denyOpenApprovals, extractText, stripFileParts } from "@/lib/utils/messageParts";
 import {
   buildSystemPrompt,
 } from "@/lib/chat/buildSystemPrompt";
@@ -40,7 +40,7 @@ import {
 } from "@/lib/chat/queue";
 import { resolveChatSettings } from "@/lib/chat/resolveChatSettings";
 import { resolveModelCandidates } from "@/lib/chat/resolveModelCandidates";
-import { cliProviderForModel } from "@/lib/cliProviders";
+import { cliProviderForModel, dropParkedRuns } from "@/lib/cliProviders";
 import { isRunnableCwd } from "@/lib/claude/sessions";
 import { recordTrace } from "@/lib/observability";
 import {
@@ -103,6 +103,13 @@ export async function POST(req: Request) {
     allowedTools: bodyAllowedTools,
   } = await req.json();
   let messages = bodyMessages;
+  // A Claude Code card left open is closed when the chat sends anything that does not answer it.
+  const lastParts = Array.isArray(messages) && messages.at(-1)?.role === "assistant" ? (messages.at(-1).parts ?? []) : [];
+  const answeringCli = lastParts.some((p: any) => String(p?.approval?.id ?? "").startsWith("cli-"));
+  const releaseCliRuns = () => {
+    if (conversationId) dropParkedRuns(conversationId);
+  };
+  if (!answeringCli) releaseCliRuns();
   // Anything unknown falls back to chat, the safest mode.
   const requestedMode: ToolMode = isChatMode(bodyMode) ? bodyMode : "chat";
   // Without AUTH_SECRET the SDK can't sign or verify approvals, so Ask would trust the browser's answers.
@@ -118,6 +125,7 @@ export async function POST(req: Request) {
       });
       // A side chat is only ever read against a main chat of the same user.
       if (!owned || owned.userId !== userId || (owned.parent && owned.parent.userId !== userId)) {
+        releaseCliRuns();
         return new Response(JSON.stringify({ error: "Conversation not found" }), {
           status: 404,
           headers: { "Content-Type": "application/json" },
@@ -199,6 +207,7 @@ export async function POST(req: Request) {
       userId,
     });
     if (!resolution.ok) {
+      releaseCliRuns();
       return new Response(
         JSON.stringify({ error: formatMissingApiKeyMessage(resolution.missingKeyProvider) }),
         { status: 400, headers: { "Content-Type": "application/json" } },
@@ -325,6 +334,7 @@ export async function POST(req: Request) {
     // re-checked every turn; chat mode is read-only there, agent mode may edit, and
     // Ask lets Claude Code ask per change (its allow-for-chat list rides along).
     const cliProvider = cliProviderForModel(servedModel);
+    if (!cliProvider) releaseCliRuns();
     const cliCwd = workingFolder && (await isRunnableCwd(workingFolder)) ? workingFolder : "";
     const providerOptions = isOllama
       ? { ollama: ollamaOptions }
@@ -336,7 +346,7 @@ export async function POST(req: Request) {
               access: MODE_POLICY[toolMode].cli,
               conversationId: conversationId ?? "",
               allowedTools: Array.isArray(bodyAllowedTools)
-                ? bodyAllowedTools.filter((t: unknown): t is string => typeof t === "string")
+                ? bodyAllowedTools.filter((t: unknown): t is string => typeof t === "string" && CHAT_ALLOWABLE_TOOLS.has(t))
                 : [],
             },
           }
@@ -743,6 +753,7 @@ export async function POST(req: Request) {
     }
     throw lastError;
   } catch (error) {
+    releaseCliRuns();
     console.error("Chat API error:", error);
     const msg = error instanceof Error ? error.message : "Failed to process chat request";
     if (!traceRecorded) {

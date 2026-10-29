@@ -152,6 +152,8 @@ export function useConversationData(
     async (folder: string | null) => {
       if (!conversation) return;
       const previous = conversation.workingFolder ?? null;
+      // A new folder means the chat's "Allow for this chat" choices no longer apply.
+      try { localStorage.removeItem(`vas:allow:${conversationId}`); } catch {}
       setConversation({ ...conversation, workingFolder: folder });
       try {
         const res = await fetch(`/api/conversations/${conversationId}`, {

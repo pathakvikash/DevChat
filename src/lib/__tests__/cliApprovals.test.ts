@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { EventEmitter } from "events";
 import { PassThrough, Writable } from "stream";
 import { spawn } from "child_process";
+import { editPreview } from "@/lib/utils/messageParts";
 import {
   CLI_PROVIDERS,
   claudeParser,
@@ -272,5 +273,135 @@ describe("watchdog while a card waits", () => {
     vi.advanceTimersByTime(130_000);
     expect(c.kill).toHaveBeenCalled();
     await secondParts;
+  });
+});
+
+/** Parks a card for `toolUseId` in `conversationId`, returns its child and approval id. */
+async function parkCard(conversationId: string, toolUseId: string) {
+  const parts = readAll(await start(prompt(), "ask", "/w", conversationId));
+  await until(() => spawned.length >= 1);
+  const c = spawned[spawned.length - 1];
+  c.say(toolUse(toolUseId, "Edit"));
+  c.say(askRequest(`req_${toolUseId}`, toolUseId));
+  await parts;
+  return { c, approvalId: `cli-${toolUseId}` };
+}
+
+describe("answers stay with their own chat, provider and mode", () => {
+  it("never resumes another chat's process", async () => {
+    const { c, approvalId } = await parkCard("chat-A", "toolu_owner");
+    const wrongChat = await readAll(await start(answerPrompt(approvalId, true), "ask", "/w", "chat-B"));
+    expect(wrongChat.some((p) => p.type === "error" && /another chat/.test(String(p.error?.message)))).toBe(true);
+    expect(c.written.length).toBe(1);
+    expect(c.kill).not.toHaveBeenCalled();
+    // The owner can still answer it.
+    const owner = readAll(await start(answerPrompt(approvalId, true), "ask", "/w", "chat-A"));
+    await until(() => c.written.length >= 2);
+    expect(c.written[1]).toBe(controlResponse("req_toolu_owner", { behavior: "allow" }));
+    c.exit(0);
+    await owner;
+  });
+
+  it("denies and closes the process when Allow arrives from another provider", async () => {
+    const { c, approvalId } = await parkCard("chat-codex", "toolu_codex");
+    const codex = CLI_PROVIDERS.find((d) => d.id === "codex")!;
+    const model = createCliModel(codex, "default");
+    const { stream } = await model.doStream({
+      prompt: answerPrompt(approvalId, true),
+      providerOptions: { codex: { cwd: "/w", access: "ask", conversationId: "chat-codex", allowedTools: [] } },
+      tools: [],
+    } as any);
+    const parts = await readAll(stream);
+    expect(parts.some((p) => p.type === "error" && /no longer in Ask mode/.test(String(p.error?.message)))).toBe(true);
+    expect(c.written.at(-1)).toBe(controlResponse("req_toolu_codex", { behavior: "deny", message: "The user denied this action." }));
+    expect(c.kill).toHaveBeenCalled();
+  });
+
+  it("denies and closes the process when Allow arrives in Chat or Plan", async () => {
+    const { c, approvalId } = await parkCard("chat-plan", "toolu_plan");
+    const parts = await readAll(await start(answerPrompt(approvalId, true), "plan", "/w", "chat-plan"));
+    expect(parts.some((p) => p.type === "error")).toBe(true);
+    expect(c.written.at(-1)).toBe(controlResponse("req_toolu_plan", { behavior: "deny", message: "The user denied this action." }));
+    expect(c.kill).toHaveBeenCalled();
+  });
+
+  it("treats a non-boolean approval as not approved", async () => {
+    const { c, approvalId } = await parkCard("chat-truthy", "toolu_truthy");
+    const parts = readAll(await start(answerPrompt(approvalId, "yes" as unknown as boolean), "ask", "/w", "chat-truthy"));
+    await until(() => c.written.length >= 2);
+    expect(c.written[1]).toBe(controlResponse("req_toolu_truthy", { behavior: "deny", message: "The user denied this action." }));
+    c.exit(0);
+    await parts;
+  });
+
+  it("ignores allow-list entries that are not chat-allowable tools", async () => {
+    const stream = await start(prompt(), "ask", "/w", "chat-bash", ["Bash"]);
+    const parts = readAll(stream);
+    await until(() => spawned.length >= 1);
+    const c = spawned[spawned.length - 1];
+    c.say(toolUse("toolu_bash", "Bash"));
+    c.say(askRequest("req_bash", "toolu_bash", "Bash"));
+    const out = await parts;
+    expect(out).toContainEqual(expect.objectContaining({ type: "tool-approval-request", approvalId: "cli-toolu_bash" }));
+    expect(c.written.some((w) => w.includes('"behavior":"allow"'))).toBe(false);
+    c.exit(0);
+  });
+
+  it("emits the tool call before its card when the CLI did not announce it in this request", async () => {
+    // Without an assistant tool_use line the card still needs its tool call first.
+    const stream = await start(prompt(), "ask", "/w", "chat-fallback2");
+    const reading = readAll(stream);
+    await until(() => spawned.length >= 1);
+    const c = spawned[spawned.length - 1];
+    c.say(askRequest("req_fallback", "toolu_fallback"));
+    await until(() => c.written.length >= 1);
+    const out = await reading;
+    const call = out.findIndex((p) => p.type === "tool-call" && p.toolCallId === "toolu_fallback");
+    const card = out.findIndex((p) => p.type === "tool-approval-request");
+    expect(call).toBeGreaterThanOrEqual(0);
+    expect(call).toBeLessThan(card);
+  });
+});
+
+describe("folder note and edit preview", () => {
+  it("tells Claude Code that edits wait for approval, but keeps Codex's read-only wording", async () => {
+    const codex = CLI_PROVIDERS.find((d) => d.id === "codex")!;
+    const stream = createCliModel(codex, "default").doStream({
+      prompt: prompt(),
+      providerOptions: { codex: { cwd: "/w", access: "ask", conversationId: "note-codex", allowedTools: [] } },
+      tools: [],
+    } as any);
+    const { stream: codexStream } = await stream;
+    const reading = readAll(codexStream);
+    await until(() => spawned.length >= 1);
+    const codexChild = spawned[spawned.length - 1];
+    codexChild.exit(0);
+    await reading;
+    const codexStdin = codexChild.written.join("");
+    expect(codexStdin).toContain("not change them");
+    expect(codexStdin).not.toContain("wait for the user's approval");
+
+    const claudeStream = await start(prompt(), "ask", "/w", "note-claude");
+    const claudeReading = readAll(claudeStream);
+    await until(() => spawned.length >= 2);
+    const claudeChild = spawned[spawned.length - 1];
+    expect(claudeChild.written[0]).toBeDefined();
+    const sysIndex = vi.mocked(spawn).mock.calls.at(-1)![1] as string[];
+    expect(sysIndex.join(" ")).toContain("wait for the user's approval");
+    claudeChild.exit(0);
+    await claudeReading;
+  });
+});
+
+describe("edit preview", () => {
+  it("caps each side at six lines and marks the cut with an ellipsis", () => {
+    const many = Array.from({ length: 10 }, (_, i) => `line ${i}`).join("\n");
+    const p = editPreview({ old_string: many, new_string: many });
+    expect(p.minus).toHaveLength(7);
+    expect(p.minus.at(-1)).toBe("…");
+    expect(p.plus.at(-1)).toBe("…");
+    expect(p.minus[0]).toBe("- line 0");
+    expect(editPreview({ old_string: "a", new_string: "b" })).toEqual({ minus: ["- a"], plus: ["+ b"] });
+    expect(editPreview({ file_path: "/x" })).toEqual({ minus: [], plus: [] });
   });
 });

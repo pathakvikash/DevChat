@@ -6,6 +6,7 @@ import { delimiter, join } from "path";
 import { createInterface } from "readline";
 import type { LanguageModel } from "ai";
 import { PROVIDERS, ENV_ALIASES } from "./providers";
+import { CHAT_ALLOWABLE_TOOLS } from "./utils/messageParts";
 
 // `ai` only exports the `LanguageModel` union publicly; carve the v3 provider
 // interface out of it rather than depending on `@ai-sdk/provider` directly.
@@ -754,6 +755,8 @@ interface Reader {
  *  nothing reads its stdout, and it is kept in `parkedRuns` until the answer arrives in the next request. */
 interface LiveRun {
   proc: ChildProcess;
+  /** The CLI provider that spawned it; an answer from another provider must not resume it. */
+  providerId: string;
   parse: (line: string) => CliEvent[];
   /** stdin stays open for control responses until the result arrives. */
   stdinHeld: boolean;
@@ -795,7 +798,7 @@ function pendingAnswer(prompt: Prompt): { approvalId: string; approved: boolean 
   if (last?.role !== "tool" || !Array.isArray(last.content)) return undefined;
   for (const p of last.content as any[]) {
     if (p?.type === "tool-approval-response" && typeof p.approvalId === "string") {
-      return { approvalId: p.approvalId, approved: !!p.approved };
+      return { approvalId: p.approvalId, approved: p.approved === true };
     }
   }
   return undefined;
@@ -905,6 +908,7 @@ function runCli(
         child = spawn(def.bin, spec!.args, { cwd, env: childEnv(spec!.env), stdio: ["pipe", "pipe", "pipe"] });
         run = {
           proc: child,
+          providerId: def.id,
           parse: def.parser(),
           stdinHeld: !!spec!.holdStdin,
           conversationId: ask?.conversationId,
@@ -936,6 +940,8 @@ function runCli(
       let errorMsg: string | undefined;
       let retries = 0;
       const usage: CliUsage = {};
+      /** Tool calls already emitted in this request, so a card can reference one. */
+      const callsEmitted = new Set<string>();
 
       const stop = (reason: string) => {
         if (!errorMsg) errorMsg = reason;
@@ -1029,6 +1035,17 @@ function runCli(
         closeReasoning();
         closeText();
         const approvalId = `cli-${ev.toolUseId}`;
+        // The SDK needs the tool call in this response before it can attach a card to it.
+        if (!callsEmitted.has(ev.toolUseId)) {
+          controller.enqueue({
+            type: "tool-call",
+            toolCallId: ev.toolUseId,
+            toolName: ev.toolName,
+            input: JSON.stringify(ev.input ?? {}),
+            providerExecuted: true,
+            dynamic: true,
+          });
+        }
         run.reader = null;
         parked = true;
         run.pending = {
@@ -1067,6 +1084,7 @@ function runCli(
               closeReasoning();
               closeText();
               sawOutput = true;
+              callsEmitted.add(ev.id);
               controller.enqueue({
                 type: "tool-call",
                 toolCallId: ev.id,
@@ -1134,7 +1152,7 @@ export function createCliModel(def: CliProviderDef, modelArg: string): LanguageM
       ? `## Working folder\nYou are working in the folder ${cwd}. Use paths relative to it or absolute paths inside it; other locations are not accessible.${
           access === "agent"
             ? " You may read, create and edit files here. Shell commands are not available."
-            : access === "ask"
+            : access === "ask" && def.id === "claude-code"
               ? " You may read and search files here. Edits and commands wait for the user's approval."
               : " You may read and search files here but not change them."
         }`
@@ -1144,8 +1162,11 @@ export function createCliModel(def: CliProviderDef, modelArg: string): LanguageM
       .join("\n\n");
     const spec = def.invoke({ model: modelArg, system, user: flat.user, effort, cwd, access });
     const toolNames = new Set(tools.map((t) => t.name));
+    // Only the tools that may be allowed for a chat; anything else in the list is ignored.
     const allowed = new Set(
-      Array.isArray(po.allowedTools) ? po.allowedTools.filter((t: unknown): t is string => typeof t === "string") : [],
+      Array.isArray(po.allowedTools)
+        ? po.allowedTools.filter((t: unknown): t is string => typeof t === "string" && CHAT_ALLOWABLE_TOOLS.has(t))
+        : [],
     );
     const conversationId = typeof po.conversationId === "string" && po.conversationId ? po.conversationId : undefined;
     const ask: AskOptions = { allowed, conversationId };
@@ -1158,7 +1179,17 @@ export function createCliModel(def: CliProviderDef, modelArg: string): LanguageM
           stream: failedStream(warnings, "The permission request expired (it waited too long, or the server restarted). Send the request again."),
         };
       }
-      return { stream: runCli(def, null, warnings, options.abortSignal, toolNames, ask, { run, approved: answer.approved }) };
+      // Another chat's card is not this request's to answer; leave that process alone.
+      if (run.conversationId !== conversationId) {
+        return { stream: failedStream(warnings, "This permission request belongs to another chat.") };
+      }
+      // Allow only from the Ask mode of the provider that asked; anything else is denied and the process closed.
+      const allow = answer.approved && access === "ask" && run.providerId === def.id;
+      if (answer.approved && !allow) {
+        dropRun(run);
+        return { stream: failedStream(warnings, "The permission request was denied: the chat is no longer in Ask mode with this tool.") };
+      }
+      return { stream: runCli(def, null, warnings, options.abortSignal, toolNames, ask, { run, approved: allow }) };
     }
     // A new request means the chat moved on from any card still open.
     if (conversationId) dropParkedRuns(conversationId);
