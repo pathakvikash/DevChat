@@ -113,7 +113,7 @@ Design decisions (made in this doc; 3.14 lists where they differ from the brief)
 | 54 | `runAgent` is built inside `buildTools` and runs a nested `streamText`. Progress travels as preliminary tool outputs, not `data-*` parts. |
 | 55 | Loop guards stop throwing or quitting mid-task. They force one text-only step (`toolChoice: "none"`) so a turn always ends with a written answer. |
 | 56 | Client: one hook per pane (`useChatPane`) inside one generic pane container (`SplitView`); split view and the side chat are both uses of it. Hand-written, no new dependency. |
-| 57 | Messaging uses a browser-run `sendToChat({ chatId, text })` tool. Replies go back only when the receiver calls `sendToChat` too. Parent → sub-agent uses a server tool, `messageAgent`. |
+| 57 | Messaging uses a browser-run `sendToChat({ to, message })` tool. Replies go back only when the receiver calls `sendToChat` too. Parent → sub-agent uses a server tool, `messageAgent`. |
 
 Split view (owner-approved addition):
 
@@ -545,13 +545,13 @@ As a user, I tell the side chat "check this with the main chat", ask one chat in
 
 **Behaviour**
 
-- Every chat pane (main, split or side) gets `sendToChat({ chatId, text })`. `chatId` is any other open pane (the model is told which chats are open, with titles and ids), or `"side"` for this chat's own side chat.
+- Every chat pane (main, split or side) gets `sendToChat({ to, message })`. `to` is any other open pane (id or exact title) (the model is told which chats are open, with titles and ids), or `"side"` for this chat's own side chat.
 - The receiver gets a user-role message with a "From <chat title>" badge (an untitled side chat reads "From Side chat"). Its model sees a label saying it came from another assistant.
 - The receiver answers on its own. To answer the sender, it calls `sendToChat` back. Plain text stays in its own pane.
 - Up to 3 agent messages per user send, across all panes. A 4th `sendToChat` is refused with "answer the user directly".
 - A "talking" indicator and Stop show while agents talk. Stop stops every pane taking part and drops pending agent messages.
 - Busy receiver: the message goes into its queue (2.6).
-- `chatId: "side"` with no side pane open: it opens (creating a side chat if none). Any other id that is not an open pane: refused with "That chat is not open".
+- `to: "side"` with no side pane open: it opens (creating a side chat if none). Any other id that is not an open pane: refused with "That chat is not open".
 - Parent → finished sub-agent: `messageAgent({ agentId, message })` resumes the helper from its saved transcript for one more run with the same limits, on a new card.
 - Tool-less models: a "Send to…" button on replies lists the other open panes and delivers that reply as an agent message. The receiver answers; nothing goes back.
 
@@ -977,10 +977,10 @@ writerConflicts(panes: { id: string; kind: string; mode: string; workingFolder: 
 
 **Browser.**
 
-- `src/lib/registry/tools.ts`: `sendToChat` `{ chatId, text }`, no `execute` (browser-run), `internal`, not mutating; in `BUILTIN_TOOL_IDS`; every chat pane gets it, helpers do not.
+- `src/lib/registry/tools.ts`: `sendToChat` `{ to, message }`, no `execute` (browser-run), `internal`, not mutating; in `BUILTIN_TOOL_IDS`; every chat pane gets it, helpers do not.
 - Each pane's request body carries `openPanes: [{ id, title, kind }]` (the other open chat panes, from `SplitView`). `buildSystemPrompt` turns it into one short section: "Other open chats you can message with sendToChat: "Pricing research" (id …), "Side chat" (id …)". No section when no other pane is open.
 - New `src/app/c/[id]/useAgentLink.ts` (page level): hop per pane, "talking" flag, Stop-all. Pure rules in new `src/lib/utils/agentLink.ts`.
-- `useChatTransport.ts` `onToolCall` for `sendToChat` in pane A: `hop = paneHop[A] + 1`; over 3 → `addToolResult` "Not sent: the limit of 3 agent messages for this user message is reached. Answer the user directly." Resolve `chatId` with `resolveTarget` (an open chat pane other than A, or `"side"` → A's side chat, opened or created if needed); anything else → "That chat is not open". Idle receiver B → `B.sendMessage({ role: "user", parts: [{ type: "data-agent-message", data: { from, fromConversationId, fromTitle, hop } }, { type: "text", text }] })`; busy receiver → `POST` to B's queue with `agent`; then `addToolResult` "Delivered. It may answer with sendToChat." `SplitView` exposes each pane's `sendMessage` and status to the agent link through a ref map keyed by conversation id.
+- `useChatTransport.ts` `onToolCall` for `sendToChat` in pane A: `hop = paneHop[A] + 1`; over 3 → `addToolResult` "Not sent: the limit of 3 agent messages for this user message is reached. Answer the user directly." Resolve `to` with `resolveTarget` (an open chat pane other than A, or `"side"` → A's side chat, opened or created if needed); anything else → "That chat is not open". Idle receiver B → `B.sendMessage({ role: "user", parts: [{ type: "data-agent-message", data: { from, fromConversationId, fromTitle, hop } }, { type: "text", text }] })`; busy receiver → `POST` to B's queue with `agent`; then `addToolResult` "Delivered. It may answer with sendToChat." `SplitView` exposes each pane's `sendMessage` and status to the agent link through a ref map keyed by conversation id.
 - `shouldAutoContinue` accepts a finished `tool-sendToChat`.
 - A pane's own user send sets its hop to 0; a turn started by an agent message, or receiving one mid-reply (`onData`), takes the larger hop.
 - `MessageContent.tsx`: badge on user messages with `data-agent-message`.
@@ -997,7 +997,7 @@ writerConflicts(panes: { id: string; kind: string; mode: string; workingFolder: 
 - **Approvals**: signed with `experimental_toolApprovalSecret`; the CLI bridge accepts only its run token and answers only from the user's session.
 - **Claude Code `acceptEdits`** in Agent mode: edits without asking, as today.
 - **No recursion**: `runAgent` / `messageAgent` never in a helper's set; side chats have no `runAgent`.
-- **Hop cap**: checked in the browser and again on the server. It counts across all panes, so a three-pane chain still stops after 3 messages.
+- **Hop cap**: counted in the browser across all panes, so a three-pane chain still stops after 3 messages. The server refuses a malformed agent part or a declared hop outside 1..3, but trusts the declared hop: the cap stops model loops, it is not a boundary against the user.
 - **Split view**: no new server surface. Each pane's requests carry their own conversation id and pass the existing owner checks. Two panes writing one folder get a warning, not a lock (2.8).
 - **Temporary chats**: memory off both ways; deleted with their traces.
 - **Token cost**: side context up to 6,000 tokens per send (less on small windows); `@` files up to 35% of the window; each helper up to 15 steps, up to 3 at once. Helper tokens show on the card and in their own traces.
