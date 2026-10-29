@@ -24,6 +24,8 @@ const GROUPS: ShortcutGroup[] = [
       { keys: ["Cmd", "Enter"], description: "In a quote: send just that quote" },
       { keys: ["Enter"], description: "In a quote: send everything" },
       { keys: ["Esc"], description: "In a quote: back to the message box" },
+      { keys: ["Enter"], description: "While a reply runs: queue the message" },
+      { keys: ["Esc"], description: "Editing a queued message: cancel the edit" },
     ],
   },
   {

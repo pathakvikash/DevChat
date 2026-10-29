@@ -22,6 +22,19 @@ export interface PersistAssistantMessageOptions {
   updateExisting?: boolean;
 }
 
+/** The reply's text in order, with each delivered queued message in its place. */
+function replyText(parts: any[]): string {
+  return parts
+    .map((p) =>
+      p.type === "text"
+        ? p.text || ""
+        : p.type === "data-queued-message"
+          ? `\n\n${p.data?.text ?? ""}\n\n`
+          : "",
+    )
+    .join("");
+}
+
 async function persistAssistantMessage(
   event: { steps: any[]; totalUsage?: any },
   opts: PersistAssistantMessageOptions,
@@ -29,23 +42,21 @@ async function persistAssistantMessage(
   const { conversationId, model, systemPrompt } = opts;
   const { steps, totalUsage } = event;
 
+  // With overrideParts the stream already holds every part (tool calls and queued markers too),
+  // so the steps are not added again.
   const parts: any[] = opts.overrideParts ? [...opts.overrideParts] : [];
-  let finalText = opts.overrideParts
-    ? opts.overrideParts.filter((p) => p.type === "text").map((p) => p.text || "").join("")
-    : "";
+  let finalText = opts.overrideParts ? replyText(opts.overrideParts) : "";
   let lastInputTokens = 0;
 
   // One part per toolCallId. A dangling call with no matching result makes
   // providers reject the whole history on reload.
   const toolPartIndex = new Map<string, number>();
 
-  for (const step of steps) {
+  for (const step of opts.overrideParts ? [] : steps) {
     const stepText = step.text || "";
-    if (!opts.overrideParts) {
-      finalText = stepText;
-      if (stepText) {
-        parts.push({ type: "text", text: stepText });
-      }
+    finalText = stepText;
+    if (stepText) {
+      parts.push({ type: "text", text: stepText });
     }
 
     if (step.toolCalls && step.toolCalls.length > 0) {

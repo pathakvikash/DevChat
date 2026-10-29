@@ -5,6 +5,7 @@ import { Plus, Upload, Globe, BookOpen, Settings, X, Slash, Mic, MicOff, ArrowRi
 import { AnimatePresence, motion } from "framer-motion";
 import AttachmentChip from "./AttachmentChip";
 import QuoteCards from "./QuoteCards";
+import QueuedMessages, { type QueuedItem } from "./QueuedMessages";
 import DragOverlay from "./DragOverlay";
 import ContextUsageCircle from "./ContextUsageCircle";
 import ModelSelector from "./conversation/ModelSelector";
@@ -61,6 +62,15 @@ interface ChatInputProps {
   onSendQuote: (id: string) => void;
   /** Temporary chat: dashed composer and its own placeholder. */
   temporary?: boolean;
+  /** Messages typed during a reply, shown as chips above the input. */
+  queued?: QueuedItem[];
+  /** Enter or Queue during a reply: queue what is typed. */
+  onQueue?: () => void;
+  onQueueEdit?: (id: string, text: string) => void;
+  onQueueRemove?: (id: string) => void;
+  onQueueRetry?: (id: string) => void;
+  /** Queued messages join a running reply only when the model has tools. */
+  toolsAvailable?: boolean;
 }
 
 export default function ChatInput({
@@ -91,6 +101,12 @@ export default function ChatInput({
   onQuoteRemove,
   onSendQuote,
   temporary,
+  queued = [],
+  onQueue = () => {},
+  onQueueEdit = () => {},
+  onQueueRemove = () => {},
+  onQueueRetry = () => {},
+  toolsAvailable = true,
 }: ChatInputProps) {
   // Read-only here; the sidebar and header toggles do the actual switching.
   const { mode } = useChatMode();
@@ -247,7 +263,12 @@ export default function ChatInput({
 
   function submitFromKey(e: React.KeyboardEvent) {
     e.preventDefault();
-    if (canSubmit && !isLoading && !submitLockRef.current) {
+    if (isLoading) {
+      // Holding Enter queues once.
+      if (!e.repeat) onQueue();
+      return;
+    }
+    if (canSubmit && !submitLockRef.current) {
       submitLockRef.current = true;
       wantFocusRef.current = true;
       onSubmit(e as any);
@@ -295,8 +316,16 @@ export default function ChatInput({
         )}
 
         {/* Composer tray: what stacks above the input. Status rows above stay put; this part scrolls. */}
-        {(quotes.length > 0 || files.length > 0) && (
+        {(queued.length > 0 || quotes.length > 0 || files.length > 0) && (
           <div className="mb-3 max-h-[min(30dvh,240px)] space-y-2 overflow-y-auto">
+            <QueuedMessages
+              items={queued}
+              toolsAvailable={toolsAvailable}
+              onEdit={onQueueEdit}
+              onRemove={onQueueRemove}
+              onRetry={onQueueRetry}
+              focusTextarea={focusTextarea}
+            />
             <QuoteCards
               quotes={quotes}
               onChange={onQuoteChange}
@@ -560,8 +589,12 @@ export default function ChatInput({
           <div className="order-3 ml-auto flex items-center gap-1.5">
             {/* Reads like a second placeholder when the box is empty. */}
             {input.length > 0 && (
-              <span className="text-[11px] text-zinc-600 hidden md:block mr-1 whitespace-nowrap">
-                {isLoading ? "Type ahead · Enter sends when the reply finishes" : "Enter to send · Shift+Enter for newline"}
+              <span className="text-[11px] text-zinc-400 hidden md:block mr-1 whitespace-nowrap">
+                {isLoading
+                  ? toolsAvailable
+                    ? "Enter queues · the model sees it at its next step"
+                    : "Enter queues · sends when the reply finishes"
+                  : "Enter to send · Shift+Enter for newline"}
               </span>
             )}
             {contextUsage && (
@@ -616,13 +649,28 @@ export default function ChatInput({
             )}
 
             {isLoading ? (
-              <button
-                type="button"
-                onClick={onStop}
-                className="flex h-9 items-center justify-center rounded-[var(--glass-radius-md)] glass-button-danger px-3 text-sm font-medium text-red-200"
-              >
-                Stop
-              </button>
+              <>
+                {input.trim() && (
+                  <button
+                    type="button"
+                    onClick={onQueue}
+                    className="flex h-9 items-center justify-center rounded-[var(--glass-radius-md)] glass-button px-3 text-sm font-medium text-[var(--foreground)]"
+                  >
+                    Queue
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => {
+                    onStop();
+                    // Stop puts the undelivered text back in the box; the cursor ends up at its end.
+                    textareaRef.current?.focus();
+                  }}
+                  className="flex h-9 items-center justify-center rounded-[var(--glass-radius-md)] glass-button-danger px-3 text-sm font-medium text-red-200"
+                >
+                  Stop
+                </button>
+              </>
             ) : (
               <button
                 type="submit"

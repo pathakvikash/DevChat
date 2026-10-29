@@ -7,6 +7,19 @@ vi.mock("@/lib/db", () => ({
   },
 }));
 
+// Records the parts handed to normalization, where duplicate tool parts would show up.
+const normalizeInputs = vi.hoisted(() => ({ seen: [] as unknown[][] }));
+vi.mock("@/lib/chat/normalizeToolParts", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/chat/normalizeToolParts")>();
+  return {
+    ...actual,
+    normalizeToolParts: (parts: unknown) => {
+      normalizeInputs.seen.push(parts as unknown[]);
+      return actual.normalizeToolParts(parts);
+    },
+  };
+});
+
 import { prisma } from "@/lib/db";
 import {
   safePersistAssistantMessage,
@@ -71,5 +84,50 @@ describe("safePersistAssistantMessage", () => {
     await expect(safePersistAssistantMessage(done, { ...opts, onError })).resolves.toBe(false);
 
     expect(onError).toHaveBeenCalledWith(err);
+  });
+  it("puts queued text into content in order, between the reply's texts", async () => {
+    await safePersistAssistantMessage(done, {
+      ...opts,
+      overrideParts: [
+        { type: "text", text: "First." },
+        { type: "data-queued-message", id: "q1", data: { queuedId: "q1", text: "Change course" } },
+        { type: "text", text: "Second." },
+      ],
+    });
+
+    expect(vi.mocked(prisma.message.create).mock.calls[0][0].data.content).toBe(
+      "First.\n\nChange course\n\nSecond.",
+    );
+    expect(savedParts()).toEqual([
+      { type: "text", text: "First." },
+      { type: "data-queued-message", id: "q1", data: { queuedId: "q1", text: "Change course" } },
+      { type: "text", text: "Second." },
+    ]);
+  });
+
+  it("hands normalization one part per tool call when the stream's parts are passed in", async () => {
+    const done2 = {
+      steps: [
+        {
+          text: "",
+          toolCalls: [{ toolCallId: "t1", toolName: "webSearch", input: { query: "q" } }],
+          toolResults: [{ toolCallId: "t1", toolName: "webSearch", output: "ok" }],
+        },
+      ],
+    };
+    const streamed = {
+      type: "tool-webSearch",
+      toolCallId: "t1",
+      toolName: "webSearch",
+      input: { query: "q" },
+      output: "ok",
+      state: "output-available",
+    };
+
+    await safePersistAssistantMessage(done2, { ...opts, overrideParts: [streamed] });
+
+    const handed = normalizeInputs.seen.at(-1) as Array<{ toolCallId?: string }>;
+    expect(handed.filter((p) => p.toolCallId === "t1")).toHaveLength(1);
+    expect(savedParts()).toEqual([expect.objectContaining({ toolCallId: "t1", state: "output-available" })]);
   });
 });

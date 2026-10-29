@@ -25,10 +25,22 @@ function lastUserText({ prompt }: CallOptions): string {
   return user.content.map((p) => (p.type === "text" ? p.text : "")).join("");
 }
 
-// True once a tool result follows the latest user message.
+// Text of a prompt message, whatever its content shape.
+const textOf = (m: { content: unknown }): string =>
+  typeof m.content === "string"
+    ? m.content
+    : Array.isArray(m.content)
+      ? m.content.map((p: { type?: string; text?: string }) => (p.type === "text" ? (p.text ?? "") : "")).join("")
+      : "";
+
+// True once a tool result follows the latest user message of this turn. A queued message reaches the
+// model as a user message too; the queue specs prefix theirs with "queued:" so it does not start a turn.
 function toolRanThisTurn({ prompt }: CallOptions): boolean {
-  const lastUser = prompt.map((m) => m.role).lastIndexOf("user");
-  return prompt.slice(lastUser + 1).some((m) => m.role === "tool");
+  const turnStart = prompt.reduce(
+    (at, m, i) => (m.role === "user" && !textOf(m).startsWith("queued:") ? i : at),
+    -1,
+  );
+  return prompt.slice(turnStart + 1).some((m) => m.role === "tool");
 }
 
 // Replies stay over 30 chars: the chat route forces a retry on shorter answers.
@@ -53,7 +65,8 @@ const MODELS: Record<string, { name: string; tools: boolean; turn: (o: CallOptio
     turn: (o) =>
       toolRanThisTurn(o)
         ? { chunks: words("The calculator returned 42, so 6 * 7 = 42. (mock tool answer)"), delayMs: 15 }
-        : { tool: { name: "calculator", input: { expression: "6 * 7" } } },
+        // Slow enough (about 1.2 s before the answer) to queue a message during the tool step.
+        : { tool: { name: "calculator", input: { expression: "6 * 7" } }, delayMs: 600 },
   },
   "mock/notools": {
     name: "Mock No Tools",

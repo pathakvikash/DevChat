@@ -119,13 +119,48 @@ export function frameSearchChatsParts(parts: unknown, role?: string): unknown {
   });
 }
 
+const QUEUED_PART = "data-queued-message";
+
+/**
+ * A queued message delivered mid-reply is stored inside the reply. The model
+ * needs it as its own user message, so the reply is split around each marker.
+ */
+export function splitAtQueuedMessages<T extends { id?: string; role?: string; parts?: unknown }>(
+  message: T,
+): T[] {
+  const parts = message.parts;
+  if (message.role !== "assistant" || !Array.isArray(parts) || !parts.some((p) => p?.type === QUEUED_PART)) {
+    return [message];
+  }
+  const out: T[] = [];
+  let reply: any[] = [];
+  let replyId = message.id;
+  const endReply = () => {
+    if (reply.some((p) => p.type !== "step-start")) out.push({ ...message, id: replyId, parts: reply });
+    reply = [];
+  };
+  for (const part of parts as any[]) {
+    if (part?.type !== QUEUED_PART) {
+      reply.push(part);
+      continue;
+    }
+    endReply();
+    const queuedId = String(part.data?.queuedId ?? part.id ?? "");
+    const text = String(part.data?.text ?? "");
+    out.push({ ...message, id: queuedId, role: "user", parts: [{ type: "text", text }] });
+    replyId = `${message.id}:${queuedId}`;
+  }
+  endReply();
+  return out;
+}
+
 /** Prepare UI messages for `convertToModelMessages`. */
 export function normalizeMessageToolParts<T extends { parts?: unknown }>(
   messages: T[],
 ): T[] {
-  return messages.map((m) => {
-    if (!m || !Array.isArray((m as any).parts)) return m;
+  return messages.flatMap((m) => {
+    if (!m || !Array.isArray((m as any).parts)) return [m];
     const parts = summarizeSpecParts(normalizeToolParts((m as any).parts));
-    return { ...m, parts: frameSearchChatsParts(parts, (m as any).role) } as T;
+    return splitAtQueuedMessages({ ...m, parts: frameSearchChatsParts(parts, (m as any).role) } as T);
   });
 }
