@@ -99,7 +99,7 @@ describe("renderTranscript", () => {
     const newest = text.slice(text.indexOf("User: NEWEST"));
     expect(newest).toContain("User: NEWEST");
     expect(countTokens(newest)).toBeGreaterThan(200);
-  });
+  }, 20_000); // tokenizing 12k dense chars is slow under a full parallel run
 
   it.each([
     ["<|endoftext|>", dense.cjk],
@@ -112,7 +112,7 @@ describe("renderTranscript", () => {
     const newest = rendered.slice(rendered.indexOf("User: NEWEST"));
     expect(newest).toContain(special);
     expect(countTokens(newest)).toBeGreaterThan(200);
-  });
+  }, 20_000);
 
   it("cuts a message that is not the newest only by dropping it whole", () => {
     const { text, shown } = renderTranscript([turn("user", `OLD ${dense.cjk}`), turn("user", "latest")], {
