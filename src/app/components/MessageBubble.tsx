@@ -35,6 +35,10 @@ interface MessageBubbleProps {
   onRegenerateMessage?: (messageId: string) => void;
   onOpenArtifact?: (id: string) => void;
   onClarificationAnswer?: (toolCallId: string, answer: string) => void;
+  /** Plan mode, last reply with no plan card: offers "Approve plan" under it. */
+  onApprovePlan?: () => void;
+  /** Explains the button for a model without tools. */
+  planCaption?: string;
   feedback?: { id: string; rating: number } | null;
 }
 
@@ -55,6 +59,8 @@ function MessageBubble({
   onRegenerateMessage,
   onOpenArtifact,
   onClarificationAnswer,
+  onApprovePlan,
+  planCaption,
   feedback,
 }: MessageBubbleProps) {
   const { thinking: inlineThinking, content: cleanContent } =
@@ -188,6 +194,18 @@ function MessageBubble({
             </>
           )}
 
+          {onApprovePlan && !isStreaming && (
+            <div className="mt-2 flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={onApprovePlan}
+                className="h-8 px-3 text-xs rounded-[var(--glass-radius-sm)] glass-button-primary text-[var(--foreground)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--glass-accent-strong)]"
+              >
+                Approve plan
+              </button>
+              {planCaption && <span className="text-xs text-zinc-400">{planCaption}</span>}
+            </div>
+          )}
           {!content &&
             !combinedThinking &&
             fileParts.length === 0 &&
@@ -255,7 +273,9 @@ const MessageBubbleMemo = memo(MessageBubble, (prev, next) => {
     prev.onFork === next.onFork &&
     prev.onRegenerateMessage === next.onRegenerateMessage &&
     prev.onOpenArtifact === next.onOpenArtifact &&
-    prev.onClarificationAnswer === next.onClarificationAnswer
+    prev.onClarificationAnswer === next.onClarificationAnswer &&
+    prev.onApprovePlan === next.onApprovePlan &&
+    prev.planCaption === next.planCaption
   );
 });
 

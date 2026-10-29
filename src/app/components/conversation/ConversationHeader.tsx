@@ -1,6 +1,6 @@
 "use client";
 
-import { Code2, Settings2, AlertCircle, Download, FileCode, GitFork, Menu, Keyboard, Brain, MoreHorizontal, MessageSquareDashed } from "lucide-react";
+import { Code2, Settings2, AlertCircle, Download, FileCode, GitFork, Menu, Keyboard, Brain, MoreHorizontal, MessageSquareDashed, ShieldCheck } from "lucide-react";
 import Link from "next/link";
 import { useState, useRef, useEffect } from "react";
 import { useSidebar } from "@/app/contexts/SidebarContext";
@@ -36,6 +36,9 @@ interface ConversationHeaderProps {
   error?: { message?: string } | null;
   onToggleMemory?: () => void;
   onToggleTemporary?: () => void;
+  /** Tools allowed for this chat in Ask mode; the reset item shows only when there are some. */
+  allowedToolCount?: number;
+  onResetAllowedTools?: () => void;
 }
 
 export default function ConversationHeader({
@@ -48,6 +51,8 @@ export default function ConversationHeader({
   enabledToolsCount,
   enabledSkillsCount,
   onOpenAdvanced,
+  allowedToolCount = 0,
+  onResetAllowedTools,
   onOpenKeyboardShortcuts,
   error,
   onToggleMemory,
@@ -55,7 +60,7 @@ export default function ConversationHeader({
 }: ConversationHeaderProps) {
   const { toggle } = useSidebar();
   const { toast } = useToast();
-  const { mode, setMode } = useChatMode();
+  const { mode, setMode, modelCaps } = useChatMode();
   const [moreOpen, setMoreOpen] = useState(false);
   const moreRef = useRef<HTMLDivElement>(null);
 
@@ -98,7 +103,7 @@ export default function ConversationHeader({
                 <span className="hidden sm:inline">Temporary</span>
               </button>
             )}
-            <ModeToggle mode={mode} onModeChange={setMode} />
+            <ModeToggle mode={mode} onModeChange={setMode} toolsAvailable={modelCaps.toolsAvailable} cli={modelCaps.cli} />
             {/* These move into the More menu on small screens. */}
             <div className="hidden sm:flex items-center gap-2">
               <button
@@ -181,6 +186,15 @@ export default function ConversationHeader({
                       </span>
                     )}
                   </button>
+                  {allowedToolCount > 0 && onResetAllowedTools && (
+                    <button
+                      onClick={() => { setMoreOpen(false); onResetAllowedTools(); }}
+                      className="flex w-full items-center gap-3 px-4 py-3 text-sm text-[var(--foreground)] hover:bg-[var(--glass-bg-hover)] transition"
+                    >
+                      <ShieldCheck size={14} />
+                      <span>Reset allowed tools</span>
+                    </button>
+                  )}
                   <button
                     onClick={() => { setMoreOpen(false); onOpenKeyboardShortcuts?.(); }}
                     className="flex w-full items-center gap-3 px-4 py-3 text-sm text-[var(--foreground)] hover:bg-[var(--glass-bg-hover)] transition"

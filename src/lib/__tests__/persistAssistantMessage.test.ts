@@ -131,3 +131,41 @@ describe("safePersistAssistantMessage", () => {
     expect(savedParts()).toEqual([expect.objectContaining({ toolCallId: "t1", state: "output-available" })]);
   });
 });
+
+describe("approval states survive saving", () => {
+  it("keeps an unanswered approval as the saved reply has it, with no second copy", async () => {
+    const waiting = {
+      type: "tool-createArtifact",
+      toolCallId: "c1",
+      state: "approval-requested",
+      input: { title: "Notes" },
+      approval: { id: "ap1" },
+    };
+    const step = { text: "", toolCalls: [{ toolCallId: "c1", toolName: "createArtifact", input: { title: "Notes" } }], toolResults: [] };
+
+    await safePersistAssistantMessage({ steps: [step] }, { ...opts, overrideParts: [waiting] });
+
+    expect(savedParts()).toEqual([expect.objectContaining({ toolCallId: "c1", state: "approval-requested", approval: { id: "ap1" } })]);
+    expect(savedParts()).toHaveLength(1);
+  });
+
+  it("keeps an allowed call's approval state after the tool runs", async () => {
+    const responded = {
+      type: "tool-createArtifact",
+      toolCallId: "c1",
+      state: "output-available",
+      input: { title: "Notes" },
+      output: "Artifact created: a1",
+      approval: { id: "ap1", approved: true },
+    };
+    const step = {
+      text: "",
+      toolCalls: [{ toolCallId: "c1", toolName: "createArtifact", input: { title: "Notes" } }],
+      toolResults: [{ toolCallId: "c1", toolName: "createArtifact", output: "Artifact created: a1" }],
+    };
+
+    await safePersistAssistantMessage({ steps: [step] }, { ...opts, overrideParts: [responded] });
+
+    expect(savedParts()).toEqual([expect.objectContaining({ toolCallId: "c1", state: "output-available", approval: { id: "ap1", approved: true } })]);
+  });
+});

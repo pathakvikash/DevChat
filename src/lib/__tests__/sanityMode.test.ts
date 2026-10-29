@@ -68,12 +68,14 @@ describe("mock model provider", () => {
     vi.stubEnv("DATABASE_URL", "file:/repo/prisma/sanity.db");
   }
 
-  it("registers the five scripted models in sanity mode", () => {
+  it("registers the scripted models in sanity mode", () => {
     stubOn();
     expect(mockModelCatalog().map((m) => m.id)).toEqual([
       "mock/echo",
       "mock/slow",
       "mock/tool",
+      "mock/write",
+      "mock/plan",
       "mock/notools",
       "mock/summary",
     ]);

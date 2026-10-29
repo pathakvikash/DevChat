@@ -2,10 +2,12 @@
 
 import { Loader2, CheckCircle2, XCircle, Check, ChevronDown, ChevronRight } from "lucide-react";
 import { useState } from "react";
-import type { ToolPart } from "@/lib/utils/messageParts";
+import { ALLOWED_FOR_CHAT, NOT_ANSWERED, type ToolPart } from "@/lib/utils/messageParts";
+import ApprovalCard from "./ApprovalCard";
 import ArtifactCard from "./ArtifactCard";
 import ArtifactReference from "./ArtifactReference";
 import ClarificationForm from "./ClarificationForm";
+import PlanCard from "./PlanCard";
 import { SearchChatsCard, ReadChatCard } from "./PastChatCards";
 
 interface ToolInvocationProps {
@@ -15,12 +17,39 @@ interface ToolInvocationProps {
   onClarificationAnswer?: (toolCallId: string, answer: string) => void;
 }
 
-export default function ToolInvocation({
+/** Approval and plan cards are their own components, so a call can change from one to a plain row
+ *  without changing the hooks of the row (ToolCall) in the middle of a render. */
+export default function ToolInvocation(props: ToolInvocationProps) {
+  const { part } = props;
+  const toolName = part.type.replace(/^tool-/, "");
+  if (toolName === "presentPlan") return <PlanCard part={part} />;
+  if (part.state === "approval-requested" && part.approval?.id) {
+    return <ApprovalCard toolName={toolName} approvalId={part.approval.id} input={part.input} />;
+  }
+  if (part.state === "output-denied") {
+    const notAnswered = part.approval?.reason === NOT_ANSWERED;
+    return (
+      <div className="my-2 glass-card rounded-[var(--glass-radius-md)] overflow-hidden">
+        <div className="flex items-center gap-2 px-3 py-2 bg-[var(--glass-bg-elevated)] text-xs">
+          <XCircle size={14} className="text-zinc-400 shrink-0" />
+          <span className="font-medium text-zinc-200 truncate">{`Tool: ${toolName}`}</span>
+          <span className="ml-auto text-zinc-400 shrink-0">{notAnswered ? "Not answered" : "Denied"}</span>
+        </div>
+      </div>
+    );
+  }
+  // Once answered: the card becomes a row that says what was allowed (UX 3.10).
+  const meta = part.approval?.approved === true ? (part.approval.reason === ALLOWED_FOR_CHAT ? ALLOWED_FOR_CHAT : "Allowed") : undefined;
+  return <ToolCall {...props} meta={meta} />;
+}
+
+function ToolCall({
   part,
   allParts,
   onOpenArtifact,
   onClarificationAnswer,
-}: ToolInvocationProps) {
+  meta,
+}: ToolInvocationProps & { meta?: string }) {
   const toolName = part.type.replace(/^tool-/, "");
   const isArtifact =
     toolName === "createArtifact" || toolName === "updateArtifact";
@@ -88,6 +117,7 @@ export default function ToolInvocation({
           version={version}
           onClick={(id) => onOpenArtifact?.(id)}
         />
+        {meta && <div className="mt-1 text-xs text-zinc-400">{meta}</div>}
         {!done && (
           <div className="flex items-center gap-2 mt-2 text-xs text-zinc-500">
             <Loader2 size={12} className="animate-spin text-blue-400" />
@@ -153,6 +183,7 @@ export default function ToolInvocation({
         <span className="font-medium text-zinc-200">
           {isExec ? `Executed ${lang || "code"}` : `Tool: ${toolName}`}
         </span>
+        {meta && <span className="ml-auto text-zinc-400 shrink-0">{meta}</span>}
         {(running && !hasResult) && <span className="text-zinc-500">running…</span>}
         {hasResult && !running && <span className="text-emerald-400">done</span>}
       </button>

@@ -351,6 +351,20 @@ describe("working folder and access", () => {
     expect(agent.args).not.toContain("bypassPermissions");
   });
 
+  it("plan is the read-only tool set plus Claude Code's plan permission mode", () => {
+    const plan = claude.invoke({ ...base, cwd: "/repo", access: "plan" });
+    expect(plan.args).toEqual(expect.arrayContaining(["--tools", "Read", "Glob", "Grep", "WebSearch", "WebFetch"]));
+    expect(plan.args).toEqual(expect.arrayContaining(["--permission-mode", "plan"]));
+    expect(plan.args).not.toContain("acceptEdits");
+  });
+
+  it("keeps OpenCode and Codex read-only in plan access", () => {
+    const oc = CLI_PROVIDERS.find((d) => d.id === "opencode")!;
+    expect(JSON.parse(oc.invoke({ ...base, model: "default", cwd: "/repo", access: "plan" }).env!.OPENCODE_CONFIG_CONTENT).permission.edit).toBe("deny");
+    const codex = CLI_PROVIDERS.find((d) => d.id === "codex")!;
+    expect(codex.invoke({ ...base, model: "default", cwd: "/repo", access: "plan" }).args).toEqual(expect.arrayContaining(["--sandbox", "read-only"]));
+  });
+
   it("maps the same policy onto OpenCode and Codex", () => {
     const oc = CLI_PROVIDERS.find((d) => d.id === "opencode")!;
     const perm = (inv: ReturnType<typeof oc.invoke>) => JSON.parse(inv.env!.OPENCODE_CONFIG_CONTENT).permission;

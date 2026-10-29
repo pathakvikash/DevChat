@@ -5,6 +5,7 @@ import { getCompressedContext } from "@/lib/compression";
 import { TOOL_REGISTRY, getSkill } from "@/lib/registry";
 import { extractText } from "@/lib/utils/messageParts";
 import { BUILTIN_TOOL_IDS, type ToolMode } from "./buildTools";
+import { MODE_POLICY } from "./modes";
 import { countTokens } from "@/lib/tokens";
 import { getSettingsKey } from "@/lib/settings";
 import { catalog as generativeUiCatalog } from "@/lib/generativeUi/catalog";
@@ -37,6 +38,13 @@ const VAS_KB_SECTION = `KNOWLEDGE BASE — \`searchKnowledgeBase({ query, topK }
 You have two data sources: (a) this tool for on-demand queries returning \`[source: filename#chunkN | score=X.XXX]\` excerpts, and (b) an auto-injected KB context block later in this prompt with top chunks already matched to the latest message. Call this tool when the user asks about their documents, says "find in the docs", or asks a domain question the KB likely covers. If it returns "No knowledge base attached", ask them to pick a KB in Model Settings.`;
 
 const VAS_SYSTEM_PROMPT_CHAT_ONLY = `You are VAS (chat-only, no tools). You can answer questions, write code in markdown blocks, analyze file attachments, and use KB context if attached. You cannot execute code or search the web.`;
+
+const VAS_ASK_SECTION = `--- Ask mode ---
+Some actions ask the user first. If one is denied, do not retry it; say what you would have done and ask how to go on.`;
+
+const vasPlanSection = (withTools: boolean) => `--- Plan mode ---
+You are planning. Look around with read-only tools, if you have them. Do not change anything: you CANNOT create or update artifacts, todos or memories, or call MCP servers, until the user approves a plan.
+${withTools ? "End by calling presentPlan with a short title and the steps in order. The user approves the plan or asks for changes." : "End with a numbered list of concrete steps. The user approves it with a button."}`;
 
 const VAS_READ_ONLY_SECTION = `--- Read-only mode ---
 You are in Chat mode, so only read-only tools are available. You CANNOT create or
@@ -109,14 +117,20 @@ export async function buildSystemPrompt(
   const hasKbTool = useTools && activeToolIds.has("searchKnowledgeBase");
   const hasClarification = useTools && activeToolIds.has("askClarification");
 
-  const agentMode = (opts.mode ?? "agent") === "agent";
+  const mode = opts.mode ?? "agent";
+  const planNote = mode === "plan" ? vasPlanSection(useTools) : null;
   const baseSections = [VAS_SYSTEM_PROMPT_WITH_TOOLS_BASE];
-  // Todos are a mutating tool, so the todo instructions only apply in agent mode.
-  if (agentMode) baseSections.push(VAS_TODO_SECTION);
+  // Todos are a mutating tool, so the todo instructions only apply where those are offered (Ask, Agent).
+  if (MODE_POLICY[mode].mutating) baseSections.push(VAS_TODO_SECTION);
   if (hasClarification) baseSections.push(VAS_CLARIFICATION_SECTION);
   if (hasKbTool) baseSections.push(VAS_KB_SECTION);
-  if (!agentMode) baseSections.push(VAS_READ_ONLY_SECTION);
-  const base = useTools ? baseSections.join("\n\n") : VAS_SYSTEM_PROMPT_CHAT_ONLY;
+  if (mode === "chat") baseSections.push(VAS_READ_ONLY_SECTION);
+  if (mode === "ask") baseSections.push(VAS_ASK_SECTION);
+  if (planNote && useTools) baseSections.push(planNote);
+  // Without tools Ask is Chat; Plan still needs its instructions.
+  const base = useTools
+    ? baseSections.join("\n\n")
+    : [VAS_SYSTEM_PROMPT_CHAT_ONLY, planNote].filter(Boolean).join("\n\n");
 
   const customInstructions = await getSettingsKey(opts.userId, "customInstructions");
   const instructions =

@@ -6,6 +6,7 @@ import MessageBubble from "./MessageBubble";
 import TypingIndicator from "./TypingIndicator";
 import QuoteReplyPill from "./QuoteReplyPill";
 import { splitAtQueuedMessages } from "@/lib/chat/normalizeToolParts";
+import { settleStaleParts } from "@/lib/utils/messageParts";
 
 interface ChatMessagesProps {
   messages: UIMessage[];
@@ -17,6 +18,10 @@ interface ChatMessagesProps {
   onRegenerateMessage?: (messageId: string) => void;
   onOpenArtifact?: (id: string) => void;
   onClarificationAnswer?: (toolCallId: string, answer: string) => void;
+  /** Set in Plan mode: offers "Approve plan" under the latest reply when it has no plan card. */
+  onApprovePlan?: () => void;
+  /** The model can't use tools, so the plan is written out and the button says so. */
+  toolsAvailable?: boolean;
   scrollRef: React.RefObject<HTMLDivElement | null>;
   /** Shown with the indicator before the assistant bubble exists, e.g. "Waiting for Claude Code…". */
   statusLabel?: string;
@@ -34,6 +39,7 @@ function normalizeParts(parts: any[]): any[] {
   );
 }
 
+
 function ChatMessages({
   messages,
   isLoading,
@@ -44,6 +50,8 @@ function ChatMessages({
   onRegenerateMessage,
   onOpenArtifact,
   onClarificationAnswer,
+  onApprovePlan,
+  toolsAvailable = true,
   scrollRef,
   statusLabel,
   onQuote,
@@ -68,7 +76,10 @@ function ChatMessages({
           }
           return unique.flatMap((message, idx) => {
             // A reply with queued messages delivered mid-way reads as reply, user bubble, reply.
-            const segments = splitAtQueuedMessages({ ...message, parts: normalizeParts((message.parts || []) as any[]) });
+            const last = idx === unique.length - 1;
+            // Stale parts settle first, then the reply splits: a reply with queued messages delivered mid-way reads as reply, user bubble, reply.
+            const settled = settleStaleParts(normalizeParts((message.parts || []) as any[]), last);
+            const segments = splitAtQueuedMessages({ ...message, parts: settled });
             // Edit, copy, regenerate and feedback sit on the last piece of the message's own role.
             const actionsAt = segments.findLastIndex((seg) => seg.role === message.role);
             return segments.map((segment, s) => {
@@ -108,6 +119,13 @@ function ChatMessages({
                     onRegenerateMessage={onRegenerateMessage}
                     onOpenArtifact={onOpenArtifact}
                     onClarificationAnswer={onClarificationAnswer}
+                    onApprovePlan={
+                      s === actionsAt && last && message.role === "assistant" && !isLoading &&
+                        !settled.some((p) => p?.type === "tool-presentPlan")
+                        ? onApprovePlan
+                        : undefined
+                    }
+                    planCaption={s === actionsAt && !toolsAvailable ? "This model can't use tools, so it will write out the result." : undefined}
                   />
                   {sentWhileReplying && (
                     <p className="mt-1 text-right text-[11px] text-zinc-400">Sent while replying</p>

@@ -8,7 +8,7 @@ import {
 import { pipeJsonRender } from "@json-render/core";
 import { prisma } from "@/lib/db";
 import { getModel } from "@/lib/models";
-import { extractText, stripFileParts } from "@/lib/utils/messageParts";
+import { denyOpenApprovals, extractText, stripFileParts } from "@/lib/utils/messageParts";
 import {
   buildSystemPrompt,
 } from "@/lib/chat/buildSystemPrompt";
@@ -49,6 +49,7 @@ import {
   getNextContextTier,
 } from "@/lib/contextManager";
 import { requireUserId } from "@/lib/auth";
+import { effectiveToolMode, isChatMode, MODE_POLICY } from "@/lib/chat/modes";
 
 // Break the loop when the model repeats the same tool call with the same arguments (llama3.2 does
 // this with failed calls): a one-shot failure beats a retry storm.
@@ -99,10 +100,14 @@ export async function POST(req: Request) {
     autoCompressThreshold: bodyAutoCompressThreshold,
     maxToolCalls: bodyMaxToolCalls,
     mode: bodyMode,
+    allowedTools: bodyAllowedTools,
   } = await req.json();
   let messages = bodyMessages;
-  // Anything that isn't "agent" falls back to chat, the safer of the two.
-  const toolMode: ToolMode = bodyMode === "agent" ? "agent" : "chat";
+  // Anything unknown falls back to chat, the safest mode.
+  const requestedMode: ToolMode = isChatMode(bodyMode) ? bodyMode : "chat";
+  // Without AUTH_SECRET the SDK can't sign or verify approvals, so Ask would trust the browser's answers.
+  const toolMode = effectiveToolMode(requestedMode, !!process.env.AUTH_SECRET);
+  if (toolMode !== requestedMode) console.warn("[chat] AUTH_SECRET is unset: Ask runs as Chat, since approvals can't be verified.");
   let model: string | undefined = bodyModel;
   try {
     let compressedAt: Date | null = null;
@@ -262,6 +267,9 @@ export async function POST(req: Request) {
           userId,
           mode: toolMode,
           memoryDisabled,
+          allowedTools: Array.isArray(bodyAllowedTools)
+            ? bodyAllowedTools.filter((t: unknown): t is string => typeof t === "string")
+            : [],
           contextWindow: contextWindowFor(servedModel, modelConfig, contextLength),
         })
       : {};
@@ -310,7 +318,7 @@ export async function POST(req: Request) {
     const providerOptions = isOllama
       ? { ollama: ollamaOptions }
       : cliProvider
-        ? { [cliProvider.id]: { effort: reasoningEffort ?? "", cwd: cliCwd, access: toolMode } }
+        ? { [cliProvider.id]: { effort: reasoningEffort ?? "", cwd: cliCwd, access: MODE_POLICY[toolMode].cli } }
         : undefined;
 
     // Per-candidate retry loop (transient errors + Ollama context overflow).
@@ -346,6 +354,8 @@ export async function POST(req: Request) {
           messages: modelMessages,
           temperature,
           topP,
+          // Signs each approval request so a browser cannot change an approved tool's input.
+          experimental_toolApprovalSecret: process.env.AUTH_SECRET || undefined,
           // Hard cap on response length: without it a looping model streams
           // indefinitely and leaves the request permanently pending.
           maxOutputTokens: maxTokens,
@@ -587,7 +597,8 @@ export async function POST(req: Request) {
                         systemPrompt: finalSystemPrompt,
                         messageId: assistantMessageId,
                         updateExisting: !!continuing,
-                        overrideParts: last?.parts ?? [],
+                        // A stopped reply saves its open approval cards as denied, so they can't be answered later.
+                        overrideParts: isAborted ? denyOpenApprovals(last?.parts ?? []) : (last?.parts ?? []),
                       }));
                     // A claimed message counts as delivered only if the saved reply holds its marker;
                     // a failed save releases every claim.

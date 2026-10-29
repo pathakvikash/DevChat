@@ -55,8 +55,8 @@ export interface CliInvocation {
   effort?: string;
   /** Working folder the tool may use; absent = sandboxed scratch dir, no file tools. */
   cwd?: string;
-  /** chat = read-only tools in `cwd`; agent = may also create/edit files there. */
-  access?: "chat" | "agent";
+  /** chat and plan = read-only tools in `cwd` (plan also asks Claude Code for plan mode); agent = may also create/edit files there. */
+  access?: "chat" | "plan" | "agent";
 }
 
 export interface CliProviderDef {
@@ -231,6 +231,7 @@ export const CLI_PROVIDERS: readonly CliProviderDef[] = [
           : access === "agent"
             ? ["--tools", "default", "--permission-mode", "acceptEdits"]
             : ["--tools", "Read", "Glob", "Grep", "WebSearch", "WebFetch"]),
+        ...(access === "plan" ? ["--permission-mode", "plan"] : []),
         ...(system ? ["--system-prompt", system] : []),
         ...(model !== "default" ? ["--model", model] : []),
         ...(effort ? ["--effort", effort] : []),
@@ -922,7 +923,7 @@ export function createCliModel(def: CliProviderDef, modelArg: string): LanguageM
     const po = options.providerOptions?.[def.id] ?? {};
     const effort = typeof po.effort === "string" && po.effort ? po.effort : undefined;
     const cwd = typeof po.cwd === "string" && po.cwd ? po.cwd : undefined;
-    const access: "chat" | "agent" = po.access === "agent" ? "agent" : "chat";
+    const access: "chat" | "plan" | "agent" = po.access === "agent" || po.access === "plan" ? po.access : "chat";
     const folderNote = cwd
       ? `## Working folder\nYou are working in the folder ${cwd}. Use paths relative to it or absolute paths inside it; other locations are not accessible.${
           access === "agent"

@@ -9,6 +9,8 @@ type StreamPart = Awaited<ReturnType<MockLanguageModelV3["doStream"]>>["stream"]
 interface Turn {
   chunks?: string[];
   tool?: { name: string; input: object };
+  /** Unique per turn, so a second approval card in the same chat has its own call id. */
+  toolCallId?: string;
   delayMs?: number;
 }
 
@@ -68,6 +70,33 @@ const MODELS: Record<string, { name: string; tools: boolean; turn: (o: CallOptio
         // Slow enough (about 1.2 s before the answer) to queue a message during the tool step.
         : { tool: { name: "calculator", input: { expression: "6 * 7" } }, delayMs: 600 },
   },
+  // Asks for a mutating tool, so Ask mode shows an approval card; Agent runs it without asking.
+  "mock/write": {
+    name: "Mock Write",
+    tools: true,
+    turn: (o) =>
+      toolRanThisTurn(o)
+        ? { chunks: words("Mock write reply (deterministic). The note step is finished."), delayMs: 15 }
+        : {
+            tool: { name: "createArtifact", input: { type: "document", title: "Mock note", content: "A note from the mock model." } },
+            toolCallId: `mock-write-${o.prompt.length}`,
+          },
+  },
+  // Ends a Plan-mode turn with presentPlan; after the answer (or the approve message) it replies in text.
+  "mock/plan": {
+    name: "Mock Plan",
+    tools: true,
+    turn: (o) =>
+      toolRanThisTurn(o) || lastUserText(o).startsWith("Approved")
+        ? { chunks: words("Mock plan reply (deterministic). The plan answer was received."), delayMs: 15 }
+        : {
+            tool: {
+              name: "presentPlan",
+              input: { title: "Add a cache", steps: ["Read the fetch path", "Add an in-memory cache", "Test the hit rate"] },
+            },
+            toolCallId: `mock-plan-${o.prompt.length}`,
+          },
+  },
   "mock/notools": {
     name: "Mock No Tools",
     tools: false,
@@ -91,7 +120,7 @@ function build(id: string): MockLanguageModelV3 {
       const t = turn(options);
       const parts: StreamPart[] = [{ type: "stream-start", warnings: [] }];
       if (t.tool) {
-        parts.push({ type: "tool-call", toolCallId: "mock-call-1", toolName: t.tool.name, input: JSON.stringify(t.tool.input) });
+        parts.push({ type: "tool-call", toolCallId: t.toolCallId ?? "mock-call-1", toolName: t.tool.name, input: JSON.stringify(t.tool.input) });
       } else {
         parts.push({ type: "text-start", id: "t1" });
         for (const delta of t.chunks ?? []) parts.push({ type: "text-delta", id: "t1", delta });
@@ -104,7 +133,7 @@ function build(id: string): MockLanguageModelV3 {
       const t = turn(options);
       return {
         content: t.tool
-          ? [{ type: "tool-call", toolCallId: "mock-call-1", toolName: t.tool.name, input: JSON.stringify(t.tool.input) }]
+          ? [{ type: "tool-call", toolCallId: t.toolCallId ?? "mock-call-1", toolName: t.tool.name, input: JSON.stringify(t.tool.input) }]
           : [{ type: "text", text: (t.chunks ?? []).join("") }],
         finishReason: { unified: t.tool ? "tool-calls" : "stop", raw: undefined },
         usage: usage(10),

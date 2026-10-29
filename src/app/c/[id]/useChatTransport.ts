@@ -1,12 +1,13 @@
 "use client";
 
-import { useEffect, useMemo, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
 import { useChat } from "@ai-sdk/react";
-import { DefaultChatTransport, type UIMessage } from "ai";
+import { DefaultChatTransport, lastAssistantMessageIsCompleteWithApprovalResponses, type UIMessage } from "ai";
 
 import { runCode } from "@/lib/sandbox";
 import { parseDataArtifact } from "@/lib/generativeUi/data";
 import { shouldAutoContinue, type AnyPart } from "@/lib/utils/messageParts";
+import type { ChatMode } from "@/lib/chat/modes";
 
 /** Python tracebacks and our sandbox's own failures both start this way. */
 const CODE_FAILED_RE = /^(Error|Traceback)/;
@@ -60,8 +61,9 @@ interface ChatTransportOptions {
   searchProvider: string;
   enabledTools: string[];
   enabledSkills: string[];
-  /** Chat = read-only tools, Agent = read + write tools. */
-  mode: "chat" | "agent";
+  mode: ChatMode;
+  /** Tools the user allowed for this chat in Ask mode. */
+  allowedTools: string[];
   /** The server announced it is compressing the conversation. */
   setIsCompressing: (compressing: boolean) => void;
   onFinishRef: React.MutableRefObject<(finish: ChatFinish) => void>;
@@ -71,7 +73,7 @@ interface ChatTransportOptions {
 }
 
 export function useChatTransport(opts: ChatTransportOptions) {
-  const { conversationId, conversation, selectedKbId, searchProvider, enabledTools, enabledSkills, mode, setIsCompressing, onFinishRef, onErrorRef, onQueuedDeliveredRef } = opts;
+  const { conversationId, conversation, selectedKbId, searchProvider, enabledTools, enabledSkills, mode, allowedTools, setIsCompressing, onFinishRef, onErrorRef, onQueuedDeliveredRef } = opts;
 
   const transportBodyRef = useRef({
     conversationId,
@@ -83,6 +85,7 @@ export function useChatTransport(opts: ChatTransportOptions) {
     enabledTools,
     enabledSkills,
     mode,
+    allowedTools,
     chatOnlyMode: conversation?.chatOnlyMode ?? false,
     memoryDisabled: conversation?.memoryDisabled ?? false,
     maxToolCalls: conversation?.maxToolCalls ?? 5,
@@ -103,12 +106,13 @@ export function useChatTransport(opts: ChatTransportOptions) {
       enabledTools,
       enabledSkills,
       mode,
+      allowedTools,
       chatOnlyMode: conversation?.chatOnlyMode ?? false,
       memoryDisabled: conversation?.memoryDisabled ?? false,
       maxToolCalls: conversation?.maxToolCalls ?? 5,
       autoCompressThreshold: threshold,
     };
-  }, [conversationId, conversation?.model, conversation?.systemPrompt, conversation?.temperature, selectedKbId, searchProvider, enabledTools, enabledSkills, mode, conversation?.chatOnlyMode, conversation?.memoryDisabled, conversation?.maxToolCalls]);
+  }, [conversationId, conversation?.model, conversation?.systemPrompt, conversation?.temperature, selectedKbId, searchProvider, enabledTools, enabledSkills, mode, allowedTools, conversation?.chatOnlyMode, conversation?.memoryDisabled, conversation?.maxToolCalls]);
 
   const transport = useMemo(
     () =>
@@ -133,7 +137,10 @@ export function useChatTransport(opts: ChatTransportOptions) {
     id: conversationId,
     experimental_throttle: 50,
     transport,
+    // A reply that waits on approvals resumes once every card is answered; executeCode and
+    // an answered plan card resume on their own.
     sendAutomaticallyWhen: ({ messages: msgs }) => {
+      if (lastAssistantMessageIsCompleteWithApprovalResponses({ messages: msgs })) return true;
       const last = msgs[msgs.length - 1];
       return last?.role === "assistant" && shouldAutoContinue(last.parts as AnyPart[]);
     },
@@ -167,5 +174,11 @@ export function useChatTransport(opts: ChatTransportOptions) {
 
   const isLoading = chat.status === "submitted" || chat.status === "streaming";
 
-  return { ...chat, isLoading };
+  // The body is read when a request goes out, so a mode or allow-list change made right before
+  // an automatic resume (plan approval, "Allow for this chat") must land here, not after render.
+  const setRequestBody = useCallback((patch: { mode?: ChatMode; allowedTools?: string[] }) => {
+    Object.assign(transportBodyRef.current, patch);
+  }, []);
+
+  return { ...chat, isLoading, setRequestBody };
 }

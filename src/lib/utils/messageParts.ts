@@ -21,6 +21,8 @@ export interface ToolPart {
   input?: any;
   output?: any;
   errorText?: string;
+  /** Set while a call waits for the user, and after an answer (approval states). */
+  approval?: { id?: string; approved?: boolean; reason?: string };
 }
 
 export interface AnyPart {
@@ -51,12 +53,77 @@ export function isToolPart(part: AnyPart): part is AnyPart & ToolPart {
   return typeof part?.type === "string" && part.type.startsWith("tool-");
 }
 
-/** Fire a follow-up after `executeCode` only; trailing reasoning/step-start parts don't
- *  count as an answer. `askClarification` is excluded — the user's own reply sends it. */
+/** The answer to a `presentPlan` card, sent back to the model as the tool's output. */
+export type PlanDecision =
+  | { action: "approve"; mode: "ask" | "agent" }
+  | { action: "revise"; feedback: string };
+
+/** The id of the plan card still waiting for an answer in the latest message, if any. */
+export function waitingPlanCallId(messages: Array<{ role?: string; parts?: unknown }>): string | undefined {
+  const last = messages[messages.length - 1];
+  if (last?.role !== "assistant" || !Array.isArray(last.parts)) return undefined;
+  const plan = (last.parts as any[]).find((p) => p?.type === "tool-presentPlan" && p.state === "input-available");
+  return typeof plan?.toolCallId === "string" ? plan.toolCallId : undefined;
+}
+
+/** Denial reason for an approval the user never answered (shown as "Not answered"). */
+export const NOT_ANSWERED = "The user did not answer this request.";
+
+/** Only the latest message can still be answered. Older approval cards and plan cards show as
+ *  settled (the model gets the same denial from normalizeToolParts, so nothing here is sent back). */
+export function settleStaleParts<T extends { type?: string; state?: string; approval?: any }>(
+  parts: T[],
+  isLatest: boolean,
+): T[] {
+  if (isLatest) return parts;
+  return parts.map((p) => {
+    if (p?.state === "approval-requested") {
+      return { ...p, state: "output-denied", approval: { id: p.approval?.id, approved: false, reason: NOT_ANSWERED } };
+    }
+    if (p?.type === "tool-presentPlan" && p.state === "input-available") {
+      return { ...p, state: "output-denied", approval: { approved: false, reason: "Replaced by a newer plan" } };
+    }
+    return p;
+  });
+}
+
+/** Approval reasons the page writes: shown as "Allowed for this chat", "Denied", "Stopped". */
+export const ALLOWED_FOR_CHAT = "Allowed for this chat";
+export const DENIED_BY_USER = "The user denied this action.";
+export const STOPPED_REPLY = "The reply was stopped before this ran.";
+
+/** Card title by tool, as UX 3.10 lists them. */
+export function approvalTitle(toolName: string, input: any): string {
+  const i = input ?? {};
+  if (toolName === "createArtifact") return `Create artifact "${i.title ?? "Untitled"}"`;
+  if (toolName === "updateArtifact") return `Update artifact "${i.title ?? i.artifactId ?? ""}"`;
+  if (toolName === "createTodo" || toolName === "createTodos" || toolName === "updateTodo") return "Update the todo list";
+  if (toolName === "rememberFact") return `Save to memory: "${i.key ?? ""}"`;
+  if (toolName === "forgetFact") return `Forget memory: "${i.key ?? ""}"`;
+  if (toolName.startsWith("mcp_")) return `Run ${toolName.replace(/^mcp_[^_]*_/, "")} on an MCP server`;
+  return `Run ${toolName}`;
+}
+
+/** A stopped reply: every card still waiting is denied, so nothing runs when it is resumed. */
+export function denyOpenApprovals(parts: any[]): any[] {
+  return parts.map((p) => {
+    if (p?.state !== "approval-requested") return p;
+    if (!p.approval?.id) return { ...p, state: "output-error", errorText: "Stopped before it ran." };
+    return { ...p, state: "output-denied", approval: { id: p.approval.id, approved: false, reason: STOPPED_REPLY } };
+  });
+}
+
+/** Fire a follow-up after `executeCode`, or after a plan card is revised. Trailing reasoning and
+ *  step-start parts don't count as an answer. `askClarification` is excluded: the user's own reply
+ *  sends it. An approved plan sends its own visible message, and a waiting card never resumes. */
 export function shouldAutoContinue(parts: AnyPart[] | undefined): boolean {
-  const tail = (parts ?? [])
-    .filter((p) => p?.type !== "reasoning" && p?.type !== "step-start")
-    .pop();
+  const list = (parts ?? []).filter((p) => p?.type !== "reasoning" && p?.type !== "step-start");
+  if (list.some((p) => (p as ToolPart).state === "approval-requested")) return false;
+  const tail = list.pop();
+  if (tail?.type === "tool-presentPlan") {
+    const { state, output } = tail as ToolPart;
+    return (state === "output-available" || state === "result") && (output as PlanDecision | undefined)?.action === "revise";
+  }
   if (tail?.type !== "tool-executeCode") return false;
   const { state } = tail as ToolPart;
   return state === "output-available" || state === "result";

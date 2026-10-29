@@ -2,10 +2,10 @@ import { quoteSearchResults } from "./quotePastChat";
 import { frameAgentMessageParts } from "./agentMessages";
 
 /**
- * Collapse duplicate tool parts and fix bogus states so every call has a result.
- * Providers reject dangling calls and drop the whole history along with them.
+ * Collapse duplicate tool parts and fix bogus states so every call has a result. Providers reject
+ * dangling calls. `answerable: false` (an older message) denies approvals nobody answered.
  */
-export function normalizeToolParts(parts: unknown): unknown {
+export function normalizeToolParts(parts: unknown, { answerable = true }: { answerable?: boolean } = {}): unknown {
   if (!Array.isArray(parts)) return parts;
 
   const out: any[] = [];
@@ -39,13 +39,28 @@ export function normalizeToolParts(parts: unknown): unknown {
     out[existingIdx] = merged;
   }
 
-  // A part is only "available" if it really has output.
+  // A part is only "available" if it really has output. Approval states are kept as they are.
   for (const idx of indexByCallId.values()) {
     const part = out[idx];
     const hasOutput = part.output !== undefined && part.output !== null;
     if (hasOutput) {
       part.state = "output-available";
       delete part.errorText;
+    } else if (part.state === "output-denied") {
+      continue;
+    } else if (part.state === "approval-requested" || part.state === "approval-responded") {
+      const approvalId = part.approval?.id;
+      if (answerable) continue;
+      // Not answered (or never run) in an earlier message: a denial the model can read.
+      if (approvalId) {
+        const reason = part.state === "approval-requested" ? "The user did not answer this request." : "The tool did not run.";
+        part.state = "output-denied";
+        part.approval = { id: approvalId, approved: false, reason };
+        delete part.errorText;
+      } else {
+        part.state = "output-error";
+        part.errorText = "No output was recorded for this tool call.";
+      }
     } else if (part.state !== "output-error") {
       part.state = "output-error";
       part.errorText = part.errorText || "No output was recorded for this tool call.";
@@ -155,14 +170,17 @@ export function splitAtQueuedMessages<T extends { id?: string; role?: string; pa
   return out;
 }
 
-/** Prepare UI messages for `convertToModelMessages`. */
+/** Prepare UI messages for `convertToModelMessages`. Only the latest message can still be answered. */
 export function normalizeMessageToolParts<T extends { parts?: unknown }>(
   messages: T[],
 ): T[] {
-  return messages.flatMap((m) => {
+  return messages.flatMap((m, i) => {
     if (!m || !Array.isArray((m as any).parts)) return [m];
-    const parts = summarizeSpecParts(normalizeToolParts((m as any).parts));
-    return splitAtQueuedMessages({ ...m, parts: frameSearchChatsParts(parts, (m as any).role) } as T)
-      .map((seg) => ({ ...seg, parts: frameAgentMessageParts(seg.parts) }) as T);
+    const answerable = i === messages.length - 1;
+    // Split first: each piece of a reply that had a queued message delivered mid-way is normalized on its own.
+    return splitAtQueuedMessages(m as any).map((seg: any) => {
+      const parts = summarizeSpecParts(normalizeToolParts(seg.parts, { answerable }));
+      return { ...seg, parts: frameAgentMessageParts(frameSearchChatsParts(parts, seg.role)) } as T;
+    });
   });
 }

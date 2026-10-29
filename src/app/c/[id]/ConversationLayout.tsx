@@ -16,6 +16,7 @@ import KeyboardShortcutsDialog from "@/app/components/KeyboardShortcutsDialog";
 import { useCommandPaletteActions } from "@/app/components/CommandPalette";
 import ConversationHeader from "@/app/components/conversation/ConversationHeader";
 import EmptyState from "@/app/components/conversation/EmptyState";
+import { ToolAnswersProvider } from "@/app/components/ToolAnswers";
 import { useKeyboardShortcuts } from "@/app/hooks/useKeyboardShortcuts";
 import { joinTextParts } from "@/lib/utils/conversation";
 import { exportChat } from "@/lib/utils/download";
@@ -77,6 +78,8 @@ export default function ConversationLayout({ conversationId, initialPrompt }: Pr
       <main className="flex h-screen flex-1 min-w-0 flex-col bg-[var(--background)] text-[var(--foreground)]">
         <div aria-live="polite" className="sr-only">{p.announcement}</div>
         <ConversationHeader
+          allowedToolCount={p.allowedToolCount}
+          onResetAllowedTools={p.resetAllowedTools}
           conversation={p.conversation}
           messagesCount={p.messages.length}
           scratchpadOpen={p.scratchpadOpen}
@@ -115,6 +118,7 @@ export default function ConversationLayout({ conversationId, initialPrompt }: Pr
           )}
 
           {p.messages.length > 0 && (
+            <ToolAnswersProvider value={{ answerApproval: p.answerApproval, answerPlan: p.answerPlan }}>
             <ChatMessages
               messages={p.messages}
               isLoading={p.isLoading}
@@ -125,11 +129,14 @@ export default function ConversationLayout({ conversationId, initialPrompt }: Pr
               onRegenerateMessage={p.handleRegenerateMessage}
               onOpenArtifact={(id: string) => { p.setSelectedArtifactId(id); p.setArtifactPanelOpen(true); }}
               onClarificationAnswer={p.handleClarificationAnswer}
+              onApprovePlan={p.mode === "plan" && !p.toolsAvailable ? p.approvePlanReply : undefined}
+              toolsAvailable={p.toolsAvailable}
               scrollRef={p.scrollRef}
               statusLabel={p.currentModelName ? `Waiting for ${p.currentModelName}…` : undefined}
               onQuote={p.addQuote}
               quoteSuppressed={p.isDialogOpen}
             />
+            </ToolAnswersProvider>
           )}
 
           {p.messages.length > 0 && (

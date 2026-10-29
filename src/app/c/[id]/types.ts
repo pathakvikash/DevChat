@@ -1,8 +1,10 @@
 import type { MinimapMessage } from "@/app/components/MinimapNavigator";
 import type { Conversation } from "@/app/components/conversation/types";
+import type { ChatMode } from "@/lib/chat/modes";
 import type { DataActions } from "./useConversationData";
 import type { QuoteCard } from "@/lib/utils/quoteReply";
 import type { QueuedItem } from "@/app/components/QueuedMessages";
+import type { ApprovalAnswer, PlanAnswer } from "@/app/components/ToolAnswers";
 
 export interface ConversationPageState extends DataActions {
   conversation: Conversation | null;
@@ -32,8 +34,6 @@ export interface ConversationPageState extends DataActions {
   editQueued: (id: string, text: string) => Promise<void>;
   removeQueued: (id: string) => Promise<void>;
   retryQueued: (id: string) => void;
-  /** The model can use tools, so queued messages join the running reply (else they go next). */
-  toolsAvailable: boolean;
   /** Text for the pane's polite live region. */
   announcement: string;
   toggleTemporary: () => Promise<void>;
@@ -80,6 +80,14 @@ export interface ConversationPageState extends DataActions {
   isLoading: boolean;
   currentModelName: string;
   handleClarificationAnswer: (toolCallId: string, answer: string) => Promise<void>;
+  answerApproval: (answer: ApprovalAnswer) => void;
+  answerPlan: (answer: PlanAnswer) => void;
+  approvePlanReply: () => void;
+  allowedToolCount: number;
+  resetAllowedTools: () => void;
+  mode: ChatMode;
+  /** False for a model without tools (or chat-only): queued messages go next, and Ask and Plan get their text fallbacks. */
+  toolsAvailable: boolean;
   handleEditMessage: (messageId: string, content: string) => Promise<void>;
   handleDeleteMessage: (messageId: string) => Promise<void>;
   handleCopyMessage: (content: string) => void;

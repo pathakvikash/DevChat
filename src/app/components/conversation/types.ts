@@ -1,5 +1,6 @@
-/** Chat gets read-only tools, Agent also gets the ones that write. */
-export type ChatMode = "chat" | "agent";
+import type { ChatMode } from "@/lib/chat/modes";
+
+export type { ChatMode };
 
 export interface Conversation {
   id: string;
