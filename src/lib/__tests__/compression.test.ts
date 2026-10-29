@@ -27,10 +27,12 @@ vi.mock("@/lib/models", () => ({
   initializeOllamaModels: vi.fn(),
 }));
 vi.mock("@/lib/apiKeys", () => ({ resolveProviderCreds: vi.fn(async () => ({})) }));
+vi.mock("@/lib/chat/loadParentContext", () => ({ loadParentContext: vi.fn(async () => null) }));
 
 import { prisma } from "@/lib/db";
 import { getModel } from "@/lib/models";
 import { calculateContextUsage, countTokens } from "@/lib/tokens";
+import { loadParentContext } from "@/lib/chat/loadParentContext";
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -342,5 +344,27 @@ describe("compressConversation focus", () => {
     const controller = new AbortController();
     await compressConversation("c1", "gpt-4o", { abortSignal: controller.signal });
     expect((generateText as any).mock.calls[0][0].abortSignal).toBe(controller.signal);
+  });
+
+  it("counts a side chat's main-conversation section in the prompt it measures", async () => {
+    (prisma.conversation.findUnique as any).mockResolvedValue({
+      userId: "u1",
+      model: "test-model",
+      systemPrompt: "persona",
+      compressedAt: null,
+      compressedSummary: null,
+    });
+    (prisma.message.findMany as any).mockResolvedValue([
+      { role: "user", content: "a" },
+      { role: "user", content: "b" },
+    ]);
+    (loadParentContext as any).mockResolvedValue({ text: "--- Main conversation (read-only) ---", shown: 1, total: 1 });
+    (calculateContextUsage as any).mockResolvedValue({ contextPercent: 10 });
+
+    await shouldAutoCompress("side-id", 85, 8192);
+    expect(loadParentContext).toHaveBeenCalledWith("side-id", "u1", 8192);
+    const systemPrompt = (calculateContextUsage as any).mock.calls[0][1];
+    expect(systemPrompt).toContain("persona");
+    expect(systemPrompt).toContain("--- Main conversation (read-only) ---");
   });
 });

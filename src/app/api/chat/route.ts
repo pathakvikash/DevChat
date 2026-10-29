@@ -106,17 +106,18 @@ export async function POST(req: Request) {
   // Anything unknown falls back to chat, the safest mode.
   const requestedMode: ToolMode = isChatMode(bodyMode) ? bodyMode : "chat";
   // Without AUTH_SECRET the SDK can't sign or verify approvals, so Ask would trust the browser's answers.
-  const toolMode = effectiveToolMode(requestedMode, !!process.env.AUTH_SECRET);
-  if (toolMode !== requestedMode) console.warn("[chat] AUTH_SECRET is unset: Ask runs as Chat, since approvals can't be verified.");
+  const authMode = effectiveToolMode(requestedMode, !!process.env.AUTH_SECRET);
+  if (authMode !== requestedMode) console.warn("[chat] AUTH_SECRET is unset: Ask runs as Chat, since approvals can't be verified.");
   let model: string | undefined = bodyModel;
   try {
     let compressedAt: Date | null = null;
     if (conversationId) {
       const owned = await prisma.conversation.findUnique({
         where: { id: conversationId },
-        select: { userId: true, compressedAt: true },
+        select: { userId: true, compressedAt: true, parent: { select: { userId: true } } },
       });
-      if (!owned || owned.userId !== userId) {
+      // A side chat is only ever read against a main chat of the same user.
+      if (!owned || owned.userId !== userId || (owned.parent && owned.parent.userId !== userId)) {
         return new Response(JSON.stringify({ error: "Conversation not found" }), {
           status: 404,
           headers: { "Content-Type": "application/json" },
@@ -170,6 +171,14 @@ export async function POST(req: Request) {
       reasoningEffort,
       workingFolder,
     } = settings;
+    if (settings.kind === "subagent") {
+      return new Response(JSON.stringify({ error: "Sub-agent runs cannot be sent to directly" }), {
+        status: 400,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+    // Side chats are read-only, whatever mode the request asks for.
+    const toolMode: ToolMode = settings.kind === "side" ? "chat" : authMode;
     // `contextLength`/`maxTokens` are reassigned below (Ollama context bump,
     // default maxTokens), so these two stay `let` unlike the rest.
     let { contextLength, maxTokens, kbId } = settings;
@@ -225,6 +234,7 @@ export async function POST(req: Request) {
       memoryDisabled,
       userId,
       mode: toolMode,
+      contextWindow: contextWindowFor(servedModel, modelConfig, contextLength),
     });
 
     console.log(

@@ -21,7 +21,7 @@ export async function GET(req: NextRequest) {
 
     const where: Record<string, unknown> = {
       role: "assistant",
-      conversation: { userId },
+      conversation: { userId, parentId: null },
     };
     if (minRating) {
       where.feedback = { is: { rating: { gte: parseInt(minRating, 10) } } };

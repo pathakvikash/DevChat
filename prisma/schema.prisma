@@ -101,9 +101,14 @@ model Conversation {
   forkedFrom               Conversation? @relation("Forks", fields: [forkedFromId], references: [id], onDelete: SetNull)
   forks                    Conversation[] @relation("Forks")
   queuedMessages           QueuedMessage[]
+  parentId                 String?
+  kind                     String     @default("main") // main | side | subagent
+  parent                   Conversation?  @relation("Children", fields: [parentId], references: [id], onDelete: Cascade)
+  children                 Conversation[] @relation("Children")
 
   @@index([updatedAt])
   @@index([userId])
+  @@index([parentId])
 }
 
 // Messages typed while a reply runs. Deleted or delivered (deliveredAt set) before the next step.

@@ -16,7 +16,8 @@ export async function GET() {
     });
 
     const stats = {
-      totalConversations: conversations.length,
+      // Side chats and sub-agent runs count in tokens and cost, not as conversations.
+      totalConversations: conversations.filter((c) => !c.parentId).length,
       totalMessages: conversations.reduce((sum, c) => sum + c.messages.length, 0),
       totalTokens: conversations.reduce((sum, c) => sum + c.totalTokens, 0),
       modelUsage: {} as Record<string, number>,

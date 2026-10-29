@@ -25,6 +25,7 @@ export interface DetailedTokenBreakdown {
   tools: number;
   memory: number;
   compressed: number;
+  main: number;
   kb: number;
   conversationHistory: number;
   currentMessage: number;
@@ -141,6 +142,7 @@ export function calculateDetailedContextUsage(
       : compressedSummary && compressedSummary.trim().length > 0
         ? countTokens(`--- Compressed Conversation History ---\n${compressedSummary}`)
         : 0;
+  const main = sections.main ? countTokens(sections.main) : 0;
   const kb = sections.kb ? countTokens(sections.kb) : 0;
 
   const historyTokens = compressed > 0 ? 0 : historyTokensOf(messages);
@@ -155,6 +157,7 @@ export function calculateDetailedContextUsage(
     tools +
     memory +
     compressed +
+    main +
     kb +
     historyTokens +
     currentTokens;
@@ -173,6 +176,7 @@ export function calculateDetailedContextUsage(
       tools,
       memory,
       compressed,
+      main,
       kb,
       conversationHistory: historyTokens,
       currentMessage: currentTokens,

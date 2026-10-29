@@ -40,10 +40,11 @@ export async function GET(
           orderBy: { createdAt: "asc" },
           select: { role: true, content: true, createdAt: true },
         },
+        parent: { select: { userId: true, kbId: true, temporary: true } },
       },
     });
 
-    if (!conversation || conversation.userId !== userId) {
+    if (!conversation || conversation.userId !== userId || (conversation.parent && conversation.parent.userId !== userId)) {
       return NextResponse.json({ error: "Conversation not found" }, { status: 404 });
     }
 
@@ -69,12 +70,15 @@ export async function GET(
     // next request, so the per-category counts reflect reality (tools,
     // skills, KB auto-inject, etc.) — not just the raw persona string.
     const chatOnlyMode = conversation.chatOnlyMode ?? false;
-    const memoryDisabled = conversation.memoryDisabled || conversation.temporary;
+    // A side chat runs like the chat route does: its main chat's KB and memory state, chat mode.
+    const side = conversation.kind === "side" ? conversation.parent : null;
+    const kbId = side ? side.kbId || undefined : conversation.kbId || undefined;
+    const memoryDisabled = conversation.memoryDisabled || conversation.temporary || !!side?.temporary;
     const useTools = !!modelConfig?.supportsTools && !chatOnlyMode;
     const activeToolIds = resolveActiveToolIds(
       explicitToolIds,
       skillIds,
-      conversation.kbId,
+      kbId,
     );
 
     // `retrieveKbContext` (called inside buildSystemPrompt) reads the LAST
@@ -88,17 +92,19 @@ export async function GET(
         ]
       : messagesForUsage;
 
-    const { sections } = await buildSystemPrompt({
+    const { sections, mainContext } = await buildSystemPrompt({
       useTools,
       systemPrompt,
       skillIds,
       activeToolIds,
       conversationId: id,
-      kbId: conversation.kbId || undefined,
+      kbId,
       ragContext: undefined,
       messages: panelMessages,
       memoryDisabled,
       userId,
+      contextWindow: contextLength,
+      ...(side ? { mode: "chat" as const } : {}),
     });
 
     const result = calculateDetailedContextUsage(
@@ -114,6 +120,7 @@ export async function GET(
       contextLength,
       systemPrompt: systemPrompt ? systemPrompt.substring(0, 200) : null,
       hasCompressedSummary: !!compressedSummary,
+      mainContext,
       ...result,
     });
   } catch (error) {

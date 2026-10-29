@@ -22,6 +22,10 @@ vi.mock("@/lib/compression", () => ({
   getCompressedContext: vi.fn(),
 }));
 
+vi.mock("@/lib/chat/loadParentContext", () => ({
+  loadParentContext: vi.fn().mockResolvedValue(null),
+}));
+
 vi.mock("@/lib/settings", () => ({
   getSettingsKey: vi.fn(),
 }));
@@ -32,6 +36,7 @@ vi.mock("@/lib/utils/messageParts", () => ({
 
 import { getMemoryBlock } from "@/lib/memory";
 import { getCompressedContext } from "@/lib/compression";
+import { loadParentContext } from "@/lib/chat/loadParentContext";
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -158,6 +163,24 @@ describe("buildSystemPrompt", () => {
     const result = await buildSystemPrompt(makeOpts());
     expect(result.sections.kb).toBeNull();
     expect(result.sections.tools).toBeNull();
+  });
+
+  it("adds the main conversation section for a side chat, and reports what it shows", async () => {
+    (getMemoryBlock as any).mockResolvedValue("");
+    (loadParentContext as any).mockResolvedValueOnce({ text: "--- Main conversation (read-only) ---", shown: 3, total: 9 });
+    const result = await buildSystemPrompt(makeOpts({ conversationId: "s1", contextWindow: 4096 }));
+    expect(loadParentContext).toHaveBeenCalledWith("s1", "test-user", 4096);
+    expect(result.sections.main).toBe("--- Main conversation (read-only) ---");
+    expect(result.text).toContain("--- Main conversation (read-only) ---");
+    expect(result.mainContext).toEqual({ shown: 3, total: 9 });
+  });
+
+  it("has no main section for a main chat", async () => {
+    (getMemoryBlock as any).mockResolvedValue("");
+    (loadParentContext as any).mockResolvedValueOnce(null);
+    const result = await buildSystemPrompt(makeOpts({ conversationId: "c1" }));
+    expect(result.sections.main).toBeNull();
+    expect(result.mainContext).toBeNull();
   });
 });
 

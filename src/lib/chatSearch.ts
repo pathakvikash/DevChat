@@ -42,7 +42,7 @@ export async function searchUserChats(
   query: string,
   { excludeId }: { excludeId?: string } = {},
 ): Promise<ChatHit[]> {
-  const owned = { userId, ...NOT_TEMPORARY, ...(excludeId ? { id: { not: excludeId } } : {}) };
+  const owned = { userId, ...NOT_TEMPORARY, parentId: null, ...(excludeId ? { id: { not: excludeId } } : {}) };
   const [byTitle, byMessage] = await Promise.all([
     prisma.conversation.findMany({
       where: { ...owned, title: contains(query) },
@@ -87,7 +87,7 @@ export async function searchUserChats(
  */
 export async function readUserChat(userId: string, id: string, budgetTokens: number): Promise<string | null> {
   const chat = await prisma.conversation.findFirst({
-    where: { id, userId, ...NOT_TEMPORARY },
+    where: { id, userId, ...NOT_TEMPORARY, parentId: null },
     select: { title: true, compressedSummary: true, compressedAt: true },
   });
   if (!chat) return null;

@@ -9,6 +9,7 @@ import { MODE_POLICY } from "./modes";
 import { countTokens } from "@/lib/tokens";
 import { getSettingsKey } from "@/lib/settings";
 import { catalog as generativeUiCatalog } from "@/lib/generativeUi/catalog";
+import { loadParentContext, type MainContext } from "./loadParentContext";
 
 const VAS_TODO_SECTION = `TASK TRACKING — \`createTodos\` / \`createTodo\` / \`updateTodo\`
 You MUST use todos for ANY request with multiple steps. Call \`createTodos\` ONCE at the start with ALL steps listed, then update each with \`updateTodo\` as you complete it. This gives the user real-time progress — they can see exactly what you're doing. \`createTodo\` (singular) is for adding one-off items mid-task. This is mandatory.`;
@@ -77,6 +78,8 @@ export interface BuildSystemPromptOptions {
   userId: string;
   /** Chat withholds mutating tools; the prompt must not advertise them. */
   mode?: ToolMode;
+  /** The model's usable window, which sizes the side chat's main-conversation section. */
+  contextWindow?: number;
 }
 
 /** Individual sections of the system prompt, exposed for the Context panel
@@ -91,6 +94,8 @@ export interface SystemPromptSections {
   tools: string | null;
   memory: string | null;
   compressed: string | null;
+  /** A side chat's view of its main chat. */
+  main?: string | null;
   kb: string | null;
   generativeUi: string | null;
 }
@@ -98,6 +103,8 @@ export interface SystemPromptSections {
 export interface BuildSystemPromptResult {
   text: string;
   sections: SystemPromptSections;
+  /** Messages of the main chat the side chat sees, out of its live total; null outside side chats. */
+  mainContext: Pick<MainContext, "shown" | "total"> | null;
 }
 
 export async function buildSystemPrompt(
@@ -176,6 +183,11 @@ export async function buildSystemPrompt(
     if (cs) compressed = `--- Compressed Conversation History ---\n${cs}`;
   }
 
+  const mainContext = conversationId
+    ? await loadParentContext(conversationId, opts.userId, opts.contextWindow ?? 8192)
+    : null;
+  const main = mainContext?.text ?? null;
+
   const kb = await retrieveKbContext({ kbId, ragContext, messages });
 
   const generativeUi = generativeUiCatalog.prompt({
@@ -183,12 +195,16 @@ export async function buildSystemPrompt(
     customRules: GENERATIVE_UI_RULES,
   });
 
-  const sections: SystemPromptSections = { base, instructions, persona, skills, tools, memory, compressed, kb, generativeUi };
-  const text = [base, instructions, persona, skills, tools, memory, compressed, kb, generativeUi]
+  const sections: SystemPromptSections = { base, instructions, persona, skills, tools, memory, compressed, main, kb, generativeUi };
+  const text = [base, instructions, persona, skills, tools, memory, compressed, main, kb, generativeUi]
     .filter((s): s is string => Boolean(s))
     .join("\n\n");
 
-  return { text, sections };
+  return {
+    text,
+    sections,
+    mainContext: mainContext && { shown: mainContext.shown, total: mainContext.total },
+  };
 }
 
 /** Hard ceiling on the auto-injected KB block. ~1500 tokens is enough for
