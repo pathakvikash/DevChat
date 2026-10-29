@@ -544,7 +544,7 @@ export default function ChatInput({
                     : mode === "agent"
                     ? "Agent mode: can make changes without asking"
                     : mode === "ask"
-                      ? isCliModelId(model) ? "Ask mode: CLI models run read-only for now" : "Ask mode: changes need your OK"
+                      ? isCliModelId(model) && !model.startsWith("claude-code/") ? "Ask mode: OpenCode and Codex can't ask before editing; read-only here" : "Ask mode: changes need your OK"
                       : mode === "plan"
                         ? "Describe the task. You'll get a plan to approve."
                         : "Type a message, / for commands, or drop files..."

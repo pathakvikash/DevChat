@@ -43,10 +43,10 @@ describe("mode -> tool set", () => {
     expect(MODE_POLICY.chat.approval || MODE_POLICY.plan.approval || MODE_POLICY.agent.approval).toBe(false);
   });
 
-  it("maps CLI access: plan is plan, ask stays read-only, agent may edit", () => {
+  it("maps CLI access: plan is plan, ask asks per change, agent may edit", () => {
     expect(MODE_POLICY.chat.cli).toBe("chat");
     expect(MODE_POLICY.plan.cli).toBe("plan");
-    expect(MODE_POLICY.ask.cli).toBe("chat");
+    expect(MODE_POLICY.ask.cli).toBe("ask");
     expect(MODE_POLICY.agent.cli).toBe("agent");
   });
 

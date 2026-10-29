@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireUserId } from "@/lib/auth";
 import { isRunnableCwd } from "@/lib/claude/sessions";
 import { deleteTraces } from "@/lib/temporaryChat";
+import { dropParkedRuns } from "@/lib/cliProviders";
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
@@ -128,6 +129,7 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
     if (result.count === 0) {
       return NextResponse.json({ error: "Conversation not found" }, { status: 404 });
     }
+    dropParkedRuns(id);
 
     return NextResponse.json({ success: true });
   } catch (error) {

@@ -87,6 +87,21 @@ export function settleStaleParts<T extends { type?: string; state?: string; appr
   });
 }
 
+/** Claude Code tools that may be allowed for the rest of a chat. Bash and everything else always asks. */
+export const CHAT_ALLOWABLE_TOOLS: ReadonlySet<string> = new Set(["Edit", "Write", "MultiEdit", "NotebookEdit"]);
+
+/** A short preview of an edit: at most `max` removed and `max` added lines, each cut side ends in "…". */
+export function editPreview(input: unknown, max = 6): { minus: string[]; plus: string[] } {
+  const i = (input ?? {}) as Record<string, unknown>;
+  if (typeof i.old_string !== "string" || typeof i.new_string !== "string") return { minus: [], plus: [] };
+  const side = (text: string, mark: string) => {
+    const lines = text.split("\n");
+    const cut = lines.length > max;
+    return [...(cut ? lines.slice(0, max) : lines).map((l) => `${mark} ${l}`), ...(cut ? ["…"] : [])];
+  };
+  return { minus: side(i.old_string, "-"), plus: side(i.new_string, "+") };
+}
+
 /** Approval reasons the page writes: shown as "Allowed for this chat", "Denied", "Stopped". */
 export const ALLOWED_FOR_CHAT = "Allowed for this chat";
 export const DENIED_BY_USER = "The user denied this action.";
@@ -100,6 +115,10 @@ export function approvalTitle(toolName: string, input: any): string {
   if (toolName === "createTodo" || toolName === "createTodos" || toolName === "updateTodo") return "Update the todo list";
   if (toolName === "rememberFact") return `Save to memory: "${i.key ?? ""}"`;
   if (toolName === "forgetFact") return `Forget memory: "${i.key ?? ""}"`;
+  // Claude Code's own tools, asked for in Ask mode.
+  if (toolName === "Edit" || toolName === "MultiEdit") return `Edit ${i.file_path ?? ""}`;
+  if (toolName === "Write") return `Create ${i.file_path ?? ""}`;
+  if (toolName === "Bash") return "Run a command";
   if (toolName.startsWith("mcp_")) return `Run ${toolName.replace(/^mcp_[^_]*_/, "")} on an MCP server`;
   return `Run ${toolName}`;
 }
