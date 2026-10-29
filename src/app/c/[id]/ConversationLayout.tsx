@@ -143,6 +143,10 @@ export default function ConversationLayout({ conversationId, initialPrompt }: Pr
           setInput={p.setInput}
           files={p.files}
           setFiles={p.setFiles}
+          conversationId={conversationId}
+          mentions={p.mentions}
+          setMentions={p.setMentions}
+          mentionCuts={p.mentionCuts}
           isLoading={p.isLoading}
           onSubmit={p.handleSubmit}
           onStop={p.stop}

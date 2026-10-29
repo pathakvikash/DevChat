@@ -2,6 +2,7 @@ import { readdirSync, statSync, existsSync, createReadStream } from "fs";
 import { readFile } from "fs/promises";
 import { homedir } from "os";
 import { join } from "path";
+import { isSanityMode } from "@/lib/sanityMode";
 
 export const CLAUDE_DIR = join(homedir(), ".claude");
 export const PROJECTS_DIR = join(CLAUDE_DIR, "projects");
@@ -148,7 +149,10 @@ export async function listProjects(): Promise<ClaudeProject[]> {
 /** Where runs are allowed — only folders Claude Code has already worked in. */
 export async function runnableCwds(): Promise<Set<string>> {
   const projects = await listProjects();
-  return new Set(projects.map((p) => p.cwd));
+  const cwds = new Set(projects.map((p) => p.cwd));
+  // Sanity suite only: a checked-in folder stands in for a Claude Code project (e2e/files.spec.ts).
+  if (isSanityMode() && process.env.SANITY_WORKING_FOLDER) cwds.add(process.env.SANITY_WORKING_FOLDER);
+  return cwds;
 }
 
 export async function isRunnableCwd(cwd: string): Promise<boolean> {

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, useCallback } from "react";
-import { Plus, Upload, Globe, BookOpen, Settings, X, Slash, Mic, MicOff, ArrowRight, Loader2, Paperclip } from "lucide-react";
+import { Plus, Upload, Globe, BookOpen, Settings, X, Slash, Mic, MicOff, ArrowRight, Loader2, Paperclip, AtSign, FileText } from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
 import AttachmentChip from "./AttachmentChip";
 import QuoteCards from "./QuoteCards";
@@ -19,6 +19,7 @@ import {
 import { useVoiceDictation } from "@/lib/useVoiceDictation";
 import { useChatMode } from "@/app/contexts/ChatModeContext";
 import type { QuoteCard } from "@/lib/utils/quoteReply";
+import { findMentionQuery, formatSize, matchMentionFiles } from "@/lib/utils/fileMentions";
 
 /** Max composer height before it starts scrolling. */
 const MAX_INPUT_HEIGHT = 200;
@@ -61,6 +62,12 @@ interface ChatInputProps {
   onSendQuote: (id: string) => void;
   /** Temporary chat: dashed composer and its own placeholder. */
   temporary?: boolean;
+  conversationId: string;
+  /** Working-folder paths picked with `@`; shown as chips. */
+  mentions: string[];
+  setMentions: React.Dispatch<React.SetStateAction<string[]>>;
+  /** Kept and total lines for each `@` file that will be cut on send. */
+  mentionCuts?: Record<string, { kept: number; total: number }>;
 }
 
 export default function ChatInput({
@@ -91,6 +98,10 @@ export default function ChatInput({
   onQuoteRemove,
   onSendQuote,
   temporary,
+  conversationId,
+  mentions,
+  setMentions,
+  mentionCuts = {},
 }: ChatInputProps) {
   // Read-only here; the sidebar and header toggles do the actual switching.
   const { mode } = useChatMode();
@@ -130,6 +141,53 @@ export default function ChatInput({
   useEffect(() => {
     setCmdIndex((i) => (i >= cmdMatches.length ? 0 : i));
   }, [cmdMatches.length]);
+
+  // `@` picks a file from the working folder. Only with a folder; the slash menu wins when both match.
+  const [caret, setCaret] = useState(0);
+  const mentionQuery = workingFolder ? findMentionQuery(input, caret) : null;
+  const mentionKey = mentionQuery ? `${mentionQuery.start}:${mentionQuery.query}` : null;
+  const [mentionDismissed, setMentionDismissed] = useState<string | null>(null);
+  const [mentionIndex, setMentionIndex] = useState(0);
+  const showMentions = mentionQuery !== null && mentionKey !== mentionDismissed && !showCommands;
+  // The list belongs to one chat and folder. It is fetched when the picker first opens, and again after a failure.
+  const listKey = `${conversationId}|${workingFolder ?? ""}`;
+  const [folderList, setFolderList] = useState<{ key: string; status: "ready" | "error"; files: { path: string; size: number }[] } | null>(null);
+  const listingKeyRef = useRef<string | null>(null);
+  const list = folderList?.key === listKey ? folderList : null;
+  const mentionMatches =
+    showMentions && mentionQuery && list?.status === "ready" ? matchMentionFiles(list.files, mentionQuery.query) : [];
+  const activeMention = mentionIndex < mentionMatches.length ? mentionIndex : 0;
+
+  useEffect(() => {
+    if (!showMentions || listingKeyRef.current === listKey) return;
+    listingKeyRef.current = listKey;
+    fetch(`/api/conversations/${conversationId}/files`)
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
+      .then((d) => setFolderList({ key: listKey, status: "ready", files: d.files }))
+      .catch(() => {
+        listingKeyRef.current = null;
+        setFolderList({ key: listKey, status: "error", files: [] });
+      });
+  }, [showMentions, listKey, conversationId]);
+
+  // After a pick the text changes, and React would move the caret to the end. Put it back here.
+  const caretAfterPick = useRef<number | null>(null);
+  useEffect(() => {
+    const el = textareaRef.current;
+    if (caretAfterPick.current === null || !el) return;
+    el.setSelectionRange(caretAfterPick.current, caretAfterPick.current);
+    caretAfterPick.current = null;
+  }, [input]);
+
+  function pickMention(path: string) {
+    if (!mentionQuery) return;
+    const pos = mentionQuery.start;
+    setInput(input.slice(0, pos) + input.slice(caret));
+    setCaret(pos);
+    setMentions((prev) => (prev.includes(path) ? prev : [...prev, path]));
+    caretAfterPick.current = pos;
+    textareaRef.current?.focus();
+  }
 
   const applyCommand = useCallback(
     (cmd: SlashCommand) => {
@@ -224,7 +282,7 @@ export default function ChatInput({
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
-  const canSubmit = input.trim() || files.length > 0 || quotes.length > 0;
+  const canSubmit = input.trim() || files.length > 0 || mentions.length > 0 || quotes.length > 0;
   const showSuggestion = Boolean(suggestion && !input && !isLoading && onAcceptSuggestion);
 
   useEffect(() => {
@@ -295,7 +353,7 @@ export default function ChatInput({
         )}
 
         {/* Composer tray: what stacks above the input. Status rows above stay put; this part scrolls. */}
-        {(quotes.length > 0 || files.length > 0) && (
+        {(quotes.length > 0 || files.length > 0 || mentions.length > 0) && (
           <div className="mb-3 max-h-[min(30dvh,240px)] space-y-2 overflow-y-auto">
             <QuoteCards
               quotes={quotes}
@@ -309,19 +367,22 @@ export default function ChatInput({
               focusTextarea={focusTextarea}
               busy={isLoading}
             />
-            {files.length > 0 && (
+            {(files.length > 0 || mentions.length > 0) && (
               <div className="space-y-2">
                 <div className="flex items-center gap-1.5 text-[11px] text-zinc-400">
-                  <Paperclip size={11} /> Files ({files.length})
+                  <Paperclip size={11} /> Files ({files.length + mentions.length})
                   <button
                     type="button"
-                    onClick={() => setFiles([])}
+                    onClick={() => {
+                      setFiles([]);
+                      setMentions([]);
+                    }}
                     className="focus-ring ml-auto rounded-[var(--glass-radius-sm)] px-1 hover:text-[var(--foreground)]"
                   >
                     Clear all
                   </button>
                 </div>
-                <div className="flex flex-wrap gap-2">
+                <div role="list" aria-label="Files" className="flex flex-wrap gap-2">
                   {files.map((file, index) => (
                     <AttachmentChip
                       key={`${file.name}-${file.size}-${index}`}
@@ -329,6 +390,23 @@ export default function ChatInput({
                       onRemove={() => removeFile(index)}
                     />
                   ))}
+                  {mentions.map((path) => {
+                    const cut = mentionCuts[path];
+                    const modelName = model.split("/").pop() || model;
+                    return (
+                      <AttachmentChip
+                        key={`@${path}`}
+                        file={{ name: path }}
+                        note={
+                          cut && {
+                            text: `Trimmed to fit ${modelName}: ${cut.total === 1 ? "part of the only line" : `${cut.kept} of ${cut.total} lines`} sent`,
+                            title: cut.total === 1 ? "Only part of this line fits this model" : `Only the first ${cut.kept} of ${cut.total} lines fit this model`,
+                          }
+                        }
+                        onRemove={() => setMentions((prev) => prev.filter((p) => p !== path))}
+                      />
+                    );
+                  })}
                 </div>
               </div>
             )}
@@ -351,6 +429,42 @@ export default function ChatInput({
             ${temporary ? "border-dashed! border-[var(--glass-border-strong)]!" : ""}
           `}
         >
+          {showMentions && (
+            <div className="absolute bottom-full left-0 right-0 mb-2 max-h-72 overflow-y-auto rounded-[var(--glass-radius-md)] glass-panel shadow-2xl z-50">
+              <div className="flex items-center gap-1.5 border-b border-[var(--glass-border)] px-3 py-1.5 text-[11px] text-zinc-500">
+                <AtSign size={11} /> Files in {workingFolder?.split("/").pop()} · ↑↓ to navigate · Tab/Enter to select
+              </div>
+              {list?.status === "error" ? (
+                <div className="px-3 py-2 text-xs text-zinc-400">Couldn&apos;t list files</div>
+              ) : list?.status !== "ready" ? (
+                <div className="flex items-center gap-2 px-3 py-2 text-xs text-zinc-400">
+                  <Loader2 size={12} aria-hidden className="animate-spin motion-reduce:animate-none" /> Loading files…
+                </div>
+              ) : mentionMatches.length === 0 ? (
+                <div className="px-3 py-2 text-xs text-zinc-400">No files match &quot;{mentionQuery?.query}&quot;</div>
+              ) : (
+                mentionMatches.map(({ path, size }, i) => (
+                  <button
+                    key={path}
+                    type="button"
+                    onMouseEnter={() => setMentionIndex(i)}
+                    onClick={() => pickMention(path)}
+                    className={`focus-ring flex w-full items-center gap-2 px-3 py-2 text-left text-sm transition ${
+                      i === activeMention ? "bg-[var(--glass-bg-hover)]" : "hover:bg-[var(--glass-bg-hover)]"
+                    }`}
+                  >
+                    <FileText size={14} aria-hidden className="shrink-0 text-zinc-500" />
+                    <span className="truncate text-[var(--foreground)]">{path.slice(path.lastIndexOf("/") + 1)}</span>
+                    {path.includes("/") && (
+                      <span className="min-w-0 truncate text-xs text-zinc-400">{path.slice(0, path.lastIndexOf("/"))}</span>
+                    )}
+                    <span className="ml-auto shrink-0 font-mono text-[11px] text-zinc-400">{formatSize(size)}</span>
+                  </button>
+                ))
+              )}
+            </div>
+          )}
+
           {showCommands && (
             <div className="absolute bottom-full left-0 right-0 mb-2 max-h-72 overflow-y-auto rounded-[var(--glass-radius-md)] glass-panel shadow-2xl z-50">
               <div className="flex items-center gap-1.5 border-b border-[var(--glass-border)] px-3 py-1.5 text-[11px] text-zinc-500">
@@ -387,7 +501,12 @@ export default function ChatInput({
             <textarea
               ref={textareaRef}
               value={input}
-              onChange={(e) => setInput(e.target.value)}
+              onChange={(e) => {
+                setInput(e.target.value);
+                setCaret(e.target.selectionStart);
+                setMentionIndex(0);
+              }}
+              onSelect={(e) => setCaret(e.currentTarget.selectionStart)}
               placeholder={
                 isListening
                   ? ""
@@ -402,6 +521,34 @@ export default function ChatInput({
               className={`w-full resize-none bg-transparent text-sm text-[var(--foreground)] outline-none placeholder:text-zinc-500 placeholder:truncate disabled:opacity-50 py-1.5 overflow-y-auto ${showSuggestion ? "pr-7" : ""}`}
               rows={1}
               onKeyDown={(e) => {
+                if (showMentions) {
+                  if (e.key === "ArrowDown" && mentionMatches.length > 0) {
+                    e.preventDefault();
+                    setMentionIndex((i) => (i + 1) % mentionMatches.length);
+                    return;
+                  }
+                  if (e.key === "ArrowUp" && mentionMatches.length > 0) {
+                    e.preventDefault();
+                    setMentionIndex((i) => (i - 1 + mentionMatches.length) % mentionMatches.length);
+                    return;
+                  }
+                  if (e.key === "Tab" && mentionMatches.length > 0) {
+                    e.preventDefault();
+                    pickMention(mentionMatches[activeMention].path);
+                    return;
+                  }
+                  // Enter picks, or does nothing while the list loads or matches nothing. It never sends.
+                  if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
+                    e.preventDefault();
+                    if (mentionMatches.length > 0) pickMention(mentionMatches[activeMention].path);
+                    return;
+                  }
+                  if (e.key === "Escape") {
+                    e.preventDefault();
+                    setMentionDismissed(mentionKey);
+                    return;
+                  }
+                }
                 if (showCommands) {
                   if (e.key === "ArrowDown") {
                     e.preventDefault();
