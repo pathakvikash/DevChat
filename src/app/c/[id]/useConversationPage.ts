@@ -9,6 +9,8 @@ import { parseCommand, missingArg } from "@/lib/commands";
 import { buildMessageParts } from "@/lib/utils/messageParts";
 import { buildMessagesFromConversation, lastExchange, type RawConversation } from "@/lib/utils/conversation";
 import { composeQuoteMessage, type QuoteCard } from "@/lib/utils/quoteReply";
+import { composeFileBlocks, cutFiles } from "@/lib/utils/fileMentions";
+import { budgetTokens } from "@/lib/chat/contextBudget";
 
 import { fetchSettings as apiFetchSettings, saveSettings as apiSaveSettings } from "@/app/hooks/useSettingsApi";
 import { runCommandAction } from "./runCommandAction";
@@ -24,6 +26,20 @@ export type { ConversationPageState };
 const pendingLeave = new Map<string, number>();
 const LEAVE_GRACE_MS = 5000;
 
+/** Share of the model's window that all `@` files together may use. */
+const FILES_SHARE = 0.35;
+
+/** A picked file's text as the server reads it; null when it refuses or cannot read the file. */
+async function readMention(conversationId: string, path: string): Promise<string | null> {
+  try {
+    const res = await fetch(`/api/conversations/${conversationId}/files?path=${encodeURIComponent(path)}`);
+    if (!res.ok) return null;
+    return (await res.json()).content ?? null;
+  } catch {
+    return null;
+  }
+}
+
 function discardTemporaryChat(id: string) {
   // keepalive lets the request outlive the page on a full reload; ?temporary=1 means the server
   // never deletes a chat that stopped being temporary.
@@ -38,6 +54,20 @@ export function useConversationPage(conversationId: string, initialPrompt?: stri
   const [conversation, setConversation] = useState<Conversation | null>(null);
   const [input, setInput] = useState("");
   const [files, setFiles] = useState<File[]>([]);
+  /** Working-folder paths picked with `@`; their contents are read on send. */
+  const [mentions, setMentions] = useState<string[]>([]);
+  /** Kept and total lines of each `@` file that the budget will cut; shown on its chip. */
+  const [mentionCuts, setMentionCuts] = useState<Record<string, { kept: number; total: number }>>({});
+  const workingFolder = conversation?.workingFolder ?? null;
+  // Picked files belong to one folder. When it changes, adjust state during render (no effect needed).
+  const [mentionFolder, setMentionFolder] = useState(workingFolder);
+  if (mentionFolder !== workingFolder) {
+    setMentionFolder(workingFolder);
+    setMentions([]);
+  }
+  /** Text of each picked file, read once per chat and folder. */
+  const mentionTextRef = useRef(new Map<string, string | null>());
+  const sendingRef = useRef(false);
   /** Suggested next message, shown greyed in the box after a reply. */
   const [suggestion, setSuggestion] = useState<string | null>(null);
   const [quotes, setQuotes] = useState<QuoteCard[]>([]);
@@ -316,31 +346,64 @@ export function useConversationPage(conversationId: string, initialPrompt?: stri
 
   /* ─── Submit ────────────────────────────────────────────────────────────── */
 
+  const windowTokens = contextData?.maxContextTokens || 8192;
+  useEffect(() => {
+    if (mentions.length === 0) return;
+    let cancelled = false;
+    (async () => {
+      const cache = mentionTextRef.current;
+      const keyOf = (path: string) => `${conversationId}|${workingFolder}|${path}`;
+      // Only files picked since the last run are read.
+      await Promise.all(
+        mentions
+          .filter((path) => !cache.has(keyOf(path)))
+          .map(async (path) => cache.set(keyOf(path), await readMention(conversationId, path))),
+      );
+      const files = mentions.map((path) => ({ path, content: cache.get(keyOf(path)) ?? null }));
+      const cuts = await cutFiles(files, budgetTokens(windowTokens, FILES_SHARE));
+      if (cancelled) return;
+      setMentionCuts(Object.fromEntries(cuts.filter((c) => c.cut).map((c) => [c.path, { kept: c.kept, total: c.total }])));
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [mentions, conversationId, workingFolder, windowTokens]);
+
   /** Sends the typed text, files and every quote card as one message. */
   async function sendComposed() {
-    if (!input.trim() && files.length === 0 && quotes.length === 0) return;
-    if (isLoading) return;
+    if (!input.trim() && files.length === 0 && mentions.length === 0 && quotes.length === 0) return;
+    // Set before the first await, so a second Enter while files are read does nothing.
+    if (isLoading || sendingRef.current) return;
+    sendingRef.current = true;
     const sent = quotes;
     try {
-      const { parts, attachments } = await buildMessageParts(composeQuoteMessage(sent, input), files, conversation?.model);
+      const fileBlocks = await composeFileBlocks(
+        await Promise.all(mentions.map(async (path) => ({ path, content: await readMention(conversationId, path) }))),
+        budgetTokens(windowTokens, FILES_SHARE),
+      );
+      const text = [composeQuoteMessage(sent, input), fileBlocks].filter(Boolean).join("\n\n");
+      const { parts, attachments } = await buildMessageParts(text, files, conversation?.model);
       const sending = sendMessage({ parts }, { body: { attachments } });
       // The message is in the transcript now, so the cards have done their job.
       setQuotes((prev) => prev.filter((q) => !sent.some((s) => s.id === q.id)));
       await sending;
       setInput("");
       setFiles([]);
+      setMentions([]);
       setSuggestion(null);
     } catch (err) {
       console.error("[handleSubmit] sendMessage failed:", err);
       toast("Failed to send message", "error");
       // Whatever didn't get sent stays: put back any card that was already cleared.
       setQuotes((prev) => [...sent.filter((s) => !prev.some((q) => q.id === s.id)), ...prev]);
+    } finally {
+      sendingRef.current = false;
     }
   }
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    if (!input.trim() && files.length === 0 && quotes.length === 0) return;
+    if (!input.trim() && files.length === 0 && mentions.length === 0 && quotes.length === 0) return;
     if (status === "streaming" || status === "submitted") return;
 
     const parsed = parseCommand(input);
@@ -349,6 +412,7 @@ export function useConversationPage(conversationId: string, initialPrompt?: stri
       if (missingArg(command, arg)) { toast(`Usage: ${command.usage}`, "info"); return; }
       setInput("");
       setFiles([]);
+      setMentions([]);
       if (command.kind === "transform" && command.transform) {
         try { await sendMessage({ parts: [{ type: "text", text: command.transform(arg) }] }); }
         catch (err) { console.error("[handleSubmit] command sendMessage failed:", err); toast("Failed to send message", "error"); }
@@ -408,7 +472,7 @@ export function useConversationPage(conversationId: string, initialPrompt?: stri
 
   return {
     conversation, setConversation, loading, setLoading,
-    input, setInput, files, setFiles, suggestion, setSuggestion,
+    input, setInput, files, setFiles, mentions, setMentions, mentionCuts, suggestion, setSuggestion,
     quotes, addQuote, updateQuote, removeQuote, sendQuote, sendComposed, announcement,
     toggleTemporary,
     scratchpadOpen, setScratchpadOpen,

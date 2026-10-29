@@ -18,7 +18,7 @@ export default function WorkingFolderPicker({ value, onChange, disabled }: Worki
   return (
     <label
       className="flex h-8 items-center gap-1.5 rounded-[var(--glass-radius-md)] glass-button px-2 text-xs text-zinc-300"
-      title={value ? `Working folder: ${value}` : "No working folder: the tool can't see any files"}
+      title={value ? `Working folder: ${value}. Type @ to mention a file.` : "No working folder: the tool can't see any files"}
     >
       <FolderOpen size={13} className={value ? "text-emerald-400" : "text-zinc-500"} />
       <select

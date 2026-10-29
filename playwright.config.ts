@@ -54,6 +54,8 @@ export default defineConfig({
       // Playwright sets NODE_ENV=test for itself; the server must run as dev (never production).
       NODE_ENV: "development",
       SANITY_TEST_AUTH: "1",
+      // Working folder for the @ files spec (a stand-in for a Claude Code project).
+      SANITY_WORKING_FOLDER: path.join(__dirname, "e2e/fixtures/project"),
       DATABASE_URL: DB_URL,
       SANITY_DIST_DIR: ".next-sanity",
       AUTH_SECRET: "sanity-suite-secret-not-a-real-secret",

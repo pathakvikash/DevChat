@@ -15,6 +15,10 @@ export interface ConversationPageState extends DataActions {
   setSuggestion: React.Dispatch<React.SetStateAction<string | null>>;
   files: File[];
   setFiles: React.Dispatch<React.SetStateAction<File[]>>;
+  /** Working-folder paths picked with `@`. */
+  mentions: string[];
+  setMentions: React.Dispatch<React.SetStateAction<string[]>>;
+  mentionCuts: Record<string, { kept: number; total: number }>;
   quotes: QuoteCard[];
   addQuote: (text: string) => void;
   updateQuote: (id: string, instruction: string) => void;

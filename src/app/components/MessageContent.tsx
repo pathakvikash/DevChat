@@ -10,6 +10,8 @@ import {
 import { useJsonRenderMessage, Renderer } from "@json-render/react";
 import { registry } from "@/lib/generativeUi/registry";
 import { splitQuoteBlocks } from "@/lib/utils/quoteReply";
+import { cutNotesIn } from "@/lib/utils/fileMentions";
+import { AlertTriangle } from "lucide-react";
 
 interface MessageContentProps {
   role: "user" | "assistant" | "system";
@@ -57,8 +59,9 @@ export default function MessageContent({
           return (
             <div key={item.key} className={isAssistant ? "max-w-2xl" : ""}>
               {isUser ? (
-                // `>` runs (quote-reply) get a quote style; the rest stays plain text.
-                splitQuoteBlocks((p as any).text ?? "").map((seg, i) =>
+                <>
+                {/* `>` runs (quote-reply) get a quote style; the rest stays plain text. */}
+                {splitQuoteBlocks((p as any).text ?? "").map((seg, i) =>
                   seg.type === "quote" ? (
                     <blockquote
                       key={i}
@@ -71,7 +74,14 @@ export default function MessageContent({
                       {seg.text}
                     </div>
                   ),
-                )
+                )}
+                {cutNotesIn((p as { text?: string }).text ?? "").map((note) => (
+                  <p key={`cut-${note.path}`} className="mt-1 flex items-center gap-1 text-xs text-zinc-400">
+                    <AlertTriangle size={12} aria-hidden className="shrink-0 text-amber-400" />
+                    Trimmed: {note.path} ({note.detail} sent)
+                  </p>
+                ))}
+                </>
               ) : (
                 <MarkdownMessage content={(p as any).text} />
               )}
