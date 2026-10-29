@@ -51,6 +51,7 @@ export default function MessageContent({
               allParts={item.parts}
               onOpenArtifact={onOpenArtifact}
               onClarificationAnswer={onClarificationAnswer}
+              isStreaming={isStreaming}
             />
           );
         }

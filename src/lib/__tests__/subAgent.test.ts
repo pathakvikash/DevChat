@@ -118,8 +118,10 @@ describe("runSubAgent", () => {
   });
 
   it("forces the 15th step to a written report", async () => {
+    // Distinct arguments: identical repeats trip the loop guard before step 15.
+    let n = 0;
     const { config, calls } = scriptedModel((o) =>
-      o.toolChoice?.type === "none" ? { text: ["Final report."] } : { tool: { name: "calculator", input: { a: 1 } } },
+      o.toolChoice?.type === "none" ? { text: ["Final report."] } : { tool: { name: "calculator", input: { a: ++n } } },
     );
     const res = await runSubAgent({
       brief,

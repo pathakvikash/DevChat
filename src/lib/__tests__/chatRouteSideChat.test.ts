@@ -27,6 +27,8 @@ vi.mock("@/lib/chat/buildSystemPrompt", () => ({
 vi.mock("@/lib/chat/buildTools", () => ({
   buildTools: vi.fn(async () => ({})),
   resolveActiveToolIds: vi.fn(() => new Set<string>()),
+  canStartSubAgents: vi.fn(() => false),
+  runAgentTool: vi.fn(),
 }));
 vi.mock("@/lib/chat/saveUserMessage", () => ({ saveUserMessage: vi.fn() }));
 vi.mock("@/lib/chat/persistAssistantMessage", () => ({ safePersistAssistantMessage: vi.fn() }));

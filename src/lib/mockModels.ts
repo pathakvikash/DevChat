@@ -45,6 +45,10 @@ function toolRanThisTurn({ prompt }: CallOptions): boolean {
   return prompt.slice(turnStart + 1).some((m) => m.role === "tool");
 }
 
+// A sub-agent run starts with the helper prompt (see runSubAgent), not with the parent's.
+const isHelper = ({ prompt }: CallOptions): boolean =>
+  prompt.some((m) => m.role === "system" && textOf(m).startsWith("You are a helper"));
+
 // Replies stay over 30 chars: the chat route forces a retry on shorter answers.
 const echo = (o: CallOptions): Turn => ({
   chunks: words(`Mock reply (deterministic). You said: ${lastUserText(o)}`),
@@ -96,6 +100,20 @@ const MODELS: Record<string, { name: string; tools: boolean; turn: (o: CallOptio
             },
             toolCallId: `mock-plan-${o.prompt.length}`,
           },
+  },
+  // Starts one helper with runAgent. The helper (its system prompt says so) writes a report, then the parent answers.
+  "mock/subagent": {
+    name: "Mock Sub-agent",
+    tools: true,
+    turn: (o) => {
+      if (isHelper(o)) return { chunks: words("Mock helper report (deterministic). The folder has one note."), delayMs: 15 };
+      return toolRanThisTurn(o)
+        ? { chunks: words("Mock sub-agent answer (deterministic). The helper's report came back."), delayMs: 15 }
+        : {
+            tool: { name: "runAgent", input: { task: "Read the notes and summarise them.", title: "Note reader" } },
+            toolCallId: `mock-agent-${o.prompt.length}`,
+          };
+    },
   },
   "mock/notools": {
     name: "Mock No Tools",

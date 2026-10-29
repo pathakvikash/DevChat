@@ -18,6 +18,8 @@ import {
   type ToolSet,
   type ToolMode,
 } from "@/lib/chat/buildTools";
+import { canStartSubAgents, runAgentTool } from "@/lib/chat/buildTools";
+import { nextStepSettings } from "@/lib/chat/loopGuard";
 import { safePersistAssistantMessage } from "@/lib/chat/persistAssistantMessage";
 import { autoCompress, canAutoCompress } from "@/lib/chat/autoCompress";
 import { liveSince } from "@/lib/liveSince";
@@ -51,33 +53,8 @@ import {
 import { requireUserId } from "@/lib/auth";
 import { effectiveToolMode, isChatMode, MODE_POLICY } from "@/lib/chat/modes";
 
-// Break the loop when the model repeats the same tool call with the same arguments (llama3.2 does
-// this with failed calls): a one-shot failure beats a retry storm.
-function checkRepeatedCall(steps: unknown[], stepNumber: number) {
-  if (steps.length < 2) return;
-  const prev = steps[steps.length - 1] as {
-    toolCalls?: Array<{ toolName: string; input?: unknown; args?: unknown }>;
-  };
-  const prev2 = steps[steps.length - 2] as {
-    toolCalls?: Array<{ toolName: string; input?: unknown; args?: unknown }>;
-  };
-  if (!prev?.toolCalls?.length || !prev2?.toolCalls?.length) return;
-  const a = prev.toolCalls[0];
-  const b = prev2.toolCalls[0];
-  if (a.toolName !== b.toolName) return;
-  const aArgs = JSON.stringify(a.input ?? a.args ?? {});
-  const bArgs = JSON.stringify(b.input ?? b.args ?? {});
-  if (aArgs === bArgs) {
-    console.warn(
-      `[chat] Model called ${a.toolName} with identical args on ` +
-        `steps ${stepNumber - 1} and ${stepNumber} — breaking loop.`,
-    );
-    throw new Error(
-      `Tool "${a.toolName}" was called twice with identical arguments. ` +
-        `Stopping to avoid a retry loop.`,
-    );
-  }
-}
+// A helper run can take minutes: the 5-minute limit plus the parent's own steps.
+export const maxDuration = 600;
 
 export async function POST(req: Request) {
   const requestStartedAt = Date.now();
@@ -253,8 +230,7 @@ export async function POST(req: Request) {
         (m: any) => m && m.role !== "compression",
       ),
     );
-    const modelMessages = await convertToModelMessages(sanitizedMessages);
-
+    
     if (conversationId) {
       const lastMsg = messages[messages.length - 1];
       if (lastMsg?.role === "user") {
@@ -331,6 +307,22 @@ export async function POST(req: Request) {
         ? { [cliProvider.id]: { effort: reasoningEffort ?? "", cwd: cliCwd, access: MODE_POLICY[toolMode].cli } }
         : undefined;
 
+    // Only main chats with tools get helpers. A helper runs on this same model, in this mode.
+    if (canStartSubAgents(settings.kind, useTools) && conversationId) {
+      aiTools.runAgent = runAgentTool(aiTools, {
+        userId,
+        parentId: conversationId,
+        model: modelConfig,
+        mode: toolMode,
+        workingFolder,
+        providerOptions,
+        maxParallel: cliProvider ? 1 : 3,
+      });
+    }
+
+    // Built after the tools, so a sub-agent's toModelOutput applies to saved history too.
+    const modelMessages = await convertToModelMessages(sanitizedMessages, { tools: aiTools });
+
     // Per-candidate retry loop (transient errors + Ollama context overflow).
     const RETRIES_PER_MODEL = 2;
     // A last assistant message means this request continues it (a client-side tool round trip):
@@ -389,70 +381,26 @@ export async function POST(req: Request) {
                 }
               }
             }
-            checkRepeatedCall(steps, stepNumber);
-            return injected.length ? { messages: withInjected(stepMessages, injected) } : undefined;
+            // Forces a text-only step on a loop or the last allowed step, so a turn ends with an answer.
+            const guard = nextStepSettings({ steps, stepNumber, maxSteps: maxToolCalls, toolOnlyLimit: 3 });
+            if (!injected.length && !guard) return undefined;
+            return {
+              ...(injected.length ? { messages: withInjected(stepMessages, injected) } : {}),
+              ...guard,
+            };
           },
+          // Ends at maxToolCalls, or after a step with no tool results (nothing left to read).
+          // Tool-only runs are handled by the loop guard in prepareStep, not by stopping here.
           stopWhen: ({ steps }) => {
             if (steps.length >= maxToolCalls) return true;
             const last = steps[steps.length - 1] as
-              | {
-                  text?: string;
-                  content?: Array<{ type: string }>;
-                  toolCalls?: unknown[];
-                  toolResults?: unknown[];
-                }
+              | { toolResults?: unknown[]; content?: Array<{ type: string }> }
               | undefined;
             if (!last) return true;
-            const text = (last.text ?? "").trim();
             const hadToolResult =
               (last.toolResults?.length ?? 0) > 0 ||
-              (last.content ?? []).some(
-                (p) => (p as { type?: string }).type === "tool-result",
-              );
-            // Break tool-only loops: if the model has done 2+ steps in a row
-            // with no text (only tool calls), stop so it doesn't exhaust its
-            // step budget on repeated searches without ever writing an answer.
-            if (steps.length >= 3) {
-              const recent = steps.slice(-3) as Array<{
-                text?: string;
-                toolCalls?: unknown[];
-              }>;
-              const allToolOnly = recent.every(
-                (s) => (s.text ?? "").trim().length < 20 && (s.toolCalls?.length ?? 0) > 0,
-              );
-              if (allToolOnly) {
-                console.warn(
-                  `[chat] 3 consecutive tool-only steps — stopping to avoid ` +
-                    `tool loop. Last text="${text.slice(0, 60).replace(/\n/g, " ")}"`,
-                );
-                return true;
-              }
-            }
-            // A step that ran tools needs a following step to read the results, or the
-            // turn ends on a bare tool card. Bounded by maxToolCalls and the loop guard.
-            if (hadToolResult) {
-              if (text.length < 60) {
-                // Local models often emit their chat template's stop token right
-                // after tool results; feeding the short text back lets them continue.
-                console.warn(
-                  `[chat] Short response (${text.length} chars) after tool ` +
-                    `result — forcing continuation. text="${text.slice(0, 60).replace(/\n/g, " ")}"`,
-                );
-              }
-              return false;
-            }
-            // qwen and other small local models sometimes emit just "..." or a
-            // bare stop token with no tool call at all. Force one continuation
-            // on step 0/1 so the SDK can re-prompt; cap at 2 retries.
-            if (!hadToolResult && text.length < 30 && steps.length <= 2) {
-              console.warn(
-                `[chat] Near-empty response (${text.length} chars) with no tool ` +
-                  `call on step ${steps.length} — forcing continuation. ` +
-                  `text="${text.slice(0, 60).replace(/\n/g, " ")}"`,
-              );
-              return false;
-            }
-            return true;
+              (last.content ?? []).some((p) => (p as { type?: string }).type === "tool-result");
+            return !hadToolResult;
           },
           tools: aiTools,
           toolChoice: "auto",
@@ -469,7 +417,7 @@ export async function POST(req: Request) {
                 input: chunk.input ?? {},
                 start: Date.now(),
               });
-            } else if (chunk.type === "tool-result") {
+            } else if (chunk.type === "tool-result" && !chunk.preliminary) {
               const meta = partialToolOutputs.get(chunk.toolCallId);
               const latencyMs = meta?.start ? Date.now() - meta.start : undefined;
               toolCallsSeen.push({

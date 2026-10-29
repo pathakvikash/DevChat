@@ -2,6 +2,7 @@ import { generateId, readUIMessageStream, stepCountIs, streamText, type Tool, ty
 import type { ModelConfig } from "@/lib/models";
 import type { ToolMode } from "@/lib/chat/buildTools";
 import { normalizeToolParts } from "@/lib/chat/normalizeToolParts";
+import { nextStepSettings } from "@/lib/chat/loopGuard";
 
 type ProviderOptions = NonNullable<Parameters<typeof streamText>[0]["providerOptions"]>;
 
@@ -194,7 +195,7 @@ export async function runSubAgent(opts: RunSubAgentOptions): Promise<SubAgentRes
       // The last step must write the report: no more tool calls. Models that ignore it
       // still stop at the cap, with a note.
       prepareStep: hasTools
-        ? ({ stepNumber }) => (stepNumber === SUB_AGENT_MAX_STEPS - 1 ? { toolChoice: "none" } : undefined)
+        ? ({ steps, stepNumber }) => nextStepSettings({ steps, stepNumber, maxSteps: SUB_AGENT_MAX_STEPS })
         : undefined,
       stopWhen: stepCountIs(SUB_AGENT_MAX_STEPS),
       abortSignal: signal,
@@ -245,4 +246,84 @@ export async function runSubAgent(opts: RunSubAgentOptions): Promise<SubAgentRes
     }
   }
   return finish(status, last, usage, status === "error" ? errorText : undefined);
+}
+
+export type SubAgentStatus = SubAgentResult["status"] | "running";
+
+export interface SubAgentStep {
+  tool: string;
+  label: string;
+  state: "running" | "done" | "error";
+}
+
+/** The `runAgent` tool's output. While it runs, each yield replaces the last; the final one is the result. */
+export interface SubAgentOutput {
+  childId?: string;
+  title: string;
+  status: SubAgentStatus;
+  startedAt: number;
+  endedAt?: number;
+  /** Model steps started so far. */
+  step: number;
+  /** The last 20 tool calls. */
+  steps: SubAgentStep[];
+  preview?: string;
+  report?: string;
+  hitStepLimit?: boolean;
+  error?: string;
+  usage?: { inputTokens: number; outputTokens: number };
+}
+
+export function startSubAgentOutput(title: string, startedAt: number, childId?: string): SubAgentOutput {
+  return { childId, title, status: "running", startedAt, step: 0, steps: [] };
+}
+
+export function applySubAgentProgress(out: SubAgentOutput, event: SubAgentProgress): SubAgentOutput {
+  switch (event.type) {
+    case "step started":
+      return { ...out, step: event.step };
+    case "tool call":
+      return {
+        ...out,
+        steps: [...out.steps, { tool: event.tool, label: event.label, state: "running" as const }].slice(-20),
+      };
+    case "tool result": {
+      const steps = [...out.steps];
+      let i = steps.length - 1;
+      while (i >= 0 && !(steps[i].tool === event.tool && steps[i].state === "running")) i--;
+      if (i >= 0) steps[i] = { ...steps[i], state: event.ok ? "done" : "error" };
+      return { ...out, steps };
+    }
+    case "text delta":
+      return { ...out, preview: event.preview };
+  }
+}
+
+export function finishSubAgentOutput(out: SubAgentOutput, result: SubAgentResult, endedAt: number): SubAgentOutput {
+  return {
+    ...out,
+    status: result.status,
+    endedAt,
+    step: result.steps,
+    preview: undefined,
+    report: result.report || undefined,
+    hitStepLimit: result.steps >= SUB_AGENT_MAX_STEPS || undefined,
+    error: result.error,
+    usage: result.usage,
+  };
+}
+
+/** What the parent model reads: the report when done, otherwise an error with any partial notes. */
+export function subAgentModelOutput(
+  out: SubAgentOutput,
+): { type: "text"; value: string } | { type: "error-text"; value: string } {
+  const who = out.childId ? `Sub-agent ${out.childId}` : "Sub-agent";
+  if (out.status === "done") return { type: "text", value: `${who} report:\n${out.report ?? ""}` };
+  const why =
+    out.status === "error"
+      ? `failed${out.error ? `: ${out.error}` : ""}`
+      : out.status === "timeout"
+        ? "timed out after 5 minutes"
+        : "was stopped";
+  return { type: "error-text", value: `${who} ${why}.${out.report ? `\nPartial notes:\n${out.report}` : ""}` };
 }
