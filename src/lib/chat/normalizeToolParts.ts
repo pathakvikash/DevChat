@@ -1,4 +1,5 @@
 import { quoteSearchResults } from "./quotePastChat";
+import { frameAgentMessageParts } from "./agentMessages";
 
 /**
  * Collapse duplicate tool parts and fix bogus states so every call has a result.
@@ -126,6 +127,7 @@ export function normalizeMessageToolParts<T extends { parts?: unknown }>(
   return messages.map((m) => {
     if (!m || !Array.isArray((m as any).parts)) return m;
     const parts = summarizeSpecParts(normalizeToolParts((m as any).parts));
-    return { ...m, parts: frameSearchChatsParts(parts, (m as any).role) } as T;
+    const framed = frameAgentMessageParts(frameSearchChatsParts(parts, (m as any).role));
+    return { ...m, parts: framed } as T;
   });
 }

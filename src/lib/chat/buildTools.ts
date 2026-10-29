@@ -8,6 +8,7 @@ import type { ToolExecutionContext } from "@/lib/registry/types";
 import { searchUserChats, readUserChat } from "@/lib/chatSearch";
 import { budgetTokens } from "@/lib/chat/contextBudget";
 import { quoteSearchResults } from "@/lib/chat/quotePastChat";
+import type { AgentTarget } from "@/lib/chat/agentMessages";
 
 export const BUILTIN_TOOL_IDS = [
   "executeCode",
@@ -25,6 +26,7 @@ export const BUILTIN_TOOL_IDS = [
   "currentTime",
   "calculator",
   "jsonExtract",
+  "sendToChat",
 ] as const;
 
 export function resolveActiveToolIds(
@@ -56,6 +58,8 @@ export interface BuildToolsOptions {
   contextWindow: number;
   /** Memory is off (temporary chat or the Memory toggle): no rememberFact / forgetFact. */
   memoryDisabled?: boolean;
+  /** Chats the model may message (see sendToChatTargets). Empty: no sendToChat tool. */
+  agentTargets?: AgentTarget[];
 }
 
 /** Convert a JSON Schema object to a Zod schema (supports basic types). */
@@ -95,6 +99,7 @@ export async function buildTools({
   mode = "agent",
   contextWindow,
   memoryDisabled = false,
+  agentTargets = [],
 }: BuildToolsOptions): Promise<Record<string, Tool>> {
   const ctx: ToolExecutionContext = { conversationId };
   const aiTools: Record<string, Tool> = {};
@@ -143,6 +148,7 @@ export async function buildTools({
   // ─── Built-in tools ─────────────────────────────────────────────────────
   for (const toolId of activeToolIds) {
     if (aiTools[toolId]) continue; // skip MCP tools already added
+    if (toolId === "sendToChat") continue; // offered below, only with targets
     const def = TOOL_REGISTRY[toolId];
     if (!def) continue;
     if (def.mutates && !allowMutating) continue;
@@ -172,6 +178,15 @@ export async function buildTools({
         inputSchema: def.inputSchema as any,
       });
     }
+  }
+
+  // Browser-run like executeCode: the pane sends it. Offered only when another chat is open.
+  if (agentTargets.length > 0) {
+    const openChats = agentTargets.map((t) => `"${t.title}" (id ${t.id})`).join(", ");
+    aiTools.sendToChat = tool({
+      description: `${TOOL_REGISTRY.sendToChat.modelDescription}\nOpen chats: ${openChats}.`,
+      inputSchema: TOOL_REGISTRY.sendToChat.inputSchema as any,
+    });
   }
 
   if (allowMutating && !memoryDisabled && activeToolIds.has("rememberFact")) {
