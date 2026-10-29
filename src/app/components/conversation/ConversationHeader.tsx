@@ -6,7 +6,8 @@ import { useSidebar } from "@/app/contexts/SidebarContext";
 import { useChatMode } from "@/app/contexts/ChatModeContext";
 import ModeToggle from "../ModeToggle";
 import { formatContext } from "@/lib/utils/messageParts";
-import { downloadBlob } from "@/lib/utils/download";
+import { exportChat } from "@/lib/utils/download";
+import { useToast } from "@/app/components/Toast";
 
 interface ConversationHeaderProps {
   conversation: {
@@ -48,6 +49,7 @@ export default function ConversationHeader({
   onToggleMemory,
 }: ConversationHeaderProps) {
   const { toggle } = useSidebar();
+  const { toast } = useToast();
   const { mode, setMode } = useChatMode();
   const [moreOpen, setMoreOpen] = useState(false);
   const moreRef = useRef<HTMLDivElement>(null);
@@ -62,32 +64,8 @@ export default function ConversationHeader({
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
-  function handleExport(format: "markdown" | "json") {
-    try {
-      const msgs = (conversation as any).messages || [];
-      let content = "";
-      if (format === "json") {
-        content = JSON.stringify(conversation, null, 2);
-      } else {
-        content = `# ${conversation.title}\n\n**Model:** ${conversation.model}\n`;
-        content += `**Created:** ${new Date().toISOString()}\n\n---\n\n`;
-        for (const msg of msgs) {
-          const role = (msg.role || "").charAt(0).toUpperCase() + (msg.role || "").slice(1);
-          const text = msg.content || "";
-          if (text) content += `### ${role}\n\n${text}\n\n`;
-        }
-      }
-      const safeTitle = (conversation.title || "conversation").replace(/[^a-zA-Z0-9 _-]/g, "").trim() || "conversation";
-      const ext = format === "json" ? "json" : "md";
-      const blob = new Blob([content], { type: format === "json" ? "application/json" : "text/markdown" });
-      downloadBlob(blob, `${safeTitle}.${ext}`);
-    } catch (e) {
-      console.error("[ConversationHeader] export error:", e);
-    }
-  }
-
   return (
-    <div className="glass-nav">
+    <div className="glass-nav relative z-20">
       <div className="px-4 py-3">
         <div className="flex items-center gap-2">
           <button onClick={toggle} className="md:hidden p-1.5 glass-button rounded transition shrink-0" title="Toggle sidebar">
@@ -182,14 +160,14 @@ export default function ConversationHeader({
                   </button>
                   <div className="border-t border-[var(--glass-border)]" />
                   <button
-                    onClick={() => { setMoreOpen(false); handleExport("markdown"); }}
+                    onClick={() => { setMoreOpen(false); exportChat(conversation.id, "markdown", toast); }}
                     className="flex w-full items-center gap-3 px-4 py-3 text-sm text-[var(--foreground)] hover:bg-[var(--glass-bg-hover)] transition"
                   >
                     <Download size={14} />
                     <span>Export Markdown</span>
                   </button>
                   <button
-                    onClick={() => { setMoreOpen(false); handleExport("json"); }}
+                    onClick={() => { setMoreOpen(false); exportChat(conversation.id, "json", toast); }}
                     className="flex w-full items-center gap-3 px-4 py-3 text-sm text-[var(--foreground)] hover:bg-[var(--glass-bg-hover)] transition"
                   >
                     <Download size={14} />

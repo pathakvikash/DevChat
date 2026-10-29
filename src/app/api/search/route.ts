@@ -1,6 +1,6 @@
-import { prisma } from "@/lib/db";
 import { NextRequest, NextResponse } from "next/server";
 import { requireUserId } from "@/lib/auth";
+import { searchUserChats } from "@/lib/chatSearch";
 
 export async function GET(req: NextRequest) {
   try {
@@ -11,45 +11,11 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: "Query too short" }, { status: 400 });
     }
 
-    // Search in conversation titles
-    const conversations = await prisma.conversation.findMany({
-      where: {
-        userId,
-        title: ({ contains: query, mode: "insensitive" } as any),
-      },
-      select: {
-        id: true,
-        title: true,
-        createdAt: true,
-        model: true,
-      },
-      take: 20,
+    const chats = await searchUserChats(userId, query, {
+      excludeId: req.nextUrl.searchParams.get("exclude") ?? undefined,
     });
 
-    // Search in message content (scoped to this user's conversations)
-    const messages = await prisma.message.findMany({
-      where: {
-        content: ({ contains: query, mode: "insensitive" } as any),
-        conversation: { userId },
-      },
-      select: {
-        id: true,
-        content: true,
-        conversationId: true,
-        createdAt: true,
-        role: true,
-      },
-      take: 20,
-    });
-
-    return NextResponse.json({
-      conversations,
-      messages: messages.map((m) => ({
-        ...m,
-        preview: m.content.substring(0, 200),
-      })),
-      count: conversations.length + messages.length,
-    });
+    return NextResponse.json({ chats, count: chats.length });
   } catch (error) {
     console.error("Search error:", error);
     return NextResponse.json({ error: "Search failed" }, { status: 500 });

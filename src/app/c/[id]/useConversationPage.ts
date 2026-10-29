@@ -5,7 +5,7 @@ import { useToast } from "@/app/components/Toast";
 import type { Conversation } from "@/app/components/conversation/types";
 import { useChatMode } from "@/app/contexts/ChatModeContext";
 import type { MinimapMessage } from "@/app/components/MinimapNavigator";
-import { parseCommand } from "@/lib/commands";
+import { parseCommand, missingArg } from "@/lib/commands";
 import { buildMessageParts } from "@/lib/utils/messageParts";
 import { lastExchange } from "@/lib/utils/conversation";
 
@@ -222,7 +222,7 @@ export function useConversationPage(conversationId: string, initialPrompt?: stri
     const parsed = parseCommand(input);
     if (parsed) {
       const { command, arg } = parsed;
-      if (command.requiresArg && !arg.trim()) { toast(`Usage: ${command.usage}`, "info"); return; }
+      if (missingArg(command, arg)) { toast(`Usage: ${command.usage}`, "info"); return; }
       setInput("");
       setFiles([]);
       if (command.kind === "transform" && command.transform) {
@@ -232,7 +232,7 @@ export function useConversationPage(conversationId: string, initialPrompt?: stri
         await runCommandAction(command, arg, {
           conversationId, conversation, sendMessage, setMessages, setConversation,
           setIsCompressing, setArtifactPanelOpen,
-          setScratchpadOpen, setModelSettingsOpen, toast, refreshConversationAndMessages,
+          setScratchpadOpen, setModelSettingsOpen, setKeyboardShortcutsOpen, toast, refreshConversationAndMessages,
         });
       }
       return;

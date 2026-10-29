@@ -6,6 +6,7 @@ import type { ToolPart } from "@/lib/utils/messageParts";
 import ArtifactCard from "./ArtifactCard";
 import ArtifactReference from "./ArtifactReference";
 import ClarificationForm from "./ClarificationForm";
+import { SearchChatsCard, ReadChatCard } from "./PastChatCards";
 
 interface ToolInvocationProps {
   part: ToolPart;
@@ -25,6 +26,15 @@ export default function ToolInvocation({
     toolName === "createArtifact" || toolName === "updateArtifact";
   const isExec = toolName === "executeCode";
   const isClarification = toolName === "askClarification";
+
+  const resultPart = allParts?.find(
+    (p) =>
+      p.toolCallId === part.toolCallId &&
+      (p.output !== undefined || p.errorText !== undefined)
+  );
+
+  if (toolName === "searchChats") return <SearchChatsCard part={part} result={resultPart} />;
+  if (toolName === "readChat") return <ReadChatCard part={part} result={resultPart} />;
 
   if (isClarification) {
     const input = part.input || {};
@@ -93,11 +103,6 @@ export default function ToolInvocation({
   const errored = part.state === "output-error";
   const running = !done && !errored;
 
-  const resultPart = allParts?.find(
-    (p) =>
-      p.toolCallId === part.toolCallId &&
-      (p.output !== undefined || p.errorText !== undefined)
-  );
   const hasResult = !!resultPart;
   const resultErrored = !!resultPart?.errorText;
 

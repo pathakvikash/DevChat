@@ -1,4 +1,4 @@
-import { encode } from "gpt-tokenizer";
+import { encode, decode } from "gpt-tokenizer";
 import type { SystemPromptSections } from "./chat/buildSystemPrompt";
 
 export interface TokenCountResult {
@@ -41,12 +41,30 @@ export interface DetailedTokenBreakdown {
   };
 }
 
+// Special-token strings such as <|endoftext|> count as plain text, not an encoding error.
+const NO_SPECIALS = { disallowedSpecial: new Set<string>() };
+
 export function countTokens(text: string): number {
   if (!text || text.trim().length === 0) return 0;
   try {
-    return encode(text).length;
+    return encode(text, NO_SPECIALS).length;
   } catch {
     return estimateTokens(text);
+  }
+}
+
+/** `text` cut to at most `max` tokens; a "…cut…" marker (counted in the budget) shows where. */
+export function cutTokens(text: string, max: number): string {
+  const marker = "…cut…";
+  try {
+    const tokens = encode(text, NO_SPECIALS);
+    if (tokens.length <= max) return text;
+    const keep = max - encode(marker, NO_SPECIALS).length;
+    if (keep < 0) return "";
+    // A cut inside a multi-byte character decodes to U+FFFD; drop every one.
+    return decode(tokens.slice(0, keep)).replace(/\uFFFD/g, "") + marker;
+  } catch {
+    return text.length > max * 3 ? text.slice(0, max * 3) + marker : text;
   }
 }
 

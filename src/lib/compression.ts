@@ -50,6 +50,7 @@ export interface CompressionResult {
 export async function compressConversation(
   conversationId: string,
   modelId: string = DEFAULT_COMPACTION_MODEL,
+  { focus, abortSignal }: { focus?: string; abortSignal?: AbortSignal } = {},
 ): Promise<CompressionResult | null> {
   const conversation = await prisma.conversation.findUnique({
     where: { id: conversationId },
@@ -92,7 +93,10 @@ export async function compressConversation(
     }
   }
 
-  const prompt = `Summarize this conversation for context preservation:\n\n${conversationText}`;
+  const focusText = focus?.trim().slice(0, 500);
+  const prompt =
+    `Summarize this conversation for context preservation:\n\n${conversationText}` +
+    (focusText ? `\n\nPay special attention to: ${focusText}` : "");
   const beforeMessages = conversation.messages.length;
 
   try {
@@ -101,6 +105,7 @@ export async function compressConversation(
       system: COMPRESSION_SYSTEM_PROMPT,
       prompt,
       temperature: 0.3,
+      abortSignal,
       ...(isOllama ? { providerOptions: { ollama: { num_predict: 2048, temperature: 0.3 } } } : {}),
     });
 

@@ -1,11 +1,39 @@
 import { describe, it, expect } from "vitest";
 import {
   countTokens,
+  cutTokens,
   estimateTokens,
   calculateContextUsage,
   calculateDetailedContextUsage,
   getContextStatus,
 } from "@/lib/tokens";
+
+describe("cutTokens", () => {
+  it("leaves text that fits untouched", () => {
+    expect(cutTokens("hello world", 50)).toBe("hello world");
+  });
+
+  it.each(["你好世界，今天天气很好。".repeat(500), "🙂🚀🔥✨".repeat(500), '{"a":[1,2,3],"b":null}'.repeat(500)])(
+    "cuts dense text to at most the token budget, keeping its start",
+    (text) => {
+      const cut = cutTokens(text, 100);
+      expect(countTokens(cut)).toBeLessThanOrEqual(100);
+      expect(cut.endsWith("…cut…")).toBe(true);
+      expect(cut.slice(0, 3)).toBe(text.slice(0, 3));
+      expect(cut).not.toContain("�");
+    },
+  );
+
+  it("returns an empty string when the marker alone does not fit", () => {
+    expect(cutTokens("hello world ".repeat(100), 2)).toBe("");
+  });
+
+  it("leaves no U+FFFD in a cut through emoji", () => {
+    const cut = cutTokens("🙂🚀🔥✨👍🎉".repeat(500), 50);
+    expect(cut).not.toContain("\uFFFD");
+    expect(countTokens(cut)).toBeLessThanOrEqual(50);
+  });
+});
 
 describe("countTokens", () => {
   it("returns 0 for empty string", () => {
@@ -42,6 +70,11 @@ describe("countTokens", () => {
     const code = `function hello() {\n  return "world";\n}`;
     const n = countTokens(code);
     expect(n).toBeGreaterThan(0);
+  });
+
+  it("counts special-token strings as plain text", () => {
+    expect(countTokens("<|endoftext|>")).toBeGreaterThan(0);
+    expect(countTokens("<|im_start|>")).toBeGreaterThan(0);
   });
 });
 

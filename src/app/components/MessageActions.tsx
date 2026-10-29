@@ -197,7 +197,7 @@ export default function MessageActions({
   );
 }
 
-function getRelativeTime(date: Date | string): string {
+export function getRelativeTime(date: Date | string): string {
   const now = Date.now();
   const then = new Date(date).getTime();
   const diffMs = now - then;
