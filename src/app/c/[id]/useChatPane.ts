@@ -92,6 +92,12 @@ export interface ChatPaneOptions {
 export function useChatPane(conversationId: string, { focused, kind, searchProvider, initialPrompt }: ChatPaneOptions): ChatPaneState {
   const { toast } = useToast();
   const split = useSplitViewOptional();
+  // A pane that has unmounted must not send the queue it left behind; the server keeps those messages.
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => { mountedRef.current = false; };
+  }, []);
 
   /* ─── State ────────────────────────────────────────────────────────────── */
 
@@ -491,7 +497,7 @@ export function useChatPane(conversationId: string, { focused, kind, searchProvi
     const all = finish?.messages ?? messages;
     // Queued messages still waiting: after a Stop or an error they go back to the input; after a normal end
     // they go out as the next message. A reply that auto-continues keeps them.
-    if (queueRef.current.length && !(finish?.message && shouldAutoContinue(finish.message.parts as AnyPart[]))) {
+    if (mountedRef.current && queueRef.current.length && !(finish?.message && shouldAutoContinue(finish.message.parts as AnyPart[]))) {
       const stopped = !!(finish?.isAbort || finish?.isError);
       takeLeftovers(all)
         .then((texts) => (stopped ? restoreInput(texts) : sendNext(texts)))
@@ -658,6 +664,7 @@ export function useChatPane(conversationId: string, { focused, kind, searchProvi
   const msgActions = useMessageActions({
     conversationId, messages, setMessages, status, sendMessage, regenerate, addToolResult, toast,
     temporary: !!conversation?.temporary,
+    onForked: (newId) => split?.replaceAt(conversationId, newId),
   });
 
   const {
@@ -789,7 +796,15 @@ export function useChatPane(conversationId: string, { focused, kind, searchProvi
           setIsCompressing, setCompressFocus, setArtifactPanelOpen,
           setScratchpadOpen, setModelSettingsOpen, setKeyboardShortcutsOpen, toast, refreshConversationAndMessages,
           setMode, setRequestBody, toolsAvailable,
-          openSide: (question) => { void split?.openSide(conversationId, question); },
+          openSide: (question) => {
+            // /side from a side chat opens the side chat of its main chat.
+            const mainId = isSide ? conversation?.parentId : conversationId;
+            if (!mainId) {
+              toast("Side chats open from a main chat", "info");
+              return;
+            }
+            void split?.openSide(mainId, question);
+          },
         });
       }
       return;

@@ -74,11 +74,14 @@ const DEFAULT_CAPS: ModelCaps = { toolsAvailable: true, cli: false };
  * value below this for its header and composer (see ConversationPane).
  */
 export function ChatModeProvider({ children }: { children: React.ReactNode }) {
-  const focus = useSplitViewOptional()?.focus || null;
+  const split = useSplitViewOptional();
+  const focus = split?.focus || null;
   const { mode, setMode } = useConversationMode(focus);
+  // The focused pane publishes its caps, so the sidebar's switch matches what that chat's model can do.
+  const modelCaps = (focus && split?.caps[focus]) || DEFAULT_CAPS;
   const value = useMemo<ChatModeValue>(
-    () => ({ mode, setMode, modelCaps: DEFAULT_CAPS, setModelCaps: () => {} }),
-    [mode, setMode],
+    () => ({ mode, setMode, modelCaps, setModelCaps: () => {} }),
+    [mode, setMode, modelCaps],
   );
   return <ChatModeContext.Provider value={value}>{children}</ChatModeContext.Provider>;
 }

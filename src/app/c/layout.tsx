@@ -13,6 +13,7 @@ import { SplitViewProvider, useSplitView } from "./SplitViewContext";
 import { useSearchParams } from "next/navigation";
 import { useConversationPage } from "./[id]/useConversationPage";
 import ConversationPane from "./[id]/ConversationPane";
+import PaneErrorBoundary from "./PaneErrorBoundary";
 import DropOverlay from "./DropOverlay";
 
 const SIDEBAR_WIDTH = 256;
@@ -234,13 +235,15 @@ function PaneArea({ children }: { children: ReactNode }) {
   const rows = ids.flatMap((id, i) => [
     ...(i > 0 ? [divider(i - 1)] : []),
     renderPane(id, id, i, (
-      <ConversationPane
-        conversationId={id}
-        focused={id === focus}
-        initialPrompt={i === 0 ? initialPrompt : undefined}
-        searchProvider={page.searchProvider}
-        onToggleSearchProvider={page.toggleSearchProvider}
-      />
+      <PaneErrorBoundary onClose={() => split.closeChat(id)}>
+        <ConversationPane
+          conversationId={id}
+          focused={id === focus}
+          initialPrompt={i === 0 ? initialPrompt : undefined}
+          searchProvider={page.searchProvider}
+          onToggleSearchProvider={page.toggleSearchProvider}
+        />
+      </PaneErrorBoundary>
     )),
   ]);
 

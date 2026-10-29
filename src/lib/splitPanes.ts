@@ -171,3 +171,8 @@ export function writerConflicts(panes: PaneWriter[]): Set<string> {
   for (const p of writers) perFolder.set(p.workingFolder!, (perFolder.get(p.workingFolder!) ?? 0) + 1);
   return new Set(writers.filter((p) => perFolder.get(p.workingFolder!)! > 1).map((p) => p.id));
 }
+
+/** Open side chats whose main chat is `closing`: they close with it. */
+export function orphanSides(ids: string[], parentOf: Record<string, string>, closing: string): string[] {
+  return ids.filter((id) => id !== closing && parentOf[id] === closing);
+}

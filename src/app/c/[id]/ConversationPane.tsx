@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import PaneBar from "@/app/c/PaneBar";
 import SideChatHeader from "@/app/components/sidechat/SideChatHeader";
 import { createSideChat, listSideChats, type SideChatSummary } from "@/lib/sideChat";
@@ -74,6 +74,22 @@ export default function ConversationPane({ conversationId, focused, initialPromp
       .catch(() => {});
   }, [isSide, conversationId, p.messages.length]);
 
+  // Closing a pane stops its stream; unmounting alone does not (the server finishes and saves).
+  const registerStop = split?.registerStop;
+  const setPaneCaps = split?.setPaneCaps;
+  const setPaneParent = split?.setPaneParent;
+  const stopRef = useRef(p.stop);
+  useEffect(() => { stopRef.current = p.stop; });
+  useEffect(() => {
+    registerStop?.(conversationId, () => stopRef.current());
+    return () => registerStop?.(conversationId, null);
+  }, [conversationId, registerStop]);
+  useEffect(() => { setPaneCaps?.(conversationId, p.modelCaps); }, [conversationId, p.modelCaps, setPaneCaps]);
+  useEffect(() => {
+    setPaneParent?.(conversationId, isSide && parentId ? parentId : null);
+    return () => setPaneParent?.(conversationId, null);
+  }, [conversationId, isSide, parentId, setPaneParent]);
+
   const panelActions = [
     { id: "scratchpad", label: "Open Scratchpad", icon: <StickyNote size={16} />, onSelect: () => p.setScratchpadOpen(true) },
     { id: "artifacts", label: "Open Artifacts", icon: <FileCode size={16} />, onSelect: () => p.setArtifactPanelOpen(true) },
@@ -91,11 +107,25 @@ export default function ConversationPane({ conversationId, focused, initialPromp
   ];
   useCommandPaletteActions(focused ? "Chat" : "Chat (idle)", focused ? chatActions : []);
 
+  // The bar stays in the loading and missing states too, so a pane can always be closed.
+  const bar = split?.multi && !isSide ? (
+    <PaneBar
+      title={split.info[conversationId]?.title ?? "Chat"}
+      focused={focused}
+      onClose={() => split.closeChat(conversationId)}
+      warning={split.warnings[conversationId]}
+      onWarningClick={() => split.focusPane(split.warnings[conversationId]?.otherId ?? conversationId)}
+    />
+  ) : null;
+
   if (p.loading) {
     return (
-      <div className="flex h-full items-center justify-center bg-[var(--background)] text-[var(--foreground)]">
-        <div className="glass-card rounded-[var(--glass-radius-xl)] px-8 py-6 backdrop-blur-[var(--glass-blur-lg)]">
-          Loading conversation...
+      <div className="flex h-full min-w-0 flex-1 flex-col">
+        {bar}
+        <div className="flex flex-1 items-center justify-center bg-[var(--background)] text-[var(--foreground)]">
+          <div className="glass-card rounded-[var(--glass-radius-xl)] px-8 py-6 backdrop-blur-[var(--glass-blur-lg)]">
+            Loading conversation...
+          </div>
         </div>
       </div>
     );
@@ -103,9 +133,12 @@ export default function ConversationPane({ conversationId, focused, initialPromp
 
   if (!p.conversation) {
     return (
-      <div className="flex h-full items-center justify-center bg-[var(--background)] text-[var(--foreground)]">
-        <div className="glass-card rounded-[var(--glass-radius-xl)] px-8 py-6">
-          This chat no longer exists
+      <div className="flex h-full min-w-0 flex-1 flex-col">
+        {bar}
+        <div className="flex flex-1 items-center justify-center bg-[var(--background)] text-[var(--foreground)]">
+          <div className="glass-card rounded-[var(--glass-radius-xl)] px-8 py-6">
+            This chat no longer exists
+          </div>
         </div>
       </div>
     );
@@ -140,7 +173,7 @@ export default function ConversationPane({ conversationId, focused, initialPromp
               dock={split && split.ids.indexOf(conversationId) < split.ids.indexOf(parentId) ? "left" : "right"}
               onToggleDock={() => split?.toggleDock(conversationId, parentId)}
               onClose={() => split?.closeChat(conversationId)}
-              onOpenParent={() => split?.focusPane(parentId)}
+              onOpenParent={() => (split?.ids.includes(parentId) ? split.focusPane(parentId) : split?.replaceFocused(parentId))}
               shown={shown?.shown}
               total={shown?.total}
             />

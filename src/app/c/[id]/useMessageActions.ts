@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useCallback } from "react";
-import { useRouter } from "next/navigation";
 import { runWebSearch, formatWebSearchResults } from "./webSearch";
 import type { ToastAction } from "@/app/components/Toast";
 
@@ -16,6 +15,8 @@ interface UseMessageActionsOptions {
   toast: (msg: string, type: "success" | "error" | "info", action?: ToastAction) => void;
   /** A temporary chat is deleted when left, so its fork's toast has no link back. */
   temporary?: boolean;
+  /** The fork exists: the pane shows it in place of the original. */
+  onForked: (id: string) => void;
 }
 
 export function useMessageActions({
@@ -28,8 +29,8 @@ export function useMessageActions({
   addToolResult,
   toast,
   temporary = false,
+  onForked,
 }: UseMessageActionsOptions) {
-  const router = useRouter();
   const [regenModal, setRegenModal] = useState<{
     type: "retry" | "message";
     messageId?: string;
@@ -122,7 +123,7 @@ export function useMessageActions({
         "success",
         temporary ? undefined : { label: "Open original", href: `/c/${conversationId}` },
       );
-      router.push(`/c/${id}`);
+      onForked(id);
     } catch (error) {
       console.error("Failed to fork conversation:", error);
       toast("Couldn't fork this chat", "error");
