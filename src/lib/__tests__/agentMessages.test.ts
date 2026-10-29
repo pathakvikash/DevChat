@@ -3,6 +3,9 @@ import { convertToModelMessages } from "ai";
 import {
   AGENT_MESSAGE_PART,
   agentBadgeText,
+  agentFromJson,
+  agentHopOverLimit,
+  parseOpenPanes,
   agentMessageModelText,
   buildAgentMessagePart,
   canDeliver,
@@ -140,5 +143,35 @@ describe("replay conversion", () => {
   it("leaves messages without agent parts untouched", () => {
     const parts = [{ type: "text", text: "plain" }];
     expect(frameAgentMessageParts(parts)).toBe(parts);
+  });
+});
+
+describe("agent message limits and stored senders", () => {
+  it("cuts titles to 80 characters and refuses more than 3 panes or an unknown kind", () => {
+    expect(parseOpenPanes(undefined)).toEqual([]);
+    expect(parseOpenPanes([{ id: "a", title: "x".repeat(100), kind: "chat" }])).toEqual([
+      { id: "a", title: "x".repeat(80), kind: "chat" },
+    ]);
+    expect(parseOpenPanes([1, 2, 3, 4].map((i) => ({ id: String(i), title: "t", kind: "chat" })))).toBeNull();
+    expect(parseOpenPanes([{ id: "a", title: "t", kind: "page" }])).toBeNull();
+    expect(parseOpenPanes("a")).toBeNull();
+  });
+
+  it("refuses a hop past the cap, and nothing else", () => {
+    const at = (hop: number) => ({ role: "user", parts: [buildAgentMessagePart({ ...sender, hop }), { type: "text", text: "x" }] });
+    expect(agentHopOverLimit(at(3))).toBe(false);
+    expect(agentHopOverLimit(at(4))).toBe(true);
+    expect(agentHopOverLimit({ role: "user", parts: [{ type: "text", text: "plain" }] })).toBe(false);
+  });
+
+  it("reads a stored sender back, and nothing from bad JSON", () => {
+    expect(agentFromJson(JSON.stringify(sender))).toEqual(sender);
+    expect(agentFromJson("{not json")).toBeNull();
+    expect(agentFromJson(null)).toBeNull();
+  });
+
+  it("badges a message with its chat's title, or its kind when untitled", () => {
+    expect(agentBadgeText(sender)).toBe('From "Pricing research"');
+    expect(agentBadgeText({ from: "side", fromTitle: "" })).toBe("From side chat");
   });
 });

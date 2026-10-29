@@ -45,6 +45,9 @@ function toolRanThisTurn({ prompt }: CallOptions): boolean {
   return prompt.slice(turnStart + 1).some((m) => m.role === "tool");
 }
 
+const offersTool = ({ tools }: CallOptions, name: string): boolean =>
+  (tools ?? []).some((t) => t.type === "function" && t.name === name);
+
 // A sub-agent run starts with the helper prompt (see runSubAgent), not with the parent's.
 const isHelper = ({ prompt }: CallOptions): boolean =>
   prompt.some((m) => m.role === "system" && textOf(m).startsWith("You are a helper"));
@@ -114,6 +117,15 @@ const MODELS: Record<string, { name: string; tools: boolean; turn: (o: CallOptio
             toolCallId: `mock-agent-${o.prompt.length}`,
           };
     },
+  },
+  // Sends "ping from main" to the side chat with sendToChat (when the request offers it), then answers "sent".
+  "mock/talker": {
+    name: "Mock Talker",
+    tools: true,
+    turn: (o) =>
+      !toolRanThisTurn(o) && offersTool(o, "sendToChat")
+        ? { tool: { name: "sendToChat", input: { to: "side", message: "ping from main" } }, toolCallId: `mock-talk-${o.prompt.length}` }
+        : { chunks: words("sent"), delayMs: 15 },
   },
   "mock/notools": {
     name: "Mock No Tools",

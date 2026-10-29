@@ -1,4 +1,5 @@
 import { specElementTypes } from "@/lib/chat/normalizeToolParts";
+import { parseAgentMessagePart, senderName } from "@/lib/chat/agentMessages";
 import { partsOf } from "@/lib/chat/renderTranscript";
 import { isToolPart } from "@/lib/utils/messageParts";
 
@@ -49,10 +50,20 @@ function specLines(parts: any[]): string[] {
 function messageBody(m: ExportedMessage, artifacts: ArtifactsById): string {
   const parts = partsOf(m);
   if (!parts) return m.content;
-  const lines = parts.flatMap((p) => {
-    if (p?.type === "text") return p.text ? [p.text as string] : [];
-    return isToolPart(p) ? [toolLine(p, artifacts)] : [];
-  });
+  const lines: string[] = [];
+  // A message from another chat: its text is labelled with the sender.
+  let from: string | null = null;
+  for (const p of parts) {
+    const agent = parseAgentMessagePart(p);
+    if (agent) {
+      from = senderName(agent);
+    } else if (p?.type === "text") {
+      if (p.text) lines.push(from ? `**From ${from}:** ${p.text}` : (p.text as string));
+      from = null;
+    } else if (isToolPart(p)) {
+      lines.push(toolLine(p, artifacts));
+    }
+  }
   return [...lines, ...specLines(parts)].join("\n\n");
 }
 

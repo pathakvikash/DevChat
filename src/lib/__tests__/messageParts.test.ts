@@ -114,3 +114,21 @@ describe("presentPlan and stale cards", () => {
     expect(part.approval.reason).toBe("Replaced by a newer plan");
   });
 });
+
+describe("shouldAutoContinue for sendToChat", () => {
+  const send = (state: string, extra: Record<string, unknown> = {}) => ({
+    type: "tool-sendToChat",
+    toolCallId: "c1",
+    state,
+    input: { to: "side", message: "hi" },
+    ...extra,
+  });
+
+  it("continues once the browser has answered the send", () => {
+    expect(shouldAutoContinue([send("output-available", { output: "Delivered." })] as any)).toBe(true);
+  });
+
+  it("waits while the send is still pending", () => {
+    expect(shouldAutoContinue([send("input-available")] as any)).toBe(false);
+  });
+});

@@ -51,6 +51,46 @@ export function parseAgentMessagePart(part: unknown): AgentMessageData | null {
   return { from: from as AgentSender, fromConversationId, fromTitle, hop };
 }
 
+/** Most open panes the browser may list for the model (the pane limit). */
+export const MAX_OPEN_PANES = 3;
+const TITLE_MAX = 80;
+const PANE_KINDS: readonly AgentPaneKind[] = ["chat", "side", "subagent"];
+
+/**
+ * The request's `openPanes`: undefined or null is none; anything malformed is null (the request is refused).
+ * A title is cut to 80 characters.
+ */
+export function parseOpenPanes(value: unknown): AgentPane[] | null {
+  if (value === undefined || value === null) return [];
+  if (!Array.isArray(value) || value.length > MAX_OPEN_PANES) return null;
+  const panes: AgentPane[] = [];
+  for (const p of value) {
+    const { id, title, kind } = (p ?? {}) as Record<string, unknown>;
+    if (typeof id !== "string" || !id || typeof title !== "string" || !PANE_KINDS.includes(kind as AgentPaneKind)) return null;
+    panes.push({ id, title: title.slice(0, TITLE_MAX), kind: kind as AgentPaneKind });
+  }
+  return panes;
+}
+
+/** Whether a message's agent part is past the hop cap (the request is refused). */
+export function agentHopOverLimit(message: unknown): boolean {
+  const parts = (message as { parts?: unknown } | null)?.parts;
+  if (!Array.isArray(parts)) return false;
+  return parts.some(
+    (p: any) => p?.type === AGENT_MESSAGE_PART && typeof p.data?.hop === "number" && p.data.hop > MAX_AGENT_HOPS,
+  );
+}
+
+/** The sender stored as JSON on a queued row, or null when there is none or it is malformed. */
+export function agentFromJson(raw: string | null | undefined): AgentMessageData | null {
+  if (!raw) return null;
+  try {
+    return parseAgentMessagePart({ type: AGENT_MESSAGE_PART, data: JSON.parse(raw) });
+  } catch {
+    return null;
+  }
+}
+
 /** Hop of a message sent from a pane whose hop is `paneHop` (0 after the user's own send). */
 export function nextHop(paneHop: number): number {
   return paneHop + 1;

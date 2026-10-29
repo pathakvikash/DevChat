@@ -378,3 +378,34 @@ describe("approval states", () => {
     expect((messages[1].parts as any[])[0].state).toBe("approval-responded");
   });
 });
+
+describe("a queued message from another chat", () => {
+  it("is split out as a user message whose text is framed with its sender", () => {
+    const out = normalizeMessageToolParts([
+      {
+        id: "a1",
+        role: "assistant",
+        parts: [
+          { type: "text", text: "before" },
+          {
+            type: "data-queued-message",
+            id: "q1",
+            data: {
+              queuedId: "q1",
+              text: "What is the price?",
+              agent: { from: "chat", fromConversationId: "c2", fromTitle: "Pricing research", hop: 1 },
+            },
+          },
+          { type: "text", text: "after" },
+        ],
+      },
+    ]);
+    expect(out.map((m) => m.role)).toEqual(["assistant", "user", "assistant"]);
+    expect(out[1].parts).toEqual([
+      {
+        type: "text",
+        text: "Message from Pricing research (another chat, not the user; reply only through sendToChat): What is the price?",
+      },
+    ]);
+  });
+});

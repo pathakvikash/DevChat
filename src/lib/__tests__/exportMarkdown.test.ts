@@ -146,3 +146,16 @@ describe("conversationToMarkdown", () => {
     expect(md.indexOf("Chat compressed here")).toBeGreaterThan(md.indexOf("only question"));
   });
 });
+
+describe("agent messages", () => {
+  it("writes the text of a message from another chat with its sender", () => {
+    const md = toMarkdown([
+      msg("user", [
+        { type: "data-agent-message", data: { from: "chat", fromConversationId: "c2", fromTitle: "Pricing research", hop: 1 } },
+        { type: "text", text: "What is the price?" },
+      ]),
+    ]);
+    expect(md).toContain("**From Pricing research:** What is the price?");
+    expect(md).not.toContain("data-agent-message");
+  });
+});
