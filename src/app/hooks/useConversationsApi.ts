@@ -4,6 +4,7 @@ export interface ConversationSummary {
   id: string;
   title: string;
   model: string;
+  workingFolder?: string | null;
   pinned: boolean;
   archived: boolean;
   createdAt: string;
