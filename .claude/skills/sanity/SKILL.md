@@ -12,6 +12,7 @@ Runs `npm run sanity` and explains what broke. Suite docs: `e2e/README.md`.
 - Default: `npm run sanity` (full, includes `next build`).
 - If the user asks for quick, or only wants to iterate: `npm run sanity -- --quick`.
 - Only Playwright, one spec: `npm run sanity -- --e2e e2e/<name>.spec.ts` (extra args go to Playwright, e.g. `-g "Stop"`).
+- Accept the current lint errors as the baseline (after fixing what you can): `npm run sanity -- --update-lint-baseline`. It rewrites `scripts/eslint-baseline.json` from `src/` and `e2e/`, then runs only the eslint step. Do not run it to hide new errors.
 - It stops at the first failing step. If it says port 3210 is in use, stop whatever listens there and re-run; do not work around it.
 - Never point it at the dev database; the suite only ever uses `prisma/sanity.db`.
 
@@ -19,7 +20,7 @@ Report the summary table (step, result, time) to the user.
 
 ## 2. If a step failed
 
-- typecheck, eslint, vitest, build: read the printed errors. Eslint only covers files changed vs `main`, with `--quiet`.
+- typecheck, eslint, vitest, build: read the printed errors. Eslint only covers files changed vs `main`, with `--quiet`, and fails only a file with more errors than its entry in `scripts/eslint-baseline.json` (the printed messages are that file's errors).
 - Playwright: for each failing test, in this order:
   1. Read the failure text from the run output. `npm run sanity:ui` opens the HTML report; the same data is in `playwright-report/` and `test-results/<test>/` (`error-context.md`, `trace.zip`, `*-actual.png`, `*-diff.png`). Look at the screenshot images; for a trace, `npx playwright show-trace test-results/<test>/trace.zip`.
   2. Read `git diff main...HEAD` (and `git diff` for uncommitted work) and find the change that touches what the test exercises.

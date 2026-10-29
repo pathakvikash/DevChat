@@ -7,11 +7,14 @@ npm run sanity            # typecheck, eslint (changed files), vitest, next buil
 npm run sanity -- --quick # same, without the build
 npm run sanity -- --live  # also runs the @live specs against local Ollama (skipped if it is down)
 npm run sanity -- --update   # accept the current screenshots as the new visual baselines
+npm run sanity -- --update-lint-baseline   # rewrite scripts/eslint-baseline.json (lint errors per file in src/ and e2e/), then run only the lint step
 npm run sanity -- --e2e -g "Stop"   # only reset the DB and run Playwright; extra args go to Playwright
 npm run sanity:ui         # open the last Playwright report (traces, screenshots, diffs)
 ```
 
 It stops at the first failing step and prints a step / result / time table.
+
+The eslint step lints the files changed vs `main` and fails only when a file has more errors than its entry in `scripts/eslint-baseline.json` (a file not listed counts as 0). Fixing old errors does not lower the baseline by itself; run `--update-lint-baseline` to tighten it.
 
 ## What it runs against
 

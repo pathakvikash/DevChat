@@ -1,8 +1,9 @@
 // `npm run sanity`: did the latest change break anything? Runs each step in order, stops on the first failure.
 // Flags: --quick (skip the build)  --live (also run @live specs)  --update (update visual baselines)  --e2e (DB reset + Playwright only)
+// --update-lint-baseline rewrites scripts/eslint-baseline.json from src/ and e2e/, then runs only the lint step.
 // Anything else is passed to Playwright, e.g. `npm run sanity -- --e2e -g "Stop"`.
 import { spawnSync } from "node:child_process";
-import { existsSync, rmSync } from "node:fs";
+import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import net from "node:net";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -10,10 +11,12 @@ import { fileURLToPath } from "node:url";
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const PORT = 3210;
 const SANITY_DB = path.join(root, "prisma", "sanity.db");
+const LINT_BASELINE = path.join(root, "scripts", "eslint-baseline.json");
 
-const flags = new Set(["--quick", "--live", "--update", "--e2e"]);
+const flags = new Set(["--quick", "--live", "--update", "--e2e", "--update-lint-baseline"]);
 const argv = process.argv.slice(2);
 const has = (f) => argv.includes(f);
+const lintOnly = has("--update-lint-baseline");
 const passthrough = argv.filter((a) => !flags.has(a));
 
 const run = (cmd, args, env = process.env) =>
@@ -34,14 +37,40 @@ function changedLintTargets() {
   );
 }
 
+// eslint --format json; paths come back relative to the repo with forward slashes, as git prints them.
+function eslintJson(targets) {
+  const r = spawnSync("npx", ["eslint", "--quiet", "--format", "json", ...targets], { cwd: root, encoding: "utf8" });
+  if (!r.stdout) throw new Error(`eslint printed no JSON: ${r.stderr}`);
+  return JSON.parse(r.stdout).map((f) => ({
+    file: path.relative(root, f.filePath).split(path.sep).join("/"),
+    errors: f.errorCount,
+    messages: f.messages,
+  }));
+}
+
+function updateLintBaseline() {
+  const rows = eslintJson(["src", "e2e"]).filter((r) => r.errors > 0).sort((a, b) => a.file.localeCompare(b.file));
+  writeFileSync(LINT_BASELINE, JSON.stringify(Object.fromEntries(rows.map((r) => [r.file, r.errors])), null, 2) + "\n");
+  console.log(`wrote ${rows.length} file(s) with lint errors to scripts/eslint-baseline.json`);
+}
+
+// Fails only a changed file that has more errors than its baseline entry (missing = 0).
 function lint() {
+  if (lintOnly) updateLintBaseline();
   const files = changedLintTargets();
   if (files.length === 0) {
     console.log("no changed JS/TS files vs main");
     return true;
   }
-  console.log(`eslint --quiet on ${files.length} changed file(s)`);
-  return run("npx", ["eslint", "--quiet", ...files]);
+  const baseline = existsSync(LINT_BASELINE) ? JSON.parse(readFileSync(LINT_BASELINE, "utf8")) : {};
+  console.log(`eslint --quiet on ${files.length} changed file(s), against scripts/eslint-baseline.json`);
+  const offenders = eslintJson(files).filter((r) => r.errors > (baseline[r.file] ?? 0));
+  for (const r of offenders) {
+    console.log(`\n${r.file}: ${r.errors} error(s), baseline ${baseline[r.file] ?? 0}`);
+    for (const m of r.messages) console.log(`  ${m.line}:${m.column}  ${m.message.split("\n")[0]}  ${m.ruleId ?? ""}`);
+  }
+  if (offenders.length > 0) console.log(`\n${offenders.length} file(s) have new lint errors. Fix them; only --update-lint-baseline rewrites the baseline.`);
+  return offenders.length === 0;
 }
 
 // The ONLY database this suite may touch. The server and the CLI both get it explicitly.
@@ -78,17 +107,17 @@ const steps = [
 ];
 
 // A leftover server on the port could run stale code against a DB we are about to rebuild.
-if (await portInUse()) {
+if (!lintOnly && (await portInUse())) {
   console.error(`Port ${PORT} is already in use. Stop that server (it may be an old sanity server) and re-run.`);
   process.exit(1);
 }
 
 // Next writes route types into the dist dir that `tsc` also reads; stale ones from another branch fail the typecheck.
-if (!has("--e2e")) rmSync(path.join(root, ".next-sanity"), { recursive: true, force: true });
+if (!has("--e2e") && !lintOnly) rmSync(path.join(root, ".next-sanity"), { recursive: true, force: true });
 
 const results = [];
 for (const step of steps) {
-  if (step.skip) {
+  if (step.skip || (lintOnly && !step.name.startsWith("eslint"))) {
     results.push({ name: step.name, status: "skipped", secs: 0 });
     continue;
   }

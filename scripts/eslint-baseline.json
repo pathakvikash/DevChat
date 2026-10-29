@@ -1,0 +1,21 @@
+{
+  "src/app/c/[id]/useChatTransport.ts": 1,
+  "src/app/c/[id]/useConversationPage.ts": 10,
+  "src/app/components/ArtifactPanel.tsx": 2,
+  "src/app/components/chatInput.tsx": 2,
+  "src/app/components/claude/ClaudeRunner.tsx": 1,
+  "src/app/components/CommandPalette.tsx": 2,
+  "src/app/components/ContextDetailsPanel.tsx": 1,
+  "src/app/components/ModelSettingsDialog.tsx": 3,
+  "src/app/components/ProfileDialog.tsx": 1,
+  "src/app/components/Scratchpad.tsx": 2,
+  "src/app/components/ThemeProvider.tsx": 1,
+  "src/app/components/ToolInvocation.tsx": 1,
+  "src/app/contexts/ChatModeContext.tsx": 1,
+  "src/app/contexts/SidebarContext.tsx": 1,
+  "src/app/hooks/useResource.ts": 1,
+  "src/app/kb/page.tsx": 1,
+  "src/app/notes/page.tsx": 1,
+  "src/app/settings/mcp/page.tsx": 3,
+  "src/lib/generativeUi/Chart.tsx": 1
+}
