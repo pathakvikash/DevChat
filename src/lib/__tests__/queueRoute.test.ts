@@ -8,6 +8,7 @@ vi.mock("@/lib/auth", () => ({ requireUserId: vi.fn().mockResolvedValue("user-1"
 vi.mock("@/lib/api/conversations", () => ({ getConversationOrNull: vi.fn().mockResolvedValue({ id: "c1" }) }));
 
 import { prisma } from "@/lib/db";
+import { getConversationOrNull } from "@/lib/api/conversations";
 const db = prisma as any;
 
 const ctx = { params: Promise.resolve({ id: "c1" }) };
@@ -43,6 +44,13 @@ describe("POST /api/conversations/[id]/queue with agent", () => {
   it("refuses a sender past the hop limit", async () => {
     const res = await post({ id: "q3", seq: 5, text: "one more", agent: { ...sender, hop: 4 } });
     expect(res.status).toBe(400);
+    expect(db.queuedMessage.create).not.toHaveBeenCalled();
+  });
+
+  it("refuses a sub-agent run as a queue target", async () => {
+    vi.mocked(getConversationOrNull).mockResolvedValueOnce({ id: "c1", model: "m", kind: "subagent" });
+    const res = await post({ id: "q5", seq: 7, text: "hi" });
+    expect(res.status).toBe(404);
     expect(db.queuedMessage.create).not.toHaveBeenCalled();
   });
 

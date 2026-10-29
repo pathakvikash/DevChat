@@ -80,7 +80,8 @@ function helperTools(tools: Record<string, Tool>): Record<string, Tool> {
   return Object.fromEntries(Object.entries(tools).filter(([name]) => !STRIPPED_TOOLS.has(name)));
 }
 
-function capReport(text: string): string {
+/** The report cap: a report, or a saved turn that is resent to a resumed helper, is cut to REPORT_MAX_CHARS. */
+export function capReport(text: string): string {
   if (text.length <= REPORT_MAX_CHARS) return text;
   return text.slice(0, REPORT_MAX_CHARS - CUT_MARKER.length) + CUT_MARKER;
 }

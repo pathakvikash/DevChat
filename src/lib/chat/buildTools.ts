@@ -8,11 +8,11 @@ import type { ToolExecutionContext } from "@/lib/registry/types";
 import { searchUserChats, readUserChat } from "@/lib/chatSearch";
 import { budgetTokens } from "@/lib/chat/contextBudget";
 import { quoteSearchResults } from "@/lib/chat/quotePastChat";
-import { buildAgentMessagePart, type AgentTarget } from "@/lib/chat/agentMessages";
-import { buildMessagesFromConversation } from "@/lib/utils/conversation";
+import { buildAgentMessagePart, parseAgentMessagePart, type AgentTarget } from "@/lib/chat/agentMessages";
 import { MODE_POLICY, needsApproval, type ChatMode } from "@/lib/chat/modes";
 import {
   applySubAgentProgress,
+  capReport,
   finishSubAgentOutput,
   runSubAgent,
   startSubAgentOutput,
@@ -375,16 +375,39 @@ function helperToolSet(parentTools: Record<string, Tool>, mode: ToolMode): Recor
   return Object.fromEntries(Object.entries(parentTools).filter(([id]) => mode === "agent" || !isMutatingTool(id)));
 }
 
-/** A helper's saved messages as UI messages, oldest first. */
+/** The agent part a saved user message carries (a follow-up from the parent), or null. */
+function senderPart(raw: string | null) {
+  try {
+    const parts: unknown[] = JSON.parse(raw ?? "[]");
+    for (const p of Array.isArray(parts) ? parts : []) {
+      const data = parseAgentMessagePart(p);
+      if (data) return buildAgentMessagePart(data);
+    }
+  } catch {
+    // A row that is not JSON has no sender.
+  }
+  return null;
+}
+
+/**
+ * A helper's saved turns for a resumed run: each brief or follow-up (with its sender's part) and each
+ * report, as text only and cut to the report cap. The raw saved parts, tool calls included, are not resent.
+ */
 async function loadChildHistory(childId: string): Promise<UIMessage[]> {
   const rows = await prisma.message.findMany({
-    where: { conversationId: childId },
+    where: { conversationId: childId, role: { in: ["user", "assistant"] } },
     orderBy: { createdAt: "asc" },
-    select: { id: true, role: true, content: true, parts: true, createdAt: true },
+    select: { id: true, role: true, content: true, parts: true },
   });
-  return (buildMessagesFromConversation({ messages: rows }) as unknown as UIMessage[]).filter(
-    (m) => m.role === "user" || m.role === "assistant",
-  );
+  return rows.map((r) => {
+    const text = { type: "text" as const, text: capReport(r.content) };
+    const sender = r.role === "user" ? senderPart(r.parts) : null;
+    return {
+      id: r.id,
+      role: r.role as "user" | "assistant",
+      parts: (sender ? [sender, text] : [text]) as UIMessage["parts"],
+    };
+  });
 }
 
 /** One helper card: progress as preliminary outputs, then the final result. The run saves itself. */

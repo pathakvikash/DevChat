@@ -20,8 +20,8 @@ import {
 } from "@/lib/chat/buildTools";
 import { canStartSubAgents, messageAgentTool, runAgentTool, type SubAgentToolOptions } from "@/lib/chat/buildTools";
 import {
-  agentHopOverLimit,
   agentMessageModelText,
+  agentPartRefused,
   parseOpenPanes,
   sendToChatTargets,
 } from "@/lib/chat/agentMessages";
@@ -176,10 +176,9 @@ export async function POST(req: Request) {
         headers: { "Content-Type": "application/json" },
       });
     }
-    // An agent message past the hop cap is refused here too; the browser stops it first.
-    const lastUser = Array.isArray(messages) ? [...messages].reverse().find((m: any) => m?.role === "user") : undefined;
-    if (agentHopOverLimit(lastUser)) {
-      return new Response(JSON.stringify({ error: "The limit of agent messages is reached. Answer the user directly." }), {
+    // A malformed agent part, or one past the hop cap, is refused rather than dropped (dropping would leave its text unframed).
+    if (Array.isArray(messages) && messages.some(agentPartRefused)) {
+      return new Response(JSON.stringify({ error: "An agent message is malformed or past the limit. Answer the user directly." }), {
         status: 400,
         headers: { "Content-Type": "application/json" },
       });
@@ -230,6 +229,8 @@ export async function POST(req: Request) {
     const useTools = modelConfig.supportsTools && !chatOnlyMode;
     const activeToolIds = resolveActiveToolIds(explicitToolIds, skillIds, kbId);
 
+    // One result for the prompt's section and the sendToChat tool.
+    const agentTargets = sendToChatTargets(openPanes, conversationId ?? "", useTools);
     const { text: finalSystemPrompt, sections } = await buildSystemPrompt({
       useTools,
       systemPrompt,
@@ -243,7 +244,7 @@ export async function POST(req: Request) {
       userId,
       mode: toolMode,
       contextWindow: contextWindowFor(servedModel, modelConfig, contextLength),
-      openPanes,
+      agentTargets,
     });
 
     console.log(
@@ -279,7 +280,6 @@ export async function POST(req: Request) {
 
     // A tool answered in this request keeps needing approval for it (see toolsWithAnsweredApproval).
     const answeredNow = new Set(toolsWithAnsweredApproval(sanitizedMessages));
-    const agentTargets = sendToChatTargets(openPanes, conversationId ?? "", useTools);
     const aiTools: ToolSet = useTools
       ? await buildTools({
           activeToolIds,

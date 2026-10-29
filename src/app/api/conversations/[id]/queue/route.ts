@@ -44,7 +44,9 @@ export async function POST(req: NextRequest, { params }: Params) {
     if (hasAgent && (!agent || !canDeliver(agent.hop))) {
       return NextResponse.json({ error: "agent is malformed or past the message limit" }, { status: 400 });
     }
-    if (!(await getConversationOrNull(id, userId))) {
+    // A sub-agent run takes no sends, so it has no queue.
+    const conv = await getConversationOrNull(id, userId);
+    if (!conv || conv.kind === "subagent") {
       return NextResponse.json({ error: "Conversation not found" }, { status: 404 });
     }
     const existing = await prisma.queuedMessage.findUnique({ where: { id: queuedId } });

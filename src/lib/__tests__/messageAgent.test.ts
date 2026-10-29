@@ -97,6 +97,28 @@ describe("messageAgent", () => {
     expect(outs.at(-1)).toMatchObject({ childId: "child-1", status: "done", report: "Two notes now." });
   });
 
+  it("resends the helper's turns as capped text, never its saved tool parts", async () => {
+    db.message.findMany.mockResolvedValue([
+      savedRow("m1", "user", "Read the notes.", "2026-10-30T10:00:00Z"),
+      {
+        id: "m2",
+        role: "assistant",
+        content: "r".repeat(20000),
+        parts: JSON.stringify([
+          { type: "tool-webSearch", toolCallId: "t1", state: "output-available", input: {}, output: "huge" },
+          { type: "text", text: "r".repeat(20000) },
+        ]),
+        createdAt: new Date("2026-10-30T10:00:05Z"),
+      },
+    ]);
+    await collect(messageAgentTool({}, options()), { agentId: "child-1", message: "Go on" });
+    const [brief, report] = run.mock.calls[0][0].resume!.history;
+    expect(brief.parts).toEqual([{ type: "text", text: "Read the notes." }]);
+    expect(report.parts).toHaveLength(1);
+    expect(report.parts[0]).toMatchObject({ type: "text" });
+    expect((report.parts[0] as { text: string }).text.length).toBeLessThanOrEqual(8000);
+  });
+
   it("refuses a helper that is not this chat's", async () => {
     db.conversation.findFirst.mockResolvedValue(null);
     const outs = await collect(messageAgentTool({}, options()), { agentId: "other-child", message: "Go on" });
