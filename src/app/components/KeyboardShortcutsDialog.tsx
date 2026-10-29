@@ -83,7 +83,7 @@ export default function KeyboardShortcutsDialog({
               <div className="space-y-1">
                 {group.shortcuts.map((shortcut) => (
                   <div
-                    key={shortcut.keys.join("+")}
+                    key={`${shortcut.description}:${shortcut.keys.join("+")}`}
                     className="flex items-center justify-between py-1.5"
                   >
                     <span className="text-sm text-zinc-300">
