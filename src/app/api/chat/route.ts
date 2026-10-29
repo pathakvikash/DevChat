@@ -322,13 +322,24 @@ export async function POST(req: Request) {
         }
       : {};
     // CLI-backed models take effort/folder/mode as provider options. The folder is
-    // re-checked every turn; chat mode is read-only there, agent mode may edit.
+    // re-checked every turn; chat mode is read-only there, agent mode may edit, and
+    // Ask lets Claude Code ask per change (its allow-for-chat list rides along).
     const cliProvider = cliProviderForModel(servedModel);
     const cliCwd = workingFolder && (await isRunnableCwd(workingFolder)) ? workingFolder : "";
     const providerOptions = isOllama
       ? { ollama: ollamaOptions }
       : cliProvider
-        ? { [cliProvider.id]: { effort: reasoningEffort ?? "", cwd: cliCwd, access: MODE_POLICY[toolMode].cli } }
+        ? {
+            [cliProvider.id]: {
+              effort: reasoningEffort ?? "",
+              cwd: cliCwd,
+              access: MODE_POLICY[toolMode].cli,
+              conversationId: conversationId ?? "",
+              allowedTools: Array.isArray(bodyAllowedTools)
+                ? bodyAllowedTools.filter((t: unknown): t is string => typeof t === "string")
+                : [],
+            },
+          }
         : undefined;
 
     // Per-candidate retry loop (transient errors + Ollama context overflow).

@@ -21,13 +21,13 @@ export const MODE_POLICY: Record<
     planCard: boolean;
     /** Each mutating or MCP call waits for an Allow / Deny card unless the chat allowed it. */
     approval: boolean;
-    /** Access for CLI models. Ask has no approval bridge yet, so CLI models stay read-only. */
-    cli: "chat" | "plan" | "agent";
+    /** Access for CLI models. Ask asks Claude Code per change; other CLIs have no bridge and stay read-only. */
+    cli: "chat" | "plan" | "ask" | "agent";
   }
 > = {
   chat: { mutating: false, planCard: false, approval: false, cli: "chat" },
   plan: { mutating: false, planCard: true, approval: false, cli: "plan" },
-  ask: { mutating: true, planCard: false, approval: true, cli: "chat" },
+  ask: { mutating: true, planCard: false, approval: true, cli: "ask" },
   agent: { mutating: true, planCard: false, approval: false, cli: "agent" },
 };
 

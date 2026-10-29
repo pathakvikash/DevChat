@@ -8,10 +8,26 @@ import { approvalTitle } from "@/lib/utils/messageParts";
 const MAX_ROWS = 4;
 const MAX_VALUE = 160;
 
+const DIFF_KEYS = ["old_string", "new_string"];
+const MAX_DIFF_LINES = 12;
+
+/** A short -/+ preview of an edit (Claude Code's Edit input), or [] for other tools. */
+function diffLines(input: unknown): string[] {
+  const i = (input ?? {}) as Record<string, unknown>;
+  if (typeof i.old_string !== "string" || typeof i.new_string !== "string") return [];
+  const lines = [
+    ...i.old_string.split("\n").map((l) => `- ${l}`),
+    ...i.new_string.split("\n").map((l) => `+ ${l}`),
+  ];
+  return lines.length > MAX_DIFF_LINES ? [...lines.slice(0, MAX_DIFF_LINES), "…"] : lines;
+}
+
 /** Up to MAX_ROWS short "label: value" rows, so the card stays small. */
 function keyRows(input: unknown): Array<[string, string]> {
   if (!input || typeof input !== "object") return [];
+  const hasDiff = diffLines(input).length > 0;
   return Object.entries(input as Record<string, unknown>)
+    .filter(([k]) => !(hasDiff && DIFF_KEYS.includes(k)))
     .slice(0, MAX_ROWS)
     .map(([k, v]) => {
       const text = typeof v === "string" ? v : JSON.stringify(v) ?? "";
@@ -35,6 +51,7 @@ export default function ApprovalCard({
   const [answered, setAnswered] = useState(false);
   const title = approvalTitle(toolName, input);
   const rows = keyRows(input);
+  const diff = diffLines(input);
   const answer = (approved: boolean, allowForChat = false) => {
     if (answered) return;
     setAnswered(true);
@@ -55,6 +72,15 @@ export default function ApprovalCard({
       </div>
       <div className="px-3 py-2">
         <p className="text-sm font-medium text-[var(--foreground)] break-words">{title}</p>
+        {diff.length > 0 && (
+          <pre className="mt-1.5 max-h-48 overflow-auto rounded-sm text-xs font-mono text-zinc-200 whitespace-pre-wrap break-all">
+            {diff.map((l, n) => (
+              <div key={n} className={l.startsWith("+") ? "bg-emerald-500/10" : l.startsWith("-") ? "bg-red-500/10" : undefined}>
+                {l}
+              </div>
+            ))}
+          </pre>
+        )}
         {rows.length > 0 && (
           <dl className="mt-1.5 space-y-0.5">
             {rows.map(([k, v]) => (

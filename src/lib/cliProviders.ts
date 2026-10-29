@@ -45,7 +45,9 @@ export type CliEvent =
   | { type: "retry" }
   /** A tool the CLI ran itself (Claude Code's Read/Edit/…), shown as a provider-executed call. */
   | { type: "tool-call"; id: string; name: string; input: unknown }
-  | { type: "tool-result"; id: string; name: string; result: unknown; isError: boolean };
+  | { type: "tool-result"; id: string; name: string; result: unknown; isError: boolean }
+  /** Claude Code asks permission for a tool call (`--permission-prompt-tool stdio`). */
+  | { type: "permission"; requestId: string; toolUseId: string; toolName: string; input: unknown };
 
 export interface CliInvocation {
   model: string;
@@ -55,8 +57,9 @@ export interface CliInvocation {
   effort?: string;
   /** Working folder the tool may use; absent = sandboxed scratch dir, no file tools. */
   cwd?: string;
-  /** chat and plan = read-only tools in `cwd` (plan also asks Claude Code for plan mode); agent = may also create/edit files there. */
-  access?: "chat" | "plan" | "agent";
+  /** chat and plan = read-only tools in `cwd` (plan also asks Claude Code for plan mode); agent = may also create/edit files there;
+   *  ask = Claude Code may act but asks per change (CLIs without a bridge treat it as chat). */
+  access?: "chat" | "plan" | "agent" | "ask";
 }
 
 export interface CliProviderDef {
@@ -67,7 +70,7 @@ export interface CliProviderDef {
   contextWindow: number;
   /** Fixed list, or "discover" to ask the tool (currently `opencode models`). */
   models: CliModel[] | "discover";
-  invoke(p: CliInvocation): { args: string[]; stdin?: string; env?: Record<string, string>; cwd?: string };
+  invoke(p: CliInvocation): { args: string[]; stdin?: string; env?: Record<string, string>; cwd?: string; holdStdin?: boolean };
   /** Stateful line parser factory: one instance per run. */
   parser(): (line: string) => CliEvent[];
 }
@@ -82,6 +85,27 @@ function json(line: string): Record<string, any> | null {
   }
 }
 
+export type PermissionDecision = { behavior: "allow" } | { behavior: "deny"; message: string };
+
+/** A `can_use_tool` control request from Claude Code, or null for any other line. */
+export function parseControlRequest(line: string): Omit<Extract<CliEvent, { type: "permission" }>, "type"> | null {
+  const e = json(line);
+  const r = e?.request;
+  if (e?.type !== "control_request" || r?.subtype !== "can_use_tool") return null;
+  if (typeof e.request_id !== "string" || typeof r.tool_use_id !== "string" || typeof r.tool_name !== "string") return null;
+  return { requestId: e.request_id, toolUseId: r.tool_use_id, toolName: r.tool_name, input: r.input ?? {} };
+}
+
+/** The answer line Claude Code reads on stdin for a `can_use_tool` request. */
+export function controlResponse(requestId: string, decision: PermissionDecision): string {
+  return JSON.stringify({ type: "control_response", response: { subtype: "success", request_id: requestId, response: decision } }) + "\n";
+}
+
+/** The prompt as one stream-json user message (`--input-format stream-json`). */
+export function userMessageLine(content: string): string {
+  return JSON.stringify({ type: "user", message: { role: "user", content } }) + "\n";
+}
+
 /** `claude -p --output-format stream-json --include-partial-messages` */
 export function claudeParser(): (line: string) => CliEvent[] {
   let streamed = false;
@@ -90,6 +114,10 @@ export function claudeParser(): (line: string) => CliEvent[] {
   return (line) => {
     const e = json(line);
     if (!e) return [];
+    if (e.type === "control_request") {
+      const req = parseControlRequest(line);
+      return req ? [{ type: "permission", ...req }] : [];
+    }
     if (e.type === "stream_event") {
       const ev = e.event;
       const d = ev?.delta;
@@ -218,27 +246,35 @@ export const CLI_PROVIDERS: readonly CliProviderDef[] = [
     ],
     // --setting-sources "" skips the user's hooks/settings; --system-prompt replaces the
     // coding-agent prompt. Tool access widens with the working folder and mode.
-    invoke: ({ model, system, user, effort, cwd, access }) => ({
-      args: [
-        "-p",
-        "--output-format", "stream-json",
-        "--verbose",
-        "--include-partial-messages",
-        "--no-session-persistence",
-        "--setting-sources", "",
-        ...(!cwd
-          ? ["--tools", ""]
-          : access === "agent"
-            ? ["--tools", "default", "--permission-mode", "acceptEdits"]
-            : ["--tools", "Read", "Glob", "Grep", "WebSearch", "WebFetch"]),
-        ...(access === "plan" ? ["--permission-mode", "plan"] : []),
-        ...(system ? ["--system-prompt", system] : []),
-        ...(model !== "default" ? ["--model", model] : []),
-        ...(effort ? ["--effort", effort] : []),
-      ],
-      stdin: user,
-      cwd,
-    }),
+    invoke: ({ model, system, user, effort, cwd, access }) => {
+      // Ask with a folder: every edit or command is a permission request on stdin/stdout (see `runCli`).
+      const bridged = !!cwd && access === "ask";
+      return {
+        args: [
+          "-p",
+          ...(bridged ? ["--input-format", "stream-json"] : []),
+          "--output-format", "stream-json",
+          "--verbose",
+          "--include-partial-messages",
+          "--no-session-persistence",
+          "--setting-sources", "",
+          ...(!cwd
+            ? ["--tools", ""]
+            : access === "agent"
+              ? ["--tools", "default", "--permission-mode", "acceptEdits"]
+              : bridged
+                ? ["--tools", "default", "--permission-mode", "default", "--permission-prompt-tool", "stdio"]
+                : ["--tools", "Read", "Glob", "Grep", "WebSearch", "WebFetch"]),
+          ...(access === "plan" ? ["--permission-mode", "plan"] : []),
+          ...(system ? ["--system-prompt", system] : []),
+          ...(model !== "default" ? ["--model", model] : []),
+          ...(effort ? ["--effort", effort] : []),
+        ],
+        stdin: bridged ? userMessageLine(user) : user,
+        holdStdin: bridged,
+        cwd,
+      };
+    },
     parser: claudeParser,
   },
   {
@@ -490,7 +526,7 @@ export function flattenPrompt(prompt: Prompt): { system: string; user: string; w
           sawTools = true;
           return `\`\`\`tool_call\n${JSON.stringify({ name: p.toolName, arguments: p.input ?? {} })}\n\`\`\``;
         }
-        if (p.type !== "reasoning" && p.type !== "tool-result") unsupported.add(`${p.type} parts`);
+        if (p.type !== "reasoning" && p.type !== "tool-result" && (p.type as string) !== "tool-approval-request") unsupported.add(`${p.type} parts`);
         return "";
       })
       .filter(Boolean)
@@ -705,25 +741,186 @@ function toUsage(u: CliUsage): Usage {
 const INACTIVITY_MS = 120_000;
 /** Upstream retries in a row with no reply before we give up on the tool. */
 const MAX_RETRIES = 3;
+/** Claude Code has no timeout of its own: a permission card left open this long is denied and the process closed. */
+const PARK_MS = 15 * 60_000;
+const DENY_MESSAGE = "The user denied this action.";
+
+interface Reader {
+  onLine(line: string): void;
+  onEnd(): void;
+}
+
+/** A Claude Code process. While it waits for a permission answer it is parked: its stream has ended,
+ *  nothing reads its stdout, and it is kept in `parkedRuns` until the answer arrives in the next request. */
+interface LiveRun {
+  proc: ChildProcess;
+  parse: (line: string) => CliEvent[];
+  /** stdin stays open for control responses until the result arrives. */
+  stdinHeld: boolean;
+  conversationId?: string;
+  /** Output read while no request was attached. */
+  backlog: string[];
+  reader: Reader | null;
+  stdoutEnded: boolean;
+  exited: boolean;
+  exitCode: number | null;
+  spawnError?: string;
+  stderr: string;
+  lastActivity: number;
+  pending?: { approvalId: string; requestId: string; ttl: ReturnType<typeof setTimeout> };
+}
+
+/** Parked runs by approval id (`cli-<tool_use id>`). Lives in this server process only. */
+const parkedRuns = new Map<string, LiveRun>();
+
+/** Denies the card and closes the process. Used on timeout and when the chat moves on. */
+function dropRun(run: LiveRun) {
+  const p = run.pending;
+  if (!p) return;
+  clearTimeout(p.ttl);
+  parkedRuns.delete(p.approvalId);
+  run.pending = undefined;
+  run.proc.stdin?.write(controlResponse(p.requestId, { behavior: "deny", message: DENY_MESSAGE }));
+  run.proc.kill("SIGTERM");
+}
+
+/** A chat that sends again while a card is open has moved on: its parked run is denied and closed. */
+export function dropParkedRuns(conversationId: string) {
+  for (const run of [...parkedRuns.values()]) if (run.conversationId === conversationId) dropRun(run);
+}
+
+/** The newest approval answer in the prompt, if the last message carries one. */
+function pendingAnswer(prompt: Prompt): { approvalId: string; approved: boolean } | undefined {
+  const last = prompt[prompt.length - 1] as { role: string; content?: unknown } | undefined;
+  if (last?.role !== "tool" || !Array.isArray(last.content)) return undefined;
+  for (const p of last.content as any[]) {
+    if (p?.type === "tool-approval-response" && typeof p.approvalId === "string") {
+      return { approvalId: p.approvalId, approved: !!p.approved };
+    }
+  }
+  return undefined;
+}
+
+function wireRun(run: LiveRun, proc: ChildProcess) {
+  const settle = () => {
+    if (!run.stdoutEnded || !run.exited) return;
+    dropRunSilently(run);
+    run.reader?.onEnd();
+  };
+  const rl = createInterface({ input: proc.stdout! });
+  rl.on("line", (line) => {
+    run.lastActivity = Date.now();
+    if (run.stdinHeld && json(line)?.type === "result") proc.stdin?.end();
+    if (run.reader) run.reader.onLine(line);
+    else run.backlog.push(line);
+  });
+  rl.on("close", () => {
+    run.stdoutEnded = true;
+    settle();
+  });
+  proc.stderr!.on("data", (d) => {
+    run.lastActivity = Date.now();
+    run.stderr += String(d);
+  });
+  proc.on("error", (err) => {
+    run.spawnError = `Claude Code could not be started (${err.message}). Is \`claude\` installed and on PATH?`;
+    run.exited = true;
+    run.exitCode = -1;
+    run.stdoutEnded = true;
+    settle();
+  });
+  proc.on("close", (code) => {
+    run.exited = true;
+    run.exitCode = code;
+    settle();
+  });
+  proc.stdin!.on("error", () => {
+    // EPIPE when the tool exits before reading; surfaced via exit code.
+  });
+}
+
+/** A parked run whose process ended can never be answered: forget it without writing to it. */
+function dropRunSilently(run: LiveRun) {
+  const p = run.pending;
+  if (!p) return;
+  clearTimeout(p.ttl);
+  parkedRuns.delete(p.approvalId);
+  run.pending = undefined;
+}
+
+function attachReader(run: LiveRun, reader: Reader) {
+  run.reader = reader;
+  while (run.reader && run.backlog.length) reader.onLine(run.backlog.shift()!);
+  if (run.reader && run.stdoutEnded && run.exited) reader.onEnd();
+}
+
+/** Lets a request ask Claude Code for a permission: the Ask-mode bridge. */
+export interface AskOptions {
+  /** Tools the chat allowed for the rest of the chat; their requests are answered without a card. */
+  allowed: ReadonlySet<string>;
+  conversationId?: string;
+}
+
+function failedStream(warnings: Warning[], message: string): ReadableStream<StreamPart> {
+  return new ReadableStream<StreamPart>({
+    start(controller) {
+      controller.enqueue({ type: "stream-start", warnings });
+      controller.enqueue({ type: "error", error: new Error(message) });
+      controller.enqueue({ type: "finish", finishReason: { unified: "error", raw: undefined }, usage: toUsage({}) });
+      controller.close();
+    },
+  });
+}
 
 function runCli(
   def: CliProviderDef,
-  spec: ReturnType<CliProviderDef["invoke"]>,
+  spec: ReturnType<CliProviderDef["invoke"]> | null,
   warnings: Warning[],
   signal?: AbortSignal,
   toolNames?: Set<string>,
+  ask?: AskOptions,
+  resume?: { run: LiveRun; approved: boolean },
 ): ReadableStream<StreamPart> {
   let child: ChildProcess | undefined;
+  let parked = false;
   return new ReadableStream<StreamPart>({
     async start(controller) {
       controller.enqueue({ type: "stream-start", warnings });
-      const scratch = join(tmpdir(), "devchat-cli");
-      await mkdir(scratch, { recursive: true });
-      const cwd = spec.cwd || scratch;
-
-      child = spawn(def.bin, spec.args, { cwd, env: childEnv(spec.env), stdio: ["pipe", "pipe", "pipe"] });
-      const proc = child;
-      const parse = def.parser();
+      let run: LiveRun;
+      if (resume) {
+        // Answer the parked request and read on from the same process.
+        run = resume.run;
+        const p = run.pending!;
+        clearTimeout(p.ttl);
+        parkedRuns.delete(p.approvalId);
+        run.pending = undefined;
+        run.proc.stdin?.write(
+          controlResponse(p.requestId, resume.approved ? { behavior: "allow" } : { behavior: "deny", message: DENY_MESSAGE }),
+        );
+        child = run.proc;
+      } else {
+        const scratch = join(tmpdir(), "devchat-cli");
+        await mkdir(scratch, { recursive: true });
+        const cwd = spec!.cwd || scratch;
+        child = spawn(def.bin, spec!.args, { cwd, env: childEnv(spec!.env), stdio: ["pipe", "pipe", "pipe"] });
+        run = {
+          proc: child,
+          parse: def.parser(),
+          stdinHeld: !!spec!.holdStdin,
+          conversationId: ask?.conversationId,
+          backlog: [],
+          reader: null,
+          stdoutEnded: false,
+          exited: false,
+          exitCode: null,
+          stderr: "",
+          lastActivity: Date.now(),
+        };
+        wireRun(run, child);
+        if (spec!.holdStdin) child.stdin!.write(spec!.stdin ?? "");
+        else child.stdin!.end(spec!.stdin ?? "");
+      }
+      const proc = run.proc;
       const scanner = toolNames?.size ? new ToolCallScanner(toolNames) : null;
       // Text and reasoning parts can open and close several times around
       // provider-run tool calls; each needs a fresh id.
@@ -735,25 +932,24 @@ function runCli(
       let sawOutput = false;
       let toolCalled = false;
       let reasoningOpen = false;
-      let exited = false;
-      let linesDone = false;
       let finished = false;
-      let exitCode: number | null = null;
       let errorMsg: string | undefined;
-      let stderr = "";
       let retries = 0;
-      let lastActivity = Date.now();
       const usage: CliUsage = {};
 
       const stop = (reason: string) => {
         if (!errorMsg) errorMsg = reason;
         proc.kill("SIGTERM");
       };
+      // Paused while parked: a pending permission card is not a stuck tool.
       const watchdog = setInterval(() => {
-        if (Date.now() - lastActivity > INACTIVITY_MS) {
+        if (Date.now() - run.lastActivity > INACTIVITY_MS) {
           stop(`${def.label} produced no output for ${INACTIVITY_MS / 1000}s and was stopped. Check that \`${def.bin}\` works in a terminal.`);
         }
       }, 5_000);
+      const onAbort = () => proc.kill("SIGTERM");
+      signal?.addEventListener("abort", onAbort, { once: true });
+      run.lastActivity = Date.now();
 
       const closeReasoning = () => {
         if (reasoningOpen) {
@@ -801,18 +997,20 @@ function runCli(
         });
       };
       const finish = () => {
-        if (finished || !exited || !linesDone) return;
+        if (finished || !run.exited || !run.stdoutEnded) return;
         finished = true;
         clearInterval(watchdog);
+        signal?.removeEventListener("abort", onAbort);
         if (scanner) emitScan(scanner.end());
         closeReasoning();
         closeText();
-        const failed = !!errorMsg || (exitCode !== 0 && !sawOutput);
+        const err = errorMsg || run.spawnError;
+        const failed = !!err || (run.exitCode !== 0 && !sawOutput);
         if (failed) {
-          const tail = stderr.trim().slice(-600);
+          const tail = run.stderr.trim().slice(-600);
           controller.enqueue({
             type: "error",
-            error: new Error(errorMsg || `${def.label} exited with code ${exitCode}${tail ? `: ${tail}` : ""}`),
+            error: new Error(err || `${def.label} exited with code ${run.exitCode}${tail ? `: ${tail}` : ""}`),
           });
         }
         controller.enqueue({
@@ -823,87 +1021,94 @@ function runCli(
         controller.close();
       };
 
-      const rl = createInterface({ input: proc.stdout! });
-      rl.on("line", (line) => {
-        lastActivity = Date.now();
-        for (const ev of parse(line)) {
-          if (ev.type === "text") {
-            if (!ev.text) continue;
-            if (scanner) emitScan(scanner.push(ev.text));
-            else emitText(ev.text);
-          } else if (ev.type === "reasoning") {
-            // May arrive after the answer; the UI groups reasoning parts into one
-            // block regardless of order.
-            emitReasoning(ev.text);
-          } else if (ev.type === "tool-call") {
-            // The CLI ran this itself; `dynamic` because it isn't one of the
-            // tools DevChat handed to streamText.
-            closeReasoning();
-            closeText();
-            sawOutput = true;
-            controller.enqueue({
-              type: "tool-call",
-              toolCallId: ev.id,
-              toolName: ev.name,
-              input: JSON.stringify(ev.input ?? {}),
-              providerExecuted: true,
-              dynamic: true,
-            });
-          } else if (ev.type === "tool-result") {
-            controller.enqueue({
-              type: "tool-result",
-              toolCallId: ev.id,
-              toolName: ev.name,
-              result: (ev.result ?? "") as NonNullable<Extract<StreamPart, { type: "tool-result" }>["result"]>,
-              isError: ev.isError,
-              dynamic: true,
-            });
-          } else if (ev.type === "usage") {
-            for (const k of Object.keys(ev.usage) as (keyof CliUsage)[]) {
-              const v = ev.usage[k];
-              if (typeof v === "number") usage[k] = (usage[k] ?? 0) + v;
+      /** Ends this request with the permission card and parks the process until the answer arrives. */
+      const park = (ev: Extract<CliEvent, { type: "permission" }>) => {
+        clearInterval(watchdog);
+        signal?.removeEventListener("abort", onAbort);
+        if (scanner) emitScan(scanner.end());
+        closeReasoning();
+        closeText();
+        const approvalId = `cli-${ev.toolUseId}`;
+        run.reader = null;
+        parked = true;
+        run.pending = {
+          approvalId,
+          requestId: ev.requestId,
+          ttl: setTimeout(() => dropRun(run), PARK_MS),
+        };
+        parkedRuns.set(approvalId, run);
+        finished = true;
+        controller.enqueue({ type: "tool-approval-request", approvalId, toolCallId: ev.toolUseId });
+        controller.enqueue({ type: "finish", finishReason: { unified: "tool-calls", raw: undefined }, usage: toUsage(usage) });
+        controller.close();
+      };
+
+      const reader: Reader = {
+        onLine: (line) => {
+          for (const ev of run.parse(line)) {
+            if (ev.type === "text") {
+              if (!ev.text) continue;
+              if (scanner) emitScan(scanner.push(ev.text));
+              else emitText(ev.text);
+            } else if (ev.type === "reasoning") {
+              // May arrive after the answer; the UI groups reasoning parts into one
+              // block regardless of order.
+              emitReasoning(ev.text);
+            } else if (ev.type === "permission") {
+              if (ask?.allowed.has(ev.toolName)) {
+                run.proc.stdin?.write(controlResponse(ev.requestId, { behavior: "allow" }));
+                continue;
+              }
+              park(ev);
+              return;
+            } else if (ev.type === "tool-call") {
+              // The CLI ran this itself; `dynamic` because it isn't one of the
+              // tools DevChat handed to streamText.
+              closeReasoning();
+              closeText();
+              sawOutput = true;
+              controller.enqueue({
+                type: "tool-call",
+                toolCallId: ev.id,
+                toolName: ev.name,
+                input: JSON.stringify(ev.input ?? {}),
+                providerExecuted: true,
+                dynamic: true,
+              });
+            } else if (ev.type === "tool-result") {
+              controller.enqueue({
+                type: "tool-result",
+                toolCallId: ev.id,
+                toolName: ev.name,
+                result: (ev.result ?? "") as NonNullable<Extract<StreamPart, { type: "tool-result" }>["result"]>,
+                isError: ev.isError,
+                dynamic: true,
+              });
+            } else if (ev.type === "usage") {
+              for (const k of Object.keys(ev.usage) as (keyof CliUsage)[]) {
+                const v = ev.usage[k];
+                if (typeof v === "number") usage[k] = (usage[k] ?? 0) + v;
+              }
+            } else if (ev.type === "retry") {
+              retries++;
+              // Otherwise the bubble just sits there: the tool is alive but its
+              // upstream API isn't answering, and only we can see that.
+              emitReasoning(`Waiting for ${def.label}'s API (retry ${retries})…\n`);
+              if (retries >= MAX_RETRIES && !sawOutput) {
+                stop(`${def.label} keeps retrying its API call (${retries}×) without answering. Run \`${def.bin}\` in a terminal to check its login.`);
+              }
+            } else if (ev.type === "error") {
+              errorMsg = ev.message;
             }
-          } else if (ev.type === "retry") {
-            retries++;
-            // Otherwise the bubble just sits there: the tool is alive but its
-            // upstream API isn't answering, and only we can see that.
-            emitReasoning(`Waiting for ${def.label}'s API (retry ${retries})…\n`);
-            if (retries >= MAX_RETRIES && !sawOutput) {
-              stop(`${def.label} keeps retrying its API call (${retries}×) without answering. Run \`${def.bin}\` in a terminal to check its login.`);
-            }
-          } else {
-            errorMsg = ev.message;
           }
-        }
-      });
-      rl.on("close", () => {
-        linesDone = true;
-        finish();
-      });
-      proc.stderr!.on("data", (d) => {
-        lastActivity = Date.now();
-        stderr += String(d);
-      });
-      proc.on("error", (err) => {
-        errorMsg = `${def.label} could not be started (${err.message}). Is \`${def.bin}\` installed and on PATH?`;
-        exited = true;
-        exitCode = -1;
-        linesDone = true;
-        finish();
-      });
-      proc.on("close", (code) => {
-        exitCode = code;
-        exited = true;
-        finish();
-      });
-      proc.stdin!.on("error", () => {
-        // EPIPE when the tool exits before reading; surfaced via exit code.
-      });
-      proc.stdin!.end(spec.stdin ?? "");
-      signal?.addEventListener("abort", () => proc.kill("SIGTERM"), { once: true });
+        },
+        onEnd: finish,
+      };
+      attachReader(run, reader);
     },
     cancel() {
-      child?.kill("SIGTERM");
+      // A parked run is kept for its answer; only an attached one is killed here.
+      if (!parked) child?.kill("SIGTERM");
     },
   });
 }
@@ -923,12 +1128,15 @@ export function createCliModel(def: CliProviderDef, modelArg: string): LanguageM
     const po = options.providerOptions?.[def.id] ?? {};
     const effort = typeof po.effort === "string" && po.effort ? po.effort : undefined;
     const cwd = typeof po.cwd === "string" && po.cwd ? po.cwd : undefined;
-    const access: "chat" | "plan" | "agent" = po.access === "agent" || po.access === "plan" ? po.access : "chat";
+    const access: "chat" | "plan" | "agent" | "ask" =
+      po.access === "agent" || po.access === "plan" || po.access === "ask" ? po.access : "chat";
     const folderNote = cwd
       ? `## Working folder\nYou are working in the folder ${cwd}. Use paths relative to it or absolute paths inside it; other locations are not accessible.${
           access === "agent"
             ? " You may read, create and edit files here. Shell commands are not available."
-            : " You may read and search files here but not change them."
+            : access === "ask"
+              ? " You may read and search files here. Edits and commands wait for the user's approval."
+              : " You may read and search files here but not change them."
         }`
       : "";
     const system = [flat.system, tools.length ? buildToolInstructions(tools) : "", folderNote]
@@ -936,7 +1144,25 @@ export function createCliModel(def: CliProviderDef, modelArg: string): LanguageM
       .join("\n\n");
     const spec = def.invoke({ model: modelArg, system, user: flat.user, effort, cwd, access });
     const toolNames = new Set(tools.map((t) => t.name));
-    return { stream: runCli(def, spec, warnings, options.abortSignal, toolNames) };
+    const allowed = new Set(
+      Array.isArray(po.allowedTools) ? po.allowedTools.filter((t: unknown): t is string => typeof t === "string") : [],
+    );
+    const conversationId = typeof po.conversationId === "string" && po.conversationId ? po.conversationId : undefined;
+    const ask: AskOptions = { allowed, conversationId };
+    // The answer to a card is the newest message: resume the process that asked, or say it is gone.
+    const answer = pendingAnswer(options.prompt);
+    if (answer) {
+      const run = parkedRuns.get(answer.approvalId);
+      if (!run) {
+        return {
+          stream: failedStream(warnings, "The permission request expired (it waited too long, or the server restarted). Send the request again."),
+        };
+      }
+      return { stream: runCli(def, null, warnings, options.abortSignal, toolNames, ask, { run, approved: answer.approved }) };
+    }
+    // A new request means the chat moved on from any card still open.
+    if (conversationId) dropParkedRuns(conversationId);
+    return { stream: runCli(def, spec, warnings, options.abortSignal, toolNames, ask) };
   };
 
   return {

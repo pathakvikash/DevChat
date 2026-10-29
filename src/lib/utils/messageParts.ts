@@ -100,6 +100,10 @@ export function approvalTitle(toolName: string, input: any): string {
   if (toolName === "createTodo" || toolName === "createTodos" || toolName === "updateTodo") return "Update the todo list";
   if (toolName === "rememberFact") return `Save to memory: "${i.key ?? ""}"`;
   if (toolName === "forgetFact") return `Forget memory: "${i.key ?? ""}"`;
+  // Claude Code's own tools, asked for in Ask mode.
+  if (toolName === "Edit" || toolName === "MultiEdit") return `Edit ${i.file_path ?? ""}`;
+  if (toolName === "Write") return `Create ${i.file_path ?? ""}`;
+  if (toolName === "Bash") return "Run a command";
   if (toolName.startsWith("mcp_")) return `Run ${toolName.replace(/^mcp_[^_]*_/, "")} on an MCP server`;
   return `Run ${toolName}`;
 }
