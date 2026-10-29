@@ -14,7 +14,7 @@ export default function ThinkingBlock({ text }: ThinkingBlockProps) {
     <div className="my-2 glass rounded-[var(--glass-radius-md)] overflow-hidden">
       <button
         onClick={() => setOpen((v) => !v)}
-        className="w-full flex items-center gap-2 px-3 py-2 text-xs text-zinc-300 hover:bg-[var(--glass-bg-hover)] transition"
+        className="w-full flex select-none items-center gap-2 px-3 py-2 text-xs text-zinc-300 hover:bg-[var(--glass-bg-hover)] transition"
       >
         {open ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
         <Brain size={14} className="text-purple-400" />

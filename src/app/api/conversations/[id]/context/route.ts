@@ -77,7 +77,7 @@ export async function GET(
     // next request, so the per-category counts reflect reality (tools,
     // skills, KB auto-inject, etc.) — not just the raw persona string.
     const chatOnlyMode = conversation.chatOnlyMode ?? false;
-    const memoryDisabled = conversation.memoryDisabled ?? false;
+    const memoryDisabled = conversation.memoryDisabled || conversation.temporary;
     const useTools = !!modelConfig?.supportsTools && !chatOnlyMode;
     const activeToolIds = resolveActiveToolIds(
       explicitToolIds,

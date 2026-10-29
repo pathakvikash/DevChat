@@ -1,9 +1,10 @@
 "use client";
 
 import { useEffect, useRef, useState, useCallback } from "react";
-import { Plus, Upload, Globe, BookOpen, Settings, X, Slash, Mic, MicOff } from "lucide-react";
+import { Plus, Upload, Globe, BookOpen, Settings, X, Slash, Mic, MicOff, Paperclip } from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
 import AttachmentChip from "./AttachmentChip";
+import QuoteCards from "./QuoteCards";
 import DragOverlay from "./DragOverlay";
 import ContextUsageCircle from "./ContextUsageCircle";
 import ModelSelector from "./conversation/ModelSelector";
@@ -15,6 +16,7 @@ import {
 } from "@/lib/commands";
 import { useVoiceDictation } from "@/lib/useVoiceDictation";
 import { useChatMode } from "@/app/contexts/ChatModeContext";
+import type { QuoteCard } from "@/lib/utils/quoteReply";
 
 /** Max composer height before it starts scrolling. */
 const MAX_INPUT_HEIGHT = 200;
@@ -44,6 +46,13 @@ interface ChatInputProps {
   onKbToggle: () => void;
   searchProvider: "duckduckgo" | "tavily";
   onToggleSearchProvider: () => void;
+  quotes: QuoteCard[];
+  onQuoteChange: (id: string, instruction: string) => void;
+  onQuoteRemove: (id: string) => void;
+  /** Cmd/Ctrl+Enter in a quote card: send just that card. */
+  onSendQuote: (id: string) => void;
+  /** Temporary chat: dashed composer and its own placeholder. */
+  temporary?: boolean;
 }
 
 export default function ChatInput({
@@ -65,6 +74,11 @@ export default function ChatInput({
   onKbToggle,
   searchProvider,
   onToggleSearchProvider,
+  quotes,
+  onQuoteChange,
+  onQuoteRemove,
+  onSendQuote,
+  temporary,
 }: ChatInputProps) {
   // Read-only here; the sidebar and header toggles do the actual switching.
   const { mode } = useChatMode();
@@ -199,11 +213,34 @@ export default function ChatInput({
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
-  const canSubmit = input.trim() || files.length > 0;
+  const canSubmit = input.trim() || files.length > 0 || quotes.length > 0;
 
   useEffect(() => {
     if (!isLoading) submitLockRef.current = false;
   }, [isLoading]);
+
+  // The textarea is disabled while a reply runs, so a focus request made then waits for the reply to end.
+  const wantFocusRef = useRef(false);
+  useEffect(() => {
+    if (isLoading || !wantFocusRef.current) return;
+    wantFocusRef.current = false;
+    if (document.activeElement === document.body) textareaRef.current?.focus();
+  }, [isLoading]);
+
+  function focusTextarea() {
+    const el = textareaRef.current;
+    if (el?.disabled) wantFocusRef.current = true;
+    else el?.focus();
+  }
+
+  function submitFromKey(e: React.KeyboardEvent) {
+    e.preventDefault();
+    if (canSubmit && !isLoading && !submitLockRef.current) {
+      submitLockRef.current = true;
+      wantFocusRef.current = true;
+      onSubmit(e as any);
+    }
+  }
 
   // Resize on value change rather than onInput, so it also shrinks back after
   // send and still grows for voice dictation and slash-command completion.
@@ -222,31 +259,6 @@ export default function ChatInput({
       <DragOverlay isVisible={isDragging} fileCount={files.length} />
 
       <div className="glass-nav px-4 py-3">
-        {files.length > 0 && (
-          <div className="mb-3 space-y-2">
-            <div className="flex items-center justify-between">
-              <span className="text-sm font-medium text-zinc-300">
-                Attachments ({files.length})
-              </span>
-              <button
-                onClick={() => setFiles([])}
-                className="text-xs text-zinc-500 hover:text-zinc-300"
-              >
-                Clear all
-              </button>
-            </div>
-            <div className="flex flex-wrap gap-2">
-              {files.map((file, index) => (
-                <AttachmentChip
-                  key={`${file.name}-${file.size}-${index}`}
-                  file={file}
-                  onRemove={() => removeFile(index)}
-                />
-              ))}
-            </div>
-          </div>
-        )}
-
         {isCompressing && !isCompressed && (
           <div className="mb-3 p-3 rounded-[var(--glass-radius-md)] glass-card border border-amber-900/50">
             <div className="flex items-center gap-2 text-amber-300 text-sm">
@@ -272,6 +284,47 @@ export default function ChatInput({
           </div>
         )}
 
+        {/* Composer tray: what stacks above the input. Status rows above stay put; this part scrolls. */}
+        {(quotes.length > 0 || files.length > 0) && (
+          <div className="mb-3 max-h-[min(30dvh,240px)] space-y-2 overflow-y-auto">
+            <QuoteCards
+              quotes={quotes}
+              onChange={onQuoteChange}
+              onRemove={onQuoteRemove}
+              onSendOne={(id) => {
+                wantFocusRef.current = true; // the card leaves, and the textarea is disabled until the reply ends
+                onSendQuote(id);
+              }}
+              onSendAll={submitFromKey}
+              focusTextarea={focusTextarea}
+              busy={isLoading}
+            />
+            {files.length > 0 && (
+              <div className="space-y-2">
+                <div className="flex items-center gap-1.5 text-[11px] text-zinc-400">
+                  <Paperclip size={11} /> Files ({files.length})
+                  <button
+                    type="button"
+                    onClick={() => setFiles([])}
+                    className="focus-ring ml-auto rounded-[var(--glass-radius-sm)] px-1 hover:text-[var(--foreground)]"
+                  >
+                    Clear all
+                  </button>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {files.map((file, index) => (
+                    <AttachmentChip
+                      key={`${file.name}-${file.size}-${index}`}
+                      file={file}
+                      onRemove={() => removeFile(index)}
+                    />
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
         <form
           onSubmit={onSubmit}
           onDragEnter={handleDragEnter}
@@ -285,6 +338,7 @@ export default function ChatInput({
                 ? "shadow-[var(--glass-shadow-glow)] border-[var(--glass-accent)]"
                 : ""
             }
+            ${temporary ? "border-dashed! border-[var(--glass-border-strong)]!" : ""}
           `}
         >
           {showCommands && (
@@ -328,7 +382,9 @@ export default function ChatInput({
               placeholder={
                 isListening
                   ? ""
-                  : mode === "agent"
+                  : temporary
+                    ? "Temporary chat. Not saved after you leave."
+                    : mode === "agent"
                     ? "Agent mode — can write artifacts, todos, memories..."
                     : "Type a message, / for commands, or drop files..."
               }
@@ -353,17 +409,12 @@ export default function ChatInput({
                   }
                   if (e.key === "Escape") {
                     e.preventDefault();
-                    e.stopPropagation();
                     setCmdDismissed(cmdQuery);
                     return;
                   }
                 }
-                if (e.key === "Enter" && !e.shiftKey) {
-                  e.preventDefault();
-                  if (canSubmit && !isLoading && !submitLockRef.current) {
-                    submitLockRef.current = true;
-                    onSubmit(e as any);
-                  }
+                if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
+                  submitFromKey(e);
                 }
               }}
               style={{

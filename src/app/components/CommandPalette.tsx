@@ -4,7 +4,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import * as Dialog from "@radix-ui/react-dialog";
 import { Command } from "cmdk";
 import { useRouter } from "next/navigation";
-import { FilePlus, Settings } from "lucide-react";
+import { FilePlus, MessageSquareDashed, Settings } from "lucide-react";
 import { useToast } from "./Toast";
 import { createConversation } from "@/app/hooks/useConversationsApi";
 
@@ -69,9 +69,9 @@ export default function CommandPaletteProvider({ children }: { children: React.R
     return () => document.removeEventListener("keydown", handleKeyDown);
   }, []);
 
-  async function createNewChat() {
+  async function createNewChat(temporary = false) {
     try {
-      const conv = await createConversation();
+      const conv = await createConversation({ temporary });
       router.push(`/c/${conv.id}`);
     } catch (error) {
       console.error("Failed to create conversation:", error);
@@ -94,9 +94,13 @@ export default function CommandPaletteProvider({ children }: { children: React.R
           <Command.Empty>No results found.</Command.Empty>
 
           <Command.Group heading="Navigation">
-            <Command.Item value="new-chat" onSelect={createNewChat}>
+            <Command.Item value="new-chat" onSelect={() => createNewChat()}>
               <FilePlus size={16} />
               New Chat
+            </Command.Item>
+            <Command.Item value="new-temporary-chat" onSelect={() => createNewChat(true)}>
+              <MessageSquareDashed size={16} />
+              New temporary chat
             </Command.Item>
             <Command.Item
               value="settings-page"

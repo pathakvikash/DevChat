@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
@@ -52,12 +52,24 @@ export default function Sidebar() {
     data: conversationsData,
     loading,
     setData: setConversations,
+    refetch,
   } = useResource<ConversationItem[]>(
     fetchConversations,
     [],
     { onError: (e) => console.error("Failed to fetch conversations:", e) },
   );
   const conversations = conversationsData ?? [];
+
+  // A chat marked temporary drops out of the list at once; un-marking brings it back.
+  useEffect(() => {
+    function onTemporaryChanged(e: Event) {
+      const { id, temporary } = (e as CustomEvent).detail;
+      if (temporary) setConversations((prev) => (prev ?? []).filter((c) => c.id !== id));
+      else void refetch();
+    }
+    window.addEventListener("vas:temporary-changed", onTemporaryChanged);
+    return () => window.removeEventListener("vas:temporary-changed", onTemporaryChanged);
+  }, [setConversations, refetch]);
 
   const filteredConversations = conversations.filter((c) => {
     const matchesSearch = c.title.toLowerCase().includes(searchInput.toLowerCase());
@@ -70,6 +82,8 @@ export default function Sidebar() {
   async function createNewChat() {
     try {
       const newConv = await createConversation();
+      // A full page load skips React cleanup, so tell an open temporary chat to delete itself.
+      window.dispatchEvent(new Event("vas:leaving-chat"));
       window.location.href = `/c/${newConv.id}`;
     } catch (error) {
       console.error("Failed to create conversation:", error);
@@ -354,8 +368,8 @@ export default function Sidebar() {
                       onChange={(e) => setEditingTitle(e.target.value)}
                       onBlur={() => updateTitle(conv.id, editingTitle)}
                       onKeyDown={(e) => {
-                        if (e.key === "Enter") updateTitle(conv.id, editingTitle);
-                        if (e.key === "Escape") setEditingId(null);
+                        if (e.key === "Enter") { e.preventDefault(); updateTitle(conv.id, editingTitle); }
+                        if (e.key === "Escape") { e.preventDefault(); setEditingId(null); }
                       }}
                       className="w-full glass-input rounded px-2 py-1"
                       onClick={(e) => e.preventDefault()}

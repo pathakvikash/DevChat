@@ -43,7 +43,7 @@ export default function ArtifactReference({
   return (
     <button
       onClick={() => onClick(artifactId)}
-      className="flex items-center gap-2.5 glass-button rounded-[var(--glass-radius-md)] px-3 py-2 cursor-pointer text-left w-full"
+      className="flex select-none items-center gap-2.5 glass-button rounded-[var(--glass-radius-md)] px-3 py-2 cursor-pointer text-left w-full"
     >
       <Icon size={16} className={`${colorClass} shrink-0`} />
       <span className="text-sm text-zinc-200 truncate flex-1 min-w-0">

@@ -204,7 +204,7 @@ export async function POST(req: Request) {
     }
 
     const aiTools: ToolSet = useTools
-      ? await buildTools({ activeToolIds, searchProvider, conversationId, userId, mode: toolMode })
+      ? await buildTools({ activeToolIds, searchProvider, conversationId, userId, mode: toolMode, memoryDisabled })
       : {};
 
     const isOllama = servedModel.startsWith("ollama/");

@@ -103,7 +103,7 @@ export default function ClarificationForm({
           </div>
         )}
 
-        <div className="flex justify-end">
+        <div className="flex select-none justify-end">
           <button
             onClick={handleSubmit}
             disabled={

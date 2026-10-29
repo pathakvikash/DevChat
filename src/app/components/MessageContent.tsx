@@ -7,6 +7,7 @@ import {
   type AnyPart,
   type ToolPart,
 } from "@/lib/utils/messageParts";
+import { splitQuoteBlocks } from "@/lib/utils/quoteReply";
 
 interface MessageContentProps {
   role: "user" | "assistant" | "system";
@@ -49,9 +50,21 @@ export default function MessageContent({
           return (
             <div key={item.key} className={isAssistant ? "max-w-2xl" : ""}>
               {isUser ? (
-                <div className="whitespace-pre-wrap wrap-break-word break-all">
-                  {(p as any).text}
-                </div>
+                // `>` runs (quote-reply) get a quote style; the rest stays plain text.
+                splitQuoteBlocks((p as any).text ?? "").map((seg, i) =>
+                  seg.type === "quote" ? (
+                    <blockquote
+                      key={i}
+                      className="my-1.5 border-l-2 border-white/40 pl-3 italic text-white/80 whitespace-pre-wrap wrap-break-word break-all"
+                    >
+                      {seg.text}
+                    </blockquote>
+                  ) : (
+                    <div key={i} className="whitespace-pre-wrap wrap-break-word break-all">
+                      {seg.text}
+                    </div>
+                  ),
+                )
               ) : (
                 <MarkdownMessage content={(p as any).text} />
               )}

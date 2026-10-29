@@ -82,6 +82,7 @@ model Conversation {
   compressedBeforeMessages Int?
   chatOnlyMode             Boolean    @default(false)
   memoryDisabled           Boolean    @default(false)
+  temporary                Boolean    @default(false) // hidden from lists, memory off, deleted on leave or after 24h
   maxToolCalls     Int          @default(5)
   fallbackModel    String? // Optional backup model tried when the primary fails (rate limit, outage, auth).
    note                     String?

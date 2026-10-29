@@ -43,9 +43,11 @@ export default function AttachmentChip({
       </div>
 
       <button
+        type="button"
         onClick={onRemove}
-        className="flex h-6 w-6 items-center justify-center rounded-full glass-strong text-zinc-400 opacity-0 transition-all hover:bg-red-600 hover:text-white group-hover:opacity-100"
-        aria-label="Remove attachment"
+        className="focus-ring flex h-6 w-6 items-center justify-center rounded-full glass-strong text-zinc-400 transition-all hover:bg-red-600 hover:text-white"
+        aria-label={`Remove ${file.name}`}
+        title={`Remove ${file.name}`}
       >
         ×
       </button>

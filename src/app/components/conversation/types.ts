@@ -17,6 +17,7 @@ export interface Conversation {
   note?: string;
   chatOnlyMode?: boolean;
   memoryDisabled?: boolean;
+  temporary?: boolean;
   maxToolCalls?: number;
   fallbackModel?: string | null;
   compressedSummary?: string;

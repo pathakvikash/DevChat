@@ -4,6 +4,7 @@ import { memo, useEffect, useRef } from "react";
 import { UIMessage } from "ai";
 import MessageBubble from "./MessageBubble";
 import TypingIndicator from "./TypingIndicator";
+import QuoteReplyPill from "./QuoteReplyPill";
 
 interface ChatMessagesProps {
   messages: UIMessage[];
@@ -14,7 +15,11 @@ interface ChatMessagesProps {
   onRegenerateMessage?: (messageId: string) => void;
   onOpenArtifact?: (id: string) => void;
   onClarificationAnswer?: (toolCallId: string, answer: string) => void;
-  scrollRef?: React.RefObject<HTMLDivElement | null>;
+  scrollRef: React.RefObject<HTMLDivElement | null>;
+  /** Shows the Reply pill over a selection inside one message. */
+  onQuote: (text: string) => void;
+  /** An overlay is open: hide the Reply pill. */
+  quoteSuppressed?: boolean;
 }
 
 function ChatMessages({
@@ -27,6 +32,8 @@ function ChatMessages({
   onOpenArtifact,
   onClarificationAnswer,
   scrollRef,
+  onQuote,
+  quoteSuppressed,
 }: ChatMessagesProps) {
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -94,6 +101,8 @@ function ChatMessages({
       </div>
 
       <div ref={messagesEndRef} />
+      {/* Positions against the transcript wrapper, so it doesn't scroll with the messages. */}
+      <QuoteReplyPill containerRef={scrollRef} onQuote={onQuote} suppressed={quoteSuppressed} />
     </div>
   );
 }

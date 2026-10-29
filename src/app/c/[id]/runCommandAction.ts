@@ -5,7 +5,7 @@ import { runWebSearch, formatWebSearchResults } from "./webSearch";
 
 export interface RunCommandCtx {
   conversationId: string;
-  conversation: { model?: string } | null;
+  conversation: { model?: string; temporary?: boolean; memoryDisabled?: boolean } | null;
   sendMessage: (msg: { parts: Array<{ type: "text"; text: string }> }) => Promise<void>;
   setMessages: (fn: (prev: any[]) => any[]) => void;
   setConversation: (fn: (prev: any) => any) => void;
@@ -22,6 +22,11 @@ export async function runCommandAction(
   arg: string,
   ctx: RunCommandCtx,
 ): Promise<void> {
+  const memoryOff = ctx.conversation?.temporary || ctx.conversation?.memoryDisabled;
+  if (memoryOff && ["remember", "search-memory", "consolidate"].includes(cmd.action ?? "")) {
+    ctx.toast("Memory is off in this chat", "info");
+    return;
+  }
   switch (cmd.action) {
     case "search": {
       const query = arg.slice(0, 300);

@@ -131,7 +131,7 @@ export default function ToolInvocation({
     <div className="my-2 glass-card rounded-[var(--glass-radius-md)] overflow-hidden">
       <button
         onClick={() => setCollapsed((v) => !v)}
-        className="flex items-center gap-2 w-full px-3 py-2 bg-[var(--glass-bg-elevated)] text-xs text-left hover:bg-[var(--glass-bg-hover)] transition-colors"
+        className="flex select-none items-center gap-2 w-full px-3 py-2 bg-[var(--glass-bg-elevated)] text-xs text-left hover:bg-[var(--glass-bg-hover)] transition-colors"
       >
         {collapsed ? (
           <ChevronRight size={14} className="text-zinc-500 shrink-0" />
