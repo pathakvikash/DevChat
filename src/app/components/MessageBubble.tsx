@@ -187,6 +187,7 @@ function MessageBubble({
                       allParts={toolParts}
                       onOpenArtifact={onOpenArtifact}
                       onClarificationAnswer={onClarificationAnswer}
+                      isStreaming={isStreaming}
                     />
                   ))}
                 </div>

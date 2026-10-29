@@ -10,6 +10,19 @@ import { budgetTokens } from "@/lib/chat/contextBudget";
 import { quoteSearchResults } from "@/lib/chat/quotePastChat";
 import type { AgentTarget } from "@/lib/chat/agentMessages";
 import { MODE_POLICY, needsApproval, type ChatMode } from "@/lib/chat/modes";
+import {
+  applySubAgentProgress,
+  finishSubAgentOutput,
+  runSubAgent,
+  startSubAgentOutput,
+  subAgentModelOutput,
+  type RunSubAgentOptions,
+  type SubAgentOutput,
+  type SubAgentProgress,
+  type SubAgentResult,
+} from "@/lib/chat/subAgent";
+import { saveUserMessage } from "@/lib/chat/saveUserMessage";
+import type { ModelConfig } from "@/lib/models";
 
 export const BUILTIN_TOOL_IDS = [
   "executeCode",
@@ -285,3 +298,176 @@ export async function buildTools({
 }
 
 export type ToolSet = Awaited<ReturnType<typeof buildTools>>;
+
+/** Tools a read-only (Ask or Plan) helper must not get: no approval can be asked inside a sub-agent. */
+const MUTATING_TOOL_IDS = new Set([
+  "rememberFact",
+  "forgetFact",
+  "createArtifact",
+  "updateArtifact",
+  "createTodo",
+  "createTodos",
+  "updateTodo",
+]);
+const isMutatingTool = (id: string) => MUTATING_TOOL_IDS.has(id) || id.startsWith("mcp_");
+
+/** Only a main chat with tools can start helpers. Side chats and helpers never get `runAgent`. */
+export function canStartSubAgents(kind: string | undefined, useTools: boolean): boolean {
+  return useTools && kind === "main";
+}
+
+export interface SubAgentToolOptions {
+  userId: string;
+  /** The parent conversation. Each run is saved as its child (`kind: "subagent"`). */
+  parentId: string;
+  /** The served model, so a helper uses the same model and fallback as its parent. */
+  model: ModelConfig;
+  mode: ToolMode;
+  workingFolder?: string | null;
+  providerOptions?: RunSubAgentOptions["providerOptions"];
+  /** Helpers allowed to run in one step: 3 for API models, 1 for CLI models. */
+  maxParallel: number;
+}
+
+async function startSubAgentChild(opts: SubAgentToolOptions, title: string, task: string): Promise<string> {
+  const child = await prisma.conversation.create({
+    data: {
+      userId: opts.userId,
+      parentId: opts.parentId,
+      kind: "subagent",
+      title,
+      model: opts.model.id,
+      workingFolder: opts.workingFolder ?? null,
+    },
+    select: { id: true },
+  });
+  await saveUserMessage({ conversationId: child.id, text: task, parts: [{ type: "text", text: task }] });
+  return child.id;
+}
+
+async function finishSubAgentChild(childId: string, modelId: string, result: SubAgentResult): Promise<void> {
+  const reply = result.transcript[1];
+  const { inputTokens, outputTokens } = result.usage;
+  if (reply?.parts.length) {
+    await prisma.message.create({
+      data: {
+        conversationId: childId,
+        role: "assistant",
+        content: result.report,
+        parts: JSON.stringify(reply.parts),
+        inputTokens,
+        outputTokens,
+        model: modelId,
+      },
+    });
+  }
+  await prisma.conversation.update({
+    where: { id: childId },
+    data: { totalTokens: { increment: inputTokens + outputTokens } },
+  });
+}
+
+/**
+ * The `runAgent` tool: one helper per call, run to completion, with progress as preliminary
+ * outputs. Built from the parent's tools after `buildTools`, so it sees the same set.
+ */
+export function runAgentTool(parentTools: Record<string, Tool>, opts: SubAgentToolOptions): Tool {
+  const helperTools = Object.fromEntries(
+    Object.entries(parentTools).filter(([id]) => opts.mode === "agent" || !isMutatingTool(id)),
+  );
+  let running = 0;
+
+  return tool({
+    description:
+      "Start a helper that does one self-contained job alone (for example reading and summarising several files, or researching one question) and returns its written report. The helper sees only the task you write, so put every fact it needs in the task. Use it for work that would take many steps. Up to 3 helpers can run in one reply.",
+    inputSchema: z.object({
+      task: z.string().min(1).max(8000).describe("The whole job for the helper, with the facts it needs."),
+      title: z.string().max(60).optional().describe("Short name for the card, e.g. 'Read the API docs'."),
+    }),
+    execute: async function* ({ task, title }, { abortSignal }) {
+      // The parent request's signal (Stop). The SDK types it as optional.
+      const signal = abortSignal ?? new AbortController().signal;
+      const startedAt = Date.now();
+      const label = title?.trim() || task.slice(0, 60);
+      // Checked before any await, so the count is exact when calls in one step start together.
+      if (running >= opts.maxParallel) {
+        yield {
+          ...startSubAgentOutput(label, startedAt),
+          status: "error",
+          endedAt: startedAt,
+          error: `Only ${opts.maxParallel} sub-agent${opts.maxParallel === 1 ? " runs" : "s run"} at once here. Wait for the others, then ask again.`,
+        } satisfies SubAgentOutput;
+        return;
+      }
+      running++;
+      try {
+        let childId: string;
+        try {
+          childId = await startSubAgentChild(opts, label, task);
+        } catch (err) {
+          console.error("[subagent] could not save the child conversation:", err);
+          yield {
+            ...startSubAgentOutput(label, startedAt),
+            status: "error",
+            endedAt: Date.now(),
+            error: "Could not start the sub-agent.",
+          } satisfies SubAgentOutput;
+          return;
+        }
+
+        let out = startSubAgentOutput(label, startedAt, childId);
+        let dirty = true;
+        let wake: (() => void) | undefined;
+        let settled = false;
+        const onProgress = (event: SubAgentProgress) => {
+          out = applySubAgentProgress(out, event);
+          dirty = true;
+          wake?.();
+        };
+        // The save runs with the run, not in this generator, so it happens even if the consumer stops reading.
+        const run = runSubAgent({
+          brief: task,
+          model: opts.model,
+          mode: opts.mode,
+          workingFolder: opts.workingFolder,
+          tools: helperTools,
+          providerOptions: opts.providerOptions,
+          abortSignal: signal,
+          onProgress,
+        })
+          .catch(
+            (err): SubAgentResult => ({
+              status: "error",
+              report: "",
+              steps: 0,
+              usage: { inputTokens: 0, outputTokens: 0 },
+              transcript: [],
+              error: err instanceof Error ? err.message : String(err),
+            }),
+          )
+          .then(async (result) => {
+            settled = true;
+            await finishSubAgentChild(childId, opts.model.id, result).catch((err) =>
+              console.error("[subagent] could not save the run:", err),
+            );
+            wake?.();
+            return result;
+          });
+
+        while (!settled) {
+          if (!dirty) await new Promise<void>((resolve) => (wake = resolve));
+          wake = undefined;
+          if (dirty) {
+            dirty = false;
+            yield out;
+          }
+        }
+        const result = await run;
+        yield finishSubAgentOutput(out, result, Date.now());
+      } finally {
+        running--;
+      }
+    },
+    toModelOutput: ({ output }) => subAgentModelOutput(output as SubAgentOutput),
+  });
+}

@@ -9,12 +9,15 @@ import ArtifactReference from "./ArtifactReference";
 import ClarificationForm from "./ClarificationForm";
 import PlanCard from "./PlanCard";
 import { SearchChatsCard, ReadChatCard } from "./PastChatCards";
+import SubAgentCard from "./SubAgentCard";
 
 interface ToolInvocationProps {
   part: ToolPart;
   allParts?: ToolPart[];
   onOpenArtifact?: (id: string) => void;
   onClarificationAnswer?: (toolCallId: string, answer: string) => void;
+  /** The message is still streaming: a sub-agent that has not finished is running, not stopped. */
+  isStreaming?: boolean;
 }
 
 /** Approval and plan cards are their own components, so a call can change from one to a plain row
@@ -23,6 +26,7 @@ export default function ToolInvocation(props: ToolInvocationProps) {
   const { part } = props;
   const toolName = part.type.replace(/^tool-/, "");
   if (toolName === "presentPlan") return <PlanCard part={part} />;
+  if (toolName === "runAgent") return <SubAgentCard part={part} isStreaming={props.isStreaming} />;
   if (part.state === "approval-requested" && part.approval?.id) {
     return <ApprovalCard toolName={toolName} approvalId={part.approval.id} input={part.input} />;
   }
