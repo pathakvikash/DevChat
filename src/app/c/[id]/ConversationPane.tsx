@@ -1,5 +1,12 @@
 "use client";
 
+import { useEffect, useRef, useState } from "react";
+import PaneBar from "@/app/c/PaneBar";
+import SideChatHeader from "@/app/components/sidechat/SideChatHeader";
+import { createSideChat, listSideChats, type SideChatSummary } from "@/lib/sideChat";
+import { useSplitViewOptional } from "@/app/c/SplitViewContext";
+import { isPaneBusy } from "@/lib/splitPanes";
+
 import ChatMessages from "@/app/components/ChatMessages";
 import MinimapNavigator from "@/app/components/MinimapNavigator";
 import ChatInput from "@/app/components/chatInput";
@@ -17,47 +24,108 @@ import { useCommandPaletteActions } from "@/app/components/CommandPalette";
 import ConversationHeader from "@/app/components/conversation/ConversationHeader";
 import EmptyState from "@/app/components/conversation/EmptyState";
 import { ToolAnswersProvider } from "@/app/components/ToolAnswers";
-import { useKeyboardShortcuts } from "@/app/hooks/useKeyboardShortcuts";
+import { ChatModeContext } from "@/app/contexts/ChatModeContext";
 import { joinTextParts } from "@/lib/utils/conversation";
 import { exportChat } from "@/lib/utils/download";
-import { StickyNote, FileCode, SlidersHorizontal, Settings, BarChart3, Target, Download, History, Minimize2 } from "lucide-react";
+import { StickyNote, FileCode, SlidersHorizontal, Settings, BarChart3, Target, Download, History, Minimize2, Columns2 } from "lucide-react";
 
-import { useConversationPage } from "./useConversationPage";
+import { useChatPane } from "./useChatPane";
 
 interface Props {
   conversationId: string;
+  /** Only a focused pane answers shortcuts and shows its palette actions. */
+  focused: boolean;
   initialPrompt?: string;
+  searchProvider: "duckduckgo" | "tavily";
+  onToggleSearchProvider: () => void;
 }
 
-export default function ConversationLayout({ conversationId, initialPrompt }: Props) {
-  const p = useConversationPage(conversationId, initialPrompt);
+/** One chat: header, transcript, composer and panels. Its state lives in useChatPane. */
+export default function ConversationPane({ conversationId, focused, initialPrompt, searchProvider, onToggleSearchProvider }: Props) {
+  const p = useChatPane(conversationId, { focused, kind: "chat", searchProvider, initialPrompt });
+  const split = useSplitViewOptional();
+  const setPaneBusy = split?.setPaneBusy;
+  // The split view asks before it closes or replaces a busy pane.
+  const busy = isPaneBusy({
+    streaming: p.isLoading,
+    input: p.input,
+    quotes: p.quotes.length,
+    files: p.files.length + p.mentions.length,
+    queued: p.queued.length,
+  });
+  useEffect(() => { setPaneBusy?.(conversationId, busy); }, [conversationId, busy, setPaneBusy]);
+  useEffect(() => () => setPaneBusy?.(conversationId, false), [conversationId, setPaneBusy]);
 
-  useCommandPaletteActions("Panels", [
+  // A side chat: its header lists the main chat's side chats and shows what the side chat sees.
+  const isSide = p.conversation?.kind === "side";
+  const parentId = p.conversation?.parentId ?? null;
+  const parentTitle = (parentId && split?.info[parentId]?.title) || "Main chat";
+  const [sideHistory, setSideHistory] = useState<SideChatSummary[]>([]);
+  const [shown, setShown] = useState<{ shown: number; total: number } | null>(null);
+  useEffect(() => {
+    if (!isSide || !parentId) return;
+    listSideChats(parentId).then(setSideHistory).catch(() => {});
+  }, [isSide, parentId]);
+  useEffect(() => {
+    if (!isSide) return;
+    fetch(`/api/conversations/${conversationId}/context`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => setShown(d?.mainContext ? { shown: d.mainContext.shown, total: d.mainContext.total } : null))
+      .catch(() => {});
+  }, [isSide, conversationId, p.messages.length]);
+
+  // Closing a pane stops its stream; unmounting alone does not (the server finishes and saves).
+  const registerStop = split?.registerStop;
+  const setPaneCaps = split?.setPaneCaps;
+  const setPaneParent = split?.setPaneParent;
+  const stopRef = useRef(p.stop);
+  useEffect(() => { stopRef.current = p.stop; });
+  useEffect(() => {
+    registerStop?.(conversationId, () => stopRef.current());
+    return () => registerStop?.(conversationId, null);
+  }, [conversationId, registerStop]);
+  useEffect(() => { setPaneCaps?.(conversationId, p.modelCaps); }, [conversationId, p.modelCaps, setPaneCaps]);
+  useEffect(() => {
+    setPaneParent?.(conversationId, isSide && parentId ? parentId : null);
+    return () => setPaneParent?.(conversationId, null);
+  }, [conversationId, isSide, parentId, setPaneParent]);
+
+  const panelActions = [
     { id: "scratchpad", label: "Open Scratchpad", icon: <StickyNote size={16} />, onSelect: () => p.setScratchpadOpen(true) },
     { id: "artifacts", label: "Open Artifacts", icon: <FileCode size={16} />, onSelect: () => p.setArtifactPanelOpen(true) },
     { id: "advanced-settings", label: "Advanced Settings", icon: <SlidersHorizontal size={16} />, onSelect: () => p.setAdvancedOpen(true) },
     { id: "model-settings", label: "Model Settings", icon: <Settings size={16} />, onSelect: () => p.setModelSettingsOpen(true) },
     { id: "context", label: "Context Usage", icon: <BarChart3 size={16} />, onSelect: () => p.setContextPanelOpen(true) },
-  ]);
+  ];
+  useCommandPaletteActions(focused ? "Panels" : "Panels (idle)", focused ? panelActions : []);
 
-  useCommandPaletteActions("Chat", [
+  const chatActions = [
     { id: "export-markdown", label: "Export as Markdown", icon: <Download size={16} />, onSelect: () => exportChat(conversationId, "markdown", p.toast) },
     { id: "search-past-chats", label: "Search past chats", icon: <History size={16} />, onSelect: () => p.setInput("/recall ") },
     { id: "compress-chat", label: "Compress chat", icon: <Minimize2 size={16} />, onSelect: () => p.setInput("/compress ") },
-  ]);
+    { id: "toggle-side-chat", label: "Toggle side chat", icon: <Columns2 size={16} />, onSelect: () => p.toggleSidePane() },
+  ];
+  useCommandPaletteActions(focused ? "Chat" : "Chat (idle)", focused ? chatActions : []);
 
-  useKeyboardShortcuts({
-    onSend: () => p.handleSubmit(),
-    isDialogOpen: p.isDialogOpen,
-    onCloseDialog: p.closeTopDialog,
-    onOpenKeyboardShortcuts: () => p.setKeyboardShortcutsOpen(true),
-  });
+  // The bar stays in the loading and missing states too, so a pane can always be closed.
+  const bar = split?.multi && !isSide ? (
+    <PaneBar
+      title={split.info[conversationId]?.title ?? "Chat"}
+      focused={focused}
+      onClose={() => split.closeChat(conversationId)}
+      warning={split.warnings[conversationId]}
+      onWarningClick={() => split.focusPane(split.warnings[conversationId]?.otherId ?? conversationId)}
+    />
+  ) : null;
 
   if (p.loading) {
     return (
-      <div className="flex h-screen items-center justify-center bg-[var(--background)] text-[var(--foreground)]">
-        <div className="glass-card rounded-[var(--glass-radius-xl)] px-8 py-6 backdrop-blur-[var(--glass-blur-lg)]">
-          Loading conversation...
+      <div className="flex h-full min-w-0 flex-1 flex-col">
+        {bar}
+        <div className="flex flex-1 items-center justify-center bg-[var(--background)] text-[var(--foreground)]">
+          <div className="glass-card rounded-[var(--glass-radius-xl)] px-8 py-6 backdrop-blur-[var(--glass-blur-lg)]">
+            Loading conversation...
+          </div>
         </div>
       </div>
     );
@@ -65,18 +133,52 @@ export default function ConversationLayout({ conversationId, initialPrompt }: Pr
 
   if (!p.conversation) {
     return (
-      <div className="flex h-screen items-center justify-center bg-[var(--background)] text-[var(--foreground)]">
-        <div className="glass-card rounded-[var(--glass-radius-xl)] px-8 py-6">
-          This chat no longer exists
+      <div className="flex h-full min-w-0 flex-1 flex-col">
+        {bar}
+        <div className="flex flex-1 items-center justify-center bg-[var(--background)] text-[var(--foreground)]">
+          <div className="glass-card rounded-[var(--glass-radius-xl)] px-8 py-6">
+            This chat no longer exists
+          </div>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="flex h-screen bg-[var(--background)]">
-      <main className="flex h-screen flex-1 min-w-0 flex-col bg-[var(--background)] text-[var(--foreground)]">
+    <ChatModeContext.Provider value={{ mode: p.mode, setMode: p.setMode, modelCaps: p.modelCaps, setModelCaps: p.setModelCaps }}>
+    <div className="flex h-full bg-[var(--background)]">
+      <main className="flex h-full flex-1 min-w-0 flex-col bg-[var(--background)] text-[var(--foreground)]">
+        {split?.multi && !isSide && (
+          <PaneBar
+            title={split.info[conversationId]?.title ?? "Chat"}
+            focused={focused}
+            onClose={() => split.closeChat(conversationId)}
+            warning={split.warnings[conversationId]}
+            onWarningClick={() => split.focusPane(split.warnings[conversationId]?.otherId ?? conversationId)}
+          />
+        )}
         <div aria-live="polite" className="sr-only">{p.announcement}</div>
+        {isSide ? (
+          parentId && (
+            <SideChatHeader
+              title={p.conversation?.title ?? "Side chat"}
+              parentId={parentId}
+              parentTitle={parentTitle}
+              model={p.conversation?.model ?? ""}
+              onModelChange={p.handleModelChange}
+              history={sideHistory}
+              activeId={conversationId}
+              onSelect={(id) => split?.replaceAt(conversationId, id)}
+              onNewSideChat={async () => split?.replaceAt(conversationId, (await createSideChat(parentId)).id)}
+              dock={split && split.ids.indexOf(conversationId) < split.ids.indexOf(parentId) ? "left" : "right"}
+              onToggleDock={() => split?.toggleDock(conversationId, parentId)}
+              onClose={() => split?.closeChat(conversationId)}
+              onOpenParent={() => (split?.ids.includes(parentId) ? split.focusPane(parentId) : split?.replaceFocused(parentId))}
+              shown={shown?.shown}
+              total={shown?.total}
+            />
+          )
+        ) : (
         <ConversationHeader
           allowedToolCount={p.allowedToolCount}
           onResetAllowedTools={p.resetAllowedTools}
@@ -111,6 +213,7 @@ export default function ConversationLayout({ conversationId, initialPrompt }: Pr
             }
           }}
         />
+        )}
 
         <div className="relative flex-1 flex min-h-0">
           {p.messages.length === 0 && !p.isLoading && (
@@ -135,6 +238,7 @@ export default function ConversationLayout({ conversationId, initialPrompt }: Pr
               statusLabel={p.currentModelName ? `Waiting for ${p.currentModelName}…` : undefined}
               onQuote={p.addQuote}
               quoteSuppressed={p.isDialogOpen}
+              sendToMain={isSide && parentId ? { title: parentTitle, onSend: (text: string) => window.dispatchEvent(new CustomEvent("vas:send-to-main", { detail: { id: parentId, text } })) } : undefined}
             />
             </ToolAnswersProvider>
           )}
@@ -162,6 +266,7 @@ export default function ConversationLayout({ conversationId, initialPrompt }: Pr
           setMentions={p.setMentions}
           mentionCuts={p.mentionCuts}
           isLoading={p.isLoading}
+          mode={p.mode}
           onSubmit={p.handleSubmit}
           onStop={p.stop}
           kbId={p.selectedKbId}
@@ -176,8 +281,8 @@ export default function ConversationLayout({ conversationId, initialPrompt }: Pr
           onWorkingFolderChange={p.handleWorkingFolderChange}
           onOpenSettings={() => p.setModelSettingsOpen(true)}
           onKbToggle={p.handleKbToggle}
-          searchProvider={p.searchProvider}
-          onToggleSearchProvider={p.toggleSearchProvider}
+          searchProvider={searchProvider}
+          onToggleSearchProvider={onToggleSearchProvider}
           suggestion={p.suggestion}
           onAcceptSuggestion={() => {
             if (p.suggestion) p.setInput(p.suggestion);
@@ -290,5 +395,6 @@ export default function ConversationLayout({ conversationId, initialPrompt }: Pr
         onClose={() => p.setKeyboardShortcutsOpen(false)}
       />
     </div>
+    </ChatModeContext.Provider>
   );
 }

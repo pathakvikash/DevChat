@@ -19,6 +19,7 @@ const GROUPS: ShortcutGroup[] = [
     title: "Chat",
     shortcuts: [
       { keys: ["Cmd", "Enter"], description: "Send message (from any focus)" },
+      { keys: ["Cmd", "\\"], description: "Toggle side chat" },
       { keys: ["Enter"], description: "Send message" },
       { keys: ["Shift", "Enter"], description: "Newline" },
       { keys: ["Cmd", "Enter"], description: "In a quote: send just that quote" },

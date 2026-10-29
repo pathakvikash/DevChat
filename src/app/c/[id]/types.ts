@@ -5,8 +5,10 @@ import type { DataActions } from "./useConversationData";
 import type { QuoteCard } from "@/lib/utils/quoteReply";
 import type { QueuedItem } from "@/app/components/QueuedMessages";
 import type { ApprovalAnswer, PlanAnswer } from "@/app/components/ToolAnswers";
+import type { ModelCaps } from "@/app/contexts/ChatModeContext";
 
-export interface ConversationPageState extends DataActions {
+/** Everything one chat pane needs (see useChatPane). Page-wide values are not in here. */
+export interface ChatPaneState extends DataActions {
   conversation: Conversation | null;
   setConversation: React.Dispatch<React.SetStateAction<Conversation | null>>;
   loading: boolean;
@@ -60,8 +62,6 @@ export interface ConversationPageState extends DataActions {
   isCompressing: boolean;
   compressFocus: string;
   setIsCompressing: React.Dispatch<React.SetStateAction<boolean>>;
-  searchProvider: "duckduckgo" | "tavily";
-  toggleSearchProvider: () => void;
   enabledTools: string[];
   enabledSkills: string[];
   persistAdvanced: (next: { enabledTools: string[]; enabledSkills: string[] }) => void;
@@ -86,6 +86,11 @@ export interface ConversationPageState extends DataActions {
   allowedToolCount: number;
   resetAllowedTools: () => void;
   mode: ChatMode;
+  setMode: (next: ChatMode) => void;
+  modelCaps: ModelCaps;
+  setModelCaps: (next: ModelCaps) => void;
+  /** Opens or closes this chat's side chat pane. */
+  toggleSidePane: () => void;
   /** False for a model without tools (or chat-only): queued messages go next, and Ask and Plan get their text fallbacks. */
   toolsAvailable: boolean;
   handleEditMessage: (messageId: string, content: string) => Promise<void>;

@@ -71,3 +71,20 @@ test("the opening limit disables the menu item at this width", async ({ page, re
   await expect(page.getByText("Close a pane first. Up to 2 fit at this width.")).toBeVisible();
   await expect(pane(page, "Gamma ideas")).toHaveCount(0);
 });
+
+test("two panes stream at once and both finish", async ({ page, request }) => {
+  const alpha = await createChat(request, { title: "Alpha plan", model: "mock/slow" });
+  await createChat(request, { title: "Beta notes", model: "mock/slow" });
+  await openChat(page, alpha);
+  await openInSplitFromMenu(page, "Beta notes");
+
+  await pane(page, "Alpha plan").getByRole("textbox", { name: "Message" }).fill("alpha question");
+  await pane(page, "Alpha plan").getByRole("textbox", { name: "Message" }).press("Enter");
+  await pane(page, "Beta notes").getByRole("textbox", { name: "Message" }).fill("beta question");
+  await pane(page, "Beta notes").getByRole("textbox", { name: "Message" }).press("Enter");
+
+  await expect(pane(page, "Alpha plan").getByText("alpha question").first()).toBeVisible();
+  await expect(pane(page, "Beta notes").getByText("beta question").first()).toBeVisible();
+  await expect(pane(page, "Alpha plan").locator("[data-message-id]")).toHaveCount(2, { timeout: 30000 });
+  await expect(pane(page, "Beta notes").locator("[data-message-id]")).toHaveCount(2, { timeout: 30000 });
+});

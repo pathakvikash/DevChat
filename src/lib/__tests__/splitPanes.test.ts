@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { orphanSides } from "@/lib/splitPanes";
 import {
   clampWidths,
   closePane,
@@ -211,5 +212,19 @@ describe("writerConflicts", () => {
   it("flags only the two that share a folder out of three", () => {
     const out = writerConflicts([pane("A", "agent"), pane("B", "agent", "/other"), pane("C", "agent")]);
     expect([...out].sort()).toEqual(["A", "C"]);
+  });
+});
+
+describe("orphanSides", () => {
+  it("returns the open side chats of the closing main chat", () => {
+    expect(orphanSides(["A", "B", "C"], { B: "A" }, "A")).toEqual(["B"]);
+  });
+
+  it("returns none when the closing pane has no side chat open", () => {
+    expect(orphanSides(["A", "B", "C"], { C: "A" }, "B")).toEqual([]);
+  });
+
+  it("ignores a side chat whose parent is not the closing pane", () => {
+    expect(orphanSides(["A", "B", "C"], { C: "B" }, "A")).toEqual([]);
   });
 });

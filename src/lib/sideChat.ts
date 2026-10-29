@@ -22,3 +22,16 @@ export async function createSideChat(parentId: string, model?: string): Promise<
   if (!res.ok) throw new Error("Failed to create side chat");
   return res.json();
 }
+
+const pendingQuestions = new Map<string, string>();
+
+/** A question for a side chat that is about to open (`/side <question>`); its pane sends it once. */
+export function queueSideQuestion(id: string, text: string): void {
+  pendingQuestions.set(id, text);
+}
+
+export function takeSideQuestion(id: string): string | undefined {
+  const text = pendingQuestions.get(id);
+  pendingQuestions.delete(id);
+  return text;
+}

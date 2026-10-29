@@ -8,6 +8,7 @@ import type { ChatMode } from "@/lib/chat/modes";
 import { runWebSearch, formatWebSearchResults } from "./webSearch";
 
 export interface RunCommandCtx {
+  openSide: (question: string) => void;
   conversationId: string;
   conversation: { model?: string; temporary?: boolean; memoryDisabled?: boolean } | null;
   sendMessage: (msg: { parts: UIMessage["parts"] }) => Promise<void>;
@@ -39,6 +40,10 @@ export async function runCommandAction(
     return;
   }
   switch (cmd.action) {
+    case "side": {
+      ctx.openSide(arg);
+      break;
+    }
     case "plan": {
       ctx.setMode("plan");
       ctx.setRequestBody({ mode: "plan" });

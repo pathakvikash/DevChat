@@ -4,9 +4,12 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useToast } from "@/app/components/Toast";
 import { fetchConversations } from "@/app/hooks/useConversationsApi";
+import { createSideChat, listSideChats, queueSideQuestion } from "@/lib/sideChat";
+import type { ModelCaps } from "@/app/contexts/ChatModeContext";
 import {
   closePane,
   fitsSideBySide,
+  orphanSides,
   dividersPx,
   maxPanesForWidth,
   nextPane,
@@ -53,9 +56,28 @@ interface SplitViewValue {
   replaceAt: (oldId: string, id: string) => void;
   closeChat: (id: string) => void;
   cycleFocus: (dir: 1 | -1) => void;
+  openSide: (parentId: string, question?: string) => Promise<void>;
+  toggleSide: (parentId: string) => Promise<void>;
+  toggleDock: (sideId: string, parentId: string) => void;
+  /** Each pane publishes its model caps, parent and stop, like setPaneBusy. */
+  caps: Record<string, ModelCaps>;
+  setPaneCaps: (id: string, value: ModelCaps) => void;
+  setPaneParent: (id: string, parent: string | null) => void;
+  registerStop: (id: string, stop: (() => void) | null) => void;
 }
 
 const SplitViewContext = createContext<SplitViewValue | null>(null);
+
+const DOCK_KEY = "vas:sideDock";
+
+/** Side chats open on the side of their main chat remembered last time. */
+function readDock(): "left" | "right" {
+  try {
+    return localStorage.getItem(DOCK_KEY) === "left" ? "left" : "right";
+  } catch {
+    return "right";
+  }
+}
 
 function basename(path: string): string {
   return path.split("/").filter(Boolean).pop() ?? path;
@@ -76,6 +98,14 @@ export function SplitViewProvider({ children }: { children: React.ReactNode }) {
   const [modes, setModes] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState<Record<string, boolean>>({});
   const [dragId, setDragId] = useState<string | null>(null);
+  const [caps, setCaps] = useState<Record<string, ModelCaps>>({});
+  const [parentOf, setParentOf] = useState<Record<string, string>>({});
+  const stoppers = useRef(new Map<string, () => void>());
+  // Latest committed state, for async steps (after an await) and for the close cascade.
+  const live = useRef({ ids, focus, parentOf });
+  useEffect(() => {
+    live.current = { ids, focus, parentOf };
+  });
 
   useEffect(() => {
     const sync = () => setWindowWidth(window.innerWidth);
@@ -185,6 +215,7 @@ export function SplitViewProvider({ children }: { children: React.ReactNode }) {
   const replaceFocused = (id: string) => {
     if (ids.includes(id)) return focusPane(id);
     if (ids.length && !confirmBusy(focus, "Replace")) return;
+    if (isBusy(focus)) stoppers.current.get(focus)?.();
     commit(ids.length ? replacePane(ids, focus, id) : { ids: [id], focus: id });
   };
 
@@ -200,8 +231,26 @@ export function SplitViewProvider({ children }: { children: React.ReactNode }) {
   };
 
   const closeChat = (id: string) => {
-    if (ids.length <= 1 || !ids.includes(id) || !confirmBusy(id, "Close")) return;
-    commit(closePane(ids, id, focus));
+    const { ids: now, focus: cur, parentOf: parents } = live.current;
+    if (!now.includes(id)) return;
+    if (now.length <= 1) {
+      // A lone side chat closes back to its main chat.
+      const parent = parents[id];
+      if (parent && confirmBusy(id, "Close")) {
+        if (isBusy(id)) stoppers.current.get(id)?.();
+        router.replace(`/c/${parent}`, { scroll: false });
+      }
+      return;
+    }
+    // A main chat takes its side chats with it, unless that would leave nothing open.
+    const orphans = orphanSides(now, parents, id);
+    const toClose = now.length - 1 - orphans.length > 0 ? [id, ...orphans] : [id];
+    const busyOnes = toClose.filter((x) => isBusy(x));
+    if (busyOnes.length && !window.confirm(`Close "${titleOf(id)}"? Its reply will stop and unsent text will be lost.`)) return;
+    for (const x of busyOnes) stoppers.current.get(x)?.();
+    let next = { ids: now, focus: cur };
+    for (const x of toClose) next = closePane(next.ids, x, next.focus);
+    commit(next);
   };
 
   const cycleFocus = (dir: 1 | -1) => {
@@ -227,6 +276,75 @@ export function SplitViewProvider({ children }: { children: React.ReactNode }) {
     return () => document.removeEventListener("keydown", onKeyDown);
   }, []);
 
+  /** The latest side chat of a main chat; created when it has none. */
+  const sideFor = async (parentId: string) => {
+    const list = await listSideChats(parentId).catch(() => []);
+    return list[0]?.id ?? (await createSideChat(parentId)).id;
+  };
+
+  const openSide = async (parentId: string, question?: string) => {
+    const sideId = await sideFor(parentId);
+    const now = live.current.ids; // read after the await: the panes may have changed meanwhile
+    if (now.includes(sideId)) {
+      commit({ ids: now, focus: sideId });
+      return;
+    }
+    if (!now.includes(parentId)) return;
+    const next = openPane(now, sideId, { index: now.indexOf(parentId), side: readDock() }, limit);
+    if (next === "full") {
+      toast(`Close a pane first. Up to ${limit} fit at this width.`, "info");
+      return;
+    }
+    if (question) queueSideQuestion(sideId, question);
+    commit({ ids: next, focus: sideId });
+  };
+
+  const toggleSide = async (parentId: string) => {
+    const sideId = await sideFor(parentId);
+    if (live.current.ids.includes(sideId)) {
+      closeChat(sideId);
+      return;
+    }
+    await openSide(parentId);
+  };
+
+  /** Moves a side chat to the other side of its parent by swapping the two. */
+  const toggleDock = (sideId: string, parentId: string) => {
+    const now = live.current.ids;
+    const i = now.indexOf(parentId);
+    const j = now.indexOf(sideId);
+    if (i < 0 || j < 0) return;
+    const next = [...now];
+    [next[i], next[j]] = [next[j], next[i]];
+    try {
+      localStorage.setItem(DOCK_KEY, next.indexOf(sideId) < next.indexOf(parentId) ? "left" : "right");
+    } catch {}
+    commit({ ids: next, focus: live.current.focus });
+  };
+
+  const setPaneCaps = useCallback((id: string, value: ModelCaps) => {
+    setCaps((prev) =>
+      prev[id]?.toolsAvailable === value.toolsAvailable && prev[id]?.cli === value.cli ? prev : { ...prev, [id]: value },
+    );
+  }, []);
+
+  const setPaneParent = useCallback((id: string, parent: string | null) => {
+    setParentOf((prev) => {
+      if (!parent) {
+        if (!(id in prev)) return prev;
+        const next = { ...prev };
+        delete next[id];
+        return next;
+      }
+      return prev[id] === parent ? prev : { ...prev, [id]: parent };
+    });
+  }, []);
+
+  const registerStop = useCallback((id: string, stop: (() => void) | null) => {
+    if (stop) stoppers.current.set(id, stop);
+    else stoppers.current.delete(id);
+  }, []);
+
   const value: SplitViewValue = {
     ids,
     focus,
@@ -249,6 +367,13 @@ export function SplitViewProvider({ children }: { children: React.ReactNode }) {
     replaceAt,
     closeChat,
     cycleFocus,
+    openSide,
+    toggleSide,
+    toggleDock,
+    caps,
+    setPaneCaps,
+    setPaneParent,
+    registerStop,
   };
   return <SplitViewContext.Provider value={value}>{children}</SplitViewContext.Provider>;
 }

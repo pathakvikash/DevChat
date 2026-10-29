@@ -6,6 +6,8 @@ export interface Conversation {
   id: string;
   title: string;
   model: string;
+  kind?: "main" | "side" | "subagent";
+  parentId?: string | null;
   persona?: string;
   systemPrompt?: string;
   kbId?: string;

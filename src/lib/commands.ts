@@ -107,6 +107,13 @@ export const SLASH_COMMANDS: SlashCommand[] = [
 
   // ---- Conversation actions ----
   {
+    name: "side",
+    description: "Open a side chat next to this chat",
+    usage: "/side [question]",
+    kind: "action",
+    action: "side",
+  },
+  {
     name: "remember",
     description: "Save a durable fact to long-term memory",
     usage: "/remember <fact>",
