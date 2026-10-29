@@ -1,0 +1,616 @@
+# DevChat UX guidelines for the new features
+
+For the agents building quote-reply, export, `/compress <focus>`, temporary chat, past-chat search, message queue, @ files, side chat, fork, modes, sub-agents and agent messaging, and for the reviewer checking them.
+
+- `docs/design/side-chat-subagents.md` owns behaviour, data and APIs. This file owns look, copy, keys, focus, motion and layout. If they disagree on anything a user can see, this file wins.
+- Follow it literally. When something isn't covered here, copy the nearest existing pattern from section 1 instead of inventing one.
+- No new colours, no new UI libraries, no new CSS tokens. Everything below uses what is already in the repo.
+
+---
+
+## 0. The rules on one screen
+
+1. Surfaces come from the `glass*` classes in `globals.css`. Text colour comes from `text-[var(--foreground)]` or the zinc scale. Never hex, never `rgb()`.
+2. Colour shows status on icons, dots, borders and tints, never on body text. Every status also has a word (`Running`, `Done`, `Failed`), so meaning never depends on colour or a spinner alone.
+3. Text you add uses `text-zinc-400` or stronger. `zinc-500` is for icons and placeholders only, `zinc-600` never for text.
+4. Everything stacked above the input goes in one **composer tray** (2.1), capped at `min(30dvh, 240px)`, and scrolls. The textarea keeps its 200px cap.
+5. Chips and quote cards share one **tray item** pattern (2.2). Sub-agent, approval, plan and search cards share one **inline card** pattern (2.3).
+6. Icon-only buttons need `aria-label` and `title`. Put the shortcut in the title, like the existing "Use suggestion (→)" (`chatInput.tsx:403`).
+7. Every new interactive element gets the focus ring in 2.5.
+8. A control never goes dead when the model can't use tools: replace it with the fallback, or disable it and say why (2.6).
+9. Motion is short (120–200ms), uses the existing springs, and turns off with reduced motion (1.5).
+10. Menus that open downward live in a bar with `relative z-20`. Overlay panels (`z-50`) always cover both chat panes (1.6).
+
+---
+
+## 1. Design language in this repo
+
+### 1.1 Surfaces and tokens
+
+Tokens: `src/app/globals.css:10-54` (dark, the default), with overrides under `[data-theme="light"]` at `:56-89`. The theme is the `data-theme` attribute on `<html>`, set by `ThemeProvider.tsx:35`. There is no Tailwind `dark:` variant in this repo, so don't use one.
+
+| Class | Defined | Used for today | Use it for |
+|---|---|---|---|
+| `glass` | `globals.css:93` | composer form (`chatInput.tsx:294`), ThinkingBlock, small badges | quiet containers, badges |
+| `glass-card` | `:114-125` (hover lifts border and shadow) | message bubbles, tool cards, code blocks, attachment chips | inline cards (2.3) and tray items (2.2) |
+| `glass-input` | `:127-137` (focus: accent border plus glow) | sidebar search, clarification textarea | every new text field outside the main textarea |
+| `glass-button` | `:139-156` | all secondary buttons, header icons, message actions | secondary buttons |
+| `glass-button-primary` | `:158-171` | Send, New Chat, active mode, user bubbles | the one primary action per surface |
+| `glass-button-danger` | `:173-184` | Stop (`chatInput.tsx:573`) | Stop and destructive actions |
+| `glass-panel` / `glass-panel-strong` | `:186`, `:194` | popovers (slash menu, plus menu), sidebar, overlay panels | popovers and menus (`glass-panel-strong`) |
+| `glass-nav` | `:202` | conversation header, composer wrapper | the side-chat header |
+| `glass-dialog` | `:209` | `CenteredDialog` | dialogs (none planned) |
+| `glass-surface` | `:217` | panel headers, sidebar header | the top strip of a panel header |
+
+Other tokens to reuse as-is: radii `--glass-radius-sm/md/lg/xl` (12/16/20/24px, `:45-48`), shadows `--glass-shadow-sm/md/lg/xl/glow` (`:32-36`), accents `--glass-accent` and `--glass-accent-strong` (blue at 0.3 and 0.5, `:52-53`), hover and active fills `--glass-bg-hover` / `--glass-bg-active`.
+
+### 1.2 Colour, light and dark
+
+- **The zinc scale flips in light mode** (`globals.css:79-88`): `zinc-100` becomes near-black and `zinc-900` near-white. So `text-zinc-200`, `text-zinc-300` and `text-zinc-400` work in both themes. Lean on that.
+- **Tailwind colours don't flip.** `text-emerald-300`, `text-amber-300`, `text-red-200` and `text-white` are bright in both themes and nearly unreadable on the light background. Existing offenders you must not copy: the compress banners (`chatInput.tsx:264,273`), `CompressionEvent.tsx:49`, `ErrorBanner.tsx:23` (`text-red-200`), and the shortcuts dialog title (`KeyboardShortcutsDialog.tsx:61`, `text-white`).
+- Status colours in use: blue-400 = running (`ToolInvocation.tsx:142`), green-400 / emerald-400 = done, red-400 = error, amber-400 = warning or waiting, purple-400 = thinking. Use them on **icons (14px), 6px dots, `border-*-900/50` borders and `bg-*-500/10` tints** only.
+- `text-white` only on `glass-button-primary` and inside the user bubble, matching what exists. Pre-existing issue, out of scope here: white on `glass-button-primary` is low contrast in light mode. Don't make it worse by adding small white text (under 14px) on primary surfaces.
+- Text inside the user bubble (blue): reuse the white-alpha set from `MessageEditor.tsx:72` (`text-white`, `text-white/80`, `border-white/20`, `bg-white/10`).
+
+### 1.3 Type, icons, sizes, spacing
+
+| Thing | Existing value | Where |
+|---|---|---|
+| Page title | `text-lg font-bold` | `ConversationHeader.tsx:97` |
+| Body, inputs, menu items | `text-sm` | everywhere |
+| Meta, card headers | `text-xs` | `ToolInvocation.tsx:134`, header meta `:204` |
+| Hints, menu headings | `text-[11px]` | slash menu header `chatInput.tsx:304`, hint `:514` |
+| Badges | `text-[10px] font-semibold` | `ArtifactReference.tsx:54` |
+| Code, ids, numbers | `font-mono` | slash usage `chatInput.tsx:317` |
+| Icons | 16 standalone buttons and header, 14 inside cards, menus and chips, 12 message actions and meta, 18 the composer + | `ConversationHeader.tsx:111`, `ToolInvocation.tsx:137`, `MessageActions.tsx:158`, `chatInput.tsx:432` |
+| Composer buttons | `h-9` (36px), radius `--glass-radius-md` | `chatInput.tsx:429,573,581` |
+| Header icon buttons | `p-1.5` plus a 16px icon (28px), radius md | `ConversationHeader.tsx:104` |
+| Message action buttons | `px-2 py-1 text-xs`, radius sm | `MessageActions.tsx:156` |
+| Menu rows | `px-4 py-3 text-sm` with icon and `gap-3` | `ConversationHeader.tsx:138`, `chatInput.tsx:439` |
+| Card buttons | `px-3 py-1.5 text-sm`, radius md | `ClarificationForm.tsx:57,114` |
+| Bubbles | radius xl, `px-4 py-3`, `max-w-[85%]` | `MessageBubble.tsx:114-120` |
+| Transcript | `max-w-4xl`, `space-y-6`, `p-4` | `ChatMessages.tsx:49-50` |
+| Card spacing in a message | `my-2` | `ToolInvocation.tsx:131` |
+
+New buttons inside cards use `h-8 px-3 text-sm font-medium rounded-[var(--glass-radius-md)]` (32px, the same height as the ClarificationForm buttons).
+
+### 1.4 Patterns to reuse
+
+| Pattern | Copy from | Use for |
+|---|---|---|
+| Popover list with header hint, ↑↓, Tab/Enter, Esc | slash menu `chatInput.tsx:302-331`, keys `:351-373` | the @ file picker; side-chat history menu rows |
+| Dropdown menu | header More `ConversationHeader.tsx:125-199` | side-chat history menu, the new header items |
+| Segmented radio | `ModeToggle.tsx:34-61` | four modes; "Run in" choice on the plan card |
+| Collapsible tool row | `ToolInvocation.tsx:131-183` | base of every inline card (2.3) |
+| Answered state of a card | `ToolInvocation.tsx:49-60` | resolved approval and plan cards |
+| Option and submit buttons | `ClarificationForm.tsx:57-61,107-121` | approval and plan buttons |
+| Event card in the transcript | `CompressionEvent.tsx:36-77` | compression with a focus |
+| Height-animated reveal | `chatInput.tsx:410-422` (spring 400/30) | tray items appearing and leaving |
+| Status dots plus label | `TypingIndicator.tsx:15-21` | "talking" indicator |
+| Progress pill | `TodoIndicator.tsx:47-59` | nothing new; keep it clear of the Reply pill |
+| Copy then "Copied!" swap, 1.5s | `CodeBlock.tsx:15-33` | "Send to main" turning into "Added" |
+| Toast (top right, 4s, success/error/info) | `Toast.tsx:52,73-83` | confirmations and errors |
+| Overlay panel (right, `z-50`, spring) | `SidePanel.tsx:17-35,49,63` | nothing new; it must keep covering both panes |
+| Palette actions | `useCommandPaletteActions`, `CommandPalette.tsx:28`; usage `ConversationLayout.tsx:34-40` | new palette entries |
+| Slash command registry | `src/lib/commands.ts:31-173` | `/export`, `/recall`, `/side`, `/compress [focus]` |
+| Shortcut list | `KeyboardShortcutsDialog.tsx:10-39`, kbd style `:91` | new shortcuts and the slash command list |
+| Capability icons (Wrench = tools) | `ModelSelector.tsx:128,190-192` | pointing users to tool-capable models |
+| Relative time | `getRelativeTime`, `MessageActions.tsx:200` | search results, side-chat history (export it, don't copy it) |
+
+### 1.5 Motion
+
+Existing: `glass-button` transitions 200ms (`globals.css:145`); the sidebar width animates 0.2s `easeInOut` (`c/layout.tsx:42-43`); overlay panels use a spring with stiffness 300 and damping 30 (`SidePanel.tsx:17-29`); the voice waveform height uses a spring with stiffness 400 and damping 30 (`chatInput.tsx:413-416`); message actions fade in over 150ms (`MessageActions.tsx:92`); cmdk items change over 100ms.
+
+Rules for new work:
+
+- Tray items: height `0 → auto` plus opacity, using the same 400/30 spring as `chatInput.tsx:413-416`, inside `<AnimatePresence initial={false}>`. Don't put `layout` props on tray items, because they fight the textarea's resize.
+- Reply pill: opacity 0→1 and scale 0.96→1 over 120ms. Exit 80ms.
+- Side pane (desktop): width animates over 0.2s `easeInOut`, like the sidebar. Narrow screens: `x: "100%" → 0` with the SidePanel spring. While dragging the divider: no transition.
+- Inline cards: no entrance animation (they stream in). Expand and collapse with no animation, like `ToolInvocation`.
+- **Reduced motion.** `globals.css:436-444` only stops CSS animations. framer-motion ignores it. Add `<MotionConfig reducedMotion="user">` once around the children in `ThemeProvider.tsx` (a client component). Spinners freeze under reduced motion, which is fine because the status word carries the meaning.
+
+### 1.6 Layering (z-index)
+
+| Layer | z | Where |
+|---|---|---|
+| TodoIndicator in the transcript | 10 | `TodoIndicator.tsx:49` |
+| Side-pane divider | 10 | new |
+| **Reply pill** (absolute, inside the pane's `relative` transcript wrapper, `ConversationLayout.tsx:113`) | 20 | new |
+| **Headers that open menus downward** (`ConversationHeader` root, side-pane header) | `relative z-20` | new, see the pitfall below |
+| Sidebar collapse handle | 30 | `c/layout.tsx:53` |
+| **Side pane on narrow screens** (`fixed inset-0`) | 30 | new, from the companion doc |
+| Mobile sidebar | 40 | `c/layout.tsx:19` |
+| Overlay panels, dialogs, slash, @ and plus menus, model dropdown | 50 | `SidePanel.tsx:49`, `chatInput.tsx:303,435`, `ModelSelector.tsx:136` |
+| cmdk palette | 99/100 | `globals.css:290,300` |
+| Toasts | 10000 | `Toast.tsx:52` |
+
+Pitfall: every `glass*` class sets `backdrop-filter`, and that creates a stacking context. A child's `z-[9999]` can't escape its glass parent. A menu that opens **downward** out of a glass header can end up under positioned elements in the transcript below it (the TodoIndicator at `z-10`, the Reply pill). Fix: give the header root `relative z-20`. Menus that open **upward** from the composer are fine, because the composer comes later in the DOM. New menus use `z-50`, not `z-[9999]`.
+
+### 1.7 Breakpoints
+
+- `sm` (640px): header icon toggles move into the More menu (`ConversationHeader.tsx:101`), and ModeToggle shows icons only (`ModeToggle.tsx:58`).
+- `md` (768px): the sidebar becomes a drawer (`c/layout.tsx:19,41`). The composer hides the model picker, folder picker, context circle and hint (`chatInput.tsx:514,524,528,539`).
+- Review width for narrow screens: **400px**. No horizontal page scroll. Touch targets are at least 32px.
+
+### 1.8 Existing gaps you must not copy
+
+- No `focus-visible` styles anywhere (only `glass-input:focus` and `MessageEditor.tsx:71`). New elements add the ring in 2.5.
+- Icon buttons with only `title` and no `aria-label` (header icons, `ConversationHeader.tsx:93-131`).
+- AttachmentChip's × appears only on hover (`AttachmentChip.tsx:47`), so touch and keyboard users can't find it. New chips show × all the time.
+- `/help` is registered (`commands.ts:166`) but not handled. It falls through to "Unknown command" (`runCommandAction.ts:130-131`). Section 2.9 fixes it.
+- Mixed `...` and `…`. New copy uses `…`.
+- `text-zinc-600` for hint text (`chatInput.tsx:514`) is below contrast in dark mode. The queue hint that replaces it uses `zinc-400`.
+
+---
+
+## 2. Shared patterns
+
+### 2.1 Composer tray
+
+Everything that stacks above the input goes in one block inside the composer wrapper (`chatInput.tsx:236`), above the `<form>`. The form, its wrapping and its `expanded` ordering (`:293-334`) stay untouched. Don't put cards inside the form.
+
+```
+glass-nav px-4 py-3
+├─ Status rows        (always visible, no scroll)   compressing / compressed banners, agents "talking"
+├─ Scroll area        mb-3 space-y-2 max-h-[min(30dvh,240px)] overflow-y-auto
+│   ├─ Queued messages   (2.2 row items)    section 3.6
+│   ├─ Quote cards       (2.2 row items)    section 3.1
+│   └─ Files             (2.2 file chips)   uploads + @ files, section 3.7
+└─ <form>             unchanged; textarea max 200px (chatInput.tsx:22)
+```
+
+- The order is fixed: things already sent but waiting (queue) sit nearest the transcript, then what you're composing, then files sitting right above the text box.
+- When an item is added and the scroll area overflows, scroll it into view (`scrollIntoView({ block: "nearest" })`).
+- Each group with two or more items gets a one-line heading in the slash-menu heading style: `text-[11px] text-zinc-400` with a 11px icon, a label on the left and an optional hint on the right. A single item needs no heading.
+- Exception, Files: the existing "Attachments (n)" heading and "Clear all" (`chatInput.tsx:239-249`) are restyled to that heading style and read **Files (n)** and **Clear all**. They show from one file up, as today.
+- At 400px wide and 700px tall, at least 160px of transcript must stay visible with three cards open.
+- The send button is enabled when the textarea has text **or** there's at least one quote card or file.
+
+### 2.2 Tray items (quote cards, queued messages, files)
+
+Same look for all of them. Two shapes.
+
+**Row item** (full width: quote cards and queued messages)
+
+```
+<div role="listitem" class="group relative glass-card rounded-[var(--glass-radius-md)] px-3 py-2 pr-9 text-sm">
+  [14px leading icon, text-zinc-500]  [content, min-w-0]
+  [× button, absolute top-1.5 right-1.5]
+</div>
+```
+
+**File chip** (wraps in a row: uploads and @ files). Keep the `AttachmentChip` layout (`AttachmentChip.tsx:25-51`: a 40px icon tile, the name in `text-sm font-medium`, the size in `text-xs`). Widen its props to `{ name, size, icon?, note? }` so @ files can use it too. Change the × to always visible (see below).
+
+The × button (identical everywhere):
+
+- `flex h-6 w-6 items-center justify-center rounded-[var(--glass-radius-sm)] text-zinc-500 hover:text-[var(--foreground)] hover:bg-[var(--glass-bg-hover)]`, with a lucide `X` at 14px.
+- Always visible. Touch and keyboard users must see it.
+- `aria-label` is `Remove quote 2`, `Remove queued message`, or `Remove <filename>`.
+
+Containers: `role="list"` with `aria-label` set to `Queued messages`, `Quotes` or `Files`.
+
+Motion: 2.1 / 1.5 (height plus opacity, spring 400/30).
+
+Focus after removing: the next item's main control, else the previous one, else the main textarea. Never `<body>`.
+
+### 2.3 Inline transcript cards (sub-agent, approval, plan, search results)
+
+Built on the tool row (`ToolInvocation.tsx:131-183`). Every card has the same skeleton. A small shared `src/app/components/ui/InlineCard.tsx` (header, body, footer slots) is worth adding, because four features use it.
+
+```
+<div role="group" aria-labelledby=… class="my-2 glass-card rounded-[var(--glass-radius-md)] overflow-hidden">
+  HEADER  flex items-center gap-2 px-3 py-2 bg-[var(--glass-bg-elevated)] text-xs
+          [chevron 14 if expandable] [status icon 14] [title: font-medium text-zinc-200 truncate]
+          [meta: ml-auto text-zinc-400 tabular-nums shrink-0] [header action, e.g. "Open"]
+  BODY    px-3 py-2 text-sm  (optional; collapsible bodies start collapsed unless stated)
+  FOOTER  flex flex-wrap items-center justify-end gap-2 px-3 py-2 border-t border-[var(--glass-border)]
+          [secondary buttons: glass-button] … [primary: glass-button-primary text-white]  (primary is last, on the right)
+</div>
+```
+
+| State | Icon (14px) | Word in the header meta |
+|---|---|---|
+| Running | `Loader2 animate-spin text-blue-400` | `Running` (or live detail) |
+| Waiting for the user | `ShieldQuestion text-amber-400` | `Waiting for you` |
+| Done | `CheckCircle2 text-green-400` | `Done` |
+| Failed | `XCircle text-red-400` | `Failed` |
+| Stopped or cancelled | `Square text-zinc-400` | `Stopped` / `Cancelled` |
+| Timed out | `Clock text-amber-400` | `Timed out` |
+
+- A card that needs the user (approval, plan) gets `border-amber-900/50`, the same border as the compress banner (`chatInput.tsx:263`). Every other card keeps the default border.
+- The header stays on one line in every state (`truncate` on the title, `shrink-0` on the meta), so status changes never change its height.
+- Live numbers (steps, elapsed time, tokens) use `font-mono tabular-nums`.
+- Cards never move focus when they appear. When one needs the user, the pane's live region announces it once (2.5).
+- At 400px the footer buttons wrap (`flex-wrap`). They never shrink below `h-8`.
+
+### 2.4 Popovers and menus
+
+- Lists that filter as you type (slash, @): copy the slash menu (`chatInput.tsx:302-331`). Container `absolute bottom-full left-0 right-0 mb-2 max-h-72 overflow-y-auto rounded-[var(--glass-radius-md)] glass-panel shadow-2xl z-50`; heading row `text-[11px] text-zinc-400` with ↑↓ and Tab/Enter hints; active row `bg-[var(--glass-bg-hover)]`.
+- Action menus (side-chat history): copy the header More menu (`ConversationHeader.tsx:134-197`) with `z-50`. Rows `px-4 py-3 text-sm` with a 14px icon. Add `role="menu"` / `role="menuitem"`. Close on outside mousedown, Esc and selection, then return focus to the trigger.
+- Only one popover is open per pane at a time. Slash and @ never show together.
+
+### 2.5 Buttons, focus, live regions
+
+- Focus ring for every new button, link, chip and segment: `focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--glass-accent-strong)]`. Text fields use `glass-input`, which already has a focus style.
+- One primary button per surface. Destructive actions use `glass-button-danger`, except Deny, which is an ordinary secondary button (denying is safe).
+- A disabled control that needs an explanation uses `aria-disabled="true"` (not `disabled`), so it stays focusable and its `title` still shows. Clicks do nothing, except on touch, where a tap shows the same text as an `info` toast.
+- Each pane has one visually hidden `<div aria-live="polite" class="sr-only">`. Announce only: "Quote added", "Message queued", "Queued message delivered", "Needs your OK: <action>", "Plan ready", "Sub-agent <title>: done|failed|timed out|stopped". Never per step or per token.
+
+### 2.6 Models that can't use tools
+
+Compute one boolean per pane, once: `toolsAvailable = modelInfo.supportsTools !== false && !conversation.chatOnlyMode` (`supportsTools` comes from `/api/models`, `conversation/types.ts:46`). Every feature reads this value. Don't scatter separate checks.
+
+Rule, in order:
+
+1. **Replace.** If a fallback exists, show it in the same place, doing the same job: `/recall` instead of the searchChats tool, an "Approve plan" button instead of the plan card, "sends when the reply finishes" instead of mid-reply delivery.
+2. **Disable and explain.** If there is no fallback (the Ask and Agent modes), keep the control visible with `aria-disabled`, and use this tooltip and tap toast: **"Needs a model that can use tools. Pick one with the wrench icon."**
+3. **Hide** only model-started surfaces (sub-agent cards, agent messaging). There was never a control for them, so nothing disappears.
+
+Why not hide everything: controls that vanish when you switch models look broken, shift the layout, and give no hint about how to get the feature back. Why not disable everything: a disabled button with a working alternative next to it is a dead end.
+
+### 2.7 Copy rules
+
+- Sentence case everywhere. No "Please", no exclamation marks, no trailing full stop on buttons, labels or toasts that are one sentence.
+- Say "chat", not "conversation", in new copy.
+- In-progress text ends with `…` (one character).
+- Errors: `Couldn't <verb> <thing>` plus the fix if there is one, for example "Couldn't search past chats. Try again." Keep toasts under 60 characters.
+- Shortcuts: tooltips write `⌘\` and `⌘↵` on Mac and `Ctrl+\` and `Ctrl+Enter` elsewhere. Work out the platform once, in `src/lib/utils`. The shortcuts dialog keeps its `Cmd` kbd style.
+- Name things the same everywhere: **Side chat**, **Main chat**, **Temporary chat**, **Sub-agent**, **Queued**, modes **Chat / Plan / Ask / Agent**.
+
+### 2.8 Keyboard map and Esc order
+
+| Key | Where | Does |
+|---|---|---|
+| ⌘K | anywhere | palette (existing) |
+| ⌘/ | anywhere | shortcuts dialog (existing) |
+| ⌘↵ | anywhere except a quote card | sends from the **focused pane**: cards plus text |
+| ⌘↵ | quote card instruction box | sends only that card. Must `stopPropagation` (see the companion doc, 3.9) |
+| ↵ / ⇧↵ | main textarea | send everything, or queue while a reply runs / newline (unchanged) |
+| ↵ | quote card instruction box | send everything (same as ↵ in the textarea) |
+| ⌘\ | anywhere | toggle the side chat |
+| @ | textarea, at the start or after a space, with a working folder set | file picker |
+| ↑ ↓, Tab / ↵ | slash or @ picker | move, pick |
+| ← → | mode switch, plan "Run in" | move the selection (roving tabindex) |
+| ← → (⇧ for big steps) | side-pane divider | resize by 16px (64px with ⇧) |
+
+**Esc**, first match wins:
+
+1. An open popover (slash, @, history, More): close it and return focus to its trigger or the textarea.
+2. An overlay panel or dialog: close it (existing `closeTopDialog`, `useConversationPage.ts:259`).
+3. The Reply pill is showing: hide it (keep the selection).
+4. Editing a queued message: cancel the edit.
+5. Focus is in a quote card's instruction box: move focus to the main textarea. The card stays.
+6. Otherwise nothing. Esc never closes the side chat and never stops a reply.
+
+### 2.9 Discoverability
+
+- **Palette.** Add an optional `shortcut?: string` to `CommandPaletteAction` (`CommandPalette.tsx:11-16`), rendered as `ml-auto text-[11px] text-zinc-400`. New groups and entries:
+  - **Chat:** New temporary chat · Toggle side chat (⌘\\) · New side chat · Search past chats (fills `/recall ` in the input) · Export as Markdown · Compress chat (fills `/compress ` in the input).
+  - **Mode:** Mode: Chat · Mode: Plan · Mode: Ask · Mode: Agent. Disabled per 2.6, with the reason as the label suffix "· needs tools".
+  - **Approvals** (shown only when something is allowed): Reset allowed tools.
+- **`/help`** opens `KeyboardShortcutsDialog` with a new **Slash commands** group generated from `SLASH_COMMANDS` (usage in `font-mono`, then the description). This fixes the unhandled `/help`.
+- **Shortcuts dialog** (`KeyboardShortcutsDialog.tsx:10-39`), new rows: `Cmd \` Toggle side chat · `Cmd Enter` in a quote: send just that quote · `Enter` in a quote: send everything · `Esc` in a quote: back to the message box · `Enter` while a reply runs: queue · `@` mention a file (needs a working folder).
+- **Palette Shortcuts group** (`CommandPalette.tsx:127-140`): add `Cmd+\` Toggle side chat.
+- **Tooltips carry the shortcut**: "Close side chat (⌘\\)", "New side chat".
+- **Empty state** (`EmptyState.tsx`): one tips line under the paragraph, `mt-4 text-xs text-zinc-400`, with kbd chips in the `KeyboardShortcutsDialog.tsx:91` style: `/ commands · @ files · ⌘\ side chat · select text to quote it`. No tours, no popups.
+
+---
+
+## 3. Features
+
+### 3.1 Quote-reply [P1]
+
+**Reply pill**
+
+- **Shows when** a non-empty selection starts and ends inside one `[data-message-id]` element in this pane, on mouseup or keyup. Never for selections in the composer, a quote card, a header, a dialog, or a read-only sub-agent viewer (it has no input).
+- **Position**: `absolute z-20` inside the pane's transcript wrapper (`ConversationLayout.tsx:113`). Centred on the selection, 8px above its top edge. Flip to 8px below if that would be within 48px of the wrapper's top, or on touch devices (`(pointer: coarse)`), so it doesn't cover the native copy menu. Clamp 8px inside the wrapper's left and right edges, which matters for wide code blocks.
+- **Look**: `inline-flex h-8 items-center gap-1.5 rounded-full glass-panel-strong px-3 text-xs font-medium text-[var(--foreground)] shadow-[var(--glass-shadow-md)]`, with a 14px `TextQuote` icon and the label **Reply**. `aria-label="Reply to selected text"`.
+- **Click**: `onMouseDown={e => e.preventDefault()}` so the selection survives the click. Use the text captured at mouseup. Clear the selection and hide the pill.
+- **Hide on**: pane scroll, window resize, selection collapse, Esc, an overlay opening, and after a click.
+- **Chrome stays out of quotes**: add `select-none` to every bit of UI inside a message: code-block header (`CodeBlock.tsx:23`), ThinkingBlock toggle, tool and card headers and footers, badges, the MessageActions row, timestamps.
+
+**Quote cards** (row items, 2.2)
+
+```
+[TextQuote 14]  ┃ quoted text, italic, line-clamp-3 (line-clamp-2 below md)             [×]
+                [ Add an instruction (optional)                         ] ⌘↵ this quote · ↵ all
+```
+
+- Quote: `border-l-2 border-zinc-600 pl-2 text-xs italic text-zinc-400 whitespace-pre-wrap` (a scaled-down version of the markdown blockquote, `MarkdownMessage.tsx:48`). `title` holds the first 300 characters of the quote.
+- Instruction: a single-line `<input>` in `mt-1.5 w-full bg-transparent text-sm text-[var(--foreground)] outline-none placeholder:text-zinc-500`. The card shows the focus as `border-[var(--glass-accent)]` via `focus-within`.
+- Hint `⌘↵ this quote · ↵ all` in `text-[11px] text-zinc-400`, only while that card's input has focus, and only from `md` up.
+- Group heading when there are two or more cards: `Quotes (n)`.
+
+**Keys and focus**
+
+- Clicking Reply adds the card at the end and focuses its instruction box.
+- ⌘↵ in a card sends only that card, removes it, and moves focus to the next card's input, else the textarea.
+- ↵ in a card sends everything. Esc goes back to the textarea (2.8). × follows the 2.2 focus rule.
+- While a reply runs, ↵ or ⌘↵ queues instead: everything composed becomes one chip (3.6).
+
+**Sent bubble**: the user bubble renders `>` runs as a quote block: `border-l-2 border-white/40 pl-3 text-white/80 italic`. The rest stays plain text (companion doc 3.9).
+
+**States**
+
+- Many cards: the tray scrolls (2.1).
+- Pane switch or chat switch: cards are dropped. No confirm.
+- Empty instruction: the card sends quote only.
+
+**Pitfalls**
+
+- The pill must not appear while the user is still dragging (wait for mouseup).
+- Don't measure the selection with `getClientRects()[0]`; use `getBoundingClientRect()`.
+- Don't render the pill in a portal on `<body>`: it would float above overlay panels.
+
+### 3.2 Export to Markdown [P1]
+
+- **Entry points**: the header More menu item that already exists, "Export Markdown" (`ConversationHeader.tsx:184-190`; keep the label and position), `/export` (usage `/export`, description **Download this chat as Markdown**, kind `action`), and the palette entry "Export as Markdown".
+- **Behaviour**: the download starts at once, with filename `<safe title>.md` (the existing rule, `ConversationHeader.tsx:80`). It must include every message shown, including ones sent this session. Today `handleExport` reads `conversation.messages` from page load (`:67`), which is stale.
+- **Feedback**: success toast **Exported "<title>.md"**. Error toast **Couldn't export this chat**.
+- **Allowed while a reply streams**: it exports what's saved so far. No extra copy.
+- **Temporary chats**: allowed. It's the user's way to keep one.
+
+### 3.3 `/compress [focus]` [P1]
+
+- **Registry**: change the existing entry (`commands.ts:127-133`) to usage `/compress [focus]`, description **Compress the chat to save context. Add a focus to keep it in detail.** Not `requiresArg`.
+- **While compressing**: the existing amber row (`chatInput.tsx:262-269`) reads **Compressing chat…** or **Compressing chat, keeping "<focus>"…** (focus cut at 40 characters with `…`). Fix its text colour to `text-[var(--foreground)]`; keep the amber spinner border.
+- **Done**: the existing toast "Conversation compressed" becomes **Chat compressed**. The `CompressionEvent` card adds a meta item `· Focus: <focus>` (`text-zinc-400`, `CompressionEvent.tsx:58-70`), and its title colour moves from `text-emerald-200` to `text-[var(--foreground)]`, keeping the emerald icon.
+- **While a reply runs**: don't queue it. Info toast **Wait for the reply to finish, then compress**. The input keeps the command text.
+- **Error**: toast **Couldn't compress the chat** (existing behaviour, new wording).
+
+### 3.4 Temporary chat [P1]
+
+**Turning it on**
+
+- Header button, shown only while the chat has **no messages**, placed left of ModeToggle (`ConversationHeader.tsx:99`). It's a toggle with `aria-pressed`, 16px `MessageSquareDashed`, and the label **Temporary** (`hidden sm:inline`, icon only below sm). Style: off `glass-button text-[var(--foreground)]`; on `glass-strong border-dashed border-[var(--glass-border-strong)] text-[var(--foreground)]`. Same box as the header icon buttons (`p-1.5`, radius md; with label `px-2.5 h-7 text-xs gap-1.5` like ModeToggle).
+- Tooltip: **Temporary chat: not saved in your history, no memory. Deleted when you leave or after 24 hours.**
+- Palette: **New temporary chat** creates a chat with the flag on and opens it.
+- After the first message the toggle disappears. Turning it off later isn't offered: start a new chat.
+
+**The indicator** (calm, and in three places, so it's always in view)
+
+1. **Header meta row** (`ConversationHeader.tsx:203-210`): first item `inline-flex items-center gap-1 text-xs text-zinc-400` with a 12px `MessageSquareDashed` and **Temporary chat · deleted when you leave**. The title reads **Temporary chat** until the chat has a real title.
+2. **Composer**: the form border goes dashed: add `border-dashed border-[var(--glass-border-strong)]` to the form (`chatInput.tsx:294`). Placeholder when empty: **Temporary chat. Not saved after you leave.**
+3. **Empty state**: a 40px `MessageSquareDashed` icon (`text-zinc-400`) in place of the emoji, title **Temporary chat**, body **Not in your history or search, and memory is off. Deleted when you leave or after 24 hours.**
+
+**Elsewhere**
+
+- Not listed in the sidebar or in search results.
+- More menu "Memory" item: `aria-disabled`, label **Memory (off in temporary chats)**.
+- No confirm when leaving. The indicator already says it. Export (3.2) and Fork (3.9) are how to keep it.
+- Opening a deleted temporary chat shows the existing "Conversation not found" card (`ConversationLayout.tsx:68-75`). Change its copy to **This chat no longer exists**.
+
+**Don't**: amber or red, a banner across the page, a pulsing badge, or a modal. Dashed lines and the icon are the whole signal.
+
+### 3.5 Search past chats [P1]
+
+**Tool card** (inline card, 2.3) for `searchChats`
+
+- Header: 14px `History` icon, title **Searched past chats for "<query>"**. Meta: `Running`, then **4 chats**, or **No matches**.
+- Body (open by default once done): up to 5 rows, then a **Show 3 more** text button (`text-xs text-zinc-400 hover:text-[var(--foreground)]`).
+- Each row is a Next `<Link href="/c/<id>">` styled `block rounded-[var(--glass-radius-sm)] px-2 py-1.5 hover:bg-[var(--glass-bg-hover)]`:
+  - line 1: title `text-sm text-zinc-200 truncate`, then meta `text-[11px] text-zinc-400 shrink-0` "2d ago · <model short name>"
+  - line 2: snippet `text-xs text-zinc-400 line-clamp-2`; matches in `<mark class="bg-[var(--glass-bg-active)] text-[var(--foreground)] rounded px-0.5">`
+  - the current chat gets a `This chat` badge (the `ArtifactReference.tsx:54` badge style)
+- It's a real link, so ⌘-click opens a new tab. A plain click navigates; the transcript is saved, so nothing is lost.
+- Empty: **No past chats matched "<query>"**. Error: header `Failed` and the body **Couldn't search past chats**.
+
+**`readChat`**: a single-line card (header only): `FileText` 14, **Read "<title>"** as a link, meta `Done`.
+
+**`/recall <query>`** (models without tools, also available to all models): usage `/recall <query>`, description **Search your past chats and use them in the answer**, `requiresArg`. It renders the **same card** inside the user's message; the user bubble shows `/recall <query>`, not the injected text. Pitfall: `/search` today pastes raw results into the user bubble (`runCommandAction.ts:33`). Don't copy that.
+
+Temporary chats never appear in results.
+
+### 3.6 Message queue [P2]
+
+**Typing during a reply**
+
+- The hint in the button row (`chatInput.tsx:515`) changes to **Enter queues · the model sees it at its next step**, or with no tools (2.6) **Enter queues · sends when the reply finishes**. Colour `text-zinc-400`.
+- A **Queue** button appears left of Stop when the textarea has text during a reply: `glass-button h-9 px-3 text-sm font-medium text-[var(--foreground)]`. It's the only way to queue on touch keyboards. Stop stays.
+
+**Queued items** (row items, 2.2, first group in the tray)
+
+```
+Queued (2)                                   the model sees these at its next step
+[Clock 14]  first two lines of the message, text-zinc-300, line-clamp-2, whitespace-pre-wrap   [×]
+```
+
+- Composed quotes show their `>` lines in the quote style from 3.1.
+- **Edit**: click the text or press Enter on the focused item. It becomes a `glass-input` textarea (auto-grows to 4 lines). ↵ saves, ⇧↵ adds a newline, Esc cancels. While saving: 12px `Loader2` next to ×.
+- **Delivered** (edit or remove got 409): the item turns read-only at 60% opacity with a 14px `Check` and **Delivered**, and leaves when its bubble appears.
+- **Failed to queue**: a 14px `AlertTriangle` (amber-400) and **Not queued** with a **Retry** text button. The text is never lost.
+- **From another agent** (3.12): a 14px `Bot` icon and the prefix **From side chat:**, not editable, × only.
+
+**Delivery in the transcript**: split the assistant bubble at the marker, so the transcript reads assistant, then user, then assistant: the reply so far, a normal right-aligned user bubble with the caption **Sent while replying** under it (`text-[11px] text-zinc-400`, right-aligned), and then the reply continuing in a new assistant bubble. Only the last segment gets MessageActions. Don't nest a blue bubble inside the grey reply card.
+
+**Stop**: undelivered texts go back into the textarea in queue order, then any text already there, joined by blank lines. The cursor goes to the end and the textarea gets focus. No toast.
+
+**Pitfalls**
+
+- Don't queue slash action commands. They run at once if safe (`/side`, `/export`, `/help`), otherwise use the 3.3 toast.
+- Hold Enter key repeat: one chip per keydown with `!e.repeat`.
+
+### 3.7 @ files [P2]
+
+- **Trigger**: `@` at the start of the text or after whitespace, only when the pane has a working folder. `a@b` doesn't trigger. With no folder, `@` is plain text and nothing pops up. The folder picker tooltip (`WorkingFolderPicker.tsx:21`) gains **Type @ to mention a file.**
+- **Picker**: the slash-menu shell (2.4). Heading: 11px `AtSign` and **Files in <short folder> · ↑↓ to navigate · Tab/Enter to select**. Each row: 14px `FileText` (`text-zinc-500`), name `text-sm text-[var(--foreground)]`, folder `text-xs text-zinc-400 truncate`, size `ml-auto text-[11px] text-zinc-400 font-mono`. At most 50 rows; filter on the text after `@`.
+  - Loading: one row with 12px `Loader2` and **Loading files…**
+  - Empty: **No files match "<text>"**
+  - Error: **Couldn't list files**
+- **Picking a file** removes `@text` from the textarea and adds a file chip (2.2) to the Files group, using a `FileText` tile in place of the paperclip. Focus stays in the textarea. Picking the same file twice does nothing.
+- **Trimmed content**: the chip gets a note line, 12px `AlertTriangle` (amber-400) and `text-xs text-zinc-400`, **Trimmed to fit <model>: <sent> of <size> sent**. The chip in the sent bubble shows the same note. If the trim is only known after sending, show it only on the sent chip.
+- **Pitfalls**: Esc closes the picker and keeps the typed `@text`. The slash and @ pickers never show together. Don't put file contents in the textarea.
+
+### 3.8 Side chat [P3]
+
+**Layout** (geometry from the companion doc 3.8)
+
+- Desktop (`md` and up): a sibling of `<main>` in the flex row, docked right by default. Background `bg-[var(--background)]`, separated by the divider, no glass panel. It's a peer of the main chat, not an overlay. Default width 420px, min 320px, max 60% of the window. The main chat never goes below 360px. If both can't fit, use the narrow layout.
+- Divider: a 6px hit area with a 1px visible line `bg-[var(--glass-border)]`. On hover or drag the line becomes 2px `bg-[var(--glass-accent)]`. `cursor-col-resize`. Double-click resets to 420px. `role="separator" aria-orientation="vertical" aria-label="Resize side chat" aria-valuenow/min/max`, `tabIndex=0`, arrows per 2.8.
+- Narrow: `fixed inset-0 z-30`, full width, sliding in from the right with the SidePanel spring. No divider, no dock toggle.
+
+**Header** (`glass-nav relative z-20 px-3 py-2`)
+
+```
+[Title ▾ (history menu)]                     [ModelSelector sm] [SquarePen] [PanelLeft|PanelRight] [X]
+Sees the main chat live                                                         (text-[11px] text-zinc-400)
+```
+
+- Title: `text-sm font-semibold truncate`, showing the side chat's title or **Side chat**. It's a button with a 12px `ChevronDown` that opens the history menu.
+- History menu (2.4): rows show the title (or the first message, cut at 40 characters) plus `getRelativeTime`. The current row has a 14px `Check`. Empty: **No older side chats**.
+- The model picker lives here (`ModelSelector size="sm"`), not in the side composer, because 320px is too narrow for the composer's button row.
+- Icon buttons are 28px like the main header: **New side chat** (`SquarePen`), **Dock left** / **Dock right** (the icon shows where it will go), **Close side chat (⌘\\)** (`X`).
+- Line 2 reads **Sees the main chat live**, or when trimmed **Sees the last <N> main messages** with the tooltip **Trimmed to fit <model>'s context**.
+
+**Body**
+
+- `ChatMessages` and the composer, with the same tray rules. No suggestion, no hint row below `md`.
+- Empty state: a 32px `PanelRight` icon (`text-zinc-400`), **Side chat**, and **Ask about the main chat. Nothing here is added to it.**
+- **Send to main** on each assistant reply, in its MessageActions row. A labelled button (icon plus text, since an icon alone would be unclear): `ArrowLeftRight` 12 and **Send to main**. For 1.5s after a click it shows `Check` and **Added**. On narrow screens it also closes the side overlay so the filled main input is visible. Focus goes to the main textarea.
+- Sub-agent viewer: the title is **Sub-agent: <title>**, with a `Read-only` badge (`ArtifactReference.tsx:54` style). There's no composer; in its place a footer `px-4 py-3 text-xs text-zinc-400 border-t border-[var(--glass-border)]` reads **Read-only transcript**, or **Still running. The card in the main chat shows live steps.**
+
+**Focus and keys**
+
+- Opening via ⌘\\, palette or `/side` focuses the side textarea. Closing returns focus to the main textarea.
+- The focused pane is the one that last got focus or a pointer-down. Its composer form gets `border-[var(--glass-border-strong)]`; the other pane's stays default. That's the only "active pane" signal.
+- `/side <question>` opens the pane and sends there; focus stays in the side textarea.
+
+**Pitfalls**
+
+- Overlay panels (`z-50`) cover both panes. The mobile sidebar (`z-40`) covers the narrow side pane (`z-30`).
+- Keep the main chat's scroll position when the pane opens, and stay pinned to the bottom if it was at the bottom.
+- Two Stop buttons can be visible at once, one per pane. That's correct.
+- No MinimapNavigator, TodoIndicator or Fork in the side pane.
+
+### 3.9 Fork from here [P3]
+
+- **Action**: in MessageActions, on any saved message in the main pane, a `GitFork` 12 button with `aria-label` and `title` **Fork from here**, placed after Copy. Hidden while streaming (existing rule, `MessageActions.tsx:84`) and in the side pane.
+- **Click**: the icon swaps to a 12px `Loader2`. Then the new chat opens (its messages up to and including this one, titled "<title> (fork)") and appears at the top of the sidebar. Error toast: **Couldn't fork this chat**.
+- **Header of the fork**: the first item in the meta row is 12px `GitFork` plus **Forked from** and a link to the source (`text-xs text-zinc-400`; the title is a link, `hover:text-[var(--foreground)] hover:underline`, truncated at 200px). If the source is gone: **Forked from a deleted chat** (no link).
+- Forking a temporary chat makes a normal, saved chat.
+
+### 3.10 Modes, approval card, plan card [P4]
+
+**Mode switch**: extend `MODES` in `ModeToggle.tsx:6-19` to four segments, in increasing order of power.
+
+| Mode | Icon | Tooltip (`title`) | Composer placeholder |
+|---|---|---|---|
+| Chat | `MessageSquare` | Chat: answers, with read-only tools (web search, knowledge base, code run) | Type a message, / for commands, or drop files… (existing) |
+| Plan | `ListChecks` | Plan: researches, then proposes a plan for you to approve. Changes nothing. | Describe the task. You'll get a plan to approve. |
+| Ask | `ShieldQuestion` | Ask: can make changes, but asks before each one | Ask mode: changes need your OK |
+| Agent | `Target` | Agent: makes changes without asking (artifacts, todos, memory, MCP, files) | Agent mode: can make changes without asking |
+
+- Header: labels from `sm` up, icons only below. Sidebar compact toggle (`Sidebar.tsx:243`): **icons only** for all four (four labels don't fit in 256px).
+- Keyboard: one tab stop (the checked segment). ←/→ move and select. Focus ring per 2.5.
+- No tools (2.6): Chat and Plan work, Ask and Agent get `aria-disabled` with the 2.6 tooltip. If the chat is in Ask or Agent when the user picks a model without tools, switch to Chat with the info toast **Switched to Chat: <model> can't use tools**.
+- Changing mode during a reply is allowed and applies to the next message. No copy needed.
+- `/plan <task>` (`commands.ts:33-41`): once modes ship, change the description to **Switch to Plan mode and send this task** and make it do that. With no tools it keeps today's text transform. One "plan" concept, not two.
+
+**Approval card** (Ask mode; also Claude Code file edits in Ask): an inline card, the "waiting" variant (2.3)
+
+```
+[ShieldQuestion amber] Needs your OK                                         Ask mode
+Edit src/app/page.tsx                                    ← text-sm font-medium text-[var(--foreground)]
+  Tool   Edit (Claude Code)                              ← up to 4 key rows: label text-xs text-zinc-400 w-16,
+  File   src/app/page.tsx                                   value text-xs font-mono text-zinc-200 truncate
+  ┌ +3 −1 diff preview, ≤12 lines, font-mono text-xs ┐   ← add lines bg-emerald-500/10, remove lines bg-red-500/10,
+  └──────────────────────────────────────────────────┘     a +/− gutter in text-zinc-400; text stays foreground
+  › Show all arguments                                   ← toggles a full JSON <pre> (ToolInvocation body style)
+                                  [Deny] [Allow for this chat] [Allow]
+```
+
+- Title by tool: **Create artifact "<title>"**, **Update artifact "<title>"**, **Update the todo list**, **Save to memory: "<key>"**, **Run <tool> on <MCP server>**, **Edit <path>**, **Create <path>**, **Run a command** (with the command as the first key row), otherwise **Run <toolName>**.
+- Buttons, left to right: **Deny** (`glass-button`), **Allow for this chat** (`glass-button`, tooltip **Don't ask again for <tool> in this chat**), **Allow** (`glass-button-primary`). All `h-8`.
+- After a decision the card collapses into the normal tool row (`ToolInvocation`). Its meta reads **Allowed**, **Allowed for this chat**, **Denied** (`XCircle text-zinc-400`, no output), or **Cancelled** (after Stop).
+- Several approvals in one step: one card each, stacked. No "allow all".
+- Never steal focus from the composer: the user may be typing a correction (it queues, 3.6). Announce **Needs your OK: <title>** once.
+- Undo "Allow for this chat": the More menu item **Reset allowed tools** (`ShieldCheck` 14), shown only when the list isn't empty. Toast: **Ask mode will ask again**.
+- Sub-agent in Ask mode: its approval card appears inside the sub-agent card's step list. The sub-agent card opens itself and its meta reads **Waiting for you**.
+
+**Plan card** (Plan mode): an inline card, the "waiting" variant until decided
+
+```
+[ListChecks blue] Plan · <title>                                            6 steps
+ 1. Step text, text-sm                          ← <ol>, space-y-1.5; optional detail line text-xs text-zinc-400
+ 2. …                                             over 8 steps: show 8, then "Show all 14 steps"
+Run in  [Ask | Agent]                                           [Revise] [Approve plan]
+```
+
+- "Run in" is a two-segment ModeToggle-style radio (`h-7 text-xs`) with **Ask** selected by default (the safer one). The label `Run in` is `text-xs text-zinc-400`.
+- **Approve plan**: switches the chat to the chosen mode (the header updates), sends a visible user message **Approved. Run the plan.**, and the card becomes a resolved row: `CheckCircle2` and **Approved · running in Ask mode**.
+- **Revise**: focuses the textarea and sets the placeholder to **Say what to change in the plan**. The mode stays Plan, and the meta reads **Revising**.
+- When a newer plan card arrives, older ones lose their footer and read **Replaced by a newer plan**.
+- No tools (2.6): there's no card. Under the last assistant reply in Plan mode, show a row `mt-2 flex items-center gap-2` with **Approve plan** (`glass-button-primary h-8`) and the caption **This model can't use tools, so it will write out the result.** (`text-xs text-zinc-400`). Clicking it switches to Chat and sends **Approved. Carry out the plan.**
+
+### 3.11 Sub-agent card [P5]
+
+An inline card (2.3), one per helper. Up to 3 stack with the normal `my-2` gap. No group wrapper.
+
+```
+[›] [status 14] <title>                          Step 4 · 1:12 · 3.2k tokens   [Open]
+    <brief, one line, text-xs text-zinc-400 truncate>
+    <latest text preview, one line, italic text-zinc-400 truncate>   (only while running)
+```
+
+- Meta: `Step <n> · <m:ss> · <compact tokens>`, using `Intl.NumberFormat(undefined, { notation: "compact" })`, `font-mono tabular-nums`, and elapsed time ticking every 1s.
+- **Open**: a text button `inline-flex h-6 items-center gap-1 rounded-[var(--glass-radius-sm)] px-2 text-xs glass-button` with 12px `PanelRightOpen` and **Open**; tooltip **Open transcript in side chat**. It opens the side pane in viewer mode (3.8). On narrow screens that's the overlay.
+- Expanded body: the steps, `max-h-60 overflow-y-auto`, following the newest step unless the user scrolled up. Each row is `flex gap-2 text-xs` with a 12px icon (`Search` web, `FileText` read, `Pencil` write, `Wrench` other), a label like **Read src/app/page.tsx** (`text-zinc-300 truncate`), and the duration (`ml-auto text-zinc-400 tabular-nums`).
+- Terminal meta words: **Done**, **Stopped at the 15-step limit** (`CheckCircle2`, it still reported), **Failed: <short reason>**, **Timed out after 5 min**, **Stopped**. On error or timeout, the body opens itself to show partial notes.
+- Follow-up (`messageAgent`): a new card titled **<title> · follow-up**.
+- A11y: `role="group" aria-label="Sub-agent: <title>"`. Announce terminal states only.
+- Pitfall: the meta must not change width every second. Use `tabular-nums` and `shrink-0`, and truncate the title instead.
+
+### 3.12 Agents messaging [P6]
+
+- **Badge on a message from another agent** (user role, right-aligned): not the blue user style. Use `glass-card text-[var(--foreground)]` with the bubble's radius and padding, and above the text a badge row `mb-1 inline-flex items-center gap-1 text-[11px] font-medium text-zinc-400` with 12px `Bot` and **From main chat** / **From side chat** (sub-agent follow-ups: **From the main chat's assistant**). So users never mistake it for something they wrote. Delivered mid-reply, it splits the reply the same way as 3.6, with this neutral style.
+- **Talking indicator**: a status row at the top of the tray (2.1) in **both** panes while agents exchange messages. `flex items-center gap-2 text-xs text-zinc-400`, then the `TypingIndicator` dots (compact), then **Talking with side chat · 2 of 3** (in the side pane: **with main chat**), then on the right **Stop** (`glass-button-danger h-7 px-2.5 text-xs`, same text colour as the existing Stop). Stop stops both panes and drops pending agent messages. The row disappears when the exchange ends or hits 3.
+- **Queued while busy**: the receiver's queue shows it as an agent item (3.6).
+- The side pane opens on its own when main sends to it (focus doesn't move).
+
+---
+
+## 4. Compatibility at a glance
+
+`toolsAvailable` comes from 2.6. "Same" means the same UI with every model.
+
+| Feature | Tools available | No tools (older, small or local models) |
+|---|---|---|
+| Quote-reply, export, `/compress`, temporary, fork, side chat, @ files | same | same (@ files may show the trimmed note) |
+| Search past chats | model calls `searchChats`; `/recall` also works | `/recall` only; same card |
+| Queue | delivered between steps; hint "the model sees it at its next step" | sent after the reply; hint "sends when the reply finishes" |
+| Modes | all four | Chat; Plan via an "Approve plan" button; Ask and Agent `aria-disabled` with the tooltip |
+| Approval card | yes (Ask) | n/a (Ask disabled) |
+| Sub-agent | model-started cards | hidden (never offered) |
+| Agents messaging | `sendToChat`; badges and talking row | hidden; "Send to main" still works |
+
+---
+
+## 5. UX review checklist
+
+Tick per feature, from screenshots in light and dark, at desktop width and about 400px.
+
+- [ ] 1. Only existing `glass*` classes, tokens and zinc and status colours; no new hex/rgb, CSS variables or UI libraries.
+- [ ] 2. Readable in both themes: no `text-white` outside primary surfaces, no coloured body text, no new `zinc-500`/`zinc-600` text.
+- [ ] 3. Every status pairs an icon with a word; nothing relies on colour or a spinner alone.
+- [ ] 4. Copy matches this doc word for word: sentence case, `…`, "chat", no "Please" or "!".
+- [ ] 5. Icon-only buttons have `aria-label` and `title`; titles include the shortcut where one exists.
+- [ ] 6. Tabbing shows the focus ring on every new control; the segmented controls use arrow keys.
+- [ ] 7. Focus lands where the feature section says on open, close, send and remove; never on `<body>`.
+- [ ] 8. Esc follows 2.8; Enter, Shift+Enter and ⌘Enter in the main input behave as before.
+- [ ] 9. Loading, empty, error and disabled states exist and are screenshotted.
+- [ ] 10. Tray order is status, queued, quotes, files; it caps at `min(30dvh,240px)` and scrolls; the textarea still caps at 200px.
+- [ ] 11. With three cards at 400×700, the transcript still shows at least 160px.
+- [ ] 12. No layout jump: tray items animate their height, live numbers use `tabular-nums`, card headers keep their height across states.
+- [ ] 13. With reduced motion on, transforms are off (`MotionConfig`) and nothing important depends on motion.
+- [ ] 14. At 400px: no horizontal scroll, nothing clipped, footers wrap, touch targets at least 32px.
+- [ ] 15. Menus aren't covered by transcript elements; overlay panels cover both panes; the narrow side pane sits under the mobile sidebar.
+- [ ] 16. Model without tools: the fallback replaces the control, or it's `aria-disabled` with the tooltip (and a toast on tap); nothing dead, nothing silently missing.
+- [ ] 17. Tray items: × always visible with an `aria-label`; containers are lists; one item shape for quotes and queue, `AttachmentChip` for files.
+- [ ] 18. Inline cards follow 2.3: header, body, footer; primary button last on the right; waiting cards get the amber border.
+- [ ] 19. Reply pill: only for single-message selections; never in the composer, cards or dialogs; doesn't clear the selection on click; code-block and card chrome stay out of the quote.
+- [ ] 20. Side chat: resize, dock left/right and width are remembered; ⌘\\ toggles; the focused pane is marked and gets ⌘Enter; "Send to main" fills and focuses the main input.
+- [ ] 21. Temporary chat: dashed composer, header meta note and empty state all show; not in the sidebar or search; Memory item disabled.
+- [ ] 22. Approval and plan: no focus stolen; Deny and Revise equally reachable; resolved state collapses to one row.
+- [ ] 23. Sub-agent card: live meta doesn't jitter; terminal states are correct; Open shows the read-only transcript.
+- [ ] 24. The screen reader live region announces quote added, queued, delivered, needs your OK, plan ready and sub-agent finished, each once.
+- [ ] 25. Discoverability: a palette entry, a `/help` listing and a shortcuts-dialog row exist where the feature has one; existing composer controls (plus menu, voice, model, folder, context circle) look and work as before.
