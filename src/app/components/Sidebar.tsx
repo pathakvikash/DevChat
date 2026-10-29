@@ -254,7 +254,7 @@ export default function Sidebar() {
           {/* Null outside a conversation (/kb, /settings, ...). */}
           {chatMode && (
             <div className="ml-auto shrink-0">
-              <ModeToggle mode={chatMode.mode} onModeChange={chatMode.setMode} compact />
+              <ModeToggle mode={chatMode.mode} onModeChange={chatMode.setMode} compact toolsAvailable={chatMode.modelCaps.toolsAvailable} cli={chatMode.modelCaps.cli} />
             </div>
           )}
         </div>

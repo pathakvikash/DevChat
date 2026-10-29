@@ -316,6 +316,23 @@ export const TOOL_REGISTRY: Record<string, ToolDefinition> = {
     },
   },
 
+  // ─── PLAN (Plan mode only, see buildTools) ───────────────────────────
+  presentPlan: {
+    id: "presentPlan",
+    name: "Present Plan",
+    description: "Show a plan the user can approve or revise before anything changes.",
+    modelDescription:
+      "Present your plan as a card the user can approve (then it runs in Ask or Agent mode) or revise. Call it once, as your last action, after you have looked around with read-only tools. Keep each step short and concrete, in order. Change nothing before the user approves.",
+    category: "Utility",
+    internal: true,
+    inputSchema: z.object({
+      title: z.string().min(1).describe("Short name for the plan"),
+      steps: z.array(z.string().min(1)).min(1).describe("The steps, in order"),
+      notes: z.string().optional().describe("Assumptions or open questions, if any"),
+    }),
+    builtIn: true,
+  },
+
   // ─── CLARIFICATION (always on) ────────────────────────────────────────
   askClarification: {
     id: "askClarification",

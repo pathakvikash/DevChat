@@ -48,7 +48,9 @@ async function persistAssistantMessage(
       }
     }
 
-    if (step.toolCalls && step.toolCalls.length > 0) {
+    // With overrideParts the saved reply already has each tool part, with its approval state;
+    // building them again from the steps would add a second copy that overwrites that state.
+    if (step.toolCalls && step.toolCalls.length > 0 && !opts.overrideParts) {
       for (const tc of step.toolCalls) {
         toolPartIndex.set(tc.toolCallId, parts.length);
         parts.push({
@@ -64,7 +66,7 @@ async function persistAssistantMessage(
       }
     }
 
-    if (step.toolResults && step.toolResults.length > 0) {
+    if (step.toolResults && step.toolResults.length > 0 && !opts.overrideParts) {
       for (const tr of step.toolResults) {
         const idx = toolPartIndex.get(tr.toolCallId);
         const resolved = {

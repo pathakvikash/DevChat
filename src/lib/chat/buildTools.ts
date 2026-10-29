@@ -8,6 +8,7 @@ import type { ToolExecutionContext } from "@/lib/registry/types";
 import { searchUserChats, readUserChat } from "@/lib/chatSearch";
 import { budgetTokens } from "@/lib/chat/contextBudget";
 import { quoteSearchResults } from "@/lib/chat/quotePastChat";
+import { MODE_POLICY, needsApproval, type ChatMode } from "@/lib/chat/modes";
 
 export const BUILTIN_TOOL_IDS = [
   "executeCode",
@@ -42,8 +43,8 @@ export function resolveActiveToolIds(
   return active;
 }
 
-/** Chat offers read-only tools; Agent additionally offers mutating ones. */
-export type ToolMode = "chat" | "agent";
+/** Chat and Plan are read-only; Ask and Agent also offer mutating tools. */
+export type ToolMode = ChatMode;
 
 export interface BuildToolsOptions {
   activeToolIds: Set<string>;
@@ -56,6 +57,8 @@ export interface BuildToolsOptions {
   contextWindow: number;
   /** Memory is off (temporary chat or the Memory toggle): no rememberFact / forgetFact. */
   memoryDisabled?: boolean;
+  /** Tools the user allowed for this chat in Ask mode ("Allow for this chat"). */
+  allowedTools?: readonly string[];
 }
 
 /** Convert a JSON Schema object to a Zod schema (supports basic types). */
@@ -95,10 +98,12 @@ export async function buildTools({
   mode = "agent",
   contextWindow,
   memoryDisabled = false,
+  allowedTools = [],
 }: BuildToolsOptions): Promise<Record<string, Tool>> {
   const ctx: ToolExecutionContext = { conversationId };
   const aiTools: Record<string, Tool> = {};
-  const allowMutating = mode === "agent";
+  const allowMutating = MODE_POLICY[mode].mutating;
+  const allowed = new Set(allowedTools);
 
   // ─── Load MCP tools from enabled servers ────────────────────────────────
   // MCP servers can do anything, so they count as mutating. Skipping the whole
@@ -117,6 +122,7 @@ export async function buildTools({
           aiTools[id] = tool({
             description: mcpTool.description || `MCP tool: ${mcpTool.name} (${server.name})`,
             inputSchema: zodSchema as any,
+            needsApproval: needsApproval(mode, id, allowed),
             execute: async (args: Record<string, unknown>) => {
               const result = await callServerTool(server.id, mcpTool.name, args);
               const texts = result.content
@@ -164,12 +170,14 @@ export async function buildTools({
       aiTools[toolId] = tool({
         description: def.modelDescription,
         inputSchema: def.inputSchema as any,
+        needsApproval: def.mutates ? needsApproval(mode, toolId, allowed) : undefined,
         execute: async (input: any) => userExecute(input, ctx),
       });
     } else {
       aiTools[toolId] = tool({
         description: def.modelDescription,
         inputSchema: def.inputSchema as any,
+        needsApproval: def.mutates ? needsApproval(mode, toolId, allowed) : undefined,
       });
     }
   }
@@ -177,6 +185,7 @@ export async function buildTools({
   if (allowMutating && !memoryDisabled && activeToolIds.has("rememberFact")) {
     aiTools.rememberFact = tool({
       description: "Save a persistent fact about the user...",
+      needsApproval: needsApproval(mode, "rememberFact", allowed),
       inputSchema: z.object({
         key: z.string().describe("Short snake_case identifier..."),
         value: z.string().describe("The fact itself, in one sentence."),
@@ -201,6 +210,7 @@ export async function buildTools({
   if (allowMutating && !memoryDisabled && activeToolIds.has("forgetFact")) {
     aiTools.forgetFact = tool({
       description: "Delete a stored memory by key...",
+      needsApproval: needsApproval(mode, "forgetFact", allowed),
       inputSchema: z.object({
         key: z.string().describe("The exact key of the memory to delete."),
       }),
@@ -245,6 +255,14 @@ export async function buildTools({
       }),
       execute: async ({ id }) =>
         (await readUserChat(userId, id, budgetTokens(contextWindow, 0.25, 6000))) ?? "Chat not found.",
+    });
+  }
+
+  // Plan ends with this card. Like askClarification it has no execute: the browser answers it.
+  if (MODE_POLICY[mode].planCard) {
+    aiTools.presentPlan = tool({
+      description: TOOL_REGISTRY.presentPlan.modelDescription,
+      inputSchema: TOOL_REGISTRY.presentPlan.inputSchema as any,
     });
   }
 

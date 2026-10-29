@@ -5,6 +5,7 @@ import { UIMessage } from "ai";
 import MessageBubble from "./MessageBubble";
 import TypingIndicator from "./TypingIndicator";
 import QuoteReplyPill from "./QuoteReplyPill";
+import { settleStaleParts } from "@/lib/utils/messageParts";
 
 interface ChatMessagesProps {
   messages: UIMessage[];
@@ -15,6 +16,10 @@ interface ChatMessagesProps {
   onRegenerateMessage?: (messageId: string) => void;
   onOpenArtifact?: (id: string) => void;
   onClarificationAnswer?: (toolCallId: string, answer: string) => void;
+  /** Set in Plan mode: offers "Approve plan" under the latest reply when it has no plan card. */
+  onApprovePlan?: () => void;
+  /** The model can't use tools, so the plan is written out and the button says so. */
+  toolsAvailable?: boolean;
   scrollRef: React.RefObject<HTMLDivElement | null>;
   /** Shown with the indicator before the assistant bubble exists, e.g. "Waiting for Claude Code…". */
   statusLabel?: string;
@@ -32,6 +37,7 @@ function normalizeParts(parts: any[]): any[] {
   );
 }
 
+
 function ChatMessages({
   messages,
   isLoading,
@@ -41,6 +47,8 @@ function ChatMessages({
   onRegenerateMessage,
   onOpenArtifact,
   onClarificationAnswer,
+  onApprovePlan,
+  toolsAvailable = true,
   scrollRef,
   statusLabel,
   onQuote,
@@ -64,7 +72,7 @@ function ChatMessages({
             unique.push(m);
           }
           return unique.map((message, idx) => {
-            const parts = normalizeParts((message.parts || []) as any[]);
+            const parts = settleStaleParts(normalizeParts((message.parts || []) as any[]), idx === unique.length - 1);
             const content = parts
               .filter((p) => p.type === "text")
               .map((p) => p.text)
@@ -98,6 +106,13 @@ function ChatMessages({
                   onRegenerateMessage={onRegenerateMessage}
                   onOpenArtifact={onOpenArtifact}
                   onClarificationAnswer={onClarificationAnswer}
+                  onApprovePlan={
+                    onApprovePlan && idx === unique.length - 1 && message.role === "assistant" && !isLoading &&
+                      !parts.some((p) => p?.type === "tool-presentPlan")
+                      ? onApprovePlan
+                      : undefined
+                  }
+                  planCaption={toolsAvailable ? undefined : "This model can't use tools, so it will write out the result."}
                 />
               </div>
             );

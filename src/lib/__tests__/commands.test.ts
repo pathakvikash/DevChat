@@ -4,6 +4,7 @@ import {
   matchCommands,
   activeCommandQuery,
   missingArg,
+  planPrompt,
   SLASH_COMMANDS,
 } from "@/lib/commands";
 
@@ -73,11 +74,25 @@ describe("parseCommand", () => {
   });
 
   it("transform commands rewrite the message text", () => {
-    const r = parseCommand("/plan ship the app");
+    const r = parseCommand("/think ship the app");
     expect(r?.command.kind).toBe("transform");
     const out = r?.command.transform?.(r.arg);
     expect(out).toContain("ship the app");
-    expect(out).toContain("plan");
+  });
+
+  it("/plan is an action that switches to Plan mode", () => {
+    const r = parseCommand("/plan add a cache");
+    expect(r?.command.kind).toBe("action");
+    expect(r?.command.action).toBe("plan");
+    expect(r?.arg).toBe("add a cache");
+  });
+
+  it("/plan without a task shows the usage hint", () => {
+    expect(missingArg(parseCommand("/plan")!.command, "")).toBe(true);
+  });
+
+  it("planPrompt is the text /plan sends to a model without tools", () => {
+    expect(planPrompt("ship the app")).toContain("Task: ship the app");
   });
 });
 

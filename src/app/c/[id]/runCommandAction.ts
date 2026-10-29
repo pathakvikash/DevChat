@@ -3,6 +3,8 @@
 import type { UIMessage } from "ai";
 import type { SlashCommand } from "@/lib/commands";
 import { exportChat } from "@/lib/utils/download";
+import { planPrompt } from "@/lib/commands";
+import type { ChatMode } from "@/lib/chat/modes";
 import { runWebSearch, formatWebSearchResults } from "./webSearch";
 
 export interface RunCommandCtx {
@@ -18,6 +20,11 @@ export interface RunCommandCtx {
   setKeyboardShortcutsOpen: (v: boolean) => void;
   toast: (msg: string, type: "success" | "error" | "info") => void;
   refreshConversationAndMessages: () => Promise<void>;
+  /** Plan mode switch; the request body carries it right away, before the next render. */
+  setMode: (mode: ChatMode) => void;
+  setRequestBody: (patch: { mode?: ChatMode }) => void;
+  /** False for a model without tools: /plan then sends the plain-text plan request. */
+  toolsAvailable: boolean;
 }
 
 export async function runCommandAction(
@@ -31,6 +38,12 @@ export async function runCommandAction(
     return;
   }
   switch (cmd.action) {
+    case "plan": {
+      ctx.setMode("plan");
+      ctx.setRequestBody({ mode: "plan" });
+      await ctx.sendMessage({ parts: [{ type: "text", text: ctx.toolsAvailable ? arg : planPrompt(arg) }] });
+      break;
+    }
     case "search": {
       const query = arg.slice(0, 300);
       let text = arg;

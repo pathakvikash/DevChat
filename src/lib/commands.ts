@@ -39,12 +39,11 @@ export const SLASH_COMMANDS: SlashCommand[] = [
   // ---- Planning ----
   {
     name: "plan",
-    description: "Get a step-by-step plan only — no execution",
+    description: "Switch to Plan mode and send this task",
     usage: "/plan <task>",
-    kind: "transform",
+    kind: "action",
+    action: "plan",
     requiresArg: true,
-    transform: (arg) =>
-      `Create a detailed, ordered plan to accomplish the task below. Output ONLY a numbered checklist of concrete steps, each with a one-line rationale. Do NOT execute the steps yet — just plan.\n\nTask: ${arg}`,
   },
   {
     name: "loop",
@@ -194,6 +193,11 @@ export const SLASH_COMMANDS: SlashCommand[] = [
     action: "help",
   },
 ];
+
+/** What /plan sends to a model without tools: the same request, as plain text. */
+export function planPrompt(task: string): string {
+  return `Create a detailed, ordered plan to accomplish the task below. Output ONLY a numbered checklist of concrete steps, each with a one-line rationale. Do NOT execute the steps yet — just plan.\n\nTask: ${task}`;
+}
 
 function findByNameOrAlias(name: string): SlashCommand | undefined {
   const lower = name.toLowerCase();

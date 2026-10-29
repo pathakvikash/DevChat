@@ -160,3 +160,41 @@ describe("buildSystemPrompt", () => {
     expect(result.sections.tools).toBeNull();
   });
 });
+
+describe("buildSystemPrompt by mode", () => {
+  const withTools = (mode: string) =>
+    makeOpts({ useTools: true, mode, activeToolIds: new Set(["createArtifact"]) });
+
+  it("ask has the approval rule and the agent sections (todos)", async () => {
+    (getMemoryBlock as any).mockResolvedValue("");
+    const { sections } = await buildSystemPrompt(withTools("ask"));
+    expect(sections.base).toContain("--- Ask mode ---");
+    expect(sections.base).toContain("If one is denied, do not retry it");
+    expect(sections.base).not.toContain("--- Read-only mode ---");
+    expect(sections.base).toContain("Todo");
+  });
+
+  it("plan is read-only and ends with presentPlan", async () => {
+    (getMemoryBlock as any).mockResolvedValue("");
+    const { sections } = await buildSystemPrompt(withTools("plan"));
+    expect(sections.base).toContain("--- Plan mode ---");
+    expect(sections.base).toContain("presentPlan");
+    expect(sections.base).not.toContain("--- Read-only mode ---");
+    expect(sections.base).not.toContain("Todo");
+  });
+
+  it("plan without tools ends with a numbered list and no tool instructions", async () => {
+    (getMemoryBlock as any).mockResolvedValue("");
+    const { sections } = await buildSystemPrompt(makeOpts({ useTools: false, mode: "plan" }));
+    expect(sections.base).toContain("--- Plan mode ---");
+    expect(sections.base).toContain("numbered list");
+    expect(sections.base).not.toContain("presentPlan");
+  });
+
+  it("ask without tools is just chat", async () => {
+    (getMemoryBlock as any).mockResolvedValue("");
+    const chat = await buildSystemPrompt(makeOpts({ useTools: false, mode: "chat" }));
+    const ask = await buildSystemPrompt(makeOpts({ useTools: false, mode: "ask" }));
+    expect(ask.sections.base).toBe(chat.sections.base);
+  });
+});

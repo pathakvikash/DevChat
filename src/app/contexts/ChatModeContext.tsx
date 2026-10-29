@@ -3,10 +3,20 @@
 import { createContext, useCallback, useContext, useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import type { ChatMode } from "@/app/components/conversation/types";
+import { storedChatMode } from "@/lib/chat/modes";
+
+/** What the current chat's model can do. The page sets it; the mode switch reads it. */
+export interface ModelCaps {
+  toolsAvailable: boolean;
+  /** A CLI-backed model: Ask runs read-only for now. */
+  cli: boolean;
+}
 
 interface ChatModeValue {
   mode: ChatMode;
   setMode: (next: ChatMode) => void;
+  modelCaps: ModelCaps;
+  setModelCaps: (next: ModelCaps) => void;
 }
 
 const ChatModeContext = createContext<ChatModeValue | null>(null);
@@ -20,6 +30,7 @@ export function ChatModeProvider({ children }: { children: React.ReactNode }) {
   const conversationId = typeof params?.id === "string" ? params.id : undefined;
   const storageKey = conversationId ? `vas:mode:${conversationId}` : null;
   const [mode, setModeState] = useState<ChatMode>("chat");
+  const [modelCaps, setModelCaps] = useState<ModelCaps>({ toolsAvailable: true, cli: false });
 
   // Re-read on route change so mode doesn't leak between conversations.
   useEffect(() => {
@@ -28,7 +39,7 @@ export function ChatModeProvider({ children }: { children: React.ReactNode }) {
       return;
     }
     try {
-      setModeState(localStorage.getItem(storageKey) === "agent" ? "agent" : "chat");
+      setModeState(storedChatMode(localStorage.getItem(storageKey)));
     } catch {
       setModeState("chat");
     }
@@ -46,7 +57,7 @@ export function ChatModeProvider({ children }: { children: React.ReactNode }) {
   );
 
   return (
-    <ChatModeContext.Provider value={{ mode, setMode }}>
+    <ChatModeContext.Provider value={{ mode, setMode, modelCaps, setModelCaps }}>
       {children}
     </ChatModeContext.Provider>
   );

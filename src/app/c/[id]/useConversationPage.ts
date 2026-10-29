@@ -2,11 +2,17 @@
 
 import { useEffect, useState, useMemo, useCallback, useRef } from "react";
 import { useToast } from "@/app/components/Toast";
-import type { Conversation } from "@/app/components/conversation/types";
+import { fetchModels } from "@/app/hooks/useModelsApi";
+import type { Conversation, ModelInfo } from "@/app/components/conversation/types";
 import { useChatMode } from "@/app/contexts/ChatModeContext";
+import type { ApprovalAnswer, PlanAnswer } from "@/app/components/ToolAnswers";
 import type { MinimapMessage } from "@/app/components/MinimapNavigator";
 import { parseCommand, missingArg } from "@/lib/commands";
-import { buildMessageParts } from "@/lib/utils/messageParts";
+import {
+  ALLOWED_FOR_CHAT, DENIED_BY_USER, approvalTitle, buildMessageParts, denyOpenApprovals, waitingPlanCallId,
+  type PlanDecision,
+} from "@/lib/utils/messageParts";
+import { isCliModelId } from "@/lib/providers";
 import { buildMessagesFromConversation, lastExchange, type RawConversation } from "@/lib/utils/conversation";
 import { composeQuoteMessage, type QuoteCard } from "@/lib/utils/quoteReply";
 
@@ -30,6 +36,16 @@ function discardTemporaryChat(id: string) {
   fetch(`/api/conversations/${id}?temporary=1`, { method: "DELETE", keepalive: true }).catch(() => {});
 }
 
+/** Tools allowed for one chat in Ask mode (`vas:allow:<id>`). Unreadable storage means none. */
+function readAllowedTools(chatId: string): string[] {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(`vas:allow:${chatId}`) ?? "[]");
+    return Array.isArray(parsed) ? parsed.filter((t): t is string => typeof t === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
 export function useConversationPage(conversationId: string, initialPrompt?: string): ConversationPageState {
   const { toast } = useToast();
 
@@ -49,8 +65,15 @@ export function useConversationPage(conversationId: string, initialPrompt?: stri
   const [scratchpadOpen, setScratchpadOpen] = useState(false);
   const [todoPanelOpen, setTodoPanelOpen] = useState(false);
   const [searchProvider, setSearchProvider] = useState<"duckduckgo" | "tavily">("duckduckgo");
-  const { mode } = useChatMode();
+  const { mode, setMode, setModelCaps } = useChatMode();
+  const [modelList, setModelList] = useState<ModelInfo[]>([]);
   const settingsKey = `vas:advancedSettings:${conversationId}`;
+  // Tools the user allowed for this chat in Ask mode ("Allow for this chat"), kept in the browser.
+  const [allowedState, setAllowedState] = useState<{ chat: string; tools: string[] } | null>(null);
+  const allowedTools = useMemo(
+    () => (allowedState?.chat === conversationId ? allowedState.tools : readAllowedTools(conversationId)),
+    [allowedState, conversationId],
+  );
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [enabledTools, setEnabledTools] = useState<string[]>([]);
   const [enabledSkills, setEnabledSkills] = useState<string[]>([]);
@@ -113,12 +136,111 @@ export function useConversationPage(conversationId: string, initialPrompt?: stri
     enabledTools,
     enabledSkills,
     mode,
+    allowedTools,
     setIsCompressing,
     onFinishRef,
     onErrorRef,
   });
 
-  const { messages, setMessages, sendMessage, status, stop, regenerate, error, addToolResult, isLoading } = chatTransport;
+  const { messages, setMessages, sendMessage, status, stop, regenerate, error, addToolResult, addToolApprovalResponse, setRequestBody, isLoading } = chatTransport;
+
+  /* ─── Ask and Plan answers ─────────────────────────────────────────────── */
+
+  useEffect(() => {
+    fetchModels().then(setModelList).catch(() => {});
+  }, []);
+  // Until the list loads, assume tools: the server still decides by the model's real support.
+  const toolsAvailable = !conversation?.chatOnlyMode && modelList.find((m) => m.id === conversation?.model)?.supportsTools !== false;
+  const modelLabel = conversation?.model?.split("/")?.pop() || conversation?.model || "";
+
+  // The mode switch reads these to disable Ask and Agent, and to label Ask for CLI models.
+  useEffect(() => {
+    setModelCaps({ toolsAvailable, cli: isCliModelId(conversation?.model ?? "") });
+  }, [toolsAvailable, conversation?.model, setModelCaps]);
+
+  // A model without tools can't run Ask or Agent: fall back to Chat and say so (UX 2.6).
+  useEffect(() => {
+    if (toolsAvailable || (mode !== "ask" && mode !== "agent")) return;
+    setMode("chat");
+    setRequestBody({ mode: "chat" });
+    toast(`Switched to Chat: ${modelLabel} can't use tools`, "info");
+  }, [toolsAvailable, mode]);
+
+  /** Clears "Allow for this chat" for this chat, so Ask mode asks again. */
+  function resetAllowedTools() {
+    setAllowedState({ chat: conversationId, tools: [] });
+    setRequestBody({ allowedTools: [] });
+    try { localStorage.removeItem(`vas:allow:${conversationId}`); } catch {}
+    toast("Ask mode will ask again", "info");
+  }
+
+
+  // Keys already answered (approval ids, plan call ids). A double click, or a click after Stop, finds its key taken.
+  const answeredRef = useRef(new Set<string>());
+  function claim(key: string): boolean {
+    if (answeredRef.current.has(key)) return false;
+    answeredRef.current.add(key);
+    return true;
+  }
+
+  /** Allow or Deny a waiting tool call. "Allow for this chat" is remembered for the rest of the chat. */
+  function answerApproval({ approvalId, toolName, approved, allowForChat }: ApprovalAnswer) {
+    if (!claim(approvalId)) return;
+    if (approved && allowForChat && !allowedTools.includes(toolName)) {
+      const next = [...allowedTools, toolName];
+      setAllowedState({ chat: conversationId, tools: next });
+      setRequestBody({ allowedTools: next });
+      try { localStorage.setItem(`vas:allow:${conversationId}`, JSON.stringify(next)); } catch {}
+    }
+    addToolApprovalResponse({
+      id: approvalId,
+      approved,
+      reason: approved ? (allowForChat ? ALLOWED_FOR_CHAT : undefined) : DENIED_BY_USER,
+    });
+  }
+
+  /** Approve on a reply with no plan card, from a model without tools: send the plan request on. */
+  function approvePlanReply() {
+    if (isLoading || !claim(`plan-reply:${messages.length}`)) return;
+    setRequestBody({ mode: "chat" });
+    setMode("chat");
+    sendMessage({ parts: [{ type: "text", text: "Approved. Carry out the plan." }] }).catch((e) =>
+      console.error("[approve plan] sendMessage failed:", e),
+    );
+  }
+
+  /** Approve runs the plan in Ask or Agent, and says so in a visible message. Revise sends the feedback
+   *  and the model plans again, with no message of its own. */
+  function answerPlan({ toolCallId, approve, mode: runIn, feedback }: PlanAnswer) {
+    if (!claim(toolCallId)) return;
+    if (approve) {
+      // The mode goes out with the request, so it is set before the result is added and the message sent.
+      const next = runIn ?? "ask";
+      setRequestBody({ mode: next });
+      setMode(next);
+      const decision: PlanDecision = { action: "approve", mode: next };
+      addToolResult({ tool: "presentPlan", toolCallId, output: decision });
+      sendMessage({ parts: [{ type: "text", text: "Approved. Run the plan." }] }).catch((e) =>
+        console.error("[approve plan] sendMessage failed:", e),
+      );
+    } else {
+      const decision: PlanDecision = { action: "revise", feedback: feedback ?? "" };
+      addToolResult({ tool: "presentPlan", toolCallId, output: decision });
+    }
+  }
+
+  /** Stop: a card still open is denied in the transcript and its id is claimed, so Allow can't run it. */
+  function stopReply() {
+    for (const m of messages) {
+      for (const p of (m.parts ?? []) as any[]) {
+        if (p?.state === "approval-requested" && p.approval?.id) answeredRef.current.add(p.approval.id);
+      }
+    }
+    setMessages((prev) =>
+      prev.map((m) => (m.parts?.some((p: any) => p?.state === "approval-requested") ? { ...m, parts: denyOpenApprovals(m.parts as any[]) } : m)) as typeof prev,
+    );
+    stop();
+  }
 
   /* ─── Data fetching ────────────────────────────────────────────────────── */
 
@@ -151,6 +273,12 @@ export function useConversationPage(conversationId: string, initialPrompt?: stri
     // is from the last render, which has not happened yet when onFinish runs.
     const all = finish?.messages ?? messages;
     const parts = (finish?.message?.parts ?? all[all.length - 1]?.parts ?? []) as any[];
+    // A card that just appeared is announced once, in the pane's live region (UX 2.5).
+    if (!finish?.isAbort) {
+      const card = parts.find((p) => p?.state === "approval-requested");
+      if (card) setAnnouncement(`Needs your OK: ${approvalTitle(String(card.type).replace(/^tool-/, ""), card.input)}`);
+      else if (parts.some((p) => p?.type === "tool-presentPlan" && p.state === "input-available")) setAnnouncement("Plan ready");
+    }
     for (const p of parts) {
       const output = p.output || "";
       if (typeof output === "string" && (output.startsWith("Artifact created:") || output.startsWith("Artifact updated:"))) {
@@ -357,8 +485,18 @@ export function useConversationPage(conversationId: string, initialPrompt?: stri
           conversationId, conversation, sendMessage, setMessages, setConversation,
           setIsCompressing, setArtifactPanelOpen,
           setScratchpadOpen, setModelSettingsOpen, setKeyboardShortcutsOpen, toast, refreshConversationAndMessages,
+          setMode, setRequestBody, toolsAvailable,
         });
       }
+      return;
+    }
+
+    // A plan card still waiting: typed text is its Revise feedback, not a new message.
+    const waitingPlan = waitingPlanCallId(messages);
+    if (waitingPlan && input.trim() && files.length === 0 && quotes.length === 0) {
+      answerPlan({ toolCallId: waitingPlan, approve: false, feedback: input.trim() });
+      setInput("");
+      setSuggestion(null);
       return;
     }
 
@@ -422,9 +560,11 @@ export function useConversationPage(conversationId: string, initialPrompt?: stri
     isCompressing, setIsCompressing,
     searchProvider, toggleSearchProvider,
     enabledTools, enabledSkills, persistAdvanced,
+    answerApproval, answerPlan, approvePlanReply, toolsAvailable, mode,
+    allowedToolCount: allowedTools.length, resetAllowedTools,
     selectedKbId, setSelectedKbId,
     scrollRef, toast,
-    messages, sendMessage, status, stop, regenerate, error, setMessages, addToolResult,
+    messages, sendMessage, status, stop: stopReply, regenerate, error, setMessages, addToolResult,
     isLoading, currentModelName,
     fetchConversation, refreshConversation, refreshConversationAndMessages,
     fetchContextUsage, handleModelSettingsSave, handleModelChange, handleWorkingFolderChange, handleKbToggle,

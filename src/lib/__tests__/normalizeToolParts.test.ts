@@ -249,3 +249,55 @@ describe("/recall results on a user message", () => {
     expect(text).toContain("No matching chats.");
   });
 });
+
+describe("approval states", () => {
+  const approvalPart = (state: string, extra: Record<string, unknown> = {}) => ({
+    type: "tool-createArtifact",
+    toolCallId: "c1",
+    state,
+    input: { title: "Notes" },
+    approval: { id: "ap1" },
+    ...extra,
+  });
+
+  it("keeps approval-responded and output-denied as they are", () => {
+    const responded = approvalPart("approval-responded", { approval: { id: "ap1", approved: true } });
+    const denied = approvalPart("output-denied", { approval: { id: "ap1", approved: false, reason: "no" } });
+    expect(normalizeToolParts([responded])).toEqual([responded]);
+    expect(normalizeToolParts([denied])).toEqual([denied]);
+  });
+
+  it("keeps an unanswered approval in the latest message", () => {
+    const waiting = approvalPart("approval-requested");
+    expect(normalizeToolParts([waiting])).toEqual([waiting]);
+    expect(normalizeMessageToolParts([{ role: "assistant", parts: [waiting] }])[0].parts).toEqual([waiting]);
+  });
+
+  it("denies an unanswered approval in an earlier message, so no call is left dangling", () => {
+    const waiting = approvalPart("approval-requested");
+    const [part] = normalizeMessageToolParts([
+      { role: "assistant", parts: [waiting] },
+      { role: "user", parts: [{ type: "text", text: "never mind, do something else" }] },
+    ])[0].parts as any[];
+    expect(part.state).toBe("output-denied");
+    expect(part.approval).toEqual({ id: "ap1", approved: false, reason: "The user did not answer this request." });
+  });
+
+  it("denies an answered-but-never-run approval in an earlier message", async () => {
+    const responded = approvalPart("approval-responded", { approval: { id: "ap1", approved: true } });
+    const messages = normalizeMessageToolParts([
+      { role: "assistant", parts: [responded] },
+      { role: "user", parts: [{ type: "text", text: "hi" }] },
+    ]);
+    expect((messages[0].parts as any[])[0].state).toBe("output-denied");
+    expect(await pairing(messages)).toEqual({ calls: 1, results: 1 });
+  });
+
+  it("keeps an approval response in the latest message unchanged", async () => {
+    const messages = normalizeMessageToolParts([
+      { role: "user", parts: [{ type: "text", text: "make a note" }] },
+      { role: "assistant", parts: [approvalPart("approval-responded", { approval: { id: "ap1", approved: true } })] },
+    ]);
+    expect((messages[1].parts as any[])[0].state).toBe("approval-responded");
+  });
+});

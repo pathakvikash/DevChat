@@ -1,5 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { buildTools, resolveActiveToolIds } from "@/lib/chat/buildTools";
+import { prisma } from "@/lib/db";
+import { listServerTools } from "@/lib/mcp/client";
 import { z } from "zod";
 
 vi.mock("@/lib/db", () => ({
@@ -405,5 +407,68 @@ describe("buildTools past-chat tools", () => {
       contextWindow: 8192,
     });
     expect(await tools.readChat.execute!({ id: "c1" }, {} as any)).toBe(framed);
+  });
+});
+
+describe("buildTools by mode", () => {
+  const base = { searchProvider: "duckduckgo" as const, userId: "test-user", contextWindow: 8192 };
+  const ids = new Set(["createArtifact", "createTodo", "webSearch", "readChat", "rememberFact"]);
+
+  it("chat offers no mutating tools and no plan card", async () => {
+    const tools = await buildTools({ ...base, mode: "chat", activeToolIds: ids });
+    expect(tools).not.toHaveProperty("createArtifact");
+    expect(tools).not.toHaveProperty("createTodo");
+    expect(tools).not.toHaveProperty("rememberFact");
+    expect(tools).not.toHaveProperty("presentPlan");
+    expect(tools).toHaveProperty("webSearch");
+  });
+
+  it("plan offers read-only tools and presentPlan, with no execute (the browser answers it)", async () => {
+    const tools = await buildTools({ ...base, mode: "plan", activeToolIds: ids });
+    expect(tools).not.toHaveProperty("createArtifact");
+    expect(tools).not.toHaveProperty("createTodo");
+    expect(tools).toHaveProperty("webSearch");
+    expect(tools).toHaveProperty("presentPlan");
+    expect(tools.presentPlan.execute).toBeUndefined();
+  });
+
+  it("agent offers mutating tools without approval", async () => {
+    const tools = await buildTools({ ...base, mode: "agent", activeToolIds: ids });
+    expect(tools.createArtifact.needsApproval).toBeFalsy();
+    expect(tools.createTodo.needsApproval).toBeFalsy();
+    expect(tools).not.toHaveProperty("presentPlan");
+  });
+
+  it("ask asks before each mutating tool", async () => {
+    const tools = await buildTools({ ...base, mode: "ask", activeToolIds: ids });
+    expect(tools.createArtifact.needsApproval).toBe(true);
+    expect(tools.createTodo.needsApproval).toBe(true);
+    expect(tools.rememberFact.needsApproval).toBe(true);
+    expect(tools.webSearch.needsApproval).toBeFalsy();
+    expect(tools).not.toHaveProperty("presentPlan");
+  });
+
+  it("ask skips the card for tools the chat allowed", async () => {
+    const tools = await buildTools({ ...base, mode: "ask", activeToolIds: ids, allowedTools: ["createArtifact"] });
+    expect(tools.createArtifact.needsApproval).toBe(false);
+    expect(tools.createTodo.needsApproval).toBe(true);
+  });
+
+  it("ask asks before MCP tool calls, plan and chat offer none", async () => {
+    const mcpIds = new Set(["mcp_docs_search"]);
+    const server = { id: "s1", name: "docs" };
+    const mcpTool = { name: "search", description: "Search docs", inputSchema: { type: "object", properties: {} } };
+
+    vi.mocked(prisma.mcpServer.findMany).mockResolvedValue([server] as any);
+    vi.mocked(listServerTools).mockResolvedValue([mcpTool] as any);
+    const ask = await buildTools({ ...base, mode: "ask", activeToolIds: mcpIds });
+    expect(ask.mcp_docs_search.needsApproval).toBe(true);
+
+    vi.mocked(prisma.mcpServer.findMany).mockResolvedValue([server] as any);
+    vi.mocked(listServerTools).mockResolvedValue([mcpTool] as any);
+    const plan = await buildTools({ ...base, mode: "plan", activeToolIds: mcpIds });
+    expect(plan).not.toHaveProperty("mcp_docs_search");
+
+    vi.mocked(prisma.mcpServer.findMany).mockResolvedValue([] as any);
   });
 });

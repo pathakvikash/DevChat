@@ -1,7 +1,9 @@
 import type { MinimapMessage } from "@/app/components/MinimapNavigator";
 import type { Conversation } from "@/app/components/conversation/types";
+import type { ChatMode } from "@/lib/chat/modes";
 import type { DataActions } from "./useConversationData";
 import type { QuoteCard } from "@/lib/utils/quoteReply";
+import type { ApprovalAnswer, PlanAnswer } from "@/app/components/ToolAnswers";
 
 export interface ConversationPageState extends DataActions {
   conversation: Conversation | null;
@@ -66,6 +68,14 @@ export interface ConversationPageState extends DataActions {
   isLoading: boolean;
   currentModelName: string;
   handleClarificationAnswer: (toolCallId: string, answer: string) => Promise<void>;
+  answerApproval: (answer: ApprovalAnswer) => void;
+  answerPlan: (answer: PlanAnswer) => void;
+  approvePlanReply: () => void;
+  allowedToolCount: number;
+  resetAllowedTools: () => void;
+  mode: ChatMode;
+  /** False for a model without tools (or chat-only): Ask and Plan get their text fallbacks. */
+  toolsAvailable: boolean;
   handleEditMessage: (messageId: string, content: string) => Promise<void>;
   handleDeleteMessage: (messageId: string) => Promise<void>;
   handleCopyMessage: (content: string) => void;

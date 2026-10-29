@@ -396,8 +396,12 @@ export default function ChatInput({
                   : temporary
                     ? "Temporary chat. Not saved after you leave."
                     : mode === "agent"
-                    ? "Agent mode — can write artifacts, todos, memories..."
-                    : "Type a message, / for commands, or drop files..."
+                    ? "Agent mode: can make changes without asking"
+                    : mode === "ask"
+                      ? isCliModelId(model) ? "Ask mode: CLI models run read-only for now" : "Ask mode: changes need your OK"
+                      : mode === "plan"
+                        ? "Describe the task. You'll get a plan to approve."
+                        : "Type a message, / for commands, or drop files..."
               }
               className={`w-full resize-none bg-transparent text-sm text-[var(--foreground)] outline-none placeholder:text-zinc-500 placeholder:truncate disabled:opacity-50 py-1.5 overflow-y-auto ${showSuggestion ? "pr-7" : ""}`}
               rows={1}
