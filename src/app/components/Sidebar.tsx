@@ -4,10 +4,11 @@ import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Plus, Search, Trash2, Edit2, Sparkles, Loader2, Pin, Archive, X, MoreHorizontal, CheckSquare, Square, CheckCheck, User as UserIcon } from "lucide-react";
+import { Plus, Search, Trash2, Edit2, Sparkles, Loader2, Pin, Archive, X, MoreHorizontal, CheckSquare, Square, CheckCheck, User as UserIcon, Columns2 } from "lucide-react";
 import { useSession } from "next-auth/react";
 import { useSidebar } from "@/app/contexts/SidebarContext";
 import { useChatModeOptional } from "@/app/contexts/ChatModeContext";
+import { CHAT_DRAG_TYPE, useSplitViewOptional } from "@/app/c/SplitViewContext";
 import ModeToggle from "./ModeToggle";
 import { useResource } from "@/app/hooks/useResource";
 import {
@@ -47,6 +48,7 @@ export default function Sidebar() {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const pathname = usePathname();
   const { toast } = useToast();
+  const split = useSplitViewOptional();
 
   const {
     data: conversationsData,
@@ -89,6 +91,10 @@ export default function Sidebar() {
   async function createNewChat() {
     try {
       const newConv = await createConversation();
+      if (split?.multi) {
+        split.replaceFocused(newConv.id);
+        return;
+      }
       // A full page load skips React cleanup, so tell an open temporary chat to delete itself.
       window.dispatchEvent(new Event("vas:leaving-chat"));
       window.location.href = `/c/${newConv.id}`;
@@ -169,6 +175,15 @@ export default function Sidebar() {
   }
 
   const currentConvId = pathname.startsWith("/c/") ? pathname.split("/")[2] : null;
+  const activeConvId = split?.ids.length ? split.focus : currentConvId;
+
+  function onChatDragStart(e: React.DragEvent, id: string) {
+    e.dataTransfer.setData(CHAT_DRAG_TYPE, id);
+    e.dataTransfer.setData("text/uri-list", `/c/${id}`);
+    e.dataTransfer.effectAllowed = "move";
+    setMenuOpenId(null);
+    split?.startDrag(id);
+  }
 
   const isSelecting = selectedIds.size > 0;
 
@@ -344,8 +359,12 @@ export default function Sidebar() {
             {filteredConversations.map((conv) => (
               <div
                 key={conv.id}
+                draggable={editingId !== conv.id}
+                onDragStart={(e) => onChatDragStart(e, conv.id)}
+                onDragEnd={() => split?.endDrag()}
+                onContextMenu={(e) => { e.preventDefault(); setMenuOpenId(conv.id); }}
                 className={`group flex items-center gap-2 px-3 py-2 rounded-[var(--glass-radius-sm)] transition ${
-                  currentConvId === conv.id
+                  activeConvId === conv.id
                     ? "glass-strong text-[var(--foreground)]"
                     : "text-zinc-300 glass-button"
                 }`}
@@ -363,7 +382,15 @@ export default function Sidebar() {
                 </button>
                 <Link
                   href={`/c/${conv.id}`}
-                  onClick={close}
+                  onClick={(e) => {
+                    close();
+                    // With panes open, a plain click opens the chat in the focused pane.
+                    if (split?.multi && !e.metaKey && !e.ctrlKey && !e.shiftKey) {
+                      e.preventDefault();
+                      split.replaceFocused(conv.id);
+                    }
+                  }}
+                  draggable={false}
                   className="flex-1 min-w-0"
                   title={conv.model.split('/').pop()}
                 >
@@ -388,6 +415,11 @@ export default function Sidebar() {
                     </div>
                   )}
                 </Link>
+                {split?.ids.includes(conv.id) && split.focus !== conv.id && (
+                  <span title="Open in split view" className="shrink-0 text-zinc-400">
+                    <Columns2 size={12} />
+                  </span>
+                )}
                 <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition items-center">
                   {editingId !== conv.id && (
                     <button
@@ -414,6 +446,17 @@ export default function Sidebar() {
                       <>
                         <div className="fixed inset-0 z-10" onClick={() => setMenuOpenId(null)} />
                         <div className="absolute right-0 top-full mt-1 z-20 w-40 glass-panel-strong rounded-[var(--glass-radius-md)] shadow-lg border border-[var(--glass-border)] overflow-hidden">
+                          {split?.sideBySide && (
+                            <button
+                              onClick={() => { split.openSplit(conv.id); setMenuOpenId(null); }}
+                              aria-disabled={split.ids.length >= split.limit && !split.ids.includes(conv.id)}
+                              title={split.ids.length >= split.limit && !split.ids.includes(conv.id) ? `Close a pane first. Up to ${split.limit} fit at this width.` : undefined}
+                              className="flex w-full items-center gap-2 px-3 py-2 text-xs text-[var(--foreground)] hover:bg-[var(--glass-bg-hover)] transition aria-disabled:opacity-50"
+                            >
+                              <Columns2 size={12} />
+                              Open in split view
+                            </button>
+                          )}
                           {editingId !== conv.id && (
                             <>
                               <button

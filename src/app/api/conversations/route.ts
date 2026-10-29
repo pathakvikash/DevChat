@@ -23,6 +23,7 @@ export async function GET(req: NextRequest) {
         title: true,
         model: true,
         note: true,
+        workingFolder: true,
         pinned: true,
         archived: true,
         createdAt: true,
