@@ -51,7 +51,7 @@ test("closing a pane leaves the other one open", async ({ page, request }) => {
 
   await expect(page).toHaveURL(new RegExp(`/c/${alpha}$`));
   await expect(pane(page, "Beta notes")).toHaveCount(0);
-  await expect(page.getByPlaceholder(/Type a message|Agent mode/)).toBeVisible();
+  await expect(page.getByRole("textbox", { name: "Message", exact: true })).toBeVisible();
 });
 
 test("the opening limit disables the menu item at this width", async ({ page, request }) => {
@@ -66,7 +66,8 @@ test("the opening limit disables the menu item at this width", async ({ page, re
   await link(page, "Gamma ideas").locator("xpath=..").getByTitle("More actions").click();
   const item = page.getByRole("button", { name: "Open in split view" });
   await expect(item).toHaveAttribute("aria-disabled", "true");
-  await item.click();
+  // aria-disabled, not disabled: the item stays tappable and explains why. Playwright treats it as not enabled, so force the click.
+  await item.click({ force: true });
 
   await expect(page.getByText("Close a pane first. Up to 2 fit at this width.")).toBeVisible();
   await expect(pane(page, "Gamma ideas")).toHaveCount(0);

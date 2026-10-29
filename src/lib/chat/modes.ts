@@ -40,3 +40,16 @@ export function effectiveToolMode(mode: ChatMode, hasApprovalSecret: boolean): C
 export function needsApproval(mode: ChatMode, toolId: string, allowed: ReadonlySet<string>): boolean {
   return MODE_POLICY[mode].approval && !allowed.has(toolId);
 }
+
+/**
+ * Tools whose approval is answered in these messages. The SDK re-checks each answer against this request's
+ * tools and denies it when the tool no longer needs approval, so "Allow for this chat" must not clear the
+ * tool for the request that carries the answer.
+ */
+export function toolsWithAnsweredApproval(messages: ReadonlyArray<{ parts?: unknown }>): string[] {
+  return messages.flatMap((m) =>
+    (Array.isArray(m?.parts) ? (m.parts as Array<{ type?: unknown; state?: unknown }>) : [])
+      .filter((p) => p?.state === "approval-responded" && typeof p.type === "string")
+      .map((p) => (p.type as string).replace(/^tool-/, "")),
+  );
+}

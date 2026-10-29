@@ -104,7 +104,8 @@ test("a model without tools shows Ask disabled, and the tap says why", async ({ 
 
   const ask = mode(page, "Ask");
   await expect(ask).toHaveAttribute("aria-disabled", "true");
-  await ask.click();
+  // aria-disabled, not disabled: the tap still explains why. Playwright treats it as not enabled, so force the click.
+  await ask.click({ force: true });
   await expect(ask).toHaveAttribute("aria-checked", "false");
   await expect(page.getByText("Needs a model that can use tools. Pick one with the wrench icon.")).toBeVisible();
 });

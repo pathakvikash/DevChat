@@ -15,7 +15,7 @@ setup("sign in as the test user and warm up the server", async ({ page }) => {
   // The first hit on each dev-server route compiles it; pay that once here instead of inside a spec.
   const id = await createChat(page.request, { title: "Warm-up" });
   await page.goto(`/c/${id}`);
-  await page.getByPlaceholder(/Type a message/).fill("warm up");
+  await page.getByRole("textbox", { name: "Message", exact: true }).fill("warm up");
   await page.keyboard.press("Enter");
   await expect(page.getByText("You said: warm up")).toBeVisible({ timeout: 120_000 });
   for (const route of ["/settings", "/memory", "/kb"]) await page.goto(route);

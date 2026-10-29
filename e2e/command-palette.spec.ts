@@ -11,7 +11,7 @@ test("Cmd/Ctrl+K opens the palette and Esc closes it", async ({ page, request })
   await expect(palette(page)).toBeVisible();
   await expect(paletteInput(page)).toBeFocused();
   for (const item of ["New Chat", "Settings Page", "Open Scratchpad", "Open Artifacts", "Advanced Settings", "Model Settings", "Context Usage"]) {
-    await expect(palette(page).getByRole("option", { name: item })).toBeVisible();
+    await expect(palette(page).getByRole("option", { name: item, exact: true })).toBeVisible();
   }
 
   await page.keyboard.press("Escape");
@@ -49,7 +49,7 @@ test("New Chat in the palette creates and opens a chat", async ({ page, request 
   const id = await createChat(request);
   await openChat(page, id);
   await page.keyboard.press("ControlOrMeta+k");
-  await palette(page).getByRole("option", { name: "New Chat" }).click();
+  await palette(page).getByRole("option", { name: "New Chat", exact: true }).click();
   await page.waitForURL((url) => /^\/c\/[a-z0-9]+$/.test(url.pathname) && !url.pathname.endsWith(id));
   await expect(page.getByText("0 messages")).toBeVisible();
 });
@@ -57,6 +57,6 @@ test("New Chat in the palette creates and opens a chat", async ({ page, request 
 test("the palette closes after New Chat", async ({ page, request }) => {
   await openChat(page, await createChat(request));
   await page.keyboard.press("ControlOrMeta+k");
-  await palette(page).getByRole("option", { name: "New Chat" }).click();
+  await palette(page).getByRole("option", { name: "New Chat", exact: true }).click();
   await expect(palette(page)).toBeHidden({ timeout: 3000 });
 });

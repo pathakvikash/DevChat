@@ -527,6 +527,7 @@ export default function ChatInput({
           <div className={`relative min-w-0 flex flex-col ${expanded ? "order-1 w-full" : "order-2 flex-1"}`}>
             <textarea
               ref={textareaRef}
+              aria-label="Message"
               value={input}
               onChange={(e) => {
                 setInput(e.target.value);

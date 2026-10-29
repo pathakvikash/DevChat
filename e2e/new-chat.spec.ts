@@ -19,7 +19,7 @@ test("/c/new creates a chat and redirects into it", async ({ page }) => {
 
 test("a prompt typed on the home page starts a chat and gets a reply", async ({ page }) => {
   await page.goto("/");
-  await page.getByPlaceholder("Ask anything...").fill("hello from home");
+  await page.getByRole("textbox", { name: "Message", exact: true }).fill("hello from home");
   await page.keyboard.press("Enter");
   await expect(page).toHaveURL(/\/c\/[a-z0-9]+(\?q=.*)?$/);
   await expect(page.getByText("You said: hello from home")).toBeVisible();
