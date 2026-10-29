@@ -1,7 +1,9 @@
 "use client";
 
 import { useState, useCallback } from "react";
+import { useRouter } from "next/navigation";
 import { runWebSearch, formatWebSearchResults } from "./webSearch";
+import type { ToastAction } from "@/app/components/Toast";
 
 interface UseMessageActionsOptions {
   conversationId: string;
@@ -11,7 +13,9 @@ interface UseMessageActionsOptions {
   sendMessage: (...args: any[]) => any;
   regenerate: (...args: any[]) => any;
   addToolResult: (...args: any[]) => void;
-  toast: (msg: string, type: "success" | "error" | "info") => void;
+  toast: (msg: string, type: "success" | "error" | "info", action?: ToastAction) => void;
+  /** A temporary chat is deleted when left, so its fork's toast has no link back. */
+  temporary?: boolean;
 }
 
 export function useMessageActions({
@@ -23,7 +27,9 @@ export function useMessageActions({
   regenerate,
   addToolResult,
   toast,
+  temporary = false,
 }: UseMessageActionsOptions) {
+  const router = useRouter();
   const [regenModal, setRegenModal] = useState<{
     type: "retry" | "message";
     messageId?: string;
@@ -99,6 +105,28 @@ export function useMessageActions({
 
   function handleCopyMessage(content: string) {
     navigator.clipboard.writeText(content);
+  }
+
+  async function handleForkMessage(messageId: string) {
+    try {
+      const res = await fetch(`/api/conversations/${conversationId}/fork`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ messageId }),
+      });
+      if (!res.ok) throw new Error(`Fork failed (${res.status})`);
+      const { id } = await res.json();
+      window.dispatchEvent(new Event("vas:chat-forked"));
+      toast(
+        "Forked this chat",
+        "success",
+        temporary ? undefined : { label: "Open original", href: `/c/${conversationId}` },
+      );
+      router.push(`/c/${id}`);
+    } catch (error) {
+      console.error("Failed to fork conversation:", error);
+      toast("Couldn't fork this chat", "error");
+    }
   }
 
   const handleRegenerateMessage = useCallback(
@@ -227,6 +255,7 @@ export function useMessageActions({
     handleEditMessage,
     handleDeleteMessage,
     handleCopyMessage,
+    handleForkMessage,
     handleRegenerateMessage,
     handleRegenExecute,
   };

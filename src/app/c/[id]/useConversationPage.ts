@@ -280,11 +280,12 @@ export function useConversationPage(conversationId: string, initialPrompt?: stri
 
   const msgActions = useMessageActions({
     conversationId, messages, setMessages, status, sendMessage, regenerate, addToolResult, toast,
+    temporary: !!conversation?.temporary,
   });
 
   const {
     regenModal, setRegenModal,
-    handleClarificationAnswer, handleEditMessage, handleDeleteMessage, handleCopyMessage,
+    handleClarificationAnswer, handleEditMessage, handleDeleteMessage, handleCopyMessage, handleForkMessage,
     handleRegenerateMessage, handleRegenExecute,
   } = msgActions;
 
@@ -428,7 +429,7 @@ export function useConversationPage(conversationId: string, initialPrompt?: stri
     isLoading, currentModelName,
     fetchConversation, refreshConversation, refreshConversationAndMessages,
     fetchContextUsage, handleModelSettingsSave, handleModelChange, handleWorkingFolderChange, handleKbToggle,
-    handleClarificationAnswer, handleEditMessage, handleDeleteMessage, handleCopyMessage,
+    handleClarificationAnswer, handleEditMessage, handleDeleteMessage, handleCopyMessage, handleForkMessage,
     handleRegenerateMessage, handleRegenExecute, regenModal, setRegenModal,
     handleSubmit,
     minimapMessages,

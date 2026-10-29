@@ -114,6 +114,7 @@ export default function ConversationLayout({ conversationId, initialPrompt }: Pr
               onEditMessage={p.handleEditMessage}
               onDeleteMessage={p.handleDeleteMessage}
               onCopyMessage={p.handleCopyMessage}
+              onForkMessage={p.handleForkMessage}
               onRegenerateMessage={p.handleRegenerateMessage}
               onOpenArtifact={(id: string) => { p.setSelectedArtifactId(id); p.setArtifactPanelOpen(true); }}
               onClarificationAnswer={p.handleClarificationAnswer}

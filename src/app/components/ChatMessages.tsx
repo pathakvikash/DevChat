@@ -12,6 +12,7 @@ interface ChatMessagesProps {
   onEditMessage?: (messageId: string, content: string) => Promise<void>;
   onDeleteMessage?: (messageId: string) => Promise<void>;
   onCopyMessage?: (content: string) => void;
+  onForkMessage?: (messageId: string) => Promise<void>;
   onRegenerateMessage?: (messageId: string) => void;
   onOpenArtifact?: (id: string) => void;
   onClarificationAnswer?: (toolCallId: string, answer: string) => void;
@@ -38,6 +39,7 @@ function ChatMessages({
   onEditMessage,
   onDeleteMessage,
   onCopyMessage,
+  onForkMessage,
   onRegenerateMessage,
   onOpenArtifact,
   onClarificationAnswer,
@@ -95,6 +97,7 @@ function ChatMessages({
                   onEdit={onEditMessage}
                   onDelete={onDeleteMessage}
                   onCopy={onCopyMessage}
+                  onFork={onForkMessage}
                   onRegenerateMessage={onRegenerateMessage}
                   onOpenArtifact={onOpenArtifact}
                   onClarificationAnswer={onClarificationAnswer}

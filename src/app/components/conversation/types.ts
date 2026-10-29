@@ -19,6 +19,7 @@ export interface Conversation {
   memoryDisabled?: boolean;
   generativeUiEnabled?: boolean;
   temporary?: boolean;
+  forkedFrom?: { id: string; title: string } | null;
   maxToolCalls?: number;
   fallbackModel?: string | null;
   reasoningEffort?: string | null;

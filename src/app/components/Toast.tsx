@@ -9,17 +9,24 @@ import {
   useEffect,
   type ReactNode,
 } from "react";
+import Link from "next/link";
 
 type ToastType = "success" | "error" | "info";
+
+export interface ToastAction {
+  label: string;
+  href: string;
+}
 
 interface Toast {
   id: number;
   message: string;
   type: ToastType;
+  action?: ToastAction;
 }
 
 interface ToastContextValue {
-  toast: (message: string, type?: ToastType) => void;
+  toast: (message: string, type?: ToastType, action?: ToastAction) => void;
 }
 
 const ToastContext = createContext<ToastContextValue | null>(null);
@@ -35,9 +42,9 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   const nextId = useRef(0);
 
   const addToast = useCallback(
-    (message: string, type: ToastType = "info") => {
+    (message: string, type: ToastType = "info", action?: ToastAction) => {
       const id = nextId.current++;
-      setToasts((prev) => [...prev, { id, message, type }]);
+      setToasts((prev) => [...prev, { id, message, type, action }]);
     },
     [],
   );
@@ -82,6 +89,11 @@ function ToastItem({
       className={`pointer-events-auto glass-strong border ${borderColor} rounded-[var(--glass-radius-md)] px-4 py-3 shadow-lg flex items-center gap-3 min-w-[280px] max-w-[400px]`}
     >
       <span className="flex-1 text-sm text-[var(--foreground)]">{toast.message}</span>
+      {toast.action && (
+        <Link href={toast.action.href} className="focus-ring shrink-0 rounded-sm text-sm font-medium text-[var(--foreground)] underline hover:no-underline">
+          {toast.action.label}
+        </Link>
+      )}
       <button
         onClick={() => onRemove(toast.id)}
         className="text-zinc-400 hover:text-zinc-200 transition shrink-0"
