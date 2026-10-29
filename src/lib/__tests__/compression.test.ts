@@ -29,6 +29,7 @@ vi.mock("@/lib/models", () => ({
 vi.mock("@/lib/apiKeys", () => ({ resolveProviderCreds: vi.fn(async () => ({})) }));
 
 import { prisma } from "@/lib/db";
+import { getModel } from "@/lib/models";
 import { calculateContextUsage, countTokens } from "@/lib/tokens";
 
 beforeEach(() => {
@@ -38,7 +39,7 @@ beforeEach(() => {
 describe("shouldAutoCompress", () => {
   it("returns false when conversation not found", async () => {
     (prisma.conversation.findUnique as any).mockResolvedValue(null);
-    const result = await shouldAutoCompress("nonexistent-id");
+    const result = await shouldAutoCompress("nonexistent-id", 85, 8192);
     expect(result).toBe(false);
   });
 
@@ -57,7 +58,7 @@ describe("shouldAutoCompress", () => {
       maxContextTokens: 8192,
     });
 
-    const result = await shouldAutoCompress("conv-id", 85);
+    const result = await shouldAutoCompress("conv-id", 85, 8192);
     expect(result).toBe(false);
   });
 
@@ -79,7 +80,7 @@ describe("shouldAutoCompress", () => {
       maxContextTokens: 8192,
     });
 
-    const result = await shouldAutoCompress("conv-id", 85);
+    const result = await shouldAutoCompress("conv-id", 85, 8192);
     expect(result).toBe(true);
   });
 
@@ -98,7 +99,7 @@ describe("shouldAutoCompress", () => {
       maxContextTokens: 8192,
     });
 
-    const result = await shouldAutoCompress("conv-id", 85);
+    const result = await shouldAutoCompress("conv-id", 85, 8192);
     expect(result).toBe(false);
   });
 
@@ -115,7 +116,7 @@ describe("shouldAutoCompress", () => {
       maxContextTokens: 8192,
     });
 
-    const result = await shouldAutoCompress("conv-id");
+    const result = await shouldAutoCompress("conv-id", 85, 8192);
     expect(result).toBe(false);
   });
 
@@ -141,7 +142,7 @@ describe("shouldAutoCompress", () => {
     );
     (calculateContextUsage as any).mockResolvedValue({ contextPercent: 10 });
 
-    await shouldAutoCompress("conv-id", 85);
+    await shouldAutoCompress("conv-id", 85, 8192);
 
     const [, systemPrompt, messages] = (calculateContextUsage as any).mock.calls.at(-1);
     expect(messages.map((m: any) => m.content)).toEqual(["kept q", "kept a", "new q", "new a"]);
@@ -161,7 +162,26 @@ describe("shouldAutoCompress", () => {
     ]);
     (calculateContextUsage as any).mockResolvedValue({ contextPercent: 99 });
 
-    expect(await shouldAutoCompress("conv-id", 85)).toBe(false);
+    expect(await shouldAutoCompress("conv-id", 85, 8192)).toBe(false);
+  });
+});
+
+describe("shouldAutoCompress context window", () => {
+  it("measures against the window it is given, not 4096", async () => {
+    (prisma.conversation.findUnique as any).mockResolvedValue({
+      model: "anthropic/big",
+      systemPrompt: "sys",
+    });
+    (prisma.message.findMany as any).mockResolvedValue([
+      { role: "user", content: "a" },
+      { role: "assistant", content: "b" },
+      { role: "user", content: "c" },
+    ]);
+    // 5000 tokens used: 122% of 4096, 2.5% of 200k.
+    (calculateContextUsage as any).mockImplementation(async (...a: any[]) => ({ contextPercent: (5000 / a[4]) * 100 }));
+
+    expect(await shouldAutoCompress("conv-id", 85, 200_000)).toBe(false);
+    expect((calculateContextUsage as any).mock.calls.at(-1)[4]).toBe(200_000);
   });
 });
 

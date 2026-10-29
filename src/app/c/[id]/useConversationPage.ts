@@ -62,6 +62,7 @@ export function useConversationPage(conversationId: string, initialPrompt?: stri
   const [toolErrorDialogOpen, setToolErrorDialogOpen] = useState(false);
   const [keyboardShortcutsOpen, setKeyboardShortcutsOpen] = useState(false);
   const [isCompressing, setIsCompressing] = useState(false);
+  const [compressFocus, setCompressFocus] = useState("");
 
   /* ─── Settings persistence ─────────────────────────────────────────────── */
 
@@ -338,11 +339,22 @@ export function useConversationPage(conversationId: string, initialPrompt?: stri
     }
   }
 
-  async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
-    e.preventDefault();
-    if (!input.trim() && files.length === 0 && quotes.length === 0) return;
-    if (status === "streaming" || status === "submitted") return;
+  // Set synchronously, so a second Enter or Cmd+Enter before the first send reaches `status` is dropped.
+  const submittingRef = useRef(false);
 
+  async function handleSubmit(e?: { preventDefault(): void }) {
+    e?.preventDefault();
+    if (status === "streaming" || status === "submitted") {
+      if (parseCommand(input)?.command.action === "compress") toast("Wait for the reply to finish, then compress", "info");
+      return;
+    }
+    if (submittingRef.current) return;
+    submittingRef.current = true;
+    try { await submitInput(); } finally { submittingRef.current = false; }
+  }
+
+  async function submitInput() {
+    if (!input.trim() && files.length === 0 && quotes.length === 0) return;
     const parsed = parseCommand(input);
     if (parsed) {
       const { command, arg } = parsed;
@@ -355,7 +367,7 @@ export function useConversationPage(conversationId: string, initialPrompt?: stri
       } else {
         await runCommandAction(command, arg, {
           conversationId, conversation, sendMessage, setMessages, setConversation,
-          setIsCompressing, setArtifactPanelOpen,
+          setIsCompressing, setCompressFocus, setArtifactPanelOpen,
           setScratchpadOpen, setModelSettingsOpen, setKeyboardShortcutsOpen, toast, refreshConversationAndMessages,
         });
       }
@@ -374,14 +386,15 @@ export function useConversationPage(conversationId: string, initialPrompt?: stri
   );
 
   const closeTopDialog = useCallback(() => {
-    if (toolErrorDialogOpen) setToolErrorDialogOpen(false);
+    if (keyboardShortcutsOpen) setKeyboardShortcutsOpen(false);
+    else if (toolErrorDialogOpen) setToolErrorDialogOpen(false);
     else if (contextPanelOpen) setContextPanelOpen(false);
     else if (modelSettingsOpen) setModelSettingsOpen(false);
     else if (advancedOpen) setAdvancedOpen(false);
     else if (artifactPanelOpen) setArtifactPanelOpen(false);
     else if (todoPanelOpen) setTodoPanelOpen(false);
     else if (scratchpadOpen) setScratchpadOpen(false);
-  }, [toolErrorDialogOpen, contextPanelOpen, modelSettingsOpen, advancedOpen, artifactPanelOpen, todoPanelOpen, scratchpadOpen]);
+  }, [toolErrorDialogOpen, contextPanelOpen, modelSettingsOpen, advancedOpen, artifactPanelOpen, todoPanelOpen, scratchpadOpen, keyboardShortcutsOpen]);
 
   /* ─── Minimap ───────────────────────────────────────────────────────────── */
 
@@ -419,7 +432,7 @@ export function useConversationPage(conversationId: string, initialPrompt?: stri
     contextPanelOpen, setContextPanelOpen, contextData, setContextData,
     toolErrorDialogOpen, setToolErrorDialogOpen,
     keyboardShortcutsOpen, setKeyboardShortcutsOpen,
-    isCompressing, setIsCompressing,
+    isCompressing, setIsCompressing, compressFocus,
     searchProvider, toggleSearchProvider,
     enabledTools, enabledSkills, persistAdvanced,
     selectedKbId, setSelectedKbId,

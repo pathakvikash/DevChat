@@ -209,7 +209,8 @@ export async function saveCompressedSummary(
 
 export async function shouldAutoCompress(
   conversationId: string,
-  thresholdPercent: number = 85
+  thresholdPercent: number,
+  contextWindow: number,
 ): Promise<boolean> {
   const conversation = await prisma.conversation.findUnique({
     where: { id: conversationId },
@@ -218,10 +219,6 @@ export async function shouldAutoCompress(
 
   if (!conversation) return false;
 
-  // Use the base dynamic tier (4096) regardless of any inflated contextLength
-  // from dynamic context management. Dynamic increases push contextUsage to
-  // well below the threshold, making auto-compress never fire.
-  const contextLength = 4096;
   const { calculateContextUsage } = await import("@/lib/tokens");
 
   // After a compression the live prompt is the summary plus messages from compressedAt on.
@@ -241,7 +238,7 @@ export async function shouldAutoCompress(
     systemPrompt,
     messages,
     "",
-    contextLength
+    contextWindow
   );
 
   return result.contextPercent >= thresholdPercent;

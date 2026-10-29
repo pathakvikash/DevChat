@@ -1,8 +1,7 @@
 import { test, expect, type Page } from "@playwright/test";
 import { composer, createChat, messages, openChat, regenerateButtons, send, storedMessages } from "./helpers";
 
-// A user message sent in this session has a client-made id that the server never stores
-// (see the test.fail cases below), so these specs reload first to work on stored messages.
+// These specs reload first so they work on stored messages; the "sent in this session" cases below skip the reload.
 async function sendAndReload(page: Page, text: string) {
   await send(page, text);
   await expect(regenerateButtons(page)).toHaveCount(1);
@@ -80,10 +79,7 @@ test("Edit can be cancelled with Escape", async ({ page, request }) => {
   expect((await storedMessages(request, id))[0].content).toBe("stay the same");
 });
 
-// Known bug, found while writing this suite: the edit shows in the UI but is never saved,
-// because the PATCH uses the client-made id and the server answers 404, which the UI treats as OK.
-// When this is fixed the test starts passing, test.fail() complains, and the line can go.
-test.fail("Edit of a message sent in this session is saved (known bug)", async ({ page, request }) => {
+test("Edit of a message sent in this session is saved", async ({ page, request }) => {
   const id = await createChat(request);
   await openChat(page, id);
   await send(page, "fresh words");
@@ -126,9 +122,7 @@ test("Delete keeps the message when you decline", async ({ page, request }) => {
   await expect(composer(page)).toBeEnabled();
 });
 
-// Known bug, same cause as the edit one: the DELETE 404s and the UI shows it as removed,
-// but the message comes back after a reload.
-test.fail("Delete of a message sent in this session is saved (known bug)", async ({ page, request }) => {
+test("Delete of a message sent in this session is saved", async ({ page, request }) => {
   const id = await createChat(request);
   await openChat(page, id);
   await send(page, "fresh delete");

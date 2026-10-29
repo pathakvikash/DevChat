@@ -37,9 +37,9 @@ describe("autoCompress", () => {
   it("compresses with a deadline and saves the summary at the cut point", async () => {
     vi.mocked(compressConversation).mockResolvedValue(compressed);
 
-    await autoCompress("c1", 85);
+    await autoCompress("c1", 85, 8192);
 
-    expect(shouldAutoCompress).toHaveBeenCalledExactlyOnceWith("c1", 85);
+    expect(shouldAutoCompress).toHaveBeenCalledExactlyOnceWith("c1", 85, 8192);
     expect(compressConversation).toHaveBeenCalledExactlyOnceWith("c1", "compact-model", {
       timeoutMs: AUTO_COMPRESS_TIMEOUT_MS,
     });
@@ -51,12 +51,25 @@ describe("autoCompress", () => {
     );
   });
 
+  it("checks the threshold against the context window it is given", async () => {
+    await autoCompress("c1", 85, 32768);
+
+    expect(shouldAutoCompress).toHaveBeenCalledWith("c1", 85, 32768);
+  });
+
+  it("skips the check and the compression when the window is unknown", async () => {
+    await autoCompress("c1", 85, null);
+
+    expect(shouldAutoCompress).not.toHaveBeenCalled();
+    expect(compressConversation).not.toHaveBeenCalled();
+  });
+
   it("resolves only after the summary is saved", async () => {
     let finish!: (r: any) => void;
     vi.mocked(compressConversation).mockReturnValue(new Promise((resolve) => (finish = resolve)));
     let resolved = false;
 
-    const done = autoCompress("c1", 85).then(() => (resolved = true));
+    const done = autoCompress("c1", 85, 8192).then(() => (resolved = true));
     await vi.waitFor(() => expect(compressConversation).toHaveBeenCalled());
     expect(resolved).toBe(false);
     finish(compressed);
@@ -72,7 +85,7 @@ describe("autoCompress", () => {
       return compressed;
     });
 
-    await autoCompress("c1", 85, () => calls.push("announce"));
+    await autoCompress("c1", 85, 8192, () => calls.push("announce"));
 
     expect(calls).toEqual(["announce", "compress"]);
   });
@@ -81,7 +94,7 @@ describe("autoCompress", () => {
     vi.mocked(shouldAutoCompress).mockResolvedValue(false);
     const onCompressing = vi.fn();
 
-    await autoCompress("c1", 85, onCompressing);
+    await autoCompress("c1", 85, 8192, onCompressing);
 
     expect(onCompressing).not.toHaveBeenCalled();
     expect(compressConversation).not.toHaveBeenCalled();
@@ -90,7 +103,7 @@ describe("autoCompress", () => {
   it("ends normally when compression fails or times out (it returns null)", async () => {
     vi.mocked(compressConversation).mockResolvedValue(null);
 
-    await expect(autoCompress("c1", 85)).resolves.toBeUndefined();
+    await expect(autoCompress("c1", 85, 8192)).resolves.toBeUndefined();
 
     expect(saveCompressedSummary).not.toHaveBeenCalled();
   });
@@ -98,7 +111,7 @@ describe("autoCompress", () => {
   it("ends normally when something in compression throws", async () => {
     vi.mocked(compressConversation).mockRejectedValue(new Error("ollama down"));
 
-    await expect(autoCompress("c1", 85)).resolves.toBeUndefined();
+    await expect(autoCompress("c1", 85, 8192)).resolves.toBeUndefined();
 
     expect(saveCompressedSummary).not.toHaveBeenCalled();
   });

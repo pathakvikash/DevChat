@@ -27,10 +27,7 @@ test("the header's More menu opens the dialog and the close button closes it", a
   await expect(heading(page)).toBeHidden();
 });
 
-// Known bug: the dialog lists "Escape: Close dialog" but Esc does nothing for it, because
-// closeTopDialog() in useConversationPage.ts has no branch for the shortcuts dialog.
-// When this is fixed the test starts passing, test.fail() complains, and the line can go.
-test.fail("Esc closes the shortcuts dialog (known bug)", async ({ page, request }) => {
+test("Esc closes the shortcuts dialog", async ({ page, request }) => {
   await openChat(page, await createChat(request));
   await page.keyboard.press("ControlOrMeta+/");
   await expect(heading(page)).toBeVisible();

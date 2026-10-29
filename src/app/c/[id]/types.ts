@@ -45,6 +45,7 @@ export interface ConversationPageState extends DataActions {
   keyboardShortcutsOpen: boolean;
   setKeyboardShortcutsOpen: React.Dispatch<React.SetStateAction<boolean>>;
   isCompressing: boolean;
+  compressFocus: string;
   setIsCompressing: React.Dispatch<React.SetStateAction<boolean>>;
   searchProvider: "duckduckgo" | "tavily";
   toggleSearchProvider: () => void;
@@ -79,7 +80,7 @@ export interface ConversationPageState extends DataActions {
     userMessageIdx?: number;
   } | null;
   setRegenModal: (v: any) => void;
-  handleSubmit: (e: React.FormEvent<HTMLFormElement>) => Promise<void>;
+  handleSubmit: (e?: { preventDefault(): void }) => Promise<void>;
   minimapMessages: MinimapMessage[];
   isDialogOpen: boolean;
   closeTopDialog: () => void;

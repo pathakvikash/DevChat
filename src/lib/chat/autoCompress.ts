@@ -46,12 +46,15 @@ export function canAutoCompress(
 export async function autoCompress(
   conversationId: string,
   threshold: number,
+  contextWindow: number | null,
   onCompressing?: () => void,
 ): Promise<void> {
+  // Without a known window there is no percentage to check, so skip rather than guess.
+  if (!contextWindow) return;
   try {
-    const needsCompression = await shouldAutoCompress(conversationId, threshold);
+    const needsCompression = await shouldAutoCompress(conversationId, threshold, contextWindow);
     console.log(
-      `[Auto-compress] Conversation ${conversationId}: needsCompression=${needsCompression}, model=${DEFAULT_COMPACTION_MODEL}`,
+      `[Auto-compress] Conversation ${conversationId}: needsCompression=${needsCompression}, window=${contextWindow}`,
     );
     if (!needsCompression) return;
     onCompressing?.();
