@@ -8,6 +8,7 @@ interface UseKeyboardShortcutsOptions {
   onOpenKeyboardShortcuts?: () => void;
   isDialogOpen?: boolean;
   onCloseDialog?: () => void;
+  onToggleSidePane?: () => void;
 }
 
 export function useKeyboardShortcuts({
@@ -16,6 +17,7 @@ export function useKeyboardShortcuts({
   onOpenKeyboardShortcuts,
   isDialogOpen,
   onCloseDialog,
+  onToggleSidePane,
 }: UseKeyboardShortcutsOptions) {
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
@@ -39,6 +41,12 @@ export function useKeyboardShortcuts({
         return;
       }
 
+      if ((e.metaKey || e.ctrlKey) && e.key === "\\") {
+        e.preventDefault();
+        onToggleSidePane?.();
+        return;
+      }
+
       if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
         e.preventDefault();
         onSend?.();
@@ -48,5 +56,5 @@ export function useKeyboardShortcuts({
 
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [onSend, onOpenCommandPalette, onOpenKeyboardShortcuts, isDialogOpen, onCloseDialog]);
+  }, [onSend, onOpenCommandPalette, onOpenKeyboardShortcuts, isDialogOpen, onCloseDialog, onToggleSidePane]);
 }

@@ -1,7 +1,9 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import PaneBar from "@/app/c/PaneBar";
+import SideChatHeader from "@/app/components/sidechat/SideChatHeader";
+import { createSideChat, listSideChats, type SideChatSummary } from "@/lib/sideChat";
 import { useSplitViewOptional } from "@/app/c/SplitViewContext";
 import { isPaneBusy } from "@/lib/splitPanes";
 
@@ -25,7 +27,7 @@ import { ToolAnswersProvider } from "@/app/components/ToolAnswers";
 import { ChatModeContext } from "@/app/contexts/ChatModeContext";
 import { joinTextParts } from "@/lib/utils/conversation";
 import { exportChat } from "@/lib/utils/download";
-import { StickyNote, FileCode, SlidersHorizontal, Settings, BarChart3, Target, Download, History, Minimize2 } from "lucide-react";
+import { StickyNote, FileCode, SlidersHorizontal, Settings, BarChart3, Target, Download, History, Minimize2, Columns2 } from "lucide-react";
 
 import { useChatPane } from "./useChatPane";
 
@@ -54,6 +56,24 @@ export default function ConversationPane({ conversationId, focused, initialPromp
   useEffect(() => { setPaneBusy?.(conversationId, busy); }, [conversationId, busy, setPaneBusy]);
   useEffect(() => () => setPaneBusy?.(conversationId, false), [conversationId, setPaneBusy]);
 
+  // A side chat: its header lists the main chat's side chats and shows what the side chat sees.
+  const isSide = p.conversation?.kind === "side";
+  const parentId = p.conversation?.parentId ?? null;
+  const parentTitle = (parentId && split?.info[parentId]?.title) || "Main chat";
+  const [sideHistory, setSideHistory] = useState<SideChatSummary[]>([]);
+  const [shown, setShown] = useState<{ shown: number; total: number } | null>(null);
+  useEffect(() => {
+    if (!isSide || !parentId) return;
+    listSideChats(parentId).then(setSideHistory).catch(() => {});
+  }, [isSide, parentId]);
+  useEffect(() => {
+    if (!isSide) return;
+    fetch(`/api/conversations/${conversationId}/context`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => setShown(d?.mainContext ? { shown: d.mainContext.shown, total: d.mainContext.total } : null))
+      .catch(() => {});
+  }, [isSide, conversationId, p.messages.length]);
+
   const panelActions = [
     { id: "scratchpad", label: "Open Scratchpad", icon: <StickyNote size={16} />, onSelect: () => p.setScratchpadOpen(true) },
     { id: "artifacts", label: "Open Artifacts", icon: <FileCode size={16} />, onSelect: () => p.setArtifactPanelOpen(true) },
@@ -67,6 +87,7 @@ export default function ConversationPane({ conversationId, focused, initialPromp
     { id: "export-markdown", label: "Export as Markdown", icon: <Download size={16} />, onSelect: () => exportChat(conversationId, "markdown", p.toast) },
     { id: "search-past-chats", label: "Search past chats", icon: <History size={16} />, onSelect: () => p.setInput("/recall ") },
     { id: "compress-chat", label: "Compress chat", icon: <Minimize2 size={16} />, onSelect: () => p.setInput("/compress ") },
+    { id: "toggle-side-chat", label: "Toggle side chat", icon: <Columns2 size={16} />, onSelect: () => p.toggleSidePane() },
   ];
   useCommandPaletteActions(focused ? "Chat" : "Chat (idle)", focused ? chatActions : []);
 
@@ -94,7 +115,7 @@ export default function ConversationPane({ conversationId, focused, initialPromp
     <ChatModeContext.Provider value={{ mode: p.mode, setMode: p.setMode, modelCaps: p.modelCaps, setModelCaps: p.setModelCaps }}>
     <div className="flex h-full bg-[var(--background)]">
       <main className="flex h-full flex-1 min-w-0 flex-col bg-[var(--background)] text-[var(--foreground)]">
-        {split?.multi && (
+        {split?.multi && !isSide && (
           <PaneBar
             title={split.info[conversationId]?.title ?? "Chat"}
             focused={focused}
@@ -104,6 +125,27 @@ export default function ConversationPane({ conversationId, focused, initialPromp
           />
         )}
         <div aria-live="polite" className="sr-only">{p.announcement}</div>
+        {isSide ? (
+          parentId && (
+            <SideChatHeader
+              title={p.conversation?.title ?? "Side chat"}
+              parentId={parentId}
+              parentTitle={parentTitle}
+              model={p.conversation?.model ?? ""}
+              onModelChange={p.handleModelChange}
+              history={sideHistory}
+              activeId={conversationId}
+              onSelect={(id) => split?.replaceAt(conversationId, id)}
+              onNewSideChat={async () => split?.replaceAt(conversationId, (await createSideChat(parentId)).id)}
+              dock={split && split.ids.indexOf(conversationId) < split.ids.indexOf(parentId) ? "left" : "right"}
+              onToggleDock={() => split?.toggleDock(conversationId, parentId)}
+              onClose={() => split?.closeChat(conversationId)}
+              onOpenParent={() => split?.focusPane(parentId)}
+              shown={shown?.shown}
+              total={shown?.total}
+            />
+          )
+        ) : (
         <ConversationHeader
           allowedToolCount={p.allowedToolCount}
           onResetAllowedTools={p.resetAllowedTools}
@@ -138,6 +180,7 @@ export default function ConversationPane({ conversationId, focused, initialPromp
             }
           }}
         />
+        )}
 
         <div className="relative flex-1 flex min-h-0">
           {p.messages.length === 0 && !p.isLoading && (
@@ -162,6 +205,7 @@ export default function ConversationPane({ conversationId, focused, initialPromp
               statusLabel={p.currentModelName ? `Waiting for ${p.currentModelName}…` : undefined}
               onQuote={p.addQuote}
               quoteSuppressed={p.isDialogOpen}
+              sendToMain={isSide && parentId ? { title: parentTitle, onSend: (text: string) => window.dispatchEvent(new CustomEvent("vas:send-to-main", { detail: { id: parentId, text } })) } : undefined}
             />
             </ToolAnswersProvider>
           )}

@@ -1,5 +1,7 @@
 "use client";
 
+import SendToMainButton from "@/app/components/sidechat/SendToMainButton";
+import { joinTextParts } from "@/lib/utils/conversation";
 import { memo, useEffect, useRef } from "react";
 import { UIMessage } from "ai";
 import MessageBubble from "./MessageBubble";
@@ -29,6 +31,8 @@ interface ChatMessagesProps {
   onQuote: (text: string) => void;
   /** An overlay is open: hide the Reply pill. */
   quoteSuppressed?: boolean;
+  /** Side chats: the last reply gets "Send to main", which prefills the main chat's box. */
+  sendToMain?: { title: string; onSend: (text: string) => void };
 }
 
 /** Provider-run tools arrive as "dynamic-tool" parts; everything downstream keys on
@@ -56,6 +60,7 @@ function ChatMessages({
   statusLabel,
   onQuote,
   quoteSuppressed,
+  sendToMain,
 }: ChatMessagesProps) {
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -127,6 +132,11 @@ function ChatMessages({
                     }
                     planCaption={s === actionsAt && !toolsAvailable ? "This model can't use tools, so it will write out the result." : undefined}
                   />
+                  {sendToMain && s === actionsAt && message.role === "assistant" && !isLoading && (
+                    <div className="mt-1 flex justify-end">
+                      <SendToMainButton text={joinTextParts(parts)} parentTitle={sendToMain.title} onSendToMain={sendToMain.onSend} />
+                    </div>
+                  )}
                   {sentWhileReplying && (
                     <p className="mt-1 text-right text-[11px] text-zinc-400">Sent while replying</p>
                   )}

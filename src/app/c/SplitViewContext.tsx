@@ -4,6 +4,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useToast } from "@/app/components/Toast";
 import { fetchConversations } from "@/app/hooks/useConversationsApi";
+import { createSideChat, listSideChats, queueSideQuestion } from "@/lib/sideChat";
 import {
   closePane,
   fitsSideBySide,
@@ -53,9 +54,23 @@ interface SplitViewValue {
   replaceAt: (oldId: string, id: string) => void;
   closeChat: (id: string) => void;
   cycleFocus: (dir: 1 | -1) => void;
+  openSide: (parentId: string, question?: string) => Promise<void>;
+  toggleSide: (parentId: string) => Promise<void>;
+  toggleDock: (sideId: string, parentId: string) => void;
 }
 
 const SplitViewContext = createContext<SplitViewValue | null>(null);
+
+const DOCK_KEY = "vas:sideDock";
+
+/** Side chats open on the side of their main chat remembered last time. */
+function readDock(): "left" | "right" {
+  try {
+    return localStorage.getItem(DOCK_KEY) === "left" ? "left" : "right";
+  } catch {
+    return "right";
+  }
+}
 
 function basename(path: string): string {
   return path.split("/").filter(Boolean).pop() ?? path;
@@ -227,6 +242,41 @@ export function SplitViewProvider({ children }: { children: React.ReactNode }) {
     return () => document.removeEventListener("keydown", onKeyDown);
   }, []);
 
+  /** The latest side chat of a main chat; created when it has none. */
+  const sideFor = async (parentId: string) => {
+    const list = await listSideChats(parentId).catch(() => []);
+    return list[0]?.id ?? (await createSideChat(parentId)).id;
+  };
+
+  const openSide = async (parentId: string, question?: string) => {
+    const sideId = await sideFor(parentId);
+    if (question) queueSideQuestion(sideId, question);
+    if (ids.includes(sideId)) return focusPane(sideId);
+    if (!ids.includes(parentId)) return;
+    const next = openPane(ids, sideId, { index: ids.indexOf(parentId), side: readDock() }, limit);
+    if (next === "full") return toast(`Close a pane first. Up to ${limit} fit at this width.`, "info");
+    commit({ ids: next, focus: sideId });
+  };
+
+  const toggleSide = async (parentId: string) => {
+    const sideId = await sideFor(parentId);
+    if (ids.includes(sideId)) return closeChat(sideId);
+    return openSide(parentId);
+  };
+
+  /** Moves a side chat to the other side of its parent by swapping the two. */
+  const toggleDock = (sideId: string, parentId: string) => {
+    const i = ids.indexOf(parentId);
+    const j = ids.indexOf(sideId);
+    if (i < 0 || j < 0) return;
+    const next = [...ids];
+    [next[i], next[j]] = [next[j], next[i]];
+    try {
+      localStorage.setItem(DOCK_KEY, next.indexOf(sideId) < next.indexOf(parentId) ? "left" : "right");
+    } catch {}
+    commit({ ids: next, focus });
+  };
+
   const value: SplitViewValue = {
     ids,
     focus,
@@ -249,6 +299,9 @@ export function SplitViewProvider({ children }: { children: React.ReactNode }) {
     replaceAt,
     closeChat,
     cycleFocus,
+    openSide,
+    toggleSide,
+    toggleDock,
   };
   return <SplitViewContext.Provider value={value}>{children}</SplitViewContext.Provider>;
 }

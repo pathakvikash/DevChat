@@ -7,6 +7,8 @@ import type { QueuedItem } from "@/app/components/QueuedMessages";
 import { fetchModels } from "@/app/hooks/useModelsApi";
 import type { Conversation, ModelInfo } from "@/app/components/conversation/types";
 import { useConversationMode, type ModelCaps } from "@/app/contexts/ChatModeContext";
+import { useSplitViewOptional } from "@/app/c/SplitViewContext";
+import { takeSideQuestion } from "@/lib/sideChat";
 import { useKeyboardShortcuts } from "@/app/hooks/useKeyboardShortcuts";
 import type { ApprovalAnswer, PlanAnswer } from "@/app/components/ToolAnswers";
 import type { MinimapMessage } from "@/app/components/MinimapNavigator";
@@ -88,8 +90,8 @@ export interface ChatPaneOptions {
 }
 
 export function useChatPane(conversationId: string, { focused, kind, searchProvider, initialPrompt }: ChatPaneOptions): ChatPaneState {
-  const isSide = kind === "side";
   const { toast } = useToast();
+  const split = useSplitViewOptional();
 
   /* ─── State ────────────────────────────────────────────────────────────── */
 
@@ -120,7 +122,11 @@ export function useChatPane(conversationId: string, { focused, kind, searchProvi
   const [selectedKbId, setSelectedKbId] = useState<string>("");
   const [scratchpadOpen, setScratchpadOpen] = useState(false);
   const [todoPanelOpen, setTodoPanelOpen] = useState(false);
-  const { mode, setMode } = useConversationMode(conversationId);
+  const { mode: storedMode, setMode: storeMode } = useConversationMode(conversationId);
+  // A side chat is always chat mode (the server forces it too), and its mode is not stored.
+  const isSide = kind === "side" || conversation?.kind === "side";
+  const mode = isSide ? "chat" : storedMode;
+  const setMode = isSide ? () => {} : storeMode;
   const [modelCaps, setModelCaps] = useState<ModelCaps>({ toolsAvailable: true, cli: false });
   const [modelList, setModelList] = useState<ModelInfo[]>([]);
   const settingsKey = `vas:advancedSettings:${conversationId}`;
@@ -566,7 +572,7 @@ export function useChatPane(conversationId: string, { focused, kind, searchProvi
   useEffect(() => {
     // One-shot per pane: the ref stops a later render from sending the prompt again.
     if (!convLoaded || autoSubmittedRef.current) return;
-    const prompt = initialPrompt;
+    const prompt = initialPrompt ?? takeSideQuestion(conversationId);
     if (!prompt) return;
     autoSubmittedRef.current = true;
     setInput(prompt);
@@ -577,6 +583,18 @@ export function useChatPane(conversationId: string, { focused, kind, searchProvi
     }, 0);
   }, [convLoaded]);
   useEffect(() => { fetchContextUsage(); }, [conversationId, messages.length, conversation?.model]);
+  // "Send to main" on a side reply: prefill this chat's box, focus it, send nothing.
+  useEffect(() => {
+    function onSendToMain(e: Event) {
+      const { id, text } = (e as CustomEvent<{ id: string; text: string }>).detail;
+      if (id !== conversationId) return;
+      setInput((prev) => (prev.trim() ? `${prev}\n\n${text}` : text));
+      document.querySelector<HTMLTextAreaElement>(`[data-pane-id="${conversationId}"] textarea`)?.focus();
+    }
+    window.addEventListener("vas:send-to-main", onSendToMain);
+    return () => window.removeEventListener("vas:send-to-main", onSendToMain);
+  }, [conversationId]);
+
   useEffect(() => {
     function handleTitleUpdate(e: Event) {
       const detail = (e as CustomEvent).detail;
@@ -771,6 +789,7 @@ export function useChatPane(conversationId: string, { focused, kind, searchProvi
           setIsCompressing, setCompressFocus, setArtifactPanelOpen,
           setScratchpadOpen, setModelSettingsOpen, setKeyboardShortcutsOpen, toast, refreshConversationAndMessages,
           setMode, setRequestBody, toolsAvailable,
+          openSide: (question) => { void split?.openSide(conversationId, question); },
         });
       }
       return;
@@ -809,7 +828,10 @@ export function useChatPane(conversationId: string, { focused, kind, searchProvi
 
   /* ─── Keyboard: only the focused pane answers ──────────────────────────── */
 
+  const toggleSidePane = () => (isSide ? split?.closeChat(conversationId) : split?.toggleSide(conversationId));
+
   useKeyboardShortcuts({
+    onToggleSidePane: focused ? toggleSidePane : undefined,
     onSend: focused ? () => handleSubmit() : undefined,
     isDialogOpen: focused && isDialogOpen,
     onCloseDialog: focused ? closeTopDialog : undefined,
@@ -854,7 +876,7 @@ export function useChatPane(conversationId: string, { focused, kind, searchProvi
     keyboardShortcutsOpen, setKeyboardShortcutsOpen,
     isCompressing, setIsCompressing, compressFocus,
     enabledTools, enabledSkills, persistAdvanced,
-    answerApproval, answerPlan, approvePlanReply, toolsAvailable, mode, setMode, modelCaps, setModelCaps,
+    answerApproval, answerPlan, approvePlanReply, toolsAvailable, mode, setMode, modelCaps, setModelCaps, toggleSidePane,
     allowedToolCount: allowedTools.length, resetAllowedTools,
     selectedKbId, setSelectedKbId,
     scrollRef, toast,

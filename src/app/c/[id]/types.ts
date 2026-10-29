@@ -89,6 +89,8 @@ export interface ChatPaneState extends DataActions {
   setMode: (next: ChatMode) => void;
   modelCaps: ModelCaps;
   setModelCaps: (next: ModelCaps) => void;
+  /** Opens or closes this chat's side chat pane. */
+  toggleSidePane: () => void;
   /** False for a model without tools (or chat-only): queued messages go next, and Ask and Plan get their text fallbacks. */
   toolsAvailable: boolean;
   handleEditMessage: (messageId: string, content: string) => Promise<void>;
