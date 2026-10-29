@@ -4,8 +4,9 @@ import {
   AGENT_MESSAGE_PART,
   agentBadgeText,
   agentFromJson,
-  agentHopOverLimit,
+  agentPartRefused,
   parseOpenPanes,
+  senderName,
   agentMessageModelText,
   buildAgentMessagePart,
   canDeliver,
@@ -157,11 +158,35 @@ describe("agent message limits and stored senders", () => {
     expect(parseOpenPanes("a")).toBeNull();
   });
 
-  it("refuses a hop past the cap, and nothing else", () => {
+  it("refuses a hop outside 1..3 and a malformed agent part, and nothing else", () => {
     const at = (hop: number) => ({ role: "user", parts: [buildAgentMessagePart({ ...sender, hop }), { type: "text", text: "x" }] });
-    expect(agentHopOverLimit(at(3))).toBe(false);
-    expect(agentHopOverLimit(at(4))).toBe(true);
-    expect(agentHopOverLimit({ role: "user", parts: [{ type: "text", text: "plain" }] })).toBe(false);
+    expect(agentPartRefused(at(1))).toBe(false);
+    expect(agentPartRefused(at(3))).toBe(false);
+    expect(agentPartRefused(at(4))).toBe(true);
+    expect(agentPartRefused(at(0))).toBe(true);
+    expect(agentPartRefused(at(1.5))).toBe(true);
+    const broken = { type: "data-agent-message", data: { from: "chat", fromTitle: "x", hop: 1 } };
+    expect(agentPartRefused({ role: "user", parts: [broken, { type: "text", text: "x" }] })).toBe(true);
+    expect(agentPartRefused({ role: "user", parts: [{ type: "text", text: "plain" }] })).toBe(false);
+  });
+
+  it("caps the sender's title at 80 and its chat id at 64, and requires a whole hop", () => {
+    const part = (data: Record<string, unknown>) => ({ type: AGENT_MESSAGE_PART, data: { ...sender, ...data } });
+    expect(parseAgentMessagePart(part({ fromTitle: "t".repeat(200) }))?.fromTitle).toHaveLength(80);
+    expect(parseAgentMessagePart(part({ fromConversationId: "c".repeat(100) }))?.fromConversationId).toHaveLength(64);
+    expect(parseAgentMessagePart(part({ hop: 1.5 }))).toBeNull();
+    expect(parseAgentMessagePart(part({ hop: 0 }))).toBeNull();
+  });
+
+  it("writes a sender's title on one line with no quotes", () => {
+    expect(senderName({ from: "chat", fromTitle: 'A "b"\nC' })).toBe("A 'b' C");
+  });
+
+  it("refuses a pane id outside letters, digits, _ and -, and sanitizes titles once for the model", () => {
+    expect(parseOpenPanes([{ id: "bad id!", title: "t", kind: "chat" }])).toBeNull();
+    expect(parseOpenPanes([{ id: "c".repeat(65), title: "t", kind: "chat" }])).toBeNull();
+    const targets = sendToChatTargets([{ id: "side-1", title: 'Pricing\n"now"', kind: "chat" }], "me", true);
+    expect(targets).toEqual([{ id: "side-1", title: "Pricing 'now'" }]);
   });
 
   it("reads a stored sender back, and nothing from bad JSON", () => {
