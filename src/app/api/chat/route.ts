@@ -18,7 +18,13 @@ import {
   type ToolSet,
   type ToolMode,
 } from "@/lib/chat/buildTools";
-import { canStartSubAgents, runAgentTool } from "@/lib/chat/buildTools";
+import { canStartSubAgents, messageAgentTool, runAgentTool, type SubAgentToolOptions } from "@/lib/chat/buildTools";
+import {
+  agentMessageModelText,
+  agentPartRefused,
+  parseOpenPanes,
+  sendToChatTargets,
+} from "@/lib/chat/agentMessages";
 import { ignoredTextStep, nextStepSettings } from "@/lib/chat/loopGuard";
 import { safePersistAssistantMessage } from "@/lib/chat/persistAssistantMessage";
 import { autoCompress, canAutoCompress } from "@/lib/chat/autoCompress";
@@ -78,6 +84,7 @@ export async function POST(req: Request) {
     maxToolCalls: bodyMaxToolCalls,
     mode: bodyMode,
     allowedTools: bodyAllowedTools,
+    openPanes: bodyOpenPanes,
   } = await req.json();
   let messages = bodyMessages;
   // A Claude Code card left open is closed when the chat sends anything that does not answer it.
@@ -162,6 +169,20 @@ export async function POST(req: Request) {
         headers: { "Content-Type": "application/json" },
       });
     }
+    const openPanes = parseOpenPanes(bodyOpenPanes);
+    if (!openPanes) {
+      return new Response(JSON.stringify({ error: "openPanes must be up to 3 panes with an id, title and kind" }), {
+        status: 400,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+    // A malformed agent part, or one past the hop cap, is refused rather than dropped (dropping would leave its text unframed).
+    if (Array.isArray(messages) && messages.some(agentPartRefused)) {
+      return new Response(JSON.stringify({ error: "An agent message is malformed or past the limit. Answer the user directly." }), {
+        status: 400,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
     // Side chats are read-only, whatever mode the request asks for.
     const toolMode: ToolMode = settings.kind === "side" ? "chat" : authMode;
     // `contextLength`/`maxTokens` are reassigned below (Ollama context bump,
@@ -208,6 +229,8 @@ export async function POST(req: Request) {
     const useTools = modelConfig.supportsTools && !chatOnlyMode;
     const activeToolIds = resolveActiveToolIds(explicitToolIds, skillIds, kbId);
 
+    // One result for the prompt's section and the sendToChat tool.
+    const agentTargets = sendToChatTargets(openPanes, conversationId ?? "", useTools);
     const { text: finalSystemPrompt, sections } = await buildSystemPrompt({
       useTools,
       systemPrompt,
@@ -221,6 +244,7 @@ export async function POST(req: Request) {
       userId,
       mode: toolMode,
       contextWindow: contextWindowFor(servedModel, modelConfig, contextLength),
+      agentTargets,
     });
 
     console.log(
@@ -264,6 +288,7 @@ export async function POST(req: Request) {
           userId,
           mode: toolMode,
           memoryDisabled,
+          agentTargets,
           allowedTools: Array.isArray(bodyAllowedTools)
             ? bodyAllowedTools.filter((t: unknown): t is string => typeof t === "string" && !answeredNow.has(t))
             : [],
@@ -332,7 +357,7 @@ export async function POST(req: Request) {
 
     // Only main chats with tools get helpers. A helper runs on this same model, in this mode.
     if (canStartSubAgents(settings.kind, useTools) && conversationId) {
-      aiTools.runAgent = runAgentTool(aiTools, {
+      const subAgents: SubAgentToolOptions = {
         userId,
         parentId: conversationId,
         model: modelConfig,
@@ -340,7 +365,10 @@ export async function POST(req: Request) {
         workingFolder,
         providerOptions,
         maxParallel: cliProvider ? 1 : 3,
-      });
+        activeChildren: new Set<string>(),
+      };
+      aiTools.runAgent = runAgentTool(aiTools, subAgents);
+      aiTools.messageAgent = messageAgentTool(aiTools, subAgents);
     }
 
     // Built after the tools, so a sub-agent's toModelOutput applies to saved history too.
@@ -395,11 +423,12 @@ export async function POST(req: Request) {
               } else {
                 for (const q of claimed) {
                   claimedIds.push(q.id);
-                  injected.push({ at: stepMessages.length, message: { role: "user", content: q.text } });
+                  const content = q.agent ? agentMessageModelText(q.agent, q.text) : q.text;
+                  injected.push({ at: stepMessages.length, message: { role: "user", content } });
                   pendingMarkers.push({
                     type: "data-queued-message",
                     id: q.id,
-                    data: { queuedId: q.id, text: q.text },
+                    data: { queuedId: q.id, text: q.text, ...(q.agent ? { agent: q.agent } : {}) },
                   });
                 }
               }

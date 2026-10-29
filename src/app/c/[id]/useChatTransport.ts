@@ -8,6 +8,7 @@ import { runCode } from "@/lib/sandbox";
 import { parseDataArtifact } from "@/lib/generativeUi/data";
 import { shouldAutoContinue, type AnyPart } from "@/lib/utils/messageParts";
 import type { ChatMode } from "@/lib/chat/modes";
+import type { AgentPane } from "@/lib/chat/agentMessages";
 
 /** Python tracebacks and our sandbox's own failures both start this way. */
 const CODE_FAILED_RE = /^(Error|Traceback)/;
@@ -70,10 +71,14 @@ interface ChatTransportOptions {
   onErrorRef: React.MutableRefObject<(err: Error) => void>;
   /** A queued message was delivered into the reply (its marker arrived). */
   onQueuedDeliveredRef: React.MutableRefObject<(queuedId: string) => void>;
+  /** The other open chat panes, sent with each request so the model knows whom it can message. */
+  openPanes: AgentPane[];
+  /** The sendToChat tool: resolves to the result the model reads. */
+  onSendToChatRef: React.MutableRefObject<(input: { to: string; message: string }) => Promise<string>>;
 }
 
 export function useChatTransport(opts: ChatTransportOptions) {
-  const { conversationId, conversation, selectedKbId, searchProvider, enabledTools, enabledSkills, mode, allowedTools, setIsCompressing, onFinishRef, onErrorRef, onQueuedDeliveredRef } = opts;
+  const { conversationId, conversation, selectedKbId, searchProvider, enabledTools, enabledSkills, mode, allowedTools, setIsCompressing, onFinishRef, onErrorRef, onQueuedDeliveredRef, openPanes, onSendToChatRef } = opts;
 
   const transportBodyRef = useRef({
     conversationId,
@@ -90,6 +95,7 @@ export function useChatTransport(opts: ChatTransportOptions) {
     memoryDisabled: conversation?.memoryDisabled ?? false,
     maxToolCalls: conversation?.maxToolCalls ?? 5,
     autoCompressThreshold: 85,
+    openPanes,
   });
 
   useEffect(() => {
@@ -111,8 +117,9 @@ export function useChatTransport(opts: ChatTransportOptions) {
       memoryDisabled: conversation?.memoryDisabled ?? false,
       maxToolCalls: conversation?.maxToolCalls ?? 5,
       autoCompressThreshold: threshold,
+      openPanes,
     };
-  }, [conversationId, conversation?.model, conversation?.systemPrompt, conversation?.temperature, selectedKbId, searchProvider, enabledTools, enabledSkills, mode, allowedTools, conversation?.chatOnlyMode, conversation?.memoryDisabled, conversation?.maxToolCalls]);
+  }, [conversationId, conversation?.model, conversation?.systemPrompt, conversation?.temperature, selectedKbId, searchProvider, enabledTools, enabledSkills, mode, allowedTools, conversation?.chatOnlyMode, conversation?.memoryDisabled, conversation?.maxToolCalls, openPanes]);
 
   const transport = useMemo(
     () =>
@@ -146,6 +153,12 @@ export function useChatTransport(opts: ChatTransportOptions) {
     },
     onToolCall: async ({ toolCall }) => {
       if (toolCall.toolName === "askClarification") return;
+      if (toolCall.toolName === "sendToChat") {
+        const input = toolCall.input as { to: string; message: string };
+        const output = await onSendToChatRef.current(input).catch((e: unknown) => `Not sent: ${e instanceof Error ? e.message : String(e)}`);
+        chat.addToolResult({ tool: "sendToChat", toolCallId: toolCall.toolCallId, output });
+        return;
+      }
       if (toolCall.toolName === "executeCode") {
         const { language, code, saveAs } = toolCall.input as {
           language: "python" | "javascript";

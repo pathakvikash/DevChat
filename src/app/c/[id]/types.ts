@@ -91,6 +91,10 @@ export interface ChatPaneState extends DataActions {
   setModelCaps: (next: ModelCaps) => void;
   /** Opens or closes this chat's side chat pane. */
   toggleSidePane: () => void;
+  /** Tool-less "Send to…": this chat's reply goes to another open chat as an agent message. */
+  sendToPane: (targetId: string, text: string) => void;
+  /** A sub-agent transcript: read only, never a message target. */
+  isSubagent: boolean;
   /** False for a model without tools (or chat-only): queued messages go next, and Ask and Plan get their text fallbacks. */
   toolsAvailable: boolean;
   handleEditMessage: (messageId: string, content: string) => Promise<void>;

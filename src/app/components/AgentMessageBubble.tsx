@@ -10,7 +10,20 @@ import {
 
 const BADGE_TITLE_MAX = 32;
 
-/** A message another chat sent: right-aligned, neutral card, labelled with its sender (UX 3.12). */
+/** The "From <chat>" line above a message another chat sent (UX 3.12). */
+export function AgentBadge({ sender }: { sender: Pick<AgentMessageData, "from" | "fromTitle"> }) {
+  return (
+    <div
+      title={agentBadgeText(sender)}
+      className="mb-1 inline-flex max-w-full items-center gap-1 text-[11px] font-medium text-zinc-400"
+    >
+      <Bot size={12} className="shrink-0" />
+      <span className="truncate">{agentBadgeText(sender, BADGE_TITLE_MAX)}</span>
+    </div>
+  );
+}
+
+/** A message another chat sent: right-aligned, neutral card, labelled with its sender. */
 export function AgentMessageBubble({
   sender,
   children,
@@ -21,13 +34,7 @@ export function AgentMessageBubble({
   return (
     <div className="flex justify-end">
       <div className="glass-card text-[var(--foreground)] rounded-[var(--glass-radius-xl)] px-4 py-3 w-fit max-w-[85%] min-w-0">
-        <div
-          title={agentBadgeText(sender)}
-          className="mb-1 inline-flex items-center gap-1 text-[11px] font-medium text-zinc-400"
-        >
-          <Bot size={12} className="shrink-0" />
-          <span>{agentBadgeText(sender, BADGE_TITLE_MAX)}</span>
-        </div>
+        <AgentBadge sender={sender} />
         {children}
       </div>
     </div>
@@ -58,6 +65,8 @@ export function AgentTalkingRow({
       <button
         type="button"
         onClick={onStop}
+        aria-label="Stop all agent messages"
+        title="Stop all agent messages"
         className="glass-button-danger ml-auto h-7 shrink-0 px-2.5 text-xs"
       >
         Stop

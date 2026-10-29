@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { simulateReadableStream, tool, type Tool } from "ai";
+import { simulateReadableStream, tool, type Tool, type UIMessage } from "ai";
 import { MockLanguageModelV3 } from "ai/test";
 import { z } from "zod";
 import { runSubAgent, REPORT_MAX_CHARS, type SubAgentProgress } from "@/lib/chat/subAgent";
@@ -286,5 +286,40 @@ describe("runSubAgent", () => {
     expect(res.steps).toBe(1);
     expect(calls).toHaveLength(1);
     expect(calls[0].tools).toBeUndefined();
+  });
+});
+
+describe("runSubAgent with resume", () => {
+  it("sends the saved messages, then the new one framed as the parent's message", async () => {
+    const { config, calls } = scriptedModel(() => ({ text: ["Done: two notes."] }), false);
+    const history: UIMessage[] = [
+      { id: "h1", role: "user", parts: [{ type: "text", text: "Read the notes." }] },
+      { id: "h2", role: "assistant", parts: [{ type: "text", text: "One note." }] },
+    ];
+    const message = {
+      id: "n1",
+      role: "user",
+      parts: [
+        { type: "data-agent-message", data: { from: "parent", fromConversationId: "p1", fromTitle: "Main", hop: 1 } },
+        { type: "text", text: "Check the second folder." },
+      ],
+    } as unknown as UIMessage;
+
+    const res = await runSubAgent({
+      brief: "Check the second folder.",
+      model: config,
+      mode: "agent",
+      tools: {},
+      abortSignal: new AbortController().signal,
+      resume: { history, message },
+    });
+
+    expect(res.status).toBe("done");
+    expect(res.report).toBe("Done: two notes.");
+    expect(res.transcript[0].id).toBe("n1");
+    const prompt = JSON.stringify(calls[0].prompt);
+    expect(prompt).toContain("Read the notes.");
+    expect(prompt).toContain("One note.");
+    expect(prompt).toContain("Message from Main (the main chat, not the user): Check the second folder.");
   });
 });

@@ -8,6 +8,8 @@ import { fetchModels } from "@/app/hooks/useModelsApi";
 import type { Conversation, ModelInfo } from "@/app/components/conversation/types";
 import { useConversationMode, type ModelCaps } from "@/app/contexts/ChatModeContext";
 import { useSplitViewOptional } from "@/app/c/SplitViewContext";
+import { buildAgentMessagePart, type AgentMessageData } from "@/lib/chat/agentMessages";
+import { AGENT_DELIVERED, AGENT_NOT_OPEN } from "@/lib/utils/agentLink";
 import { takeSideQuestion } from "@/lib/sideChat";
 import { useKeyboardShortcuts } from "@/app/hooks/useKeyboardShortcuts";
 import type { ApprovalAnswer, PlanAnswer } from "@/app/components/ToolAnswers";
@@ -17,7 +19,6 @@ import {
   ALLOWED_FOR_CHAT, DENIED_BY_USER, approvalTitle, buildMessageParts, denyOpenApprovals, shouldAutoContinue,
   waitingPlanCallId, type AnyPart, type PlanDecision,
 } from "@/lib/utils/messageParts";
-import { isCliModelId } from "@/lib/providers";
 import { buildMessagesFromConversation, lastExchange, type RawConversation } from "@/lib/utils/conversation";
 import { composeQuoteMessage, type QuoteCard } from "@/lib/utils/quoteReply";
 import { composeFileBlocks, cutFiles } from "@/lib/utils/fileMentions";
@@ -62,6 +63,9 @@ function deliveredQueueIds(messages: UIMessage[]): Set<string> {
 }
 
 const queueHeaders = { "Content-Type": "application/json" };
+
+/** A queued message the server never took: its text, and its sender when it came from another chat. */
+type Leftover = { text: string; agent?: AgentMessageData };
 
 function discardTemporaryChat(id: string) {
   // keepalive lets the request outlive the page on a full reload; ?temporary=1 means the server
@@ -133,7 +137,7 @@ export function useChatPane(conversationId: string, { focused, kind, searchProvi
   const isSide = kind === "side" || conversation?.kind === "side";
   const mode = isSide ? "chat" : storedMode;
   const setMode = isSide ? () => {} : storeMode;
-  const [modelCaps, setModelCaps] = useState<ModelCaps>({ toolsAvailable: true, cli: false });
+  const [modelCaps, setModelCaps] = useState<ModelCaps>({ toolsAvailable: true });
   const [modelList, setModelList] = useState<ModelInfo[]>([]);
   const settingsKey = `vas:advancedSettings:${conversationId}`;
   // Tools the user allowed for this chat in Ask mode ("Allow for this chat"), kept in the browser.
@@ -142,6 +146,12 @@ export function useChatPane(conversationId: string, { focused, kind, searchProvi
     () => (allowedState?.chat === conversationId ? allowedState.tools : readAllowedTools(conversationId)),
     [allowedState, conversationId],
   );
+  // Allowed tools belong to one folder: a folder change starts the list again (render-time adjust, as mentions do).
+  const [allowedFolder, setAllowedFolder] = useState(workingFolder);
+  if (allowedFolder !== workingFolder) {
+    setAllowedFolder(workingFolder);
+    setAllowedState(null);
+  }
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [enabledTools, setEnabledTools] = useState<string[]>([]);
   const [enabledSkills, setEnabledSkills] = useState<string[]>([]);
@@ -181,6 +191,9 @@ export function useChatPane(conversationId: string, { focused, kind, searchProvi
   const onFinishRef = useRef<(finish: ChatFinish) => void>(() => {});
   const onErrorRef = useRef<(err: Error) => void>(() => {});
   const onQueuedDeliveredRef = useRef<(queuedId: string) => void>(() => {});
+  const onSendToChatRef = useRef<(input: { to: string; message: string }) => Promise<string>>(async () => AGENT_NOT_OPEN);
+  // The other open chat panes, sent with each request (the model is told which chats it can message).
+  const openPanes = useMemo(() => (split?.chatPanes ?? []).filter((p) => p.id !== conversationId), [split?.chatPanes, conversationId]);
 
   const chatTransport = useChatTransport({
     conversationId,
@@ -195,9 +208,17 @@ export function useChatPane(conversationId: string, { focused, kind, searchProvi
     onFinishRef,
     onErrorRef,
     onQueuedDeliveredRef,
+    openPanes,
+    onSendToChatRef,
   });
 
-  const { messages, setMessages, sendMessage, status, stop: stopStream, regenerate, error, addToolResult, addToolApprovalResponse, setRequestBody, isLoading } = chatTransport;
+  const { messages, setMessages, sendMessage: chatSend, status, stop: stopStream, regenerate, error, addToolResult, addToolApprovalResponse, setRequestBody, isLoading } = chatTransport;
+  const isSubagent = conversation?.kind === "subagent";
+  // A user's own send starts this pane's agent count again. Agent messages go through chatSend directly.
+  const sendMessage = (...args: Parameters<typeof chatSend>) => {
+    split?.resetHop(conversationId);
+    return chatSend(...args);
+  };
 
   /* ─── Message queue ────────────────────────────────────────────────────── */
 
@@ -232,7 +253,7 @@ export function useChatPane(conversationId: string, { focused, kind, searchProvi
         const res = await fetch(queuedUrl, {
           method: "POST",
           headers: queueHeaders,
-          body: JSON.stringify({ id: item.id, text: item.text, seq: item.seq }),
+          body: JSON.stringify({ id: item.id, text: item.text, seq: item.seq, ...(item.agent ? { agent: item.agent } : {}) }),
         });
         if (!res.ok) throw new Error(String(res.status));
         setQueued(item.id, { status: "queued" });
@@ -261,6 +282,21 @@ export function useChatPane(conversationId: string, { focused, kind, searchProvi
     setQuotes([]);
     setAnnouncement((a) => (a === "Message queued" ? "Message queued " : "Message queued"));
     void postQueued(item);
+  }
+
+  /** An agent message that arrives while this chat replies: it joins the queue with its sender's badge. */
+  function queueAgent(text: string, agent: AgentMessageData) {
+    const item: QueuedItem = { id: generateId(), seq: ++seqRef.current, text, status: "queued", agent };
+    knownRef.current.add(item.id);
+    setQueue((prev) => [...prev, item]);
+    void postQueued(item);
+  }
+
+  /** Stop all: this chat's queued agent messages go; the user's own typed messages stay. */
+  function dropAgentQueued() {
+    for (const q of queueRef.current) {
+      if (q.agent && q.status !== "claimed") void removeQueued(q.id);
+    }
   }
 
   async function editQueued(id: string, text: string) {
@@ -311,40 +347,41 @@ export function useChatPane(conversationId: string, { focused, kind, searchProvi
     void postQueued({ ...item, status: "queued" });
   }
 
-  /** DELETEs each row and returns the texts that are now ours. A row the server no longer has (taken, or in a
+  /** DELETEs each row and returns the ones that are now ours. A row the server no longer has (taken, or in a
    *  step's claim) is dropped; a row never stored keeps its text. */
-  async function takeRows(rows: { id: string; text: string; stored: boolean }[]): Promise<string[]> {
-    const texts = await Promise.all(
-      rows.map(async (row) => {
-        if (!row.stored) return row.text;
+  async function takeRows(rows: { id: string; text: string; stored: boolean; agent?: AgentMessageData }[]): Promise<Leftover[]> {
+    const taken = await Promise.all(
+      rows.map(async (row): Promise<Leftover | null> => {
+        const mine = { text: row.text, agent: row.agent };
+        if (!row.stored) return mine;
         try {
           const res = await fetch(`${queuedUrl}?qid=${encodeURIComponent(row.id)}`, { method: "DELETE" });
-          return res.ok ? row.text : null;
+          return res.ok ? mine : null;
         } catch {
-          return row.text;
+          return mine;
         }
       }),
     );
-    return texts.filter((t): t is string => t !== null);
+    return taken.filter((t): t is Leftover => t !== null);
   }
 
   /** After the stream closes: waits for the POSTs, re-reads the queue and takes what is still undelivered. */
-  async function takeLeftovers(all: UIMessage[]): Promise<string[]> {
+  async function takeLeftovers(all: UIMessage[]): Promise<Leftover[]> {
     await Promise.all([...postsRef.current.values()]);
     const shown = deliveredQueueIds(all);
     const res = await fetch(queuedUrl);
     if (!res.ok) throw new Error(String(res.status));
-    const stored: { id: string; text: string; seq: number }[] = (await res.json()).queued ?? [];
+    const stored: { id: string; text: string; seq: number; agent?: AgentMessageData }[] = (await res.json()).queued ?? [];
     const storedIds = new Set(stored.map((s) => s.id));
     const unstored = queueRef.current.filter((q) => q.status === "failed" && !storedIds.has(q.id) && !shown.has(q.id));
     const rows = [
-      ...stored.map((s) => ({ ...s, stored: true })),
-      ...unstored.map((q) => ({ id: q.id, text: q.text, seq: q.seq, stored: false })),
+      ...stored.map((s) => ({ ...s, agent: queueRef.current.find((q) => q.id === s.id)?.agent ?? s.agent, stored: true })),
+      ...unstored.map((q) => ({ id: q.id, text: q.text, seq: q.seq, agent: q.agent, stored: false })),
     ].sort((a, b) => a.seq - b.seq);
-    const texts = await takeRows(rows);
+    const taken = await takeRows(rows);
     const ours = new Set(rows.map((r) => r.id));
     setQueue((prev) => prev.filter((q) => !ours.has(q.id) && !shown.has(q.id)));
-    return texts;
+    return taken;
   }
 
   /** Texts go back into the input box, ahead of any text already there. */
@@ -364,6 +401,21 @@ export function useChatPane(conversationId: string, { focused, kind, searchProvi
     }, 0);
   }
 
+  /** A leftover agent message goes out as an agent message again, with its sender and hop. One turn at a
+   *  time: any others go back into the input box as text. */
+  function sendAgentNext(items: Leftover[]) {
+    const [first, ...rest] = items;
+    restoreInput(rest.map((r) => r.text));
+    if (!first?.agent) return;
+    // The send counts at its own hop, so the chain's cap still holds after a reload or a busy turn.
+    split?.bumpHop(conversationId, first.agent.hop);
+    setTimeout(() => {
+      chatSend({ parts: [buildAgentMessagePart(first.agent!), { type: "text" as const, text: first.text }] }).catch((err: unknown) =>
+        console.error("[agent] sending a queued agent message failed:", err),
+      );
+    }, 0);
+  }
+
   /** Stop ends the stream; onFinish then puts the undelivered messages back into the input box. */
   function stop() {
     stopStream();
@@ -380,8 +432,8 @@ export function useChatPane(conversationId: string, { focused, kind, searchProvi
 
   // The mode switch reads these to disable Ask and Agent, and to label Ask for CLI models.
   useEffect(() => {
-    setModelCaps({ toolsAvailable, cli: isCliModelId(conversation?.model ?? "") });
-  }, [toolsAvailable, conversation?.model, setModelCaps]);
+    setModelCaps({ toolsAvailable });
+  }, [toolsAvailable, setModelCaps]);
 
   // A model without tools can't run Ask or Agent: fall back to Chat and say so (UX 2.6).
   useEffect(() => {
@@ -502,9 +554,20 @@ export function useChatPane(conversationId: string, { focused, kind, searchProvi
     if (mountedRef.current && queueRef.current.length && !(finish?.message && shouldAutoContinue(finish.message.parts as AnyPart[]))) {
       const stopped = !!(finish?.isAbort || finish?.isError);
       takeLeftovers(all)
-        .then((texts) => (stopped ? restoreInput(texts) : sendNext(texts)))
+        .then((rest) => {
+          const own = rest.filter((r) => !r.agent);
+          // A stop drops the agent messages (the user did not write them); otherwise they go out as agent messages.
+          if (stopped) return restoreInput(own.map((r) => r.text));
+          const agents = rest.filter((r) => r.agent);
+          if (agents.length) {
+            sendAgentNext(agents);
+            restoreInput(own.map((r) => r.text));
+          } else sendNext(own.map((r) => r.text));
+        })
         .catch(() => toast("Couldn't restore queued messages. Reload to see them.", "error"));
     }
+    // The reply is over: if the other pane of its agent exchange is idle too, the exchange ends.
+    split?.agentIdle(conversationId);
     const parts = (finish?.message?.parts ?? all[all.length - 1]?.parts ?? []) as any[];
     // A card that just appeared is announced once, in the pane's live region (UX 2.5).
     if (!finish?.isAbort) {
@@ -557,6 +620,34 @@ export function useChatPane(conversationId: string, { focused, kind, searchProvi
     }
   }, [toast]);
 
+  /* ─── Agent messaging ──────────────────────────────────────────────────── */
+
+  const setAgentPane = split?.setAgentPane;
+  // Other panes reach this one through its handle; republished on every render so it sees the latest state.
+  useEffect(() => {
+    // Not before the chat has loaded: its model and settings go out with the message.
+    if (!conversation) return;
+    setAgentPane?.(conversationId, {
+      isLoading: () => isLoading,
+      deliver: (parts) => {
+        chatSend({ parts }).catch((err: unknown) => console.error("[agent] delivery failed:", err));
+      },
+      queueAgent,
+      dropAgentQueued,
+    });
+  });
+  useEffect(() => () => setAgentPane?.(conversationId, null), [conversationId, setAgentPane]);
+  useEffect(() => {
+    onSendToChatRef.current = (input) =>
+      split ? split.sendToChat(conversationId, input.to, input.message) : Promise.resolve(AGENT_NOT_OPEN);
+  });
+
+  /** Tool-less "Send to…": this reply goes to another open chat as an agent message. */
+  function sendToPane(targetId: string, text: string) {
+    const result = split?.deliverTo(conversationId, targetId, text);
+    if (result && result !== AGENT_DELIVERED) toast(result, "info");
+  }
+
   /* ─── Initial fetches ──────────────────────────────────────────────────── */
 
   const [convLoaded, setConvLoaded] = useState(false);
@@ -568,8 +659,9 @@ export function useChatPane(conversationId: string, { focused, kind, searchProvi
     fetch(queuedUrl)
       .then((r) => (r.ok ? r.json() : null))
       .then(async (d) => {
-        const rows = (d?.queued ?? []).map((q: { id: string; text: string }) => ({ ...q, stored: true }));
-        if (rows.length) restoreInput(await takeRows(rows));
+        const rows = (d?.queued ?? []).map((q: { id: string; text: string; agent?: AgentMessageData }) => ({ ...q, stored: true }));
+        // Every row is taken off the server; an agent message is dropped, since the user did not write it.
+        if (rows.length) restoreInput((await takeRows(rows)).filter((r) => !r.agent).map((r) => r.text));
       })
       .catch(() => {});
   }, [convLoaded]);
@@ -774,6 +866,7 @@ export function useChatPane(conversationId: string, { focused, kind, searchProvi
 
   async function handleSubmit(e?: { preventDefault(): void }) {
     e?.preventDefault();
+    if (isSubagent) return; // a sub-agent transcript is read only
     if (status === "streaming" || status === "submitted") {
       if (parseCommand(input)?.command.action === "compress") toast("Wait for the reply to finish, then compress", "info");
       return;
@@ -907,7 +1000,7 @@ export function useChatPane(conversationId: string, { focused, kind, searchProvi
     handleClarificationAnswer, handleEditMessage, handleDeleteMessage, handleCopyMessage, handleForkMessage,
     handleRegenerateMessage, handleRegenExecute, regenModal, setRegenModal,
     queued, queueMessage, editQueued, removeQueued, retryQueued,
-    handleSubmit,
+    handleSubmit, isSubagent, sendToPane,
     minimapMessages,
     isDialogOpen, closeTopDialog,
   };

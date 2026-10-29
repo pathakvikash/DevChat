@@ -18,6 +18,7 @@ import {
 } from "lucide-react";
 import type { ToolPart } from "@/lib/utils/messageParts";
 import type { SubAgentOutput, SubAgentStep } from "@/lib/chat/subAgent";
+import { useSplitViewOptional } from "@/app/c/SplitViewContext";
 
 type View = "running" | "done" | "limit" | "error" | "timeout" | "stopped";
 
@@ -79,10 +80,11 @@ export default function SubAgentCard({
 }: {
   part: ToolPart;
   isStreaming?: boolean;
-  /** Defaults to opening the child conversation at `/c/<id>`. Split view passes its own. */
+  /** Defaults to opening the transcript as a read-only pane next to this chat (or `/c/<id>` outside split view). */
   onOpen?: (childId: string) => void;
 }) {
   const router = useRouter();
+  const split = useSplitViewOptional();
   const out = part.output as SubAgentOutput | undefined;
   const input = (part.input ?? {}) as { task?: string; title?: string };
   const view = viewOf(out, part, isStreaming);
@@ -135,8 +137,12 @@ export default function SubAgentCard({
         {out?.childId && (
           <button
             type="button"
-            title="Open transcript in side chat"
-            onClick={() => (onOpen ? onOpen(out.childId!) : router.push(`/c/${out.childId}`))}
+            title="Open transcript next to this chat"
+            onClick={() => {
+              if (onOpen) onOpen(out.childId!);
+              else if (split) split.openSplit(out.childId!);
+              else router.push(`/c/${out.childId}`);
+            }}
             className="inline-flex h-6 shrink-0 items-center gap-1 rounded-[var(--glass-radius-sm)] px-2 text-xs glass-button"
           >
             <PanelRightOpen size={12} />

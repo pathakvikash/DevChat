@@ -47,7 +47,7 @@ describe("withInjected", () => {
 describe("claimQueued", () => {
   it("claims the undelivered rows with one token, then reads back the rows that carry it in client order", async () => {
     db.queuedMessage.updateMany.mockResolvedValue({ count: 2 });
-    db.queuedMessage.findMany.mockResolvedValue([{ id: "q1", text: "a" }, { id: "q2", text: "b" }]);
+    db.queuedMessage.findMany.mockResolvedValue([{ id: "q1", text: "a", agent: null }, { id: "q2", text: "b", agent: null }]);
 
     const claimed = await claimQueued("c1");
 
@@ -60,9 +60,9 @@ describe("claimQueued", () => {
     expect(db.queuedMessage.findMany).toHaveBeenCalledWith({
       where: { conversationId: "c1", claimToken: token },
       orderBy: { seq: "asc" },
-      select: { id: true, text: true },
+      select: { id: true, text: true, agent: true },
     });
-    expect(claimed).toEqual([{ id: "q1", text: "a" }, { id: "q2", text: "b" }]);
+    expect(claimed).toEqual([{ id: "q1", text: "a", agent: null }, { id: "q2", text: "b", agent: null }]);
   });
 
   it("reads only its own rows when two claims share a timestamp", async () => {

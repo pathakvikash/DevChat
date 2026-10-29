@@ -6,6 +6,13 @@
 export const AGENT_MESSAGE_PART = "data-agent-message";
 /** Agent messages per user send, across all panes. */
 export const MAX_AGENT_HOPS = 3;
+const TITLE_MAX = 80;
+const ID_MAX = 64;
+/** A pane or chat id: letters, digits, `_` and `-`. */
+export const ID_RE = /^[\w-]{1,64}$/;
+
+/** A title as the model reads it: one line, no quotes. */
+export const promptTitle = (title: string): string => title.replace(/[\r\n]+/g, " ").replace(/["`]/g, "'").trim();
 
 export type AgentSender = "chat" | "side" | "parent";
 export type AgentPaneKind = "chat" | "side" | "subagent";
@@ -48,7 +55,58 @@ export function parseAgentMessagePart(part: unknown): AgentMessageData | null {
   if (!SENDERS.includes(from as AgentSender)) return null;
   if (typeof fromConversationId !== "string" || typeof fromTitle !== "string") return null;
   if (typeof hop !== "number" || !Number.isInteger(hop) || hop < 1) return null;
-  return { from: from as AgentSender, fromConversationId, fromTitle, hop };
+  return {
+    from: from as AgentSender,
+    fromConversationId: fromConversationId.slice(0, ID_MAX),
+    fromTitle: fromTitle.slice(0, TITLE_MAX),
+    hop,
+  };
+}
+
+/** Most open panes the browser may list for the model (the pane limit). */
+export const MAX_OPEN_PANES = 3;
+const PANE_KINDS: readonly AgentPaneKind[] = ["chat", "side", "subagent"];
+
+/**
+ * The request's `openPanes`: undefined or null is none; anything malformed (including an id outside
+ * ID_RE) is null, and the request is refused. A title is cut to 80 characters.
+ */
+export function parseOpenPanes(value: unknown): AgentPane[] | null {
+  if (value === undefined || value === null) return [];
+  if (!Array.isArray(value) || value.length > MAX_OPEN_PANES) return null;
+  const panes: AgentPane[] = [];
+  for (const p of value) {
+    const { id, title, kind } = (p ?? {}) as Record<string, unknown>;
+    if (typeof id !== "string" || !ID_RE.test(id) || typeof title !== "string" || !PANE_KINDS.includes(kind as AgentPaneKind)) {
+      return null;
+    }
+    panes.push({ id, title: title.slice(0, TITLE_MAX), kind: kind as AgentPaneKind });
+  }
+  return panes;
+}
+
+/**
+ * Whether a message has an agent part that is malformed or has a hop outside 1..MAX_AGENT_HOPS. Such a
+ * request is refused: a dropped part would leave its text reaching the model unframed.
+ */
+export function agentPartRefused(message: unknown): boolean {
+  const parts = (message as { parts?: unknown } | null)?.parts;
+  if (!Array.isArray(parts)) return false;
+  return parts.some((p: any) => {
+    if (p?.type !== AGENT_MESSAGE_PART) return false;
+    const data = parseAgentMessagePart(p);
+    return !data || !canDeliver(data.hop);
+  });
+}
+
+/** The sender stored as JSON on a queued row, or null when there is none or it is malformed. */
+export function agentFromJson(raw: string | null | undefined): AgentMessageData | null {
+  if (!raw) return null;
+  try {
+    return parseAgentMessagePart({ type: AGENT_MESSAGE_PART, data: JSON.parse(raw) });
+  } catch {
+    return null;
+  }
 }
 
 /** Hop of a message sent from a pane whose hop is `paneHop` (0 after the user's own send). */
@@ -72,8 +130,8 @@ export function sendToChatTargets(
 ): AgentTarget[] {
   if (!supportsTools) return [];
   return panes
-    .filter((p) => p.id !== selfId && p.kind !== "subagent")
-    .map((p) => ({ id: p.id, title: p.title.trim() || (p.kind === "side" ? "Side chat" : "Untitled chat") }));
+    .filter((p) => p.id !== selfId && p.kind !== "subagent" && ID_RE.test(p.id))
+    .map((p) => ({ id: p.id, title: promptTitle(p.title) || (p.kind === "side" ? "Side chat" : "Untitled chat") }));
 }
 
 /** Resolve the `to` argument: an id first, then an exact title (case-insensitive). */
@@ -92,7 +150,7 @@ export function resolveAgentTarget(
 
 /** Who sent it, by title; untitled senders get a name from their kind. */
 export function senderName(d: Pick<AgentMessageData, "from" | "fromTitle">): string {
-  const title = d.fromTitle.trim();
+  const title = promptTitle(d.fromTitle);
   if (title) return title;
   if (d.from === "side") return "side chat";
   if (d.from === "parent") return "the main chat's assistant";
@@ -101,6 +159,8 @@ export function senderName(d: Pick<AgentMessageData, "from" | "fromTitle">): str
 
 /** Badge text such as `From "Pricing research"`. A title longer than `max` is cut with an ellipsis. */
 export function agentBadgeText(d: Pick<AgentMessageData, "from" | "fromTitle">, max = Infinity): string {
+  // A sub-agent's follow-up is badged by its role, whatever title its run carries.
+  if (d.from === "parent") return "From the main chat's assistant";
   const title = d.fromTitle.trim();
   if (!title) return `From ${senderName(d)}`;
   const shown = title.length > max ? `${title.slice(0, max)}…` : title;

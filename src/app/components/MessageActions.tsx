@@ -1,7 +1,16 @@
 "use client";
 
-import { Copy, Edit, GitFork, Loader2, RotateCcw, ThumbsUp, ThumbsDown, Trash2 } from "lucide-react";
-import { useState, useCallback, useEffect, useRef } from "react";
+import { Copy, Edit, GitFork, Loader2, RotateCcw, Send, ThumbsUp, ThumbsDown, Trash2 } from "lucide-react";
+import { createContext, useState, useCallback, useContext, useEffect, useRef } from "react";
+
+export interface AgentSendValue {
+  /** The other open chats. Empty hides the "Send to…" menu. */
+  targets: { id: string; title: string }[];
+  send: (targetId: string, text: string) => void;
+}
+
+/** Set by the pane: tool-less models get a "Send to…" menu on replies (UX 2.14). */
+export const AgentSendContext = createContext<AgentSendValue | null>(null);
 
 interface MessageActionsProps {
   messageId?: string;
@@ -37,17 +46,23 @@ export default function MessageActions({
   const [forking, setForking] = useState(false);
   const [feedbackMenuOpen, setFeedbackMenuOpen] = useState(false);
   const feedbackMenuRef = useRef<HTMLDivElement>(null);
+  const [sendMenuOpen, setSendMenuOpen] = useState(false);
+  const sendMenuRef = useRef<HTMLDivElement>(null);
+  const agentSend = useContext(AgentSendContext);
 
   useEffect(() => {
-    if (!feedbackMenuOpen) return;
+    if (!feedbackMenuOpen && !sendMenuOpen) return;
     function handleClickOutside(e: MouseEvent) {
       if (feedbackMenuRef.current && !feedbackMenuRef.current.contains(e.target as Node)) {
         setFeedbackMenuOpen(false);
       }
+      if (sendMenuRef.current && !sendMenuRef.current.contains(e.target as Node)) {
+        setSendMenuOpen(false);
+      }
     }
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, [feedbackMenuOpen]);
+  }, [feedbackMenuOpen, sendMenuOpen]);
 
   const handleFeedback = useCallback(async (rating: number) => {
     if (!messageId || feedbackLoading) return;
@@ -170,6 +185,42 @@ export default function MessageActions({
       >
         <Copy size={12} />
       </button>
+
+      {!isUser && messageId && agentSend && agentSend.targets.length > 0 && (
+        <div className="relative" ref={sendMenuRef}>
+          <button
+            type="button"
+            onClick={() => setSendMenuOpen((v) => !v)}
+            title="Send to…"
+            aria-label="Send to another chat"
+            aria-expanded={sendMenuOpen}
+            className="inline-flex items-center gap-1 px-2 py-1 text-xs text-zinc-400 hover:text-zinc-100 glass-button rounded-[var(--glass-radius-sm)] transition"
+          >
+            <Send size={12} />
+          </button>
+          {sendMenuOpen && (
+            <div
+              className="absolute bottom-full left-0 mb-2 w-56 glass-panel-strong rounded-[var(--glass-radius-md)] shadow-lg border border-[var(--glass-border-strong)] z-[9999] overflow-hidden"
+            >
+              {agentSend.targets.map((t) => (
+                <button
+                  key={t.id}
+                  type="button"
+                  title={t.title}
+                  onClick={() => {
+                    setSendMenuOpen(false);
+                    agentSend.send(t.id, stripThinkTags(content));
+                  }}
+                  className="flex w-full items-center gap-2 px-4 py-2.5 text-left text-sm text-[var(--foreground)] hover:bg-[var(--glass-bg-hover)] transition"
+                >
+                  <Send size={14} className="shrink-0 text-zinc-400" />
+                  <span className="truncate">{`Send to "${t.title}"`}</span>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       {onFork && messageId && (
         <button

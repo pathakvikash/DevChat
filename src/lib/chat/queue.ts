@@ -1,6 +1,7 @@
 import { randomUUID } from "crypto";
 import type { ModelMessage, UIMessageChunk } from "ai";
 import { prisma } from "@/lib/db";
+import { agentFromJson, type AgentMessageData } from "@/lib/chat/agentMessages";
 
 /** A queued message that went into the model's history at `at` (an index in that step's messages). */
 export interface QueuedInjection {
@@ -12,7 +13,7 @@ export interface QueuedInjection {
 export interface QueuedMarker {
   type: "data-queued-message";
   id: string;
-  data: { queuedId: string; text: string };
+  data: { queuedId: string; text: string; agent?: AgentMessageData };
 }
 
 /**
@@ -20,7 +21,9 @@ export interface QueuedMarker {
  * (not the timestamp) identifies the claim, so two claims in the same millisecond cannot read each other's rows.
  * If the read fails, the rows are put back.
  */
-export async function claimQueued(conversationId: string): Promise<{ id: string; text: string }[]> {
+export async function claimQueued(
+  conversationId: string,
+): Promise<{ id: string; text: string; agent: AgentMessageData | null }[]> {
   const token = randomUUID();
   const { count } = await prisma.queuedMessage.updateMany({
     where: { conversationId, deliveredAt: null },
@@ -28,11 +31,12 @@ export async function claimQueued(conversationId: string): Promise<{ id: string;
   });
   if (!count) return [];
   try {
-    return await prisma.queuedMessage.findMany({
+    const rows = await prisma.queuedMessage.findMany({
       where: { conversationId, claimToken: token },
       orderBy: { seq: "asc" },
-      select: { id: true, text: true },
+      select: { id: true, text: true, agent: true },
     });
+    return rows.map((r) => ({ id: r.id, text: r.text, agent: agentFromJson(r.agent) }));
   } catch (err) {
     await prisma.queuedMessage.updateMany({
       where: { conversationId, claimToken: token },

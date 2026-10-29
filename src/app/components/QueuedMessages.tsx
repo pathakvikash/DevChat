@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { AlertTriangle, Clock, Loader2, X } from "lucide-react";
+import { agentBadgeText, type AgentMessageData } from "@/lib/chat/agentMessages";
 
 export interface QueuedItem {
   id: string;
@@ -13,6 +14,8 @@ export interface QueuedItem {
   status: "queued" | "failed" | "claimed";
   /** An edit is being saved. */
   saving?: boolean;
+  /** Set for an agent message from another chat: the chip shows who sent it. */
+  agent?: AgentMessageData;
 }
 
 interface QueuedMessagesProps {
@@ -158,7 +161,10 @@ function QueuedRow({
               title={claimed ? undefined : "Edit queued message"}
               className="focus-ring block w-full text-left"
             >
-              <span className="line-clamp-2 whitespace-pre-wrap break-words text-zinc-300">{item.text}</span>
+              <span className="line-clamp-2 whitespace-pre-wrap break-words text-zinc-300">
+                {item.agent && <span className="text-zinc-400">{`${agentBadgeText(item.agent, 32)}: `}</span>}
+                {item.text}
+              </span>
             </button>
           )}
           {claimed && <p className="mt-1 text-xs text-zinc-400">Sending…</p>}

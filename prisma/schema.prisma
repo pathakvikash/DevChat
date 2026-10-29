@@ -120,6 +120,7 @@ model QueuedMessage {
   createdAt      DateTime     @default(now())
   deliveredAt    DateTime?
   claimToken     String? // set while one step's claim holds the row; unique per claim
+  agent          String? // JSON of AgentMessageData for a message sent from another chat; null for the user's own
   conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
 
   @@index([conversationId, deliveredAt])

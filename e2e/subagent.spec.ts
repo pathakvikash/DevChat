@@ -24,5 +24,5 @@ test("mock/subagent starts a helper, shows its card, and saves the helper as a c
   expect(transcript[1].content).toContain("Mock helper report");
 
   await card.getByRole("button", { name: "Open" }).click();
-  await expect(page).toHaveURL(new RegExp(`/c/${children[0].id}`));
+  await expect(page).toHaveURL(new RegExp(`split=${children[0].id}`));
 });

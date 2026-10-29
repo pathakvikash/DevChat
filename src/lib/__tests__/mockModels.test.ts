@@ -36,3 +36,29 @@ describe("mock/tool turn rule", () => {
     expect(await reply([user("what is 6 times 7?"), toolCall, toolResult, user("queued: make it 7 times 7")])).toEqual(["text"]);
   });
 });
+
+describe("mock/talker", () => {
+  const sendTool = [{ type: "function", name: "sendToChat", inputSchema: { type: "object" } }];
+  const sent = { role: "assistant", content: [{ type: "tool-call", toolCallId: "c1", toolName: "sendToChat", input: {} }] };
+  const sentResult = {
+    role: "tool",
+    content: [{ type: "tool-result", toolCallId: "c1", toolName: "sendToChat", output: { type: "text", value: "Delivered." } }],
+  };
+
+  async function talk(prompt: unknown[], tools?: unknown[]) {
+    const model = mockModelConfig("mock/talker")!.model as any;
+    const { content } = await model.doGenerate({ prompt, tools });
+    return content;
+  }
+
+  it("sends a ping to the side chat with sendToChat when it is offered", async () => {
+    const content = await talk([user("ping the side chat")], sendTool);
+    expect(content).toEqual([expect.objectContaining({ type: "tool-call", toolName: "sendToChat" })]);
+    expect(JSON.parse(content[0].input)).toEqual({ to: "side", message: "ping from main" });
+  });
+
+  it("answers sent once the tool has run, and without the tool", async () => {
+    expect(await talk([user("ping the side chat"), sent, sentResult], sendTool)).toEqual([{ type: "text", text: "sent" }]);
+    expect(await talk([user("ping the side chat")])).toEqual([{ type: "text", text: "sent" }]);
+  });
+});

@@ -10,6 +10,8 @@ import MessageEditor from "./MessageEditor";
 import MarkdownMessage from "./MarkdownMessage";
 import ToolInvocation from "./ToolInvocation";
 import CompressionEvent from "./CompressionEvent";
+import { AgentBadge } from "./AgentMessageBubble";
+import { parseAgentMessagePart } from "@/lib/chat/agentMessages";
 import { splitThinking } from "@/lib/utils/splitThinking";
 import {
   findCompressionEvent,
@@ -69,6 +71,8 @@ function MessageBubble({
     .filter(Boolean)
     .join("\n\n");
   const isUser = role === "user";
+  // A message another chat sent is a user-role message with an agent part: neutral style, labelled (UX 3.12).
+  const agentSender = isUser ? (allParts ?? []).map((p) => parseAgentMessagePart(p)).find((d) => d !== null) ?? null : null;
 
   const [isEditing, setIsEditing] = useState(false);
   const [editBuffer, setEditBuffer] = useState(content);
@@ -126,12 +130,13 @@ function MessageBubble({
         <div
           className={`
             w-fit max-w-full rounded-[var(--glass-radius-xl)] px-4 py-3 relative
-            ${isUser
+            ${isUser && !agentSender
               ? "glass-button-primary text-white"
               : "glass-card text-[var(--foreground)]"
             }
           `}
         >
+          {agentSender && <AgentBadge sender={agentSender} />}
           <FileAttachments fileParts={fileParts} />
 
           {!isUser && combinedThinking && (

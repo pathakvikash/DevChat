@@ -8,6 +8,7 @@ import {
   approvalTitle,
   STOPPED_REPLY,
 } from "@/lib/utils/messageParts";
+import { AGENT_DELIVERED } from "@/lib/utils/agentLink";
 
 /** `executeCode` runs in the browser, so its reply needs a second request to continue.
  *  The tool part is not necessarily last — reasoning parts can follow it. */
@@ -33,6 +34,20 @@ describe("shouldAutoContinue", () => {
 
   it("does not continue while the call is still waiting for its output", () => {
     expect(shouldAutoContinue([call("input-available")])).toBe(false);
+  });
+
+  it("continues after a sendToChat that was delivered, so the model can answer", () => {
+    const send = (output: string) => ({ type: "tool-sendToChat", toolCallId: "s1", state: "output-available", output });
+    expect(shouldAutoContinue([send(AGENT_DELIVERED)])).toBe(true);
+  });
+
+  it("continues after the first refused sendToChat in a reply, not after a second, so retries can't loop", () => {
+    const send = (output: string) => ({ type: "tool-sendToChat", toolCallId: "s1", state: "output-available", output });
+    const refused = "Not sent: the limit of 3 agent messages for this user message is reached. Answer the user directly.";
+    expect(shouldAutoContinue([send("That chat is not open.")])).toBe(true);
+    expect(shouldAutoContinue([send(refused)])).toBe(true);
+    expect(shouldAutoContinue([send("That chat is not open."), send("That chat is not open.")])).toBe(false);
+    expect(shouldAutoContinue([send(AGENT_DELIVERED), send(refused)])).toBe(true);
   });
 
   it("does not continue for askClarification, which the user answers", () => {
@@ -112,5 +127,23 @@ describe("presentPlan and stale cards", () => {
     const [part] = settleStaleParts<any>([{ type: "tool-presentPlan", state: "input-available", input: { title: "x" } }], false);
     expect(part.state).toBe("output-denied");
     expect(part.approval.reason).toBe("Replaced by a newer plan");
+  });
+});
+
+describe("shouldAutoContinue for sendToChat", () => {
+  const send = (state: string, extra: Record<string, unknown> = {}) => ({
+    type: "tool-sendToChat",
+    toolCallId: "c1",
+    state,
+    input: { to: "side", message: "hi" },
+    ...extra,
+  });
+
+  it("continues once the browser has answered the send", () => {
+    expect(shouldAutoContinue([send("output-available", { output: AGENT_DELIVERED })] as any)).toBe(true);
+  });
+
+  it("waits while the send is still pending", () => {
+    expect(shouldAutoContinue([send("input-available")] as any)).toBe(false);
   });
 });

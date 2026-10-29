@@ -1,8 +1,10 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import PaneBar from "@/app/c/PaneBar";
 import SideChatHeader from "@/app/components/sidechat/SideChatHeader";
+import { AgentTalkingRow } from "@/app/components/AgentMessageBubble";
+import { AgentSendContext } from "@/app/components/MessageActions";
 import { createSideChat, listSideChats, type SideChatSummary } from "@/lib/sideChat";
 import { useSplitViewOptional } from "@/app/c/SplitViewContext";
 import { isPaneBusy } from "@/lib/splitPanes";
@@ -58,8 +60,23 @@ export default function ConversationPane({ conversationId, focused, initialPromp
 
   // A side chat: its header lists the main chat's side chats and shows what the side chat sees.
   const isSide = p.conversation?.kind === "side";
+  // A sub-agent transcript: read only, and never a target for sendToChat.
+  const isSub = p.isSubagent;
   const parentId = p.conversation?.parentId ?? null;
   const parentTitle = (parentId && split?.info[parentId]?.title) || "Main chat";
+  const setPaneKind = split?.setPaneKind;
+  useEffect(() => {
+    if (p.conversation) setPaneKind?.(conversationId, isSub ? "subagent" : isSide ? "side" : "chat");
+  }, [conversationId, p.conversation, isSub, isSide, setPaneKind]);
+  const talk = split?.talk[conversationId];
+  // Tool-less models have no sendToChat: their replies get a "Send to…" menu over the other open chats.
+  // A sub-agent transcript is read only, so it sends nowhere.
+  const sendTargets = useMemo(
+    () => (isSub || p.toolsAvailable ? [] : (split?.chatPanes ?? []).filter((x) => x.id !== conversationId).map((x) => ({ id: x.id, title: x.title.trim() || (x.kind === "side" ? "Side chat" : "Untitled chat") }))),
+    [isSub, p.toolsAvailable, split?.chatPanes, conversationId],
+  );
+  const sendToPane = p.sendToPane;
+  const agentSend = useMemo(() => ({ targets: sendTargets, send: sendToPane }), [sendTargets, sendToPane]);
   const [sideHistory, setSideHistory] = useState<SideChatSummary[]>([]);
   const [shown, setShown] = useState<{ shown: number; total: number } | null>(null);
   useEffect(() => {
@@ -158,7 +175,16 @@ export default function ConversationPane({ conversationId, focused, initialPromp
           />
         )}
         <div aria-live="polite" className="sr-only">{p.announcement}</div>
-        {isSide ? (
+        {isSub ? (
+          <SubAgentBanner
+            parentTitle={parentTitle}
+            onOpenParent={() => {
+              if (!parentId) return;
+              if (split?.ids.includes(parentId)) split.focusPane(parentId);
+              else split?.replaceFocused(parentId);
+            }}
+          />
+        ) : isSide ? (
           parentId && (
             <SideChatHeader
               title={p.conversation?.title ?? "Side chat"}
@@ -221,15 +247,16 @@ export default function ConversationPane({ conversationId, focused, initialPromp
           )}
 
           {p.messages.length > 0 && (
+            <AgentSendContext.Provider value={agentSend}>
             <ToolAnswersProvider value={{ answerApproval: p.answerApproval, answerPlan: p.answerPlan }}>
             <ChatMessages
               messages={p.messages}
               isLoading={p.isLoading}
-              onEditMessage={p.handleEditMessage}
-              onDeleteMessage={p.handleDeleteMessage}
+              onEditMessage={isSub ? undefined : p.handleEditMessage}
+              onDeleteMessage={isSub ? undefined : p.handleDeleteMessage}
               onCopyMessage={p.handleCopyMessage}
-              onForkMessage={p.handleForkMessage}
-              onRegenerateMessage={p.handleRegenerateMessage}
+              onForkMessage={isSub ? undefined : p.handleForkMessage}
+              onRegenerateMessage={isSub ? undefined : p.handleRegenerateMessage}
               onOpenArtifact={(id: string) => { p.setSelectedArtifactId(id); p.setArtifactPanelOpen(true); }}
               onClarificationAnswer={p.handleClarificationAnswer}
               onApprovePlan={p.mode === "plan" && !p.toolsAvailable ? p.approvePlanReply : undefined}
@@ -237,10 +264,11 @@ export default function ConversationPane({ conversationId, focused, initialPromp
               scrollRef={p.scrollRef}
               statusLabel={p.currentModelName ? `Waiting for ${p.currentModelName}…` : undefined}
               onQuote={p.addQuote}
-              quoteSuppressed={p.isDialogOpen}
+              quoteSuppressed={isSub || p.isDialogOpen}
               sendToMain={isSide && parentId ? { title: parentTitle, onSend: (text: string) => window.dispatchEvent(new CustomEvent("vas:send-to-main", { detail: { id: parentId, text } })) } : undefined}
             />
             </ToolAnswersProvider>
+            </AgentSendContext.Provider>
           )}
 
           {p.messages.length > 0 && (
@@ -254,8 +282,14 @@ export default function ConversationPane({ conversationId, focused, initialPromp
             conversationId={conversationId}
             onOpen={() => p.setTodoPanelOpen(true)}
           />
+          {/* Overlaid on the top of the list, so the list does not move when agents start or stop talking. */}
+          {talk && (
+            <div className="glass-card absolute inset-x-0 top-0 z-10 mx-4 mt-2 rounded-[var(--glass-radius-md)] px-3 py-2">
+              <AgentTalkingRow withTitle={split?.info[talk.withId]?.title ?? ""} hop={talk.hop} onStop={() => split?.stopAgents()} />
+            </div>
+          )}
         </div>
-
+        {!isSub && (
         <ChatInput
           input={p.input}
           setInput={p.setInput}
@@ -300,6 +334,7 @@ export default function ConversationPane({ conversationId, focused, initialPromp
           onQueueRetry={p.retryQueued}
           toolsAvailable={p.toolsAvailable}
         />
+        )}
       </main>
       <ArtifactPanel
         conversationId={conversationId}
@@ -396,5 +431,17 @@ export default function ConversationPane({ conversationId, focused, initialPromp
       />
     </div>
     </ChatModeContext.Provider>
+  );
+}
+
+/** The header of a sub-agent transcript: it says so, and links back to the chat that ran it. */
+function SubAgentBanner({ parentTitle, onOpenParent }: { parentTitle: string; onOpenParent: () => void }) {
+  return (
+    <div className="flex items-center gap-2 border-b border-[var(--glass-border)] px-4 py-2 text-xs text-zinc-400">
+      <span>Sub-agent transcript · read only</span>
+      <button type="button" onClick={onOpenParent} className="focus-ring ml-auto truncate underline hover:text-[var(--foreground)]">
+        {`Back to ${parentTitle}`}
+      </button>
+    </div>
   );
 }

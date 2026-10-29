@@ -103,7 +103,7 @@ export default function ConversationHeader({
                 <span className="hidden sm:inline">Temporary</span>
               </button>
             )}
-            <ModeToggle mode={mode} onModeChange={setMode} toolsAvailable={modelCaps.toolsAvailable} cli={modelCaps.cli} />
+            <ModeToggle mode={mode} onModeChange={setMode} toolsAvailable={modelCaps.toolsAvailable} />
             {/* These move into the More menu on small screens. */}
             <div className="hidden sm:flex items-center gap-2">
               <button
