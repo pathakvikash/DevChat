@@ -51,11 +51,15 @@ export interface CompressionResult {
 }
 
 /** `timeoutMs` bounds the model call, with no retries since a retry would only spend the
- *  deadline twice; without it the call keeps the default retries. */
+ *  deadline twice; without it the call keeps the default retries. `focus` steers the summary. */
 export async function compressConversation(
   conversationId: string,
   modelId: string = DEFAULT_COMPACTION_MODEL,
-  timeoutMs?: number,
+  {
+    focus,
+    timeoutMs,
+    abortSignal,
+  }: { focus?: string; timeoutMs?: number; abortSignal?: AbortSignal } = {},
 ): Promise<CompressionResult | null> {
   const conversation = await prisma.conversation.findUnique({
     where: { id: conversationId },
@@ -103,8 +107,16 @@ export async function compressConversation(
     beforeTokens = countTokens(conversationText);
   }
 
-  const prompt = `Summarize this conversation for context preservation:\n\n${conversationText}`;
+  const focusText = focus?.trim().slice(0, 500);
+  const prompt =
+    `Summarize this conversation for context preservation:\n\n${conversationText}` +
+    (focusText ? `\n\nPay special attention to: ${focusText}` : "");
   const beforeMessages = lineItems.length;
+  const timeoutSignal = timeoutMs ? AbortSignal.timeout(timeoutMs) : undefined;
+  const signal =
+    timeoutSignal && abortSignal
+      ? AbortSignal.any([timeoutSignal, abortSignal])
+      : (timeoutSignal ?? abortSignal);
 
   try {
     const result = await generateText({
@@ -112,7 +124,7 @@ export async function compressConversation(
       system: COMPRESSION_SYSTEM_PROMPT,
       prompt,
       temperature: 0.3,
-      abortSignal: timeoutMs ? AbortSignal.timeout(timeoutMs) : undefined,
+      abortSignal: signal,
       maxRetries: timeoutMs ? 0 : undefined,
       ...(isOllama ? { providerOptions: { ollama: { num_predict: 2048, temperature: 0.3 } } } : {}),
     });

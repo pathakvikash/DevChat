@@ -40,7 +40,9 @@ describe("autoCompress", () => {
     await autoCompress("c1", 85);
 
     expect(shouldAutoCompress).toHaveBeenCalledExactlyOnceWith("c1", 85);
-    expect(compressConversation).toHaveBeenCalledExactlyOnceWith("c1", "compact-model", AUTO_COMPRESS_TIMEOUT_MS);
+    expect(compressConversation).toHaveBeenCalledExactlyOnceWith("c1", "compact-model", {
+      timeoutMs: AUTO_COMPRESS_TIMEOUT_MS,
+    });
     expect(saveCompressedSummary).toHaveBeenCalledExactlyOnceWith(
       "c1",
       "s",

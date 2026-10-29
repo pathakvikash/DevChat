@@ -46,7 +46,7 @@ export default function CompressionEvent({
               <Sparkles size={14} className="text-emerald-300" />
             </div>
             <div className="min-w-0">
-              <div className="text-sm font-semibold text-emerald-200 flex items-center gap-2">
+              <div className="text-sm font-semibold text-[var(--foreground)] flex items-center gap-2">
                 Conversation compressed
                 {typeof reductionPercent === "number" && reductionPercent > 0 && (
                   <span className="inline-flex items-center gap-1 text-xs font-mono text-emerald-300 bg-emerald-900/50 px-1.5 py-0.5 rounded">

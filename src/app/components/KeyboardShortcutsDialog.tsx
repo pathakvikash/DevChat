@@ -1,6 +1,7 @@
 "use client";
 
 import { Keyboard, X } from "lucide-react";
+import { SLASH_COMMANDS } from "@/lib/commands";
 
 interface ShortcutGroup {
   title: string;
@@ -104,6 +105,19 @@ export default function KeyboardShortcutsDialog({
               </div>
             </div>
           ))}
+          <div>
+            <h3 className="text-xs font-semibold uppercase tracking-wider text-zinc-400 mb-2.5">
+              Slash commands
+            </h3>
+            <div className="space-y-1">
+              {SLASH_COMMANDS.map((c) => (
+                <div key={c.name} className="flex items-baseline justify-between gap-4 py-1.5">
+                  <code className="font-mono text-xs text-zinc-200 shrink-0">{c.usage}</code>
+                  <span className="text-sm text-zinc-300 text-right">{c.description}</span>
+                </div>
+              ))}
+            </div>
+          </div>
         </div>
 
         <div className="px-5 py-3 border-t border-[var(--glass-border)] glass">

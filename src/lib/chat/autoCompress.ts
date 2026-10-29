@@ -58,7 +58,7 @@ export async function autoCompress(
     const result = await compressConversation(
       conversationId,
       DEFAULT_COMPACTION_MODEL,
-      AUTO_COMPRESS_TIMEOUT_MS,
+      { timeoutMs: AUTO_COMPRESS_TIMEOUT_MS },
     );
     if (!result) return;
     await saveCompressedSummary(

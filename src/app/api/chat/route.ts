@@ -29,6 +29,7 @@ import {
   friendlyProviderErrorMessage,
   formatMissingApiKeyMessage,
 } from "@/lib/chat/providerErrors";
+import { contextWindowFor } from "@/lib/chat/contextBudget";
 import { resolveChatSettings } from "@/lib/chat/resolveChatSettings";
 import { resolveModelCandidates } from "@/lib/chat/resolveModelCandidates";
 import { cliProviderForModel } from "@/lib/cliProviders";
@@ -218,7 +219,14 @@ export async function POST(req: Request) {
     }
 
     const aiTools: ToolSet = useTools
-      ? await buildTools({ activeToolIds, searchProvider, conversationId, userId, mode: toolMode })
+      ? await buildTools({
+          activeToolIds,
+          searchProvider,
+          conversationId,
+          userId,
+          mode: toolMode,
+          contextWindow: contextWindowFor(servedModel, modelConfig, contextLength),
+        })
       : {};
 
     const isOllama = servedModel.startsWith("ollama/");

@@ -220,7 +220,7 @@ describe("compressConversation", () => {
   });
 
   it("bounds the call with a timeout and no retries, and keeps the default retries without one", async () => {
-    await compressConversation("conv-id", "ollama/x", 1000);
+    await compressConversation("conv-id", "ollama/x", { timeoutMs: 1000 });
     await compressConversation("conv-id", "ollama/x");
 
     const [bounded, unbounded] = (generateText as any).mock.calls.map((c: any[]) => c[0]);
@@ -281,5 +281,46 @@ describe("compressConversation", () => {
     expect(promptSent()).toContain("old facts");
     expect(promptSent()).not.toContain("q1 ");
     expect(promptSent()).toContain("a2 ");
+  });
+});
+
+describe("compressConversation focus", () => {
+  beforeEach(() => {
+    (prisma.conversation.findUnique as any).mockResolvedValue({
+      userId: null,
+      messages: [
+        { role: "user", content: "setup", createdAt: new Date("2024-06-01T10:00:00Z") },
+        { role: "assistant", content: "ok", createdAt: new Date("2024-06-01T10:01:00Z") },
+        { role: "user", content: "which cache?", createdAt: new Date("2024-06-01T11:00:00Z") },
+        { role: "assistant", content: "redis", createdAt: new Date("2024-06-01T11:01:00Z") },
+      ],
+    });
+    (generateText as any).mockResolvedValue({ text: "### Goal\nPick a cache" });
+  });
+
+  const promptSent = () => (generateText as any).mock.calls[0][0].prompt as string;
+
+  it("puts the focus into the compression prompt", async () => {
+    await compressConversation("c1", "gpt-4o", { focus: "keep the API decisions" });
+    expect(promptSent()).toContain("Pay special attention to: keep the API decisions");
+  });
+
+  it("leaves the prompt unchanged without a focus", async () => {
+    await compressConversation("c1", "gpt-4o");
+    expect(promptSent()).not.toContain("Pay special attention to");
+    await compressConversation("c1", "gpt-4o", { focus: "   " });
+    expect((generateText as any).mock.calls[1][0].prompt).toBe(promptSent());
+  });
+
+  it("cuts a focus longer than 500 characters", async () => {
+    await compressConversation("c1", "gpt-4o", { focus: "x".repeat(600) });
+    expect(promptSent()).toContain(`Pay special attention to: ${"x".repeat(500)}`);
+    expect(promptSent()).not.toContain("x".repeat(501));
+  });
+
+  it("passes the abort signal on to the model call", async () => {
+    const controller = new AbortController();
+    await compressConversation("c1", "gpt-4o", { abortSignal: controller.signal });
+    expect((generateText as any).mock.calls[0][0].abortSignal).toBe(controller.signal);
   });
 });

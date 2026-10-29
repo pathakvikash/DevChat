@@ -3,6 +3,7 @@ import { prisma } from "@/lib/db";
 import { calculateDetailedContextUsage } from "@/lib/tokens";
 import { buildSystemPrompt } from "@/lib/chat/buildSystemPrompt";
 import { resolveActiveToolIds } from "@/lib/chat/buildTools";
+import { contextWindowFor } from "@/lib/chat/contextBudget";
 import { getModel } from "@/lib/models";
 import { resolveProviderCreds } from "@/lib/apiKeys";
 import { requireUserId } from "@/lib/auth";
@@ -53,13 +54,9 @@ export async function GET(
       modelConfig = null;
     }
     // `conversation.contextLength` is really Ollama's `num_ctx` override (see
-    // api/chat/route.ts) — it must not shadow a cloud model's real, much
-    // larger context window just because an earlier Ollama session on this
-    // conversation set it.
-    const isOllama = conversation.model.startsWith("ollama/");
-    const contextLength = isOllama
-      ? conversation.contextLength || modelConfig?.contextWindow || 8192
-      : modelConfig?.contextWindow || 8192;
+    // api/chat/route.ts) — contextWindowFor keeps it from shadowing a cloud
+    // model's real, much larger context window.
+    const contextLength = contextWindowFor(conversation.model, modelConfig, conversation.contextLength);
     const systemPrompt = conversation.systemPrompt || "";
     const compressedSummary = conversation.compressedSummary || null;
 

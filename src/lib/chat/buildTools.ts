@@ -5,12 +5,17 @@ import { prisma } from "@/lib/db";
 import { webSearch, formatSearchResults, type SearchProvider } from "@/lib/search";
 import { listServerTools, callServerTool } from "@/lib/mcp/client";
 import type { ToolExecutionContext } from "@/lib/registry/types";
+import { searchUserChats, readUserChat } from "@/lib/chatSearch";
+import { budgetTokens } from "@/lib/chat/contextBudget";
+import { quoteSearchResults } from "@/lib/chat/quotePastChat";
 
 export const BUILTIN_TOOL_IDS = [
   "executeCode",
   "webSearch",
   "rememberFact",
   "forgetFact",
+  "searchChats",
+  "readChat",
   "createArtifact",
   "updateArtifact",
   "askClarification",
@@ -47,6 +52,8 @@ export interface BuildToolsOptions {
   userId: string;
   /** Defaults to "agent" so server-side callers keep full capability. */
   mode?: ToolMode;
+  /** The model's context window in tokens; `readChat` sizes its result from it. */
+  contextWindow: number;
 }
 
 /** Convert a JSON Schema object to a Zod schema (supports basic types). */
@@ -84,6 +91,7 @@ export async function buildTools({
   conversationId,
   userId,
   mode = "agent",
+  contextWindow,
 }: BuildToolsOptions): Promise<Record<string, Tool>> {
   const ctx: ToolExecutionContext = { conversationId };
   const aiTools: Record<string, Tool> = {};
@@ -202,6 +210,38 @@ export async function buildTools({
           return `Error forgetting ${key}: ${e?.message || String(e)}`;
         }
       },
+    });
+  }
+
+  // Read-only, so offered in every mode.
+  if (activeToolIds.has("searchChats")) {
+    aiTools.searchChats = tool({
+      description:
+        "Search the user's OTHER past chats (not this one) by keyword. Use it when they refer to something discussed earlier, e.g. \"what did we decide about X last week\". Returns up to 5 chats with id, title, date and a snippet; pass an id to readChat for more.",
+      inputSchema: z.object({
+        query: z.string().min(2).describe("Keyword or phrase to look for in chat titles and messages."),
+      }),
+      // The card reads the structured results; the model only ever sees them framed as data.
+      execute: async ({ query }) => {
+        const hits = await searchUserChats(userId, query, { excludeId: conversationId });
+        return { results: hits.map((h) => ({ ...h, updatedAt: h.updatedAt.toISOString() })) };
+      },
+      toModelOutput: ({ input, output }) => ({
+        type: "text",
+        value: quoteSearchResults(input.query, output.results),
+      }),
+    });
+  }
+
+  if (activeToolIds.has("readChat")) {
+    aiTools.readChat = tool({
+      description:
+        "Read one of the user's past chats: its summary and most recent messages. Takes an id returned by searchChats.",
+      inputSchema: z.object({
+        id: z.string().describe("Chat id from searchChats."),
+      }),
+      execute: async ({ id }) =>
+        (await readUserChat(userId, id, budgetTokens(contextWindow, 0.25, 6000))) ?? "Chat not found.",
     });
   }
 

@@ -47,7 +47,7 @@ export function extractText(message: unknown): string {
 }
 
 /** Type guard for tool-call parts (type === "tool-<name>"). */
-function isToolPart(part: AnyPart): part is AnyPart & ToolPart {
+export function isToolPart(part: AnyPart): part is AnyPart & ToolPart {
   return typeof part?.type === "string" && part.type.startsWith("tool-");
 }
 

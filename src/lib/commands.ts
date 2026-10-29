@@ -26,6 +26,13 @@ export interface SlashCommand {
   action?: string;
   /** If true and no argument is given, the dispatcher shows the usage hint. */
   requiresArg?: boolean;
+  /** With `requiresArg`: fewer characters than this counts as no argument (default 1). */
+  minArgLength?: number;
+}
+
+/** True when the command needs an argument and `arg` is missing or too short. */
+export function missingArg(command: SlashCommand, arg: string): boolean {
+  return !!command.requiresArg && arg.trim().length < (command.minArgLength ?? 1);
 }
 
 export const SLASH_COMMANDS: SlashCommand[] = [
@@ -126,10 +133,26 @@ export const SLASH_COMMANDS: SlashCommand[] = [
   },
   {
     name: "compress",
-    description: "Compress the conversation to save context",
-    usage: "/compress",
+    description: "Compress the chat to save context. Add a focus to keep it in detail.",
+    usage: "/compress [focus]",
     kind: "action",
     action: "compress",
+  },
+  {
+    name: "export",
+    description: "Download this chat as Markdown",
+    usage: "/export",
+    kind: "action",
+    action: "export",
+  },
+  {
+    name: "recall",
+    description: "Search your past chats and use them in the answer",
+    usage: "/recall <query>",
+    kind: "action",
+    action: "recall",
+    requiresArg: true,
+    minArgLength: 2, // what /api/search accepts
   },
   {
     name: "title",

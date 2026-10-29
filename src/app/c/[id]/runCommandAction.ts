@@ -1,18 +1,21 @@
 "use client";
 
+import type { UIMessage } from "ai";
 import type { SlashCommand } from "@/lib/commands";
+import { exportChat } from "@/lib/utils/download";
 import { runWebSearch, formatWebSearchResults } from "./webSearch";
 
 export interface RunCommandCtx {
   conversationId: string;
   conversation: { model?: string } | null;
-  sendMessage: (msg: { parts: Array<{ type: "text"; text: string }> }) => Promise<void>;
+  sendMessage: (msg: { parts: UIMessage["parts"] }) => Promise<void>;
   setMessages: (fn: (prev: any[]) => any[]) => void;
   setConversation: (fn: (prev: any) => any) => void;
   setIsCompressing: (v: boolean) => void;
   setArtifactPanelOpen: (v: boolean) => void;
   setScratchpadOpen: (v: boolean) => void;
   setModelSettingsOpen: (v: boolean) => void;
+  setKeyboardShortcutsOpen: (v: boolean) => void;
   toast: (msg: string, type: "success" | "error" | "info") => void;
   refreshConversationAndMessages: () => Promise<void>;
 }
@@ -38,10 +41,40 @@ export async function runCommandAction(
       await ctx.sendMessage({ parts: [{ type: "text", text }] });
       break;
     }
+    case "recall": {
+      const query = arg.trim().slice(0, 300);
+      let results: unknown[];
+      try {
+        const res = await fetch(`/api/search?q=${encodeURIComponent(query)}&exclude=${ctx.conversationId}`);
+        if (!res.ok) throw new Error("search failed");
+        results = (await res.json()).chats;
+      } catch {
+        ctx.toast("Couldn't search past chats. Try again.", "error");
+        break;
+      }
+      // The results ride on the message as a searchChats card, so the bubble stays `/recall …`.
+      await ctx.sendMessage({
+        parts: [
+          { type: "text", text: `/recall ${query}` },
+          {
+            type: "tool-searchChats",
+            toolCallId: `recall-${Date.now()}`,
+            state: "output-available",
+            input: { query },
+            output: { results },
+          },
+        ],
+      });
+      break;
+    }
     case "compress":
       ctx.setIsCompressing(true);
       try {
-        const res = await fetch(`/api/conversations/${ctx.conversationId}/compress`, { method: "POST" });
+        const res = await fetch(`/api/conversations/${ctx.conversationId}/compress`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ focus: arg }),
+        });
         if (!res.ok) throw new Error("compress failed");
         const data = await res.json();
         if (data?.success === false) {
@@ -49,12 +82,18 @@ export async function runCommandAction(
           return;
         }
         await ctx.refreshConversationAndMessages();
-        ctx.toast("Conversation compressed", "success");
+        ctx.toast("Chat compressed", "success");
       } catch {
-        ctx.toast("Failed to compress conversation", "error");
+        ctx.toast("Couldn't compress the chat", "error");
       } finally {
         ctx.setIsCompressing(false);
       }
+      break;
+    case "export":
+      await exportChat(ctx.conversationId, "markdown", ctx.toast);
+      break;
+    case "help":
+      ctx.setKeyboardShortcutsOpen(true);
       break;
     case "title":
       try {
