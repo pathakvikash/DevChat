@@ -30,6 +30,14 @@ import {
   formatMissingApiKeyMessage,
 } from "@/lib/chat/providerErrors";
 import { contextWindowFor } from "@/lib/chat/contextBudget";
+import {
+  claimQueued,
+  queuedMarkerTransform,
+  releaseUnshown,
+  withInjected,
+  type QueuedInjection,
+  type QueuedMarker,
+} from "@/lib/chat/queue";
 import { resolveChatSettings } from "@/lib/chat/resolveChatSettings";
 import { resolveModelCandidates } from "@/lib/chat/resolveModelCandidates";
 import { cliProviderForModel } from "@/lib/cliProviders";
@@ -41,6 +49,34 @@ import {
   getNextContextTier,
 } from "@/lib/contextManager";
 import { requireUserId } from "@/lib/auth";
+
+// Break the loop when the model repeats the same tool call with the same arguments (llama3.2 does
+// this with failed calls): a one-shot failure beats a retry storm.
+function checkRepeatedCall(steps: unknown[], stepNumber: number) {
+  if (steps.length < 2) return;
+  const prev = steps[steps.length - 1] as {
+    toolCalls?: Array<{ toolName: string; input?: unknown; args?: unknown }>;
+  };
+  const prev2 = steps[steps.length - 2] as {
+    toolCalls?: Array<{ toolName: string; input?: unknown; args?: unknown }>;
+  };
+  if (!prev?.toolCalls?.length || !prev2?.toolCalls?.length) return;
+  const a = prev.toolCalls[0];
+  const b = prev2.toolCalls[0];
+  if (a.toolName !== b.toolName) return;
+  const aArgs = JSON.stringify(a.input ?? a.args ?? {});
+  const bArgs = JSON.stringify(b.input ?? b.args ?? {});
+  if (aArgs === bArgs) {
+    console.warn(
+      `[chat] Model called ${a.toolName} with identical args on ` +
+        `steps ${stepNumber - 1} and ${stepNumber} — breaking loop.`,
+    );
+    throw new Error(
+      `Tool "${a.toolName}" was called twice with identical arguments. ` +
+        `Stopping to avoid a retry loop.`,
+    );
+  }
+}
 
 export async function POST(req: Request) {
   const requestStartedAt = Date.now();
@@ -300,6 +336,10 @@ export async function POST(req: Request) {
         partialToolOutputs.clear();
         toolCallsSeen.length = 0;
         firstTokenAt = null;
+        // Queued messages delivered between steps, and their markers for the reply stream.
+        const injected: QueuedInjection[] = [];
+        const claimedIds: string[] = [];
+        const pendingMarkers: QueuedMarker[] = [];
         const result = streamText({
           model: modelConfig.model,
           system: finalSystemPrompt,
@@ -309,35 +349,28 @@ export async function POST(req: Request) {
           // Hard cap on response length: without it a looping model streams
           // indefinitely and leaves the request permanently pending.
           maxOutputTokens: maxTokens,
-          // Break the loop if the model calls the SAME tool with the SAME
-          // arguments twice in a row. llama3.2 in particular will keep
-          // re-issuing a failed tool call up to 3 times; we'd rather have
-          // a one-shot failure than an infinite retry storm.
-          prepareStep: ({ steps, stepNumber }) => {
-            if (steps.length < 2) return undefined;
-            const prev = steps[steps.length - 1] as {
-              toolCalls?: Array<{ toolName: string; input?: unknown; args?: unknown }>;
-            };
-            const prev2 = steps[steps.length - 2] as {
-              toolCalls?: Array<{ toolName: string; input?: unknown; args?: unknown }>;
-            };
-            if (!prev?.toolCalls?.length || !prev2?.toolCalls?.length) return undefined;
-            const a = prev.toolCalls[0];
-            const b = prev2.toolCalls[0];
-            if (a.toolName !== b.toolName) return undefined;
-            const aArgs = JSON.stringify(a.input ?? a.args ?? {});
-            const bArgs = JSON.stringify(b.input ?? b.args ?? {});
-            if (aArgs === bArgs) {
-              console.warn(
-                `[chat] Model called ${a.toolName} with identical args on ` +
-                  `steps ${stepNumber - 1} and ${stepNumber} — breaking loop.`,
-              );
-              throw new Error(
-                `Tool "${a.toolName}" was called twice with identical arguments. ` +
-                  `Stopping to avoid a retry loop.`,
-              );
+          prepareStep: async ({ steps, stepNumber, messages: stepMessages }) => {
+            // Queued messages join the history before each step after the first. prepareStep's
+            // messages apply to one step only, so the delivered ones are re-added on every step.
+            if (conversationId && stepNumber > 0) {
+              const claimed = await claimQueued(conversationId);
+              // Stop came while the claim ran: no step will show these, so they go back.
+              if (req.signal.aborted) {
+                await releaseUnshown(claimed.map((q) => q.id), []);
+              } else {
+                for (const q of claimed) {
+                  claimedIds.push(q.id);
+                  injected.push({ at: stepMessages.length, message: { role: "user", content: q.text } });
+                  pendingMarkers.push({
+                    type: "data-queued-message",
+                    id: q.id,
+                    data: { queuedId: q.id, text: q.text },
+                  });
+                }
+              }
             }
-            return undefined;
+            checkRepeatedCall(steps, stepNumber);
+            return injected.length ? { messages: withInjected(stepMessages, injected) } : undefined;
           },
           stopWhen: ({ steps }) => {
             if (steps.length >= maxToolCalls) return true;
@@ -524,7 +557,13 @@ export async function POST(req: Request) {
                   execute: ({ writer: inner }) => {
                     // `toUIMessageStream` needs its own onError: it turns `error` parts into
                     // text itself, so createUIMessageStream's onError never sees them.
-                    inner.merge(pipeJsonRender(result.toUIMessageStream({ onError: onStreamError })));
+                    inner.merge(
+                      pipeJsonRender(
+                        result
+                          .toUIMessageStream({ onError: onStreamError })
+                          .pipeThrough(queuedMarkerTransform(pendingMarkers)),
+                      ),
+                    );
                   },
                   onError: onStreamError,
                   generateId: () => assistantMessageId,
@@ -537,17 +576,24 @@ export async function POST(req: Request) {
                     if (!conversationId) return;
                     const last = finishedMessages[finishedMessages.length - 1];
                     // Stopped before anything streamed: there is no reply to save.
-                    if (isAborted && !last?.parts.some((p) => p.type !== "step-start")) return;
+                    const nothingToSave = isAborted && !last?.parts.some((p) => p.type !== "step-start");
                     // No captured event means the stream errored before finishing.
                     const event = { steps: [], ...capturedFinishEvent };
-                    const saved = await safePersistAssistantMessage(event, {
-                      conversationId,
-                      model: servedModel,
-                      systemPrompt: finalSystemPrompt,
-                      messageId: assistantMessageId,
-                      updateExisting: !!continuing,
-                      overrideParts: last?.parts ?? [],
-                    });
+                    const saved =
+                      !nothingToSave &&
+                      (await safePersistAssistantMessage(event, {
+                        conversationId,
+                        model: servedModel,
+                        systemPrompt: finalSystemPrompt,
+                        messageId: assistantMessageId,
+                        updateExisting: !!continuing,
+                        overrideParts: last?.parts ?? [],
+                      }));
+                    // A claimed message counts as delivered only if the saved reply holds its marker;
+                    // a failed save releases every claim.
+                    await releaseUnshown(claimedIds, saved ? (last?.parts ?? []) : []).catch((e) =>
+                      console.error("[queue] releasing unshown messages failed:", e),
+                    );
                     if (saved && canAutoCompress(event, isAborted)) {
                       await autoCompress(
                         conversationId,

@@ -66,10 +66,12 @@ interface ChatTransportOptions {
   setIsCompressing: (compressing: boolean) => void;
   onFinishRef: React.MutableRefObject<(finish: ChatFinish) => void>;
   onErrorRef: React.MutableRefObject<(err: Error) => void>;
+  /** A queued message was delivered into the reply (its marker arrived). */
+  onQueuedDeliveredRef: React.MutableRefObject<(queuedId: string) => void>;
 }
 
 export function useChatTransport(opts: ChatTransportOptions) {
-  const { conversationId, conversation, selectedKbId, searchProvider, enabledTools, enabledSkills, mode, setIsCompressing, onFinishRef, onErrorRef } = opts;
+  const { conversationId, conversation, selectedKbId, searchProvider, enabledTools, enabledSkills, mode, setIsCompressing, onFinishRef, onErrorRef, onQueuedDeliveredRef } = opts;
 
   const transportBodyRef = useRef({
     conversationId,
@@ -155,7 +157,10 @@ export function useChatTransport(opts: ChatTransportOptions) {
         }
       }
     },
-    onData: (part) => { if (part.type === "data-compressing") setIsCompressing(true); },
+    onData: (part) => {
+      if (part.type === "data-compressing") setIsCompressing(true);
+      if (part.type === "data-queued-message") onQueuedDeliveredRef.current(String((part.data as { queuedId?: string })?.queuedId ?? ""));
+    },
     onError: (err) => { onErrorRef.current(err); },
     onFinish: (finish) => { onFinishRef.current(finish); },
   });

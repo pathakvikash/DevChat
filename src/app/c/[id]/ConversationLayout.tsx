@@ -181,6 +181,12 @@ export default function ConversationLayout({ conversationId, initialPrompt }: Pr
           onQuoteRemove={p.removeQuote}
           onSendQuote={p.sendQuote}
           temporary={p.conversation.temporary}
+          queued={p.queued}
+          onQueue={p.queueMessage}
+          onQueueEdit={p.editQueued}
+          onQueueRemove={p.removeQueued}
+          onQueueRetry={p.retryQueued}
+          toolsAvailable={p.toolsAvailable}
         />
       </main>
       <ArtifactPanel

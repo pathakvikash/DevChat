@@ -249,3 +249,81 @@ describe("/recall results on a user message", () => {
     expect(text).toContain("No matching chats.");
   });
 });
+
+describe("normalizeMessageToolParts splits a reply at its queued messages", () => {
+  const text = (t: string) => ({ type: "text", text: t });
+  const marker = (id: string, t: string) => ({
+    type: "data-queued-message",
+    id,
+    data: { queuedId: id, text: t },
+  });
+  const reply = (parts: any[]) => [{ id: "a1", role: "assistant", parts }];
+  const shape = (msgs: any[]) =>
+    msgs.map((m) => [m.role, m.parts.map((p: any) => p.text ?? p.type)]);
+
+  it("turns a marker in the middle into assistant, user, assistant", () => {
+    const out = normalizeMessageToolParts(reply([text("before"), marker("q1", "change course"), text("after")]));
+    expect(shape(out)).toEqual([
+      ["assistant", ["before"]],
+      ["user", ["change course"]],
+      ["assistant", ["after"]],
+    ]);
+    expect(out[1].id).toBe("q1");
+  });
+
+  it("drops the empty part before a marker that comes first", () => {
+    const out = normalizeMessageToolParts(reply([marker("q1", "first"), text("answer")]));
+    expect(shape(out)).toEqual([
+      ["user", ["first"]],
+      ["assistant", ["answer"]],
+    ]);
+  });
+
+  it("drops the empty part after a marker that comes last", () => {
+    const out = normalizeMessageToolParts(reply([text("answer"), marker("q1", "last")]));
+    expect(shape(out)).toEqual([
+      ["assistant", ["answer"]],
+      ["user", ["last"]],
+    ]);
+  });
+
+  it("splits around two markers", () => {
+    const out = normalizeMessageToolParts(
+      reply([text("one"), marker("q1", "two"), text("three"), marker("q2", "four"), text("five")]),
+    );
+    expect(out.map((m) => m.role)).toEqual(["assistant", "user", "assistant", "user", "assistant"]);
+    expect(out[3].parts).toEqual([{ type: "text", text: "four" }]);
+  });
+
+  it("keeps a tool call and its result before the marker in the first half", () => {
+    const tool = {
+      type: "tool-webSearch",
+      toolCallId: "w1",
+      toolName: "webSearch",
+      input: { query: "q" },
+      output: "results",
+      state: "output-available",
+    };
+    const out = normalizeMessageToolParts(reply([tool, marker("q1", "more"), text("done")]));
+    expect(out[0].parts.map((p: any) => p.type)).toEqual(["tool-webSearch"]);
+    expect(out[0].parts[0]).toMatchObject({ toolCallId: "w1", state: "output-available" });
+    expect(out[1].role).toBe("user");
+  });
+
+  it("gives the model the split order through convertToModelMessages", async () => {
+    const out = await convertToModelMessages(
+      normalizeMessageToolParts([
+        { id: "u0", role: "user", parts: [text("question")] },
+        ...reply([text("partial"), marker("q1", "use the other file"), text("final")]),
+      ]) as any,
+    );
+    expect(out.map((m) => m.role)).toEqual(["user", "assistant", "user", "assistant"]);
+    expect(out[2].content).toEqual([{ type: "text", text: "use the other file" }]);
+  });
+
+  it("leaves a reply without markers unchanged", () => {
+    const messages = reply([text("plain")]);
+    expect(normalizeMessageToolParts(messages)).toEqual(messages);
+  });
+});
+

@@ -5,6 +5,7 @@ import { UIMessage } from "ai";
 import MessageBubble from "./MessageBubble";
 import TypingIndicator from "./TypingIndicator";
 import QuoteReplyPill from "./QuoteReplyPill";
+import { splitAtQueuedMessages } from "@/lib/chat/normalizeToolParts";
 
 interface ChatMessagesProps {
   messages: UIMessage[];
@@ -65,45 +66,55 @@ function ChatMessages({
             seen.add(m.id);
             unique.push(m);
           }
-          return unique.map((message, idx) => {
-            const parts = normalizeParts((message.parts || []) as any[]);
-            const content = parts
-              .filter((p) => p.type === "text")
-              .map((p) => p.text)
-              .join("");
-            const reasoning = parts
-              .filter((p) => p.type === "reasoning")
-              .map((p) => p.text || p.reasoning || "")
-              .join("\n\n");
-            const fileParts = parts.filter(
-              (p) => p.type === "file" || p.type === "image"
-            );
-            const toolParts = parts.filter(
-              (p) => typeof p.type === "string" && p.type.startsWith("tool-")
-            );
-            return (
-              <div key={message.id} data-message-id={message.id} data-message-index={idx}>
-                <MessageBubble key={message.id}
-                  role={message.role as "user" | "assistant" | "system" | "compression"}
-                  content={content}
-                  messageId={message.id}
-                  feedback={(message as any).feedback ?? null}
-                  reasoning={reasoning}
-                  fileParts={fileParts}
-                  toolParts={toolParts}
-                  allParts={parts}
-                  createdAt={(message as any).createdAt}
-                  isStreaming={message.role === "assistant" && isLoading}
-                  onEdit={onEditMessage}
-                  onDelete={onDeleteMessage}
-                  onCopy={onCopyMessage}
-                  onFork={onForkMessage}
-                  onRegenerateMessage={onRegenerateMessage}
-                  onOpenArtifact={onOpenArtifact}
-                  onClarificationAnswer={onClarificationAnswer}
-                />
-              </div>
-            );
+          return unique.flatMap((message, idx) => {
+            // A reply with queued messages delivered mid-way reads as reply, user bubble, reply.
+            const segments = splitAtQueuedMessages({ ...message, parts: normalizeParts((message.parts || []) as any[]) });
+            // Edit, copy, regenerate and feedback sit on the last piece of the message's own role.
+            const actionsAt = segments.findLastIndex((seg) => seg.role === message.role);
+            return segments.map((segment, s) => {
+              const parts = segment.parts as any[];
+              const content = parts
+                .filter((p) => p.type === "text")
+                .map((p) => p.text)
+                .join("");
+              const reasoning = parts
+                .filter((p) => p.type === "reasoning")
+                .map((p) => p.text || p.reasoning || "")
+                .join("\n\n");
+              const fileParts = parts.filter(
+                (p) => p.type === "file" || p.type === "image"
+              );
+              const toolParts = parts.filter(
+                (p) => typeof p.type === "string" && p.type.startsWith("tool-")
+              );
+              const sentWhileReplying = segment.role === "user" && message.role !== "user";
+              return (
+                <div key={segment.id} data-message-id={segment.id} data-message-index={idx}>
+                  <MessageBubble
+                    role={segment.role as "user" | "assistant" | "system" | "compression"}
+                    content={content}
+                    messageId={s === actionsAt ? message.id : undefined}
+                    feedback={s === actionsAt ? (message as any).feedback ?? null : null}
+                    reasoning={reasoning}
+                    fileParts={fileParts}
+                    toolParts={toolParts}
+                    allParts={parts}
+                    createdAt={(message as any).createdAt}
+                    isStreaming={segment.role === "assistant" && isLoading && s === segments.length - 1}
+                    onEdit={onEditMessage}
+                    onDelete={onDeleteMessage}
+                    onCopy={onCopyMessage}
+                    onFork={s === actionsAt ? onForkMessage : undefined}
+                    onRegenerateMessage={onRegenerateMessage}
+                    onOpenArtifact={onOpenArtifact}
+                    onClarificationAnswer={onClarificationAnswer}
+                  />
+                  {sentWhileReplying && (
+                    <p className="mt-1 text-right text-[11px] text-zinc-400">Sent while replying</p>
+                  )}
+                </div>
+              );
+            });
           });
         })()}
 

@@ -100,9 +100,24 @@ model Conversation {
   forkedFromId             String?
   forkedFrom               Conversation? @relation("Forks", fields: [forkedFromId], references: [id], onDelete: SetNull)
   forks                    Conversation[] @relation("Forks")
+  queuedMessages           QueuedMessage[]
 
   @@index([updatedAt])
   @@index([userId])
+}
+
+// Messages typed while a reply runs. Deleted or delivered (deliveredAt set) before the next step.
+model QueuedMessage {
+  id             String       @id
+  conversationId String
+  text           String
+  seq            Int          @default(0) // client order within the chat; claims read rows in this order
+  createdAt      DateTime     @default(now())
+  deliveredAt    DateTime?
+  claimToken     String? // set while one step's claim holds the row; unique per claim
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@index([conversationId, deliveredAt])
 }
 
 model Message {

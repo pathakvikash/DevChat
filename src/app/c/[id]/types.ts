@@ -2,6 +2,7 @@ import type { MinimapMessage } from "@/app/components/MinimapNavigator";
 import type { Conversation } from "@/app/components/conversation/types";
 import type { DataActions } from "./useConversationData";
 import type { QuoteCard } from "@/lib/utils/quoteReply";
+import type { QueuedItem } from "@/app/components/QueuedMessages";
 
 export interface ConversationPageState extends DataActions {
   conversation: Conversation | null;
@@ -25,6 +26,14 @@ export interface ConversationPageState extends DataActions {
   removeQuote: (id: string) => void;
   sendQuote: (id: string) => Promise<void>;
   sendComposed: () => Promise<void>;
+  /** Messages typed during a reply, waiting for the server to take them. */
+  queued: QueuedItem[];
+  queueMessage: () => void;
+  editQueued: (id: string, text: string) => Promise<void>;
+  removeQueued: (id: string) => Promise<void>;
+  retryQueued: (id: string) => void;
+  /** The model can use tools, so queued messages join the running reply (else they go next). */
+  toolsAvailable: boolean;
   /** Text for the pane's polite live region. */
   announcement: string;
   toggleTemporary: () => Promise<void>;

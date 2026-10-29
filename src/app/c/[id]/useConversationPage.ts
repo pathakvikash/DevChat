@@ -1,12 +1,15 @@
 "use client";
 
 import { useEffect, useState, useMemo, useCallback, useRef } from "react";
+import { generateId, type UIMessage } from "ai";
 import { useToast } from "@/app/components/Toast";
+import type { QueuedItem } from "@/app/components/QueuedMessages";
+import { fetchModels } from "@/app/hooks/useModelsApi";
 import type { Conversation } from "@/app/components/conversation/types";
 import { useChatMode } from "@/app/contexts/ChatModeContext";
 import type { MinimapMessage } from "@/app/components/MinimapNavigator";
 import { parseCommand, missingArg } from "@/lib/commands";
-import { buildMessageParts } from "@/lib/utils/messageParts";
+import { buildMessageParts, shouldAutoContinue, type AnyPart } from "@/lib/utils/messageParts";
 import { buildMessagesFromConversation, lastExchange, type RawConversation } from "@/lib/utils/conversation";
 import { composeQuoteMessage, type QuoteCard } from "@/lib/utils/quoteReply";
 import { composeFileBlocks, cutFiles } from "@/lib/utils/fileMentions";
@@ -39,6 +42,19 @@ async function readMention(conversationId: string, path: string): Promise<string
     return null;
   }
 }
+
+/** Ids of the queued messages a reply already shows, from its `data-queued-message` parts. */
+function deliveredQueueIds(messages: UIMessage[]): Set<string> {
+  const ids = new Set<string>();
+  for (const m of messages) {
+    for (const p of (m.parts ?? []) as any[]) {
+      if (p.type === "data-queued-message") ids.add(p.data?.queuedId);
+    }
+  }
+  return ids;
+}
+
+const queueHeaders = { "Content-Type": "application/json" };
 
 function discardTemporaryChat(id: string) {
   // keepalive lets the request outlive the page on a full reload; ?temporary=1 means the server
@@ -135,6 +151,7 @@ export function useConversationPage(conversationId: string, initialPrompt?: stri
 
   const onFinishRef = useRef<(finish: ChatFinish) => void>(() => {});
   const onErrorRef = useRef<(err: Error) => void>(() => {});
+  const onQueuedDeliveredRef = useRef<(queuedId: string) => void>(() => {});
 
   const chatTransport = useChatTransport({
     conversationId,
@@ -147,9 +164,188 @@ export function useConversationPage(conversationId: string, initialPrompt?: stri
     setIsCompressing,
     onFinishRef,
     onErrorRef,
+    onQueuedDeliveredRef,
   });
 
-  const { messages, setMessages, sendMessage, status, stop, regenerate, error, addToolResult, isLoading } = chatTransport;
+  const { messages, setMessages, sendMessage, status, stop: stopStream, regenerate, error, addToolResult, isLoading } = chatTransport;
+
+  /* ─── Message queue ────────────────────────────────────────────────────── */
+
+  const [queue, setQueue] = useState<QueuedItem[]>([]);
+  const queueRef = useRef(queue);
+  useEffect(() => { queueRef.current = queue; }, [queue]);
+  // Each chip's POST. Edits, removals and take-backs wait for it, so no request reaches a row that does not exist yet.
+  const postsRef = useRef(new Map<string, Promise<void>>());
+  const seqRef = useRef(0);
+  // Chips queued in this page; only their delivery is announced.
+  const knownRef = useRef(new Set<string>());
+  const queuedUrl = `/api/conversations/${conversationId}/queue`;
+  const delivered = deliveredQueueIds(messages);
+  const queued = queue.filter((q) => !delivered.has(q.id));
+  const [modelSupportsTools, setModelSupportsTools] = useState(true);
+  const toolsAvailable = modelSupportsTools && !conversation?.chatOnlyMode;
+
+  useEffect(() => {
+    const model = conversation?.model;
+    if (!model) return;
+    fetchModels()
+      .then((list) => setModelSupportsTools(list.find((m) => m.id === model)?.supportsTools !== false))
+      .catch(() => {});
+  }, [conversation?.model]);
+
+  useEffect(() => {
+    onQueuedDeliveredRef.current = (id) => {
+      if (knownRef.current.has(id)) setAnnouncement((a) => (a === "Queued message delivered" ? `${a} ` : "Queued message delivered"));
+    };
+  });
+
+  function setQueued(id: string, change: Partial<QueuedItem> | null) {
+    setQueue((prev) =>
+      change ? prev.map((q) => (q.id === id ? { ...q, ...change } : q)) : prev.filter((q) => q.id !== id),
+    );
+  }
+
+  /** POSTs a chip. If the POST fails the chip stays on this page as "Not queued". */
+  function postQueued(item: QueuedItem): Promise<void> {
+    const run = (async () => {
+      try {
+        const res = await fetch(queuedUrl, {
+          method: "POST",
+          headers: queueHeaders,
+          body: JSON.stringify({ id: item.id, text: item.text, seq: item.seq }),
+        });
+        if (!res.ok) throw new Error(String(res.status));
+        setQueued(item.id, { status: "queued" });
+      } catch {
+        setQueued(item.id, { status: "failed" });
+      }
+    })();
+    postsRef.current.set(item.id, run);
+    return run;
+  }
+
+  /** Enter or Queue while a reply runs: the message becomes a chip until a step takes it. */
+  function queueMessage() {
+    const text = composeQuoteMessage(quotes, input).trim();
+    if (!text) return;
+    if (parseCommand(input)) {
+      toast("Wait for the reply to finish, then run the command", "info");
+      return;
+    }
+    const item: QueuedItem = { id: generateId(), seq: ++seqRef.current, text, status: "queued" };
+    knownRef.current.add(item.id);
+    setQueue((prev) => [...prev, item]);
+    setInput("");
+    setQuotes([]);
+    setAnnouncement((a) => (a === "Message queued" ? "Message queued " : "Message queued"));
+    void postQueued(item);
+  }
+
+  async function editQueued(id: string, text: string) {
+    const item = queueRef.current.find((q) => q.id === id);
+    if (!item || item.status === "claimed") return;
+    // Never stored: the edit stays on this page.
+    if (item.status === "failed") {
+      setQueued(id, { text });
+      return;
+    }
+    setQueued(id, { text, saving: true });
+    try {
+      await postsRef.current.get(id);
+      const res = await fetch(queuedUrl, {
+        method: "PATCH",
+        headers: queueHeaders,
+        body: JSON.stringify({ id, text }),
+      });
+      if (res.status === 409) setQueued(id, { status: "claimed", text: item.text, saving: false });
+      else if (res.status === 404) setQueued(id, { status: "failed", saving: false });
+      else if (!res.ok) throw new Error(String(res.status));
+      else setQueued(id, { saving: false });
+    } catch {
+      setQueued(id, { text: item.text, saving: false });
+      toast("Couldn't edit the queued message", "error");
+    }
+  }
+
+  async function removeQueued(id: string) {
+    const item = queueRef.current.find((q) => q.id === id);
+    if (!item || item.status === "claimed") return;
+    try {
+      await postsRef.current.get(id);
+      const res = await fetch(`${queuedUrl}?qid=${encodeURIComponent(id)}`, { method: "DELETE" });
+      // In flight: a step has taken it, so it stays until its marker shows.
+      if (res.status === 409) setQueued(id, { status: "claimed" });
+      else if (res.ok || res.status === 404) setQueued(id, null);
+      else throw new Error(String(res.status));
+    } catch {
+      toast("Couldn't remove the queued message", "error");
+    }
+  }
+
+  function retryQueued(id: string) {
+    const item = queueRef.current.find((q) => q.id === id);
+    if (!item) return;
+    setQueued(id, { status: "queued" });
+    void postQueued({ ...item, status: "queued" });
+  }
+
+  /** DELETEs each row and returns the texts that are now ours. A row the server no longer has (taken, or in a
+   *  step's claim) is dropped; a row never stored keeps its text. */
+  async function takeRows(rows: { id: string; text: string; stored: boolean }[]): Promise<string[]> {
+    const texts = await Promise.all(
+      rows.map(async (row) => {
+        if (!row.stored) return row.text;
+        try {
+          const res = await fetch(`${queuedUrl}?qid=${encodeURIComponent(row.id)}`, { method: "DELETE" });
+          return res.ok ? row.text : null;
+        } catch {
+          return row.text;
+        }
+      }),
+    );
+    return texts.filter((t): t is string => t !== null);
+  }
+
+  /** After the stream closes: waits for the POSTs, re-reads the queue and takes what is still undelivered. */
+  async function takeLeftovers(all: UIMessage[]): Promise<string[]> {
+    await Promise.all([...postsRef.current.values()]);
+    const shown = deliveredQueueIds(all);
+    const res = await fetch(queuedUrl);
+    if (!res.ok) throw new Error(String(res.status));
+    const stored: { id: string; text: string; seq: number }[] = (await res.json()).queued ?? [];
+    const storedIds = new Set(stored.map((s) => s.id));
+    const unstored = queueRef.current.filter((q) => q.status === "failed" && !storedIds.has(q.id) && !shown.has(q.id));
+    const rows = [
+      ...stored.map((s) => ({ ...s, stored: true })),
+      ...unstored.map((q) => ({ id: q.id, text: q.text, seq: q.seq, stored: false })),
+    ].sort((a, b) => a.seq - b.seq);
+    const texts = await takeRows(rows);
+    const ours = new Set(rows.map((r) => r.id));
+    setQueue((prev) => prev.filter((q) => !ours.has(q.id) && !shown.has(q.id)));
+    return texts;
+  }
+
+  /** Texts go back into the input box, ahead of any text already there. */
+  function restoreInput(texts: string[]) {
+    if (texts.length) setInput((prev) => [...texts, prev].filter(Boolean).join("\n\n"));
+  }
+
+  /** Texts go out together as the next message, once the chat is idle. */
+  function sendNext(texts: string[]) {
+    if (!texts.length) return;
+    // After onFinish the chat is not yet idle, so the send waits a tick (as the auto-submit does).
+    setTimeout(() => {
+      sendMessage({ parts: [{ type: "text" as const, text: texts.join("\n\n") }] }).catch((err: unknown) => {
+        console.error("[queue] sending queued messages failed:", err);
+        toast("Failed to send message", "error");
+      });
+    }, 0);
+  }
+
+  /** Stop ends the stream; onFinish then puts the undelivered messages back into the input box. */
+  function stop() {
+    stopStream();
+  }
 
   /* ─── Data fetching ────────────────────────────────────────────────────── */
 
@@ -181,6 +377,14 @@ export function useConversationPage(conversationId: string, initialPrompt?: stri
     // `finish.messages` is the chat store's live array; the `messages` closure
     // is from the last render, which has not happened yet when onFinish runs.
     const all = finish?.messages ?? messages;
+    // Queued messages still waiting: after a Stop or an error they go back to the input; after a normal end
+    // they go out as the next message. A reply that auto-continues keeps them.
+    if (queueRef.current.length && !(finish?.message && shouldAutoContinue(finish.message.parts as AnyPart[]))) {
+      const stopped = !!(finish?.isAbort || finish?.isError);
+      takeLeftovers(all)
+        .then((texts) => (stopped ? restoreInput(texts) : sendNext(texts)))
+        .catch(() => toast("Couldn't restore queued messages. Reload to see them.", "error"));
+    }
     const parts = (finish?.message?.parts ?? all[all.length - 1]?.parts ?? []) as any[];
     for (const p of parts) {
       const output = p.output || "";
@@ -231,6 +435,18 @@ export function useConversationPage(conversationId: string, initialPrompt?: stri
 
   const [convLoaded, setConvLoaded] = useState(false);
   const autoSubmittedRef = useRef(false);
+
+  // A reload stops the reply, so queued messages the server never took come back into the input box.
+  useEffect(() => {
+    if (!convLoaded) return;
+    fetch(queuedUrl)
+      .then((r) => (r.ok ? r.json() : null))
+      .then(async (d) => {
+        const rows = (d?.queued ?? []).map((q: { id: string; text: string }) => ({ ...q, stored: true }));
+        if (rows.length) restoreInput(await takeRows(rows));
+      })
+      .catch(() => {});
+  }, [convLoaded]);
 
   useEffect(() => {
     fetchConversation().then(() => setConvLoaded(true));
@@ -317,8 +533,16 @@ export function useConversationPage(conversationId: string, initialPrompt?: stri
   const {
     regenModal, setRegenModal,
     handleClarificationAnswer, handleEditMessage, handleDeleteMessage, handleCopyMessage, handleForkMessage,
-    handleRegenerateMessage, handleRegenExecute,
+    handleRegenExecute,
   } = msgActions;
+
+  // Regenerating drops the reply's queued messages from the history, so their text goes back to the input first.
+  const handleRegenerateMessage = (messageId: string) => {
+    const msg = messages.find((m) => m.id === messageId);
+    const texts = ((msg?.parts ?? []) as any[]).filter((p) => p.type === "data-queued-message").map((p) => p.data?.text ?? "");
+    if (texts.length) setInput((prev) => [...texts, prev].filter(Boolean).join("\n\n"));
+    msgActions.handleRegenerateMessage(messageId);
+  };
 
   /* ─── Quote cards ───────────────────────────────────────────────────────── */
 
@@ -508,6 +732,7 @@ export function useConversationPage(conversationId: string, initialPrompt?: stri
     fetchContextUsage, handleModelSettingsSave, handleModelChange, handleWorkingFolderChange, handleKbToggle,
     handleClarificationAnswer, handleEditMessage, handleDeleteMessage, handleCopyMessage, handleForkMessage,
     handleRegenerateMessage, handleRegenExecute, regenModal, setRegenModal,
+    queued, queueMessage, editQueued, removeQueued, retryQueued, toolsAvailable,
     handleSubmit,
     minimapMessages,
     isDialogOpen, closeTopDialog,
