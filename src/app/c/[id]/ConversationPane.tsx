@@ -70,9 +70,10 @@ export default function ConversationPane({ conversationId, focused, initialPromp
   }, [conversationId, p.conversation, isSub, isSide, setPaneKind]);
   const talk = split?.talk[conversationId];
   // Tool-less models have no sendToChat: their replies get a "Send to…" menu over the other open chats.
+  // A sub-agent transcript is read only, so it sends nowhere.
   const sendTargets = useMemo(
-    () => (p.toolsAvailable ? [] : (split?.chatPanes ?? []).filter((x) => x.id !== conversationId).map((x) => ({ id: x.id, title: x.title.trim() || (x.kind === "side" ? "Side chat" : "Untitled chat") }))),
-    [p.toolsAvailable, split?.chatPanes, conversationId],
+    () => (isSub || p.toolsAvailable ? [] : (split?.chatPanes ?? []).filter((x) => x.id !== conversationId).map((x) => ({ id: x.id, title: x.title.trim() || (x.kind === "side" ? "Side chat" : "Untitled chat") }))),
+    [isSub, p.toolsAvailable, split?.chatPanes, conversationId],
   );
   const sendToPane = p.sendToPane;
   const agentSend = useMemo(() => ({ targets: sendTargets, send: sendToPane }), [sendTargets, sendToPane]);
@@ -251,11 +252,11 @@ export default function ConversationPane({ conversationId, focused, initialPromp
             <ChatMessages
               messages={p.messages}
               isLoading={p.isLoading}
-              onEditMessage={p.handleEditMessage}
-              onDeleteMessage={p.handleDeleteMessage}
+              onEditMessage={isSub ? undefined : p.handleEditMessage}
+              onDeleteMessage={isSub ? undefined : p.handleDeleteMessage}
               onCopyMessage={p.handleCopyMessage}
-              onForkMessage={p.handleForkMessage}
-              onRegenerateMessage={p.handleRegenerateMessage}
+              onForkMessage={isSub ? undefined : p.handleForkMessage}
+              onRegenerateMessage={isSub ? undefined : p.handleRegenerateMessage}
               onOpenArtifact={(id: string) => { p.setSelectedArtifactId(id); p.setArtifactPanelOpen(true); }}
               onClarificationAnswer={p.handleClarificationAnswer}
               onApprovePlan={p.mode === "plan" && !p.toolsAvailable ? p.approvePlanReply : undefined}
@@ -263,7 +264,7 @@ export default function ConversationPane({ conversationId, focused, initialPromp
               scrollRef={p.scrollRef}
               statusLabel={p.currentModelName ? `Waiting for ${p.currentModelName}…` : undefined}
               onQuote={p.addQuote}
-              quoteSuppressed={p.isDialogOpen}
+              quoteSuppressed={isSub || p.isDialogOpen}
               sendToMain={isSide && parentId ? { title: parentTitle, onSend: (text: string) => window.dispatchEvent(new CustomEvent("vas:send-to-main", { detail: { id: parentId, text } })) } : undefined}
             />
             </ToolAnswersProvider>
@@ -281,13 +282,13 @@ export default function ConversationPane({ conversationId, focused, initialPromp
             conversationId={conversationId}
             onOpen={() => p.setTodoPanelOpen(true)}
           />
+          {/* Overlaid on the top of the list, so the list does not move when agents start or stop talking. */}
+          {talk && (
+            <div className="glass-card absolute inset-x-0 top-0 z-10 mx-4 mt-2 rounded-[var(--glass-radius-md)] px-3 py-2">
+              <AgentTalkingRow withTitle={split?.info[talk.withId]?.title ?? ""} hop={talk.hop} onStop={() => split?.stopAgents()} />
+            </div>
+          )}
         </div>
-
-        {talk && (
-          <div className="px-4 pt-2">
-            <AgentTalkingRow withTitle={split?.info[talk.withId]?.title ?? ""} hop={talk.hop} onStop={() => split?.stopAgents()} />
-          </div>
-        )}
         {!isSub && (
         <ChatInput
           input={p.input}

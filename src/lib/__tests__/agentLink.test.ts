@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import type { AgentPane } from "@/lib/chat/agentMessages";
 import { AGENT_NOT_OPEN, raiseHop, routeAgentMessage } from "@/lib/utils/agentLink";
+import { canDeliver, nextHop } from "@/lib/chat/agentMessages";
 
 const panes: AgentPane[] = [
   { id: "main", title: "Pricing research", kind: "chat" },
@@ -14,6 +15,12 @@ describe("raiseHop", () => {
   it("keeps the larger hop, so a turn started by a message takes the bigger count", () => {
     expect(raiseHop(0, 2)).toBe(2);
     expect(raiseHop(3, 1)).toBe(3);
+  });
+
+  it("a leftover agent message sent at its own hop still counts toward the cap", () => {
+    // A queued message at hop 3 leaves its pane at 3, so the pane's next message is refused.
+    expect(canDeliver(nextHop(raiseHop(0, 3)))).toBe(false);
+    expect(canDeliver(nextHop(raiseHop(0, 2)))).toBe(true);
   });
 });
 

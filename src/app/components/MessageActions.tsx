@@ -193,7 +193,6 @@ export default function MessageActions({
             onClick={() => setSendMenuOpen((v) => !v)}
             title="Send to…"
             aria-label="Send to another chat"
-            aria-haspopup="menu"
             aria-expanded={sendMenuOpen}
             className="inline-flex items-center gap-1 px-2 py-1 text-xs text-zinc-400 hover:text-zinc-100 glass-button rounded-[var(--glass-radius-sm)] transition"
           >
@@ -201,15 +200,12 @@ export default function MessageActions({
           </button>
           {sendMenuOpen && (
             <div
-              role="menu"
-              aria-label="Send to another chat"
               className="absolute bottom-full left-0 mb-2 w-56 glass-panel-strong rounded-[var(--glass-radius-md)] shadow-lg border border-[var(--glass-border-strong)] z-[9999] overflow-hidden"
             >
               {agentSend.targets.map((t) => (
                 <button
                   key={t.id}
                   type="button"
-                  role="menuitem"
                   title={t.title}
                   onClick={() => {
                     setSendMenuOpen(false);

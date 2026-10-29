@@ -63,7 +63,7 @@ test("a tool-less model's reply goes to the side chat from the Send to menu", as
   await expect(pane(page, main).getByRole("button", { name: "Regenerate message" })).toHaveCount(1, { timeout: 30000 });
 
   await pane(page, main).getByRole("button", { name: "Send to another chat" }).click();
-  await pane(page, main).getByRole("menuitem").first().click();
+  await pane(page, main).getByRole("button", { name: /^Send to "/ }).click();
 
   await expect(pane(page, side).getByText('From "Main plan"')).toBeVisible({ timeout: 30000 });
   await expect(pane(page, side).locator("[data-message-id]")).toHaveCount(2, { timeout: 30000 });

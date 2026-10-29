@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { requireUserId } from "@/lib/auth";
 import { getConversationOrNull } from "@/lib/api/conversations";
-import { AGENT_MESSAGE_PART, canDeliver, parseAgentMessagePart } from "@/lib/chat/agentMessages";
+import { agentFromJson, canDeliver, parseAgentMessagePart, AGENT_MESSAGE_PART } from "@/lib/chat/agentMessages";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -24,7 +24,8 @@ export async function GET(_req: NextRequest, { params }: Params) {
     });
     return NextResponse.json({
       queued: queued.map((q) => {
-        const agent = q.agent ? parseAgentMessagePart({ type: AGENT_MESSAGE_PART, data: JSON.parse(q.agent) }) : null;
+        // A bad stored sender comes back without `agent` rather than failing the whole list.
+        const agent = agentFromJson(q.agent);
         return { id: q.id, text: q.text, seq: q.seq, ...(agent ? { agent } : {}) };
       }),
     });

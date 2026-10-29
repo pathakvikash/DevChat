@@ -159,6 +159,8 @@ export function senderName(d: Pick<AgentMessageData, "from" | "fromTitle">): str
 
 /** Badge text such as `From "Pricing research"`. A title longer than `max` is cut with an ellipsis. */
 export function agentBadgeText(d: Pick<AgentMessageData, "from" | "fromTitle">, max = Infinity): string {
+  // A sub-agent's follow-up is badged by its role, whatever title its run carries.
+  if (d.from === "parent") return "From the main chat's assistant";
   const title = d.fromTitle.trim();
   if (!title) return `From ${senderName(d)}`;
   const shown = title.length > max ? `${title.slice(0, max)}…` : title;

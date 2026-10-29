@@ -77,13 +77,6 @@ interface ChatTransportOptions {
   onSendToChatRef: React.MutableRefObject<(input: { to: string; message: string }) => Promise<string>>;
 }
 
-/** The tool call is the last part of the reply, finished: the model answers after it. */
-function endsWithSendToChat(parts: AnyPart[]): boolean {
-  const list = parts.filter((p) => p?.type !== "reasoning" && p?.type !== "step-start");
-  const tail = list[list.length - 1] as { type?: string; state?: string } | undefined;
-  return tail?.type === "tool-sendToChat" && tail.state === "output-available";
-}
-
 export function useChatTransport(opts: ChatTransportOptions) {
   const { conversationId, conversation, selectedKbId, searchProvider, enabledTools, enabledSkills, mode, allowedTools, setIsCompressing, onFinishRef, onErrorRef, onQueuedDeliveredRef, openPanes, onSendToChatRef } = opts;
 
@@ -156,7 +149,7 @@ export function useChatTransport(opts: ChatTransportOptions) {
     sendAutomaticallyWhen: ({ messages: msgs }) => {
       if (lastAssistantMessageIsCompleteWithApprovalResponses({ messages: msgs })) return true;
       const last = msgs[msgs.length - 1];
-      return last?.role === "assistant" && (shouldAutoContinue(last.parts as AnyPart[]) || endsWithSendToChat(last.parts as AnyPart[]));
+      return last?.role === "assistant" && shouldAutoContinue(last.parts as AnyPart[]);
     },
     onToolCall: async ({ toolCall }) => {
       if (toolCall.toolName === "askClarification") return;

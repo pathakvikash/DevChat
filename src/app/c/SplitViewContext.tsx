@@ -56,6 +56,8 @@ export interface AgentTalk {
 }
 
 const CLOSE_A_PANE = "Close a pane first.";
+const STOPPED = "Not sent: stopped";
+const READ_ONLY = "Sub-agent transcripts are read only.";
 const REFUSED = `Not sent: the limit of ${MAX_AGENT_HOPS} agent messages for this user message is reached. Answer the user directly.`;
 
 function kindOf(id: string, kinds: Record<string, AgentPaneKind>, parentOf: Record<string, string>): AgentPaneKind {
@@ -129,6 +131,8 @@ interface SplitViewValue {
   talk: Record<string, AgentTalk>;
   /** A pane's own user send starts it again from hop 0. */
   resetHop: (id: string) => void;
+  /** Raises a pane's hop to at least `hop` (a queued agent message sent from the pane). */
+  bumpHop: (id: string, hop: number) => void;
   /** The sendToChat tool: resolves to what the model is told. */
   sendToChat: (fromId: string, to: string, message: string) => Promise<string>;
   /** Tool-less "Send to…": one message at hop 1, nothing goes back. */
@@ -179,6 +183,8 @@ export function SplitViewProvider({ children }: { children: React.ReactNode }) {
   const agentPanes = useRef(new Map<string, AgentPaneHandle>());
   // Hop of each pane's current agent exchange; a pane's own user send clears it.
   const hops = useRef(new Map<string, number>());
+  // Counts Stop all: a sendToChat that was waiting on a side pane checks it before it delivers.
+  const stopEpoch = useRef(0);
   // Latest committed state, for async steps (after an await) and for the close cascade.
   const live = useRef({ ids, focus, parentOf, info, kinds, talk });
   useEffect(() => {
@@ -406,6 +412,7 @@ export function SplitViewProvider({ children }: { children: React.ReactNode }) {
     else hops.current.delete(id);
   };
   const resetHop = useCallback((id: string) => hops.current.delete(id), []);
+  const bumpHop = (id: string, hop: number) => setHop(id, raiseHop(hopOf(id), hop));
 
   const startTalk = (a: string, b: string, hop: number) =>
     setTalk((prev) => ({ ...prev, [a]: { withId: b, hop }, [b]: { withId: a, hop } }));
@@ -446,16 +453,21 @@ export function SplitViewProvider({ children }: { children: React.ReactNode }) {
       return REFUSED;
     }
     const now = live.current;
+    if (kindOf(fromId, now.kinds, now.parentOf) === "subagent") return READ_ONLY;
     const route = routeAgentMessage(to, fromId, chatPanesOf(now.ids, now.info, now.kinds, now.parentOf), now.parentOf);
     if ("error" in route) return route.error;
+    const epoch = stopEpoch.current;
     const toId = "id" in route ? route.id : await openSide(route.openSideOf, undefined, true);
     if (!toId) return CLOSE_A_PANE;
-    if (!(await waitForHandle(agentPanes.current, toId))) return AGENT_NOT_OPEN;
+    const handle = await waitForHandle(agentPanes.current, toId);
+    if (stopEpoch.current !== epoch) return STOPPED;
+    if (!handle) return AGENT_NOT_OPEN;
     return dispatch(fromId, toId, message, hop);
   };
 
   const deliverTo = (fromId: string, toId: string, message: string): string => {
     const now = live.current;
+    if (kindOf(fromId, now.kinds, now.parentOf) === "subagent") return READ_ONLY;
     const open = chatPanesOf(now.ids, now.info, now.kinds, now.parentOf).some((p) => p.id === toId);
     if (toId === fromId || !open) return AGENT_NOT_OPEN;
     return dispatch(fromId, toId, message, 1);
@@ -476,6 +488,7 @@ export function SplitViewProvider({ children }: { children: React.ReactNode }) {
   };
 
   const stopAgents = () => {
+    stopEpoch.current += 1;
     const involved = new Set([...Object.keys(live.current.talk), ...hops.current.keys()]);
     for (const id of involved) {
       stoppers.current.get(id)?.();
@@ -554,6 +567,7 @@ export function SplitViewProvider({ children }: { children: React.ReactNode }) {
     setAgentPane,
     talk,
     resetHop,
+    bumpHop,
     sendToChat,
     deliverTo,
     agentIdle,

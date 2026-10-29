@@ -112,6 +112,11 @@ describe("model text framing", () => {
     expect(text).toContain("Message from the main chat's assistant (the main chat, not the user)");
   });
 
+  it("a sub-agent follow-up badges as the main chat's assistant, even with a title", () => {
+    expect(agentBadgeText({ from: "parent", fromTitle: "Note reader" })).toBe("From the main chat's assistant");
+    expect(agentBadgeText({ from: "parent", fromTitle: "" })).toBe("From the main chat's assistant");
+  });
+
   it("badge reads From <title>, cut to the limit with an ellipsis", () => {
     expect(agentBadgeText(sender)).toBe('From "Pricing research"');
     expect(agentBadgeText(sender, 6)).toBe('From "Pricin…"');

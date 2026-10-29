@@ -1,3 +1,5 @@
+import { AGENT_DELIVERED } from "@/lib/utils/agentLink";
+
 /**
  * Shared types and helpers for AI-SDK `parts`. The same `FilePart` /
  * `ToolPart` shape was previously declared inline in five different files
@@ -143,8 +145,15 @@ export function shouldAutoContinue(parts: AnyPart[] | undefined): boolean {
     const { state, output } = tail as ToolPart;
     return (state === "output-available" || state === "result") && (output as PlanDecision | undefined)?.action === "revise";
   }
-  // A sendToChat answer goes back to the model so it can carry on in this chat.
-  if (tail?.type !== "tool-executeCode" && tail?.type !== "tool-sendToChat") return false;
+  // A delivered sendToChat goes back to the model so it can carry on. The first refusal in a reply also
+  // goes back so the model can answer the user; a second one ends the turn, so retries can't loop.
+  if (tail?.type === "tool-sendToChat") {
+    const { state, output } = tail as ToolPart;
+    if (state !== "output-available" && state !== "result") return false;
+    if (output === AGENT_DELIVERED) return true;
+    return [...list, tail].filter((p) => p.type === "tool-sendToChat" && (p as ToolPart).output !== AGENT_DELIVERED).length === 1;
+  }
+  if (tail?.type !== "tool-executeCode") return false;
   const { state } = tail as ToolPart;
   return state === "output-available" || state === "result";
 }

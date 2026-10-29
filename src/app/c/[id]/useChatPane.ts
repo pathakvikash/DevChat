@@ -407,6 +407,8 @@ export function useChatPane(conversationId: string, { focused, kind, searchProvi
     const [first, ...rest] = items;
     restoreInput(rest.map((r) => r.text));
     if (!first?.agent) return;
+    // The send counts at its own hop, so the chain's cap still holds after a reload or a busy turn.
+    split?.bumpHop(conversationId, first.agent.hop);
     setTimeout(() => {
       chatSend({ parts: [buildAgentMessagePart(first.agent!), { type: "text" as const, text: first.text }] }).catch((err: unknown) =>
         console.error("[agent] sending a queued agent message failed:", err),
