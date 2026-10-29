@@ -7,7 +7,7 @@ import { useChatMode } from "@/app/contexts/ChatModeContext";
 import type { MinimapMessage } from "@/app/components/MinimapNavigator";
 import { parseCommand } from "@/lib/commands";
 import { buildMessageParts } from "@/lib/utils/messageParts";
-import { lastExchange } from "@/lib/utils/conversation";
+import { buildMessagesFromConversation, lastExchange, type RawConversation } from "@/lib/utils/conversation";
 
 import { fetchSettings as apiFetchSettings, saveSettings as apiSaveSettings } from "@/app/hooks/useSettingsApi";
 import { runCommandAction } from "./runCommandAction";
@@ -98,6 +98,7 @@ export function useConversationPage(conversationId: string, initialPrompt?: stri
     enabledTools,
     enabledSkills,
     mode,
+    setIsCompressing,
     onFinishRef,
     onErrorRef,
   });
@@ -116,6 +117,17 @@ export function useConversationPage(conversationId: string, initialPrompt?: stri
     fetchConversation, refreshConversation, refreshConversationAndMessages,
     fetchContextUsage, handleModelSettingsSave, handleModelChange, handleWorkingFolderChange, handleKbToggle,
   } = dataActions;
+
+  // After a compression, rebuild the chat from the saved conversation once it is idle, so the
+  // summarized messages leave the view. Skips a snapshot that lacks the chat's newest message
+  // (the refresh hasn't landed yet); it runs again when the next one does.
+  useEffect(() => {
+    if (isLoading || !conversation?.compressedAt || !conversation?.compressedSummary) return;
+    if (messages[0]?.id === `compression-${new Date(conversation.compressedAt).getTime()}`) return;
+    const lastId = messages[messages.length - 1]?.id;
+    if (lastId && !conversation.messages?.some((m) => m.id === lastId)) return;
+    setMessages(buildMessagesFromConversation(conversation as unknown as RawConversation) as unknown as typeof messages);
+  }, [isLoading, conversation, messages, setMessages]);
 
   onFinishRef.current = useCallback((finish?: ChatFinish) => {
     refreshConversation().finally(() => setIsCompressing(false));

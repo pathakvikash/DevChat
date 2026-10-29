@@ -43,6 +43,11 @@ export async function runCommandAction(
       try {
         const res = await fetch(`/api/conversations/${ctx.conversationId}/compress`, { method: "POST" });
         if (!res.ok) throw new Error("compress failed");
+        const data = await res.json();
+        if (data?.success === false) {
+          ctx.toast(data.message || "Nothing to compress yet", "info");
+          return;
+        }
         await ctx.refreshConversationAndMessages();
         ctx.toast("Conversation compressed", "success");
       } catch {

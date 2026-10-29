@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef } from "react";
 import { useChat } from "@ai-sdk/react";
-import { DefaultChatTransport, generateId, type UIMessage } from "ai";
+import { DefaultChatTransport, type UIMessage } from "ai";
 
 import { runCode } from "@/lib/sandbox";
 import { parseDataArtifact } from "@/lib/generativeUi/data";
@@ -53,9 +53,6 @@ export interface ChatFinish {
   isError?: boolean;
 }
 
-// Tracks the client-generated assistant message id per conversation so the
-// server can persist the DB message under the same id (see captureGenerateId).
-
 interface ChatTransportOptions {
   conversationId: string;
   conversation: { model?: string; systemPrompt?: string; temperature?: number; chatOnlyMode?: boolean; memoryDisabled?: boolean; maxToolCalls?: number } | null;
@@ -65,12 +62,14 @@ interface ChatTransportOptions {
   enabledSkills: string[];
   /** Chat = read-only tools, Agent = read + write tools. */
   mode: "chat" | "agent";
+  /** The server announced it is compressing the conversation. */
+  setIsCompressing: (compressing: boolean) => void;
   onFinishRef: React.MutableRefObject<(finish: ChatFinish) => void>;
   onErrorRef: React.MutableRefObject<(err: Error) => void>;
 }
 
 export function useChatTransport(opts: ChatTransportOptions) {
-  const { conversationId, conversation, selectedKbId, searchProvider, enabledTools, enabledSkills, mode, onFinishRef, onErrorRef } = opts;
+  const { conversationId, conversation, selectedKbId, searchProvider, enabledTools, enabledSkills, mode, setIsCompressing, onFinishRef, onErrorRef } = opts;
 
   const transportBodyRef = useRef({
     conversationId,
@@ -86,7 +85,6 @@ export function useChatTransport(opts: ChatTransportOptions) {
     memoryDisabled: conversation?.memoryDisabled ?? false,
     maxToolCalls: conversation?.maxToolCalls ?? 5,
     autoCompressThreshold: 85,
-    assistantMessageId: undefined as string | undefined,
   });
 
   useEffect(() => {
@@ -107,21 +105,8 @@ export function useChatTransport(opts: ChatTransportOptions) {
       memoryDisabled: conversation?.memoryDisabled ?? false,
       maxToolCalls: conversation?.maxToolCalls ?? 5,
       autoCompressThreshold: threshold,
-      assistantMessageId: undefined as string | undefined,
     };
   }, [conversationId, conversation?.model, conversation?.systemPrompt, conversation?.temperature, selectedKbId, searchProvider, enabledTools, enabledSkills, mode, conversation?.chatOnlyMode, conversation?.memoryDisabled, conversation?.maxToolCalls]);
-
-  // Capture the client-generated id of the NEXT assistant message so the
-  // server can persist it under the SAME id. Without this, the DB message
-  // gets a fresh cuid while the UI keeps the client id, so per-message
-  // features (feedback, edit, delete) break until a page refresh re-syncs.
-  // Stored on the existing transportBodyRef (already spread into the request
-  // body) so it rides along with the next request.
-  const captureGenerateId = (...args: Parameters<typeof generateId>) => {
-    const id = generateId(...args);
-    if (transportBodyRef.current) transportBodyRef.current.assistantMessageId = id;
-    return id;
-  };
 
   const transport = useMemo(
     () =>
@@ -145,7 +130,6 @@ export function useChatTransport(opts: ChatTransportOptions) {
   const chat = useChat({
     id: conversationId,
     experimental_throttle: 50,
-    generateId: captureGenerateId,
     transport,
     sendAutomaticallyWhen: ({ messages: msgs }) => {
       const last = msgs[msgs.length - 1];
@@ -171,6 +155,7 @@ export function useChatTransport(opts: ChatTransportOptions) {
         }
       }
     },
+    onData: (part) => { if (part.type === "data-compressing") setIsCompressing(true); },
     onError: (err) => { onErrorRef.current(err); },
     onFinish: (finish) => { onFinishRef.current(finish); },
   });

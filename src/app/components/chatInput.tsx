@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, useCallback } from "react";
-import { Plus, Upload, Globe, BookOpen, Settings, X, Slash, Mic, MicOff, ArrowRight } from "lucide-react";
+import { Plus, Upload, Globe, BookOpen, Settings, X, Slash, Mic, MicOff, ArrowRight, Loader2 } from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
 import AttachmentChip from "./AttachmentChip";
 import DragOverlay from "./DragOverlay";
@@ -259,12 +259,10 @@ export default function ChatInput({
           </div>
         )}
 
-        {isCompressing && !isCompressed && (
-          <div className="mb-3 p-3 rounded-[var(--glass-radius-md)] glass-card border border-amber-900/50">
-            <div className="flex items-center gap-2 text-amber-300 text-sm">
-              <span className="inline-block w-3.5 h-3.5 border-2 border-amber-400 border-t-transparent rounded-full animate-spin" />
-              <span>Compressing conversation...</span>
-            </div>
+        {isCompressing && (
+          <div className="mb-3 flex items-center gap-2 text-sm text-zinc-300">
+            <Loader2 size={14} aria-hidden className="animate-spin motion-reduce:animate-none text-amber-400" />
+            Compressing chat…
           </div>
         )}
 

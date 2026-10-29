@@ -1,15 +1,9 @@
 import { prisma } from "@/lib/db";
-import {
-  shouldAutoCompress,
-  compressConversation,
-  saveCompressedSummary,
-  DEFAULT_COMPACTION_MODEL,
-} from "@/lib/compression";
+import { normalizeToolParts } from "@/lib/chat/normalizeToolParts";
 
 export interface PersistAssistantMessageOptions {
   conversationId: string;
   model: string;
-  autoCompressThreshold?: number;
   onError?: (e: unknown) => void;
   systemPrompt?: string;
   // Use the client-generated message id so the persisted DB row matches the
@@ -24,13 +18,15 @@ export interface PersistAssistantMessageOptions {
    * plain text instead of re-rendering the UI.
    */
   overrideParts?: any[];
+  /** The reply continues a saved message (a client-tool round trip): update that row, don't add a copy. */
+  updateExisting?: boolean;
 }
 
 async function persistAssistantMessage(
   event: { steps: any[]; totalUsage?: any },
   opts: PersistAssistantMessageOptions,
 ): Promise<void> {
-  const { conversationId, model, autoCompressThreshold, systemPrompt } = opts;
+  const { conversationId, model, systemPrompt } = opts;
   const { steps, totalUsage } = event;
 
   const parts: any[] = opts.overrideParts ? [...opts.overrideParts] : [];
@@ -99,19 +95,36 @@ async function persistAssistantMessage(
     parts.map((p) => p.type),
   );
 
-  await prisma.message.create({
-    data: {
-      ...(opts.messageId ? { id: opts.messageId } : {}),
-      conversationId,
-      role: "assistant",
-      content: finalText,
-      systemPrompt,
-      parts: JSON.stringify(parts),
-      model,
-      inputTokens: totalInputTokens,
-      outputTokens: totalOutputTokens,
-    },
-  });
+  const row = {
+    content: finalText,
+    systemPrompt,
+    // An aborted turn can leave tool calls with no result; providers reject those on reload.
+    parts: JSON.stringify(normalizeToolParts(parts)),
+    model,
+  };
+  const updated =
+    opts.updateExisting && opts.messageId
+      ? await prisma.message.updateMany({
+          where: { id: opts.messageId, conversationId },
+          data: {
+            ...row,
+            inputTokens: { increment: totalInputTokens },
+            outputTokens: { increment: totalOutputTokens },
+          },
+        })
+      : null;
+  if (!updated?.count) {
+    await prisma.message.create({
+      data: {
+        ...(opts.messageId ? { id: opts.messageId } : {}),
+        conversationId,
+        role: "assistant",
+        ...row,
+        inputTokens: totalInputTokens,
+        outputTokens: totalOutputTokens,
+      },
+    });
+  }
   await prisma.conversation.update({
     where: { id: conversationId },
     data: {
@@ -120,36 +133,19 @@ async function persistAssistantMessage(
       },
     },
   });
-
-  const threshold = autoCompressThreshold ?? 85;
-  const needsCompression = await shouldAutoCompress(conversationId, threshold);
-  console.log(
-    `[Auto-compress] Conversation ${conversationId}: needsCompression=${needsCompression}, model=${DEFAULT_COMPACTION_MODEL}`,
-  );
-  if (needsCompression) {
-    const result = await compressConversation(
-      conversationId,
-      DEFAULT_COMPACTION_MODEL,
-    );
-    if (result) {
-      await saveCompressedSummary(conversationId, result.summary, {
-        beforeTokens: result.beforeTokens,
-        afterTokens: result.afterTokens,
-        beforeMessages: result.beforeMessages,
-      });
-      console.log(
-        `[Auto-compress] Summary saved (${result.beforeTokens} -> ${result.afterTokens} tokens, -${result.reductionPercent}%)`,
-      );
-    }
-  }
 }
 
+/** Resolves true once the message is saved; failures are reported through `onError`, not thrown. */
 export function safePersistAssistantMessage(
   event: { steps: any[]; totalUsage?: any },
   opts: PersistAssistantMessageOptions,
-): void {
-  persistAssistantMessage(event, opts).catch((e) => {
-    console.error("Failed to persist assistant message:", e);
-    opts.onError?.(e);
-  });
+): Promise<boolean> {
+  return persistAssistantMessage(event, opts).then(
+    () => true,
+    (e) => {
+      console.error("Failed to persist assistant message:", e);
+      opts.onError?.(e);
+      return false;
+    },
+  );
 }

@@ -6,6 +6,7 @@ import { resolveActiveToolIds } from "@/lib/chat/buildTools";
 import { getModel } from "@/lib/models";
 import { resolveProviderCreds } from "@/lib/apiKeys";
 import { requireUserId } from "@/lib/auth";
+import { liveSince } from "@/lib/liveSince";
 
 function parseListParam(raw: string | null): string[] {
   if (!raw) return [];
@@ -61,18 +62,11 @@ export async function GET(
       : modelConfig?.contextWindow || 8192;
     const systemPrompt = conversation.systemPrompt || "";
     const compressedSummary = conversation.compressedSummary || null;
-    const compressedAt = conversation.compressedAt
-      ? new Date(conversation.compressedAt)
-      : null;
 
     // When a compressed summary exists, the live prompt only sees the summary
     // (not the original history), so we don't need to count the pre-compression
     // messages toward the context window at all.
-    const messagesForUsage = compressedAt
-      ? conversation.messages.filter(
-          (m) => new Date(m.createdAt) >= compressedAt,
-        )
-      : conversation.messages;
+    const messagesForUsage = conversation.messages.filter(liveSince(conversation.compressedAt).isLive);
 
     // Re-build the actual system-prompt sections the model will see on the
     // next request, so the per-category counts reflect reality (tools,

@@ -66,7 +66,7 @@ export default function CompressionEvent({
                     · {beforeMessages} {beforeMessages === 1 ? "message" : "messages"} summarized
                   </span>
                 )}
-                {tsLabel && <span className="text-zinc-500">· {tsLabel}</span>}
+                {tsLabel && <span className="text-zinc-500">· before {tsLabel}</span>}
               </div>
             </div>
           </div>

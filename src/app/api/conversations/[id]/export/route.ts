@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/db";
 import { NextRequest, NextResponse } from "next/server";
 import { requireUserId } from "@/lib/auth";
+import { liveSince } from "@/lib/liveSince";
 
 function getMessageText(msg: { content: string; parts: string | null }): string {
   if (msg.parts) {
@@ -56,11 +57,7 @@ export async function GET(
     const compressedAt = conversation.compressedAt
       ? new Date(conversation.compressedAt)
       : null;
-    const messagesToExport = compressedAt
-      ? conversation.messages.filter(
-          (m) => new Date(m.createdAt) >= compressedAt,
-        )
-      : conversation.messages;
+    const messagesToExport = conversation.messages.filter(liveSince(compressedAt).isLive);
 
     let content = "";
 

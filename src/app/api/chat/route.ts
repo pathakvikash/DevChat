@@ -1,5 +1,6 @@
 import {
   convertToModelMessages,
+  generateId,
   streamText,
   createUIMessageStream,
   createUIMessageStreamResponse,
@@ -18,7 +19,11 @@ import {
   type ToolMode,
 } from "@/lib/chat/buildTools";
 import { safePersistAssistantMessage } from "@/lib/chat/persistAssistantMessage";
+import { autoCompress, canAutoCompress } from "@/lib/chat/autoCompress";
+import { liveSince } from "@/lib/liveSince";
 import { normalizeMessageToolParts } from "@/lib/chat/normalizeToolParts";
+import { dropCompressedMessages } from "@/lib/chat/dropCompressedMessages";
+import { saveUserMessage } from "@/lib/chat/saveUserMessage";
 import {
   isTransientProviderError,
   friendlyProviderErrorMessage,
@@ -41,7 +46,7 @@ export async function POST(req: Request) {
   let traceRecorded = false;
   const userId = await requireUserId();
   const {
-    messages,
+    messages: bodyMessages,
     conversationId,
     model: bodyModel,
     systemPrompt: bodySystemPrompt,
@@ -56,18 +61,18 @@ export async function POST(req: Request) {
     memoryDisabled: bodyMemoryDisabled,
     autoCompressThreshold: bodyAutoCompressThreshold,
     maxToolCalls: bodyMaxToolCalls,
-    messageId: bodyUserMessageId,
-    assistantMessageId: bodyAssistantMessageId,
     mode: bodyMode,
   } = await req.json();
+  let messages = bodyMessages;
   // Anything that isn't "agent" falls back to chat, the safer of the two.
   const toolMode: ToolMode = bodyMode === "agent" ? "agent" : "chat";
   let model: string | undefined = bodyModel;
   try {
+    let compressedAt: Date | null = null;
     if (conversationId) {
       const owned = await prisma.conversation.findUnique({
         where: { id: conversationId },
-        select: { userId: true },
+        select: { userId: true, compressedAt: true },
       });
       if (!owned || owned.userId !== userId) {
         return new Response(JSON.stringify({ error: "Conversation not found" }), {
@@ -75,22 +80,38 @@ export async function POST(req: Request) {
           headers: { "Content-Type": "application/json" },
         });
       }
+      compressedAt = owned.compressedAt;
     }
-    const settings = await resolveChatSettings({
-      userId,
-      conversationId,
-      bodyModel,
-      bodySystemPrompt,
-      bodyTemperature,
-      bodyKbId,
-      bodySearchProvider,
-      bodyEnabledTools,
-      bodyEnabledSkills,
-      bodyChatOnlyMode,
-      bodyMemoryDisabled,
-      bodyAutoCompressThreshold,
-      bodyMaxToolCalls,
-    });
+    const [settings, summarized] = await Promise.all([
+      resolveChatSettings({
+        userId,
+        conversationId,
+        bodyModel,
+        bodySystemPrompt,
+        bodyTemperature,
+        bodyKbId,
+        bodySearchProvider,
+        bodyEnabledTools,
+        bodyEnabledSkills,
+        bodyChatOnlyMode,
+        bodyMemoryDisabled,
+        bodyAutoCompressThreshold,
+        bodyMaxToolCalls,
+      }),
+      // A client that missed the refresh after a compress (Stop, a dropped connection) still
+      // holds the summarized messages; keep them out of the prompt next to the summary.
+      compressedAt && Array.isArray(messages)
+        ? prisma.message.findMany({
+            where: {
+              conversationId,
+              ...liveSince(compressedAt).summarizedWhere,
+              id: { in: messages.flatMap((m: { id?: string }) => (m?.id ? [m.id] : [])) },
+            },
+            select: { id: true },
+          })
+        : [],
+    ]);
+    messages = dropCompressedMessages(messages, summarized.map((m) => m.id));
     model = settings.model;
     const {
       searchProvider,
@@ -186,27 +207,13 @@ export async function POST(req: Request) {
       const lastMsg = messages[messages.length - 1];
       if (lastMsg?.role === "user") {
         const userText = extractText(lastMsg);
-        const lastSaved = await prisma.message.findFirst({
-          where: { conversationId, role: "user" },
-          orderBy: { createdAt: "desc" },
+        await saveUserMessage({
+          conversationId,
+          id: typeof lastMsg.id === "string" ? lastMsg.id : undefined,
+          text: userText,
+          parts: stripFileParts(lastMsg.parts || [{ type: "text", text: userText }]),
+          attachments: bodyAttachments,
         });
-        if (!lastSaved || lastSaved.content !== userText) {
-          await prisma.message.create({
-            data: {
-              ...(bodyUserMessageId ? { id: bodyUserMessageId } : {}),
-              conversationId,
-              role: "user",
-              content: userText,
-              parts: JSON.stringify(
-                stripFileParts(lastMsg.parts || [{ type: "text", text: userText }]),
-              ),
-              attachments:
-                Array.isArray(bodyAttachments) && bodyAttachments.length > 0
-                  ? JSON.stringify(bodyAttachments)
-                  : null,
-            },
-          });
-        }
       }
     }
 
@@ -263,15 +270,17 @@ export async function POST(req: Request) {
 
     // Per-candidate retry loop (transient errors + Ollama context overflow).
     const RETRIES_PER_MODEL = 2;
-    // Tracks partial assistant output so we can persist it if the client
-    // stops the stream mid-generation (onFinish won't fire in that case).
-    let assistantPersisted = false;
+    // A last assistant message means this request continues it (a client-side tool round trip):
+    // the reply must replace that message in the client and update its row, not add a copy.
+    const lastIncoming = messages[messages.length - 1];
+    const continuing = lastIncoming?.role === "assistant" ? lastIncoming : null;
+    // The stream starts under this id and the reply is saved under it, so client and DB match.
+    const assistantMessageId = continuing?.id ?? generateId();
     let traceRecorded = false;
     let partialText = "";
     // Captured from streamText's onFinish so the later createUIMessageStream onFinish,
     // which does the persisting, can still record real token usage.
     let capturedFinishEvent: { steps: any[]; totalUsage?: any } | null = null;
-    const partialParts: any[] = [];
     const partialToolOutputs = new Map<string, { name: string; input: any; start: number }>();
     // Per-tool observations (name/input/output/latency) collected during streaming.
     const toolCallsSeen: { toolName: string; input?: any; output?: any; ok: boolean; latencyMs?: number }[] = [];
@@ -279,7 +288,6 @@ export async function POST(req: Request) {
     for (let attempt = 0; attempt < RETRIES_PER_MODEL; attempt++) {
       try {
         partialText = "";
-        partialParts.length = 0;
         partialToolOutputs.clear();
         toolCallsSeen.length = 0;
         firstTokenAt = null;
@@ -399,13 +407,6 @@ export async function POST(req: Request) {
                 input: chunk.input ?? {},
                 start: Date.now(),
               });
-              partialParts.push({
-                type: `tool-${chunk.toolName}`,
-                toolCallId: chunk.toolCallId,
-                toolName: chunk.toolName,
-                input: chunk.input ?? {},
-                state: "output-available",
-              });
             } else if (chunk.type === "tool-result") {
               const meta = partialToolOutputs.get(chunk.toolCallId);
               const latencyMs = meta?.start ? Date.now() - meta.start : undefined;
@@ -416,16 +417,6 @@ export async function POST(req: Request) {
                 ok: true,
                 latencyMs,
               });
-              const idx = partialParts.findIndex(
-                (p) => p.toolCallId === chunk.toolCallId,
-              );
-              if (idx >= 0 && partialParts[idx]) {
-                partialParts[idx] = {
-                  ...partialParts[idx],
-                  output: chunk.output,
-                  state: "result",
-                };
-              }
             }
           },
           onFinish: (event) => {
@@ -516,61 +507,57 @@ export async function POST(req: Request) {
         // which splits prose from JSONL patches into `text`/`data-spec` parts.
         const response = createUIMessageStreamResponse({
           stream: createUIMessageStream({
-            execute: async ({ writer }) => {
-              // `toUIMessageStream` needs its own onError: it turns `error` parts into
-              // text itself, so createUIMessageStream's onError never sees them.
-              writer.merge(pipeJsonRender(result.toUIMessageStream({ onError: onStreamError })));
+            execute: ({ writer }) => {
+              // The inner stream's onFinish runs after the inner stream closes, so it can't write
+              // to it: it writes its "compressing" status to this outer one, which is still open.
+              writer.merge(
+                createUIMessageStream({
+                  execute: ({ writer: inner }) => {
+                    // `toUIMessageStream` needs its own onError: it turns `error` parts into
+                    // text itself, so createUIMessageStream's onError never sees them.
+                    inner.merge(pipeJsonRender(result.toUIMessageStream({ onError: onStreamError })));
+                  },
+                  onError: onStreamError,
+                  generateId: () => assistantMessageId,
+                  // Starts the stream under the continued message's id and builds its parts from it.
+                  originalMessages: messages,
+                  // Runs on a normal finish, an error and an abort (Stop). It is the only place the
+                  // reply is saved, and it is awaited: the stream closes only after the save and
+                  // any auto-compress, so the client's refresh sees the new compressedAt.
+                  onFinish: async ({ messages: finishedMessages, isAborted }) => {
+                    if (!conversationId) return;
+                    const last = finishedMessages[finishedMessages.length - 1];
+                    // Stopped before anything streamed: there is no reply to save.
+                    if (isAborted && !last?.parts.some((p) => p.type !== "step-start")) return;
+                    // No captured event means the stream errored before finishing.
+                    const event = { steps: [], ...capturedFinishEvent };
+                    const saved = await safePersistAssistantMessage(event, {
+                      conversationId,
+                      model: servedModel,
+                      systemPrompt: finalSystemPrompt,
+                      messageId: assistantMessageId,
+                      updateExisting: !!continuing,
+                      overrideParts: last?.parts ?? [],
+                    });
+                    if (saved && canAutoCompress(event, isAborted)) {
+                      await autoCompress(conversationId, autoCompressThreshold ?? 85, () =>
+                        writer.write({ type: "data-compressing", data: true, transient: true }),
+                      );
+                    }
+                  },
+                }),
+              );
             },
             onError: onStreamError,
-            onFinish: ({ messages: finishedMessages }) => {
-              if (!conversationId || assistantPersisted) return;
-              assistantPersisted = true;
-              const last = finishedMessages[finishedMessages.length - 1];
-              safePersistAssistantMessage(capturedFinishEvent ?? { steps: [] }, {
-                conversationId,
-                model: servedModel,
-                autoCompressThreshold,
-                systemPrompt: finalSystemPrompt,
-                messageId: bodyAssistantMessageId,
-                overrideParts: (last?.parts as any[]) ?? [],
-              });
-            },
           }),
         });
 
-        // If the client stops the generation, onFinish may not fire. Persist
-        // whatever partial content we've accumulated so it isn't lost on refresh.
+        // Stop: onFinish above saves the partial reply. This only records the trace, since
+        // streamText's own onFinish doesn't run on an abort.
         if (conversationId && req.signal) {
           req.signal.addEventListener(
             "abort",
             () => {
-              if (assistantPersisted) return;
-              assistantPersisted = true;
-              const parts =
-                partialParts.length > 0
-                  ? partialParts
-                  : partialText
-                    ? [{ type: "text", text: partialText }]
-                    : [];
-              if (parts.length === 0) return;
-              safePersistAssistantMessage(
-                {
-                  steps: [
-                    {
-                      text: partialText,
-                      toolCalls: partialParts
-                        .filter((p) => p.toolName)
-                        .map((p) => ({ toolCallId: p.toolCallId, toolName: p.toolName, input: p.input })),
-                      toolResults: partialParts
-                        .filter((p) => p.state === "result")
-                        .map((p) => ({ toolCallId: p.toolCallId, toolName: p.toolName, output: p.output })),
-                    },
-                  ],
-                  totalUsage: undefined,
-                },
-                { conversationId, model: servedModel, autoCompressThreshold, systemPrompt: finalSystemPrompt, messageId: bodyAssistantMessageId },
-              );
-
               if (!traceRecorded) {
                 traceRecorded = true;
                 const lastMsg = messages[messages.length - 1];

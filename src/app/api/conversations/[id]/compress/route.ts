@@ -28,17 +28,23 @@ export async function POST(
     );
     const result = await compressConversation(id, conversation.model);
     if (!result) {
-      return NextResponse.json(
-        { error: "Failed to generate summary" },
-        { status: 500 },
-      );
+      return NextResponse.json({
+        success: false,
+        reason: "nothing-to-compress",
+        message: "Nothing to compress yet",
+      });
     }
 
-    await saveCompressedSummary(id, result.summary, {
-      beforeTokens: result.beforeTokens,
-      afterTokens: result.afterTokens,
-      beforeMessages: result.beforeMessages,
-    });
+    await saveCompressedSummary(
+      id,
+      result.summary,
+      {
+        beforeTokens: result.beforeTokens,
+        afterTokens: result.afterTokens,
+        beforeMessages: result.beforeMessages,
+      },
+      result.cutAt,
+    );
     console.log(`[Manual-compress] Summary saved`);
 
     return NextResponse.json({

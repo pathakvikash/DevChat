@@ -6,6 +6,8 @@
  * layer, and so the helpers can be unit-tested in isolation if needed.
  */
 
+import { liveSince } from "@/lib/liveSince";
+
 interface RawPart {
   type: string;
   text?: string;
@@ -97,9 +99,7 @@ export function buildMessagesFromConversation(
   const rawMessages = Array.isArray(conv.messages) ? conv.messages : [];
   const compressedAt = conv.compressedAt ? new Date(conv.compressedAt) : null;
 
-  const visibleMessages = compressedAt
-    ? rawMessages.filter((m) => new Date(m.createdAt) >= compressedAt)
-    : rawMessages;
+  const visibleMessages = rawMessages.filter(liveSince(compressedAt).isLive);
 
   const mapped: AppMessage[] = visibleMessages.map((m) => {
     let parts: RawPart[];

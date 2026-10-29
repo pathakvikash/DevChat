@@ -1,23 +1,35 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { shouldAutoCompress } from "@/lib/compression";
+import { generateText } from "ai";
+import { compressConversation, saveCompressedSummary, shouldAutoCompress } from "@/lib/compression";
 
 vi.mock("@/lib/db", () => ({
   prisma: {
     conversation: {
       findUnique: vi.fn(),
+      update: vi.fn(),
+      updateMany: vi.fn(),
     },
     message: {
       findMany: vi.fn(),
+      findFirst: vi.fn(),
     },
   },
 }));
 
 vi.mock("@/lib/tokens", () => ({
   calculateContextUsage: vi.fn(),
+  countTokens: vi.fn(() => 10),
 }));
 
+vi.mock("ai", () => ({ generateText: vi.fn() }));
+vi.mock("@/lib/models", () => ({
+  getModel: vi.fn(() => ({ model: "m" })),
+  initializeOllamaModels: vi.fn(),
+}));
+vi.mock("@/lib/apiKeys", () => ({ resolveProviderCreds: vi.fn(async () => ({})) }));
+
 import { prisma } from "@/lib/db";
-import { calculateContextUsage } from "@/lib/tokens";
+import { calculateContextUsage, countTokens } from "@/lib/tokens";
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -105,5 +117,169 @@ describe("shouldAutoCompress", () => {
 
     const result = await shouldAutoCompress("conv-id");
     expect(result).toBe(false);
+  });
+
+  it("counts only messages from compressedAt on, plus the summary", async () => {
+    const compressedAt = new Date("2024-06-01T12:00:00Z");
+    const rows = [
+      { role: "user", content: "old q", createdAt: new Date("2024-06-01T11:00:00Z") },
+      { role: "assistant", content: "old a", createdAt: new Date("2024-06-01T11:01:00Z") },
+      { role: "user", content: "kept q", createdAt: compressedAt },
+      { role: "assistant", content: "kept a", createdAt: new Date("2024-06-01T12:01:00Z") },
+      { role: "user", content: "new q", createdAt: new Date("2024-06-01T12:02:00Z") },
+      { role: "assistant", content: "new a", createdAt: new Date("2024-06-01T12:03:00Z") },
+    ];
+    (prisma.conversation.findUnique as any).mockResolvedValue({
+      model: "test-model",
+      systemPrompt: "sys",
+      compressedAt,
+      compressedSummary: "the summary",
+    });
+    // Honour the `createdAt >= compressedAt` filter like the database would.
+    (prisma.message.findMany as any).mockImplementation(async ({ where }: any) =>
+      rows.filter((r) => !where.createdAt?.gte || r.createdAt >= where.createdAt.gte),
+    );
+    (calculateContextUsage as any).mockResolvedValue({ contextPercent: 10 });
+
+    await shouldAutoCompress("conv-id", 85);
+
+    const [, systemPrompt, messages] = (calculateContextUsage as any).mock.calls.at(-1);
+    expect(messages.map((m: any) => m.content)).toEqual(["kept q", "kept a", "new q", "new a"]);
+    expect(systemPrompt).toContain("the summary");
+  });
+
+  it("returns false when the only user message left is the cut point, nothing to drop", async () => {
+    (prisma.conversation.findUnique as any).mockResolvedValue({
+      model: "test-model",
+      systemPrompt: "sys",
+      compressedAt: new Date("2024-06-01T12:00:00Z"),
+      compressedSummary: "the summary",
+    });
+    (prisma.message.findMany as any).mockResolvedValue([
+      { role: "user", content: "huge pasted file" },
+      { role: "assistant", content: "answer" },
+    ]);
+    (calculateContextUsage as any).mockResolvedValue({ contextPercent: 99 });
+
+    expect(await shouldAutoCompress("conv-id", 85)).toBe(false);
+  });
+});
+
+describe("saveCompressedSummary", () => {
+  it("keeps the latest exchange live by cutting at the cut point it is given", async () => {
+    const cutAt = new Date("2024-06-01T12:00:00Z");
+
+    await saveCompressedSummary("conv-id", "summary", undefined, cutAt);
+
+    expect((prisma.conversation.updateMany as any).mock.calls[0][0].data.compressedAt).toBe(cutAt);
+    expect(prisma.message.findFirst).not.toHaveBeenCalled();
+  });
+
+  it("does not move compressedAt backwards when an older cut lands late", async () => {
+    const newer = new Date("2024-06-01T12:00:00Z");
+    let stored: Date | null = newer;
+    (prisma.conversation.updateMany as any).mockImplementation(async ({ where, data }: any) => {
+      const applies = where.OR.some((cond: any) =>
+        cond.compressedAt === null ? stored === null : stored !== null && stored <= cond.compressedAt.lte,
+      );
+      if (applies) stored = data.compressedAt;
+      return { count: applies ? 1 : 0 };
+    });
+
+    await saveCompressedSummary("conv-id", "stale summary", undefined, new Date("2024-06-01T11:00:00Z"));
+
+    expect(stored).toBe(newer);
+  });
+
+  it("falls back to now when there is no cut point", async () => {
+    await saveCompressedSummary("conv-id", "summary");
+
+    expect((prisma.conversation.update as any).mock.calls[0][0].data.compressedAt).toBeInstanceOf(Date);
+  });
+});
+
+describe("compressConversation", () => {
+  const at = (iso: string) => new Date(iso);
+  const exchange = (n: number, hour: number) => [
+    { role: "user", content: `q${n}`, createdAt: at(`2024-06-01T${hour}:00:00Z`) },
+    { role: "assistant", content: `a${n}`, createdAt: at(`2024-06-01T${hour}:01:00Z`) },
+  ];
+  const conversation = (extra: object = {}) => ({
+    userId: null,
+    compressedAt: null,
+    compressedSummary: null,
+    messages: [...exchange(1, 10), ...exchange(2, 11), ...exchange(3, 12)],
+    ...extra,
+  });
+  const promptSent = () => (generateText as any).mock.calls[0][0].prompt as string;
+
+  beforeEach(() => {
+    (prisma.conversation.findUnique as any).mockResolvedValue(conversation());
+    (generateText as any).mockResolvedValue({ text: "summary" });
+    (countTokens as any).mockImplementation(() => 10);
+  });
+
+  it("bounds the call with a timeout and no retries, and keeps the default retries without one", async () => {
+    await compressConversation("conv-id", "ollama/x", 1000);
+    await compressConversation("conv-id", "ollama/x");
+
+    const [bounded, unbounded] = (generateText as any).mock.calls.map((c: any[]) => c[0]);
+    expect(bounded.abortSignal).toBeInstanceOf(AbortSignal);
+    expect(bounded.maxRetries).toBe(0);
+    expect(unbounded.abortSignal).toBeUndefined();
+    expect(unbounded.maxRetries).toBeUndefined();
+  });
+
+  it("returns the last user message of the snapshot as the cut point", async () => {
+    const result = await compressConversation("conv-id", "ollama/x");
+
+    expect(result?.cutAt).toEqual(at("2024-06-01T12:00:00Z"));
+  });
+
+  it("summarizes only what is before the cut, so the live last exchange is not also in the summary", async () => {
+    const result = await compressConversation("conv-id", "ollama/x");
+
+    expect(promptSent()).toContain("USER: q1\n\nASSISTANT: a1\n\nUSER: q2\n\nASSISTANT: a2");
+    expect(promptSent()).not.toContain("q3");
+    expect(promptSent()).not.toContain("a3");
+    expect(result?.beforeMessages).toBe(4);
+  });
+
+  it("feeds the earlier summary first, then the messages since it that are before the cut", async () => {
+    (prisma.conversation.findUnique as any).mockResolvedValue(
+      conversation({ compressedAt: at("2024-06-01T11:00:00Z"), compressedSummary: "old facts" }),
+    );
+
+    await compressConversation("conv-id", "ollama/x");
+
+    expect(promptSent()).toContain("Earlier summary:\nold facts\n\nUSER: q2\n\nASSISTANT: a2");
+    expect(promptSent()).not.toContain("q1");
+    expect(promptSent()).not.toContain("q3");
+  });
+
+  it("returns null when there is nothing before the cut to summarize", async () => {
+    (prisma.conversation.findUnique as any).mockResolvedValue(conversation({ messages: exchange(1, 10) }));
+
+    expect(await compressConversation("conv-id", "ollama/x")).toBeNull();
+    expect(generateText).not.toHaveBeenCalled();
+  });
+
+  it("over the token cap drops the oldest messages, never the earlier summary", async () => {
+    (countTokens as any).mockImplementation((text: string) => text.length);
+    (prisma.conversation.findUnique as any).mockResolvedValue(
+      conversation({
+        compressedSummary: "old facts",
+        messages: [...exchange(1, 10), ...exchange(2, 11), ...exchange(3, 12)].map((m) => ({
+          ...m,
+          content: `${m.content} ${"x".repeat(1500)}`,
+        })),
+      }),
+    );
+
+    await compressConversation("conv-id", "ollama/x");
+
+    expect(promptSent()).toContain("old facts");
+    expect(promptSent()).not.toContain("q1 ");
+    expect(promptSent()).toContain("a2 ");
   });
 });

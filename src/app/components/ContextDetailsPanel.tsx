@@ -5,6 +5,7 @@ import { Loader2, Trash2, Sparkles, CheckCircle, AlertTriangle } from "lucide-re
 import SidePanel from "./ui/SidePanel";
 import ErrorBanner from "./ui/ErrorBanner";
 import AsyncButton from "./ui/AsyncButton";
+import { useToast } from "./Toast";
 import { useResource } from "@/app/hooks/useResource";
 import ModelInfoSection from "./contextDetails/ModelInfoSection";
 import TokenBreakdownSection, {
@@ -71,6 +72,7 @@ export default function ContextDetailsPanel({
   onCompressed,
   onCleared,
 }: ContextDetailsPanelProps) {
+  const { toast } = useToast();
   const [compressing, setCompressing] = useState(false);
   const [compressError, setCompressError] = useState<string | null>(null);
   const [compressResult, setCompressResult] = useState<CompressionResult | null>(null);
@@ -116,7 +118,12 @@ export default function ContextDetailsPanel({
         const err = await res.json();
         throw new Error(err.error || "Failed to compress conversation");
       }
-      const result: CompressionResult = await res.json();
+      const data = await res.json();
+      if (data?.success === false) {
+        toast(data.message || "Nothing to compress yet", "info");
+        return;
+      }
+      const result: CompressionResult = data;
       setCompressResult(result);
       onCompressed?.(result);
       await refetchContextUsage();

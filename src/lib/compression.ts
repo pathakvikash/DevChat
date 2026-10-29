@@ -3,6 +3,7 @@ import { getModel, initializeOllamaModels } from "@/lib/models";
 import { resolveProviderCreds } from "@/lib/apiKeys";
 import { prisma } from "@/lib/db";
 import { countTokens } from "@/lib/tokens";
+import { liveSince } from "@/lib/liveSince";
 
 /**
  * Default model used for compaction. Picked to be a small, fast local model
@@ -45,11 +46,16 @@ export interface CompressionResult {
   beforeMessages: number;
   reductionTokens: number;
   reductionPercent: number;
+  /** Last user message in the snapshot summarized: it and later messages stay live (see `liveSince`). */
+  cutAt: Date | null;
 }
 
+/** `timeoutMs` bounds the model call, with no retries since a retry would only spend the
+ *  deadline twice; without it the call keeps the default retries. */
 export async function compressConversation(
   conversationId: string,
   modelId: string = DEFAULT_COMPACTION_MODEL,
+  timeoutMs?: number,
 ): Promise<CompressionResult | null> {
   const conversation = await prisma.conversation.findUnique({
     where: { id: conversationId },
@@ -74,26 +80,31 @@ export async function compressConversation(
 
   const MAX_COMPRESSION_TOKENS = 4000;
 
-  let conversationText = conversation.messages
-    .map((m) => `${m.role.toUpperCase()}: ${m.content}`)
-    .join("\n\n");
+  // Rolling summary: the previous one first, then the messages since it that this round
+  // drops (before the cut). The cut message and later ones stay live, so they are not
+  // summarized too. Over the cap the oldest messages go first, never the summary.
+  const cutAt = conversation.messages.findLast((m) => m.role === "user")?.createdAt ?? null;
+  const sincePrevious = liveSince(conversation.compressedAt).isLive;
+  const keptLive = liveSince(cutAt).isLive;
+  const earlier = conversation.compressedSummary
+    ? `Earlier summary:\n${conversation.compressedSummary}`
+    : "";
+  const lineItems = conversation.messages
+    .filter((m) => sincePrevious(m) && !keptLive(m))
+    .map((m) => `${m.role.toUpperCase()}: ${m.content}`);
+  if (lineItems.length === 0) return null;
+  const joinText = () => [earlier, ...lineItems].filter(Boolean).join("\n\n");
 
+  let conversationText = joinText();
   let beforeTokens = countTokens(conversationText);
-
-  if (beforeTokens > MAX_COMPRESSION_TOKENS) {
-    const lineItems = conversation.messages.map(
-      (m) => `${m.role.toUpperCase()}: ${m.content}`,
-    );
-    while (lineItems.length > 1) {
-      lineItems.shift();
-      conversationText = lineItems.join("\n\n");
-      beforeTokens = countTokens(conversationText);
-      if (beforeTokens <= MAX_COMPRESSION_TOKENS) break;
-    }
+  while (beforeTokens > MAX_COMPRESSION_TOKENS && lineItems.length > 1) {
+    lineItems.shift();
+    conversationText = joinText();
+    beforeTokens = countTokens(conversationText);
   }
 
   const prompt = `Summarize this conversation for context preservation:\n\n${conversationText}`;
-  const beforeMessages = conversation.messages.length;
+  const beforeMessages = lineItems.length;
 
   try {
     const result = await generateText({
@@ -101,6 +112,8 @@ export async function compressConversation(
       system: COMPRESSION_SYSTEM_PROMPT,
       prompt,
       temperature: 0.3,
+      abortSignal: timeoutMs ? AbortSignal.timeout(timeoutMs) : undefined,
+      maxRetries: timeoutMs ? 0 : undefined,
       ...(isOllama ? { providerOptions: { ollama: { num_predict: 2048, temperature: 0.3 } } } : {}),
     });
 
@@ -126,6 +139,7 @@ export async function compressConversation(
       beforeMessages,
       reductionTokens,
       reductionPercent,
+      cutAt,
     };
   } catch (error) {
     console.error("Failed to compress conversation:", error);
@@ -150,17 +164,32 @@ export async function saveCompressedSummary(
     beforeTokens?: number;
     afterTokens?: number;
     beforeMessages?: number;
-  }
+  },
+  cutAt?: Date | null,
 ): Promise<void> {
-  await prisma.conversation.update({
-    where: { id: conversationId },
-    data: {
-      compressedSummary: summary,
-      compressedAt: new Date(),
-      compressedBeforeTokens: stats?.beforeTokens,
-      compressedAfterTokens: stats?.afterTokens,
-      compressedBeforeMessages: stats?.beforeMessages,
+  const data = {
+    compressedSummary: summary,
+    compressedBeforeTokens: stats?.beforeTokens,
+    compressedAfterTokens: stats?.afterTokens,
+    compressedBeforeMessages: stats?.beforeMessages,
+  };
+
+  if (!cutAt) {
+    await prisma.conversation.update({
+      where: { id: conversationId },
+      data: { ...data, compressedAt: new Date() },
+    });
+    return;
+  }
+
+  // The cut point from the summarized snapshot: the last exchange stays visible and in
+  // context, and a save that lands late can't hide messages sent since.
+  await prisma.conversation.updateMany({
+    where: {
+      id: conversationId,
+      OR: [{ compressedAt: null }, { compressedAt: { lte: cutAt } }],
     },
+    data: { ...data, compressedAt: cutAt },
   });
 }
 
@@ -170,7 +199,7 @@ export async function shouldAutoCompress(
 ): Promise<boolean> {
   const conversation = await prisma.conversation.findUnique({
     where: { id: conversationId },
-    select: { model: true, systemPrompt: true },
+    select: { model: true, systemPrompt: true, compressedAt: true, compressedSummary: true },
   });
 
   if (!conversation) return false;
@@ -181,15 +210,21 @@ export async function shouldAutoCompress(
   const contextLength = 4096;
   const { calculateContextUsage } = await import("@/lib/tokens");
 
+  // After a compression the live prompt is the summary plus messages from compressedAt on.
   const messages = await prisma.message.findMany({
-    where: { conversationId },
+    where: { conversationId, ...liveSince(conversation.compressedAt).where },
     orderBy: { createdAt: "asc" },
     select: { role: true, content: true },
   });
+  // Compressing cuts at the newest user message, so it only helps if an older one exists to drop.
+  if (messages.filter((m) => m.role === "user").length < 2) return false;
+  const systemPrompt = [conversation.systemPrompt, conversation.compressedSummary]
+    .filter(Boolean)
+    .join("\n\n");
 
   const result = await calculateContextUsage(
     conversation.model,
-    conversation.systemPrompt || "",
+    systemPrompt,
     messages,
     "",
     contextLength
