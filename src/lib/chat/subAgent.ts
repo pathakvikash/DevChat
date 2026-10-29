@@ -3,6 +3,7 @@ import type { ModelConfig } from "@/lib/models";
 import type { ToolMode } from "@/lib/chat/buildTools";
 import { normalizeToolParts } from "@/lib/chat/normalizeToolParts";
 import { nextStepSettings } from "@/lib/chat/loopGuard";
+import { quotePastChat } from "@/lib/chat/quotePastChat";
 
 type ProviderOptions = NonNullable<Parameters<typeof streamText>[0]["providerOptions"]>;
 
@@ -313,17 +314,18 @@ export function finishSubAgentOutput(out: SubAgentOutput, result: SubAgentResult
   };
 }
 
-/** What the parent model reads: the report when done, otherwise an error with any partial notes. */
+/** What the parent model reads. Helper text is quoted as reference data, so it cannot pose as instructions. */
 export function subAgentModelOutput(
   out: SubAgentOutput,
 ): { type: "text"; value: string } | { type: "error-text"; value: string } {
   const who = out.childId ? `Sub-agent ${out.childId}` : "Sub-agent";
-  if (out.status === "done") return { type: "text", value: `${who} report:\n${out.report ?? ""}` };
+  if (out.status === "done") return { type: "text", value: quotePastChat(`${who} report`, out.report ?? "") };
   const why =
     out.status === "error"
       ? `failed${out.error ? `: ${out.error}` : ""}`
       : out.status === "timeout"
         ? "timed out after 5 minutes"
         : "was stopped";
-  return { type: "error-text", value: `${who} ${why}.${out.report ? `\nPartial notes:\n${out.report}` : ""}` };
+  const notes = out.report ? `\n${quotePastChat(`${who} partial notes`, out.report)}` : "";
+  return { type: "error-text", value: `${who} ${why}.${notes}` };
 }

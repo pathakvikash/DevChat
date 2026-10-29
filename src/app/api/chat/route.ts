@@ -19,7 +19,7 @@ import {
   type ToolMode,
 } from "@/lib/chat/buildTools";
 import { canStartSubAgents, runAgentTool } from "@/lib/chat/buildTools";
-import { nextStepSettings } from "@/lib/chat/loopGuard";
+import { ignoredTextStep, nextStepSettings } from "@/lib/chat/loopGuard";
 import { safePersistAssistantMessage } from "@/lib/chat/persistAssistantMessage";
 import { autoCompress, canAutoCompress } from "@/lib/chat/autoCompress";
 import { liveSince } from "@/lib/liveSince";
@@ -390,9 +390,10 @@ export async function POST(req: Request) {
             };
           },
           // Ends at maxToolCalls, or after a step with no tool results (nothing left to read).
-          // Tool-only runs are handled by the loop guard in prepareStep, not by stopping here.
+          // The loop guard in prepareStep forces the answer; this stops only if a provider ignored that.
           stopWhen: ({ steps }) => {
             if (steps.length >= maxToolCalls) return true;
+            if (ignoredTextStep(steps, 3)) return true;
             const last = steps[steps.length - 1] as
               | { toolResults?: unknown[]; content?: Array<{ type: string }> }
               | undefined;
