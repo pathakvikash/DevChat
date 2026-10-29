@@ -69,6 +69,7 @@ export interface ConversationPageState extends DataActions {
   handleEditMessage: (messageId: string, content: string) => Promise<void>;
   handleDeleteMessage: (messageId: string) => Promise<void>;
   handleCopyMessage: (content: string) => void;
+  handleForkMessage: (messageId: string) => Promise<void>;
   handleRegenerateMessage: (messageId: string) => void;
   handleRegenExecute: (mode: "retry" | "think" | "search", additionalInput: string) => Promise<void>;
   regenModal: {

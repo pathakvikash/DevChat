@@ -1,6 +1,6 @@
 "use client";
 
-import { Copy, Edit, RotateCcw, ThumbsUp, ThumbsDown, Trash2 } from "lucide-react";
+import { Copy, Edit, GitFork, Loader2, RotateCcw, ThumbsUp, ThumbsDown, Trash2 } from "lucide-react";
 import { useState, useCallback, useEffect, useRef } from "react";
 
 interface MessageActionsProps {
@@ -13,6 +13,7 @@ interface MessageActionsProps {
   onEdit?: (messageId: string, content: string) => Promise<void>;
   onDelete?: (messageId: string) => Promise<void>;
   onCopy?: (content: string) => void;
+  onFork?: (messageId: string) => Promise<void>;
   onStartEditing: () => void;
   onRegenerateMessage?: (messageId: string) => void;
 }
@@ -27,11 +28,13 @@ export default function MessageActions({
   onEdit,
   onDelete,
   onCopy,
+  onFork,
   onStartEditing,
   onRegenerateMessage,
 }: MessageActionsProps) {
   const [feedback, setFeedback] = useState<number | null>(initialFeedback ?? null);
   const [feedbackLoading, setFeedbackLoading] = useState(false);
+  const [forking, setForking] = useState(false);
   const [feedbackMenuOpen, setFeedbackMenuOpen] = useState(false);
   const feedbackMenuRef = useRef<HTMLDivElement>(null);
 
@@ -71,6 +74,16 @@ export default function MessageActions({
       onCopy(textToCopy);
     } else {
       navigator.clipboard.writeText(textToCopy);
+    }
+  };
+
+  const handleFork = async () => {
+    if (!messageId || !onFork || forking) return;
+    setForking(true);
+    try {
+      await onFork(messageId);
+    } finally {
+      setForking(false);
     }
   };
 
@@ -157,6 +170,19 @@ export default function MessageActions({
       >
         <Copy size={12} />
       </button>
+
+      {onFork && messageId && (
+        <button
+          type="button"
+          onClick={handleFork}
+          disabled={forking}
+          title="Fork from here"
+          aria-label="Fork from here"
+          className="focus-ring inline-flex items-center gap-1 px-2 py-1 text-xs text-zinc-400 hover:text-zinc-100 glass-button rounded-[var(--glass-radius-sm)] transition"
+        >
+          {forking ? <Loader2 size={12} className="animate-spin" /> : <GitFork size={12} />}
+        </button>
+      )}
 
       {!isUser && onRegenerateMessage && messageId && (
         <button

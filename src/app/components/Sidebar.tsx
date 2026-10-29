@@ -71,6 +71,13 @@ export default function Sidebar() {
     return () => window.removeEventListener("vas:temporary-changed", onTemporaryChanged);
   }, [setConversations, refetch]);
 
+  // A fork is made on the page, so the list (which stays mounted) has to fetch it.
+  useEffect(() => {
+    const onForked = () => void refetch();
+    window.addEventListener("vas:chat-forked", onForked);
+    return () => window.removeEventListener("vas:chat-forked", onForked);
+  }, [refetch]);
+
   const filteredConversations = conversations.filter((c) => {
     const matchesSearch = c.title.toLowerCase().includes(searchInput.toLowerCase());
     if (!matchesSearch) return false;

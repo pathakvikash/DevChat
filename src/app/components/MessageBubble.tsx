@@ -31,6 +31,7 @@ interface MessageBubbleProps {
   onEdit?: (messageId: string, content: string) => Promise<void>;
   onDelete?: (messageId: string) => Promise<void>;
   onCopy?: (content: string) => void;
+  onFork?: (messageId: string) => Promise<void>;
   onRegenerateMessage?: (messageId: string) => void;
   onOpenArtifact?: (id: string) => void;
   onClarificationAnswer?: (toolCallId: string, answer: string) => void;
@@ -50,6 +51,7 @@ function MessageBubble({
   onEdit,
   onDelete,
   onCopy,
+  onFork,
   onRegenerateMessage,
   onOpenArtifact,
   onClarificationAnswer,
@@ -213,6 +215,7 @@ function MessageBubble({
           onEdit={onEdit}
           onDelete={onDelete}
           onCopy={onCopy}
+          onFork={onFork}
           onStartEditing={startEditing}
           onRegenerateMessage={onRegenerateMessage}
         />
@@ -249,6 +252,7 @@ const MessageBubbleMemo = memo(MessageBubble, (prev, next) => {
     prev.onEdit === next.onEdit &&
     prev.onDelete === next.onDelete &&
     prev.onCopy === next.onCopy &&
+    prev.onFork === next.onFork &&
     prev.onRegenerateMessage === next.onRegenerateMessage &&
     prev.onOpenArtifact === next.onOpenArtifact &&
     prev.onClarificationAnswer === next.onClarificationAnswer

@@ -15,6 +15,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
           orderBy: { createdAt: "asc" },
           include: { feedback: true },
         },
+        forkedFrom: { select: { id: true, title: true, temporary: true } },
       },
     });
 
@@ -22,7 +23,12 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
       return NextResponse.json({ error: "Conversation not found" }, { status: 404 });
     }
 
-    return NextResponse.json(conversation);
+    // A temporary source is deleted when left, so the link back would be dead.
+    const { forkedFrom, ...rest } = conversation;
+    return NextResponse.json({
+      ...rest,
+      forkedFrom: forkedFrom && !forkedFrom.temporary ? { id: forkedFrom.id, title: forkedFrom.title } : null,
+    });
   } catch (error) {
     console.error("Failed to fetch conversation:", error);
     return NextResponse.json({ error: "Failed to fetch conversation" }, { status: 500 });

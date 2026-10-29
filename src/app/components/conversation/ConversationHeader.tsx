@@ -1,6 +1,7 @@
 "use client";
 
-import { Code2, Settings2, AlertCircle, Download, FileCode, Menu, Keyboard, Brain, MoreHorizontal, MessageSquareDashed } from "lucide-react";
+import { Code2, Settings2, AlertCircle, Download, FileCode, GitFork, Menu, Keyboard, Brain, MoreHorizontal, MessageSquareDashed } from "lucide-react";
+import Link from "next/link";
 import { useState, useRef, useEffect } from "react";
 import { useSidebar } from "@/app/contexts/SidebarContext";
 import { useChatMode } from "@/app/contexts/ChatModeContext";
@@ -21,6 +22,7 @@ interface ConversationHeaderProps {
     maxTokens?: number;
     memoryDisabled?: boolean;
     temporary?: boolean;
+    forkedFrom?: { id: string; title: string } | null;
   };
   messagesCount: number;
   scratchpadOpen: boolean;
@@ -207,6 +209,14 @@ export default function ConversationHeader({
           </div>
         </div>
         <div className="flex items-center gap-3 mt-1">
+          {conversation.forkedFrom && (
+            <span className="inline-flex min-w-0 items-center gap-1 text-xs text-zinc-400">
+              <GitFork size={12} className="shrink-0" /> Forked from
+              <Link href={`/c/${conversation.forkedFrom.id}`} className="focus-ring max-w-[200px] truncate rounded-sm hover:text-[var(--foreground)] hover:underline">
+                {conversation.forkedFrom.title}
+              </Link>
+            </span>
+          )}
           {conversation.temporary && (
             <span className="inline-flex items-center gap-1 text-xs text-zinc-400">
               <MessageSquareDashed size={12} /> Temporary chat · deleted when you leave

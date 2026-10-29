@@ -97,6 +97,9 @@ model Conversation {
   messages                 Message[]
   artifacts                Artifact[]
   todos                    Todo[]
+  forkedFromId             String?
+  forkedFrom               Conversation? @relation("Forks", fields: [forkedFromId], references: [id], onDelete: SetNull)
+  forks                    Conversation[] @relation("Forks")
 
   @@index([updatedAt])
   @@index([userId])
