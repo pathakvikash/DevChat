@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { orphanSides } from "@/lib/splitPanes";
+import { orphanSides, sideShares } from "@/lib/splitPanes";
 import {
   clampWidths,
   closePane,
@@ -226,5 +226,18 @@ describe("orphanSides", () => {
 
   it("ignores a side chat whose parent is not the closing pane", () => {
     expect(orphanSides(["A", "B", "C"], { C: "B" }, "A")).toEqual([]);
+  });
+});
+
+describe("sideShares", () => {
+  it("gives a compact side chat about 400px and the rest the row", () => {
+    const [main, side] = sideShares([false, true], [false, false], 1000);
+    expect(side).toBeCloseTo(0.4);
+    expect(main).toBeCloseTo(0.6);
+  });
+
+  it("gives a wide side chat half the row, and leaves the no-side layout equal", () => {
+    expect(sideShares([false, true], [false, true], 1000)).toEqual([0.5, 0.5]);
+    expect(sideShares([false, false], [false, false], 1000)).toEqual([0.5, 0.5]);
   });
 });

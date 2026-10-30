@@ -8,7 +8,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { Check, ChevronDown, ChevronLeft, ChevronRight, Columns2, X } from "lucide-react";
 import { useCommandPaletteActions } from "@/app/components/CommandPalette";
 import { createConversation } from "@/app/hooks/useConversationsApi";
-import { clampWidths, dividersPx, equalShares, resizeDivider, SPLIT_MIN_PX } from "@/lib/splitPanes";
+import { clampWidths, dividersPx, resizeDivider, sideShares, SPLIT_MIN_PX } from "@/lib/splitPanes";
 import { SplitViewProvider, useSplitView } from "./SplitViewContext";
 import { useSearchParams } from "next/navigation";
 import { useConversationPage } from "./[id]/useConversationPage";
@@ -114,8 +114,12 @@ function PaneArea({ children }: { children: ReactNode }) {
   const rowRef = useRef<HTMLDivElement>(null);
   const [stored, setStored] = useState<Record<number, number[]>>({});
   const [switcherOpen, setSwitcherOpen] = useState(false);
+  // Side chats that are wide (half the row). Compact is the default.
+  const [wideSides, setWideSides] = useState<Record<string, boolean>>({});
   const area = Math.max(0, split.rowWidth - dividersPx(n));
-  const shares = n > 1 ? clampWidths(stored[n] ?? equalShares(n), area) : [1];
+  const sides = ids.map((id) => split.chatPanes.some((x) => x.id === id && x.kind === "side"));
+  const wide = ids.map((id) => !!wideSides[id]);
+  const shares = n > 1 ? clampWidths(stored[n] ?? sideShares(sides, wide, area), area) : [1];
   const drag = useRef<{ i: number; x: number; start: number[]; cur: number[]; area: number } | null>(null);
   const sized = multi && sideBySide;
   const titleOf = (id: string) => info[id]?.title ?? "Chat";
@@ -182,6 +186,12 @@ function PaneArea({ children }: { children: ReactNode }) {
     saveShares(n, resizeDivider(shares, i, step, area));
   }
 
+  /** Flips a side chat between compact and wide. Its width is written like a drag, so the divider still moves it. */
+  function toggleSideWide(id: string) {
+    setWideSides((prev) => ({ ...prev, [id]: !prev[id] }));
+    saveShares(n, sideShares(sides, ids.map((x) => (x === id ? !wideSides[x] : !!wideSides[x])), area));
+  }
+
   function equalize(i: number) {
     const next = [...shares];
     next[i] = next[i + 1] = (shares[i] + shares[i + 1]) / 2;
@@ -242,6 +252,8 @@ function PaneArea({ children }: { children: ReactNode }) {
           initialPrompt={i === 0 ? initialPrompt : undefined}
           searchProvider={page.searchProvider}
           onToggleSearchProvider={page.toggleSearchProvider}
+          sideWide={!!wideSides[id]}
+          onToggleSideWide={() => toggleSideWide(id)}
         />
       </PaneErrorBoundary>
     )),

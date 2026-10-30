@@ -2,6 +2,7 @@
 
 import MarkdownMessage from "./MarkdownMessage";
 import ToolInvocation from "./ToolInvocation";
+import { SideToolCall } from "./sidechat/SideFold";
 import {
   groupToolParts,
   type AnyPart,
@@ -21,6 +22,8 @@ interface MessageContentProps {
   isStreaming: boolean;
   onOpenArtifact?: (id: string) => void;
   onClarificationAnswer?: (toolCallId: string, answer: string) => void;
+  /** Side chat: tool calls fold to one line, and prose has no width cap. */
+  compact?: boolean;
 }
 
 export default function MessageContent({
@@ -31,6 +34,7 @@ export default function MessageContent({
   isStreaming,
   onOpenArtifact,
   onClarificationAnswer,
+  compact = false,
 }: MessageContentProps) {
   const isAssistant = role === "assistant";
   const merged = groupToolParts(allParts);
@@ -43,6 +47,18 @@ export default function MessageContent({
   return (
     <>
       {merged.map((item) => {
+        if (item.type === "tool-group" && compact) {
+          return (
+            <SideToolCall
+              key={item.key}
+              part={item.parts[0]}
+              allParts={item.parts}
+              onOpenArtifact={onOpenArtifact}
+              onClarificationAnswer={onClarificationAnswer}
+              isStreaming={isStreaming}
+            />
+          );
+        }
         if (item.type === "tool-group") {
           return (
             <ToolInvocation
@@ -58,7 +74,7 @@ export default function MessageContent({
         const p = item.part;
         if (p.type === "text") {
           return (
-            <div key={item.key} className={isAssistant ? "max-w-2xl" : ""}>
+            <div key={item.key} className={isAssistant && !compact ? "max-w-2xl" : ""}>
               {isUser ? (
                 <>
                 {/* `>` runs (quote-reply) get a quote style; the rest stays plain text. */}

@@ -2,6 +2,8 @@
 
 import { Copy, Edit, GitFork, Loader2, RotateCcw, Send, ThumbsUp, ThumbsDown, Trash2 } from "lucide-react";
 import { createContext, useState, useCallback, useContext, useEffect, useRef } from "react";
+import SendToMainButton from "@/app/components/sidechat/SendToMainButton";
+import { formatAgo } from "@/lib/chat/sideChatLabels";
 
 export interface AgentSendValue {
   /** The other open chats. Empty hides the "Send to…" menu. */
@@ -25,6 +27,11 @@ interface MessageActionsProps {
   onFork?: (messageId: string) => Promise<void>;
   onStartEditing: () => void;
   onRegenerateMessage?: (messageId: string) => void;
+  /** Side chat: only Copy, Send to main and the time, in a quieter row. */
+  compact?: boolean;
+  /** Compact: keep the row visible instead of showing it on hover. */
+  pinned?: boolean;
+  sendToMain?: { text: string; parentTitle: string; onSendToMain: (text: string) => void };
 }
 
 export default function MessageActions({
@@ -40,6 +47,9 @@ export default function MessageActions({
   onFork,
   onStartEditing,
   onRegenerateMessage,
+  compact = false,
+  pinned = false,
+  sendToMain,
 }: MessageActionsProps) {
   const [feedback, setFeedback] = useState<number | null>(initialFeedback ?? null);
   const [feedbackLoading, setFeedbackLoading] = useState(false);
@@ -110,6 +120,33 @@ export default function MessageActions({
   };
 
   if (!messageId || (isStreaming && !isUser)) return null;
+
+  if (compact) {
+    const ago = createdAt ? formatAgo(createdAt) : "";
+    return (
+      <div
+        className={`
+          mt-1 flex select-none items-center gap-1 transition-opacity duration-150
+          ${isUser ? "justify-end" : "justify-start"}
+          ${pinned ? "opacity-100" : "opacity-0 group-hover:opacity-100 focus-within:opacity-100"}
+        `}
+      >
+        <button
+          type="button"
+          onClick={handleCopy}
+          title="Copy"
+          aria-label="Copy message"
+          className="focus-ring inline-flex h-7 w-7 items-center justify-center rounded-[var(--glass-radius-sm)] text-zinc-500 transition hover:bg-[var(--glass-bg-hover)] hover:text-zinc-200"
+        >
+          <Copy size={16} />
+        </button>
+        {!isUser && sendToMain && (
+          <SendToMainButton text={sendToMain.text} parentTitle={sendToMain.parentTitle} onSendToMain={sendToMain.onSendToMain} />
+        )}
+        {ago && <span className="ml-1 text-xs text-zinc-500">{ago}</span>}
+      </div>
+    );
+  }
 
   return (
     <div
