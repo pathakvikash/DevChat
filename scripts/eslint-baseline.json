@@ -1,6 +1,6 @@
 {
+  "src/app/c/[id]/useChatPane.ts": 2,
   "src/app/c/[id]/useChatTransport.ts": 1,
-  "src/app/c/[id]/useConversationPage.ts": 10,
   "src/app/components/ArtifactPanel.tsx": 2,
   "src/app/components/chatInput.tsx": 2,
   "src/app/components/claude/ClaudeRunner.tsx": 1,
