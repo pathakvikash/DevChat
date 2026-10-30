@@ -3,6 +3,8 @@ import { defineConfig, devices } from "@playwright/test";
 import { ENV_ALIASES, PROVIDERS } from "./src/lib/providers";
 
 const PORT = 3210;
+// Loopback only: this server has the no-password test login, so it must not be reachable from the network.
+const HOST = "127.0.0.1";
 const live = process.env.SANITY_LIVE === "1";
 // Every env var that can make a provider look configured. Blank beats .env files: Next keeps a var set to "".
 const providerEnv = Object.fromEntries(
@@ -28,7 +30,7 @@ export default defineConfig({
     toHaveScreenshot: { animations: "disabled", caret: "hide", maxDiffPixelRatio: 0.01 },
   },
   use: {
-    baseURL: `http://localhost:${PORT}`,
+    baseURL: `http://${HOST}:${PORT}`,
     locale: "en-US",
     timezoneId: "UTC",
     trace: "retain-on-failure",
@@ -50,8 +52,8 @@ export default defineConfig({
     },
   ],
   webServer: {
-    command: `npx next dev --port ${PORT}`,
-    url: `http://localhost:${PORT}/login`,
+    command: `npx next dev --hostname ${HOST} --port ${PORT}`,
+    url: `http://${HOST}:${PORT}/login`,
     reuseExistingServer: true,
     timeout: 180_000,
     // The app logs every failed Ollama lookup (expected here); SANITY_DEBUG=1 shows the server log.
