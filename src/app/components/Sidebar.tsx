@@ -72,7 +72,7 @@ function OnScreenMark({ label, focused }: { label: string | null; focused: boole
     <span
       role="img"
       aria-label={label}
-      className={`absolute right-3 top-1/2 flex size-[22px] -translate-y-1/2 items-center justify-center transition group-hover:pointer-events-none group-hover:opacity-0 ${
+      className={`pointer-events-none absolute right-3 top-1/2 flex size-[22px] -translate-y-1/2 items-center justify-center transition group-hover:opacity-0 ${
         focused ? "text-zinc-200" : "text-zinc-400"
       }`}
     >
@@ -427,6 +427,8 @@ export default function Sidebar() {
                 onDragEnd={() => split?.endDrag()}
                 onContextMenu={(e) => { e.preventDefault(); setMenuOpenId(conv.id); }}
                 className={`group relative flex items-center gap-2 px-3 py-2 rounded-[var(--glass-radius-sm)] transition ${
+                  menuOpenId === conv.id ? "z-30" : "" /* its menu paints over the rows below */
+                } ${
                   activeConvId === conv.id
                     ? "glass-strong text-[var(--foreground)]"
                     : "text-zinc-300 glass-button"
