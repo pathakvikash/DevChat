@@ -40,10 +40,10 @@ const INDENT_PX = 20;
 const LINE_X = 12; // how far left of a row its own level's line runs
 const LINE = "absolute -top-1 border-[var(--glass-border-strong)]";
 
-/** The tree lines beside a nested row. Each starts 4px (the row gap) above the row so the line stays unbroken. */
+/** The tree lines beside a nested row. The wrapper is the row's border box (-inset-px), so each line starts one row gap above it and stays unbroken. */
 function TreeLines({ depth, isLastChild, through }: Omit<TreeRow<ConversationItem>, "item">) {
   return (
-    <span aria-hidden="true" className="pointer-events-none absolute inset-0">
+    <span aria-hidden="true" className="pointer-events-none absolute -inset-px">
       {through.map((on, i) =>
         on && (
           <span
@@ -55,7 +55,7 @@ function TreeLines({ depth, isLastChild, through }: Omit<TreeRow<ConversationIte
       )}
       {isLastChild ? (
         <span
-          className={`${LINE} h-[calc(50%+4px)] rounded-bl-lg border-b border-l`}
+          className={`${LINE} h-[calc(50%+0.25rem)] rounded-bl-lg border-b border-l`}
           style={{ left: -LINE_X, width: LINE_X }}
         />
       ) : (
@@ -72,7 +72,6 @@ function OnScreenMark({ label, focused }: { label: string | null; focused: boole
     <span
       role="img"
       aria-label={label}
-      title={label}
       className={`absolute right-3 top-1/2 flex size-[22px] -translate-y-1/2 items-center justify-center transition group-hover:pointer-events-none group-hover:opacity-0 ${
         focused ? "text-zinc-200" : "text-zinc-400"
       }`}
@@ -226,14 +225,16 @@ export default function Sidebar() {
   }
 
   const currentConvId = pathname.startsWith("/c/") ? pathname.split("/")[2] : null;
-  const activeConvId = split?.ids.length ? split.focus : currentConvId;
+  // Side chats are not listed, so a focused side pane lights up its main chat's row.
+  const focusedId = split?.ids.length ? (split.parentOf[split.focus] ?? split.focus) : null;
+  const activeConvId = focusedId ?? currentConvId;
 
-  /** The label of the mark on a row that is on screen, or null. Panes show only with more than one open. */
+  /** The label of the mark on a row that is on screen, or null. Only listed panes count; side chats are not listed. */
   function onScreenLabel(id: string): string | null {
-    if (!split?.multi) return null;
-    const pane = split.ids.indexOf(id);
-    if (pane >= 0) return `Open in split view, pane ${pane + 1} of ${split.ids.length}`;
-    // Side chats are not listed, so their main chat's row stands for them.
+    if (!split) return null;
+    const listed = split.ids.filter((open) => !split.parentOf[open]);
+    const pane = listed.indexOf(id);
+    if (pane >= 0 && listed.length > 1) return `Open in split view, pane ${pane + 1} of ${listed.length}`;
     return split.ids.some((open) => split.parentOf[open] === id) ? "Side chat open" : null;
   }
 
@@ -478,7 +479,7 @@ export default function Sidebar() {
                     </div>
                   )}
                 </Link>
-                <OnScreenMark label={onScreenLabel(conv.id)} focused={split?.focus === conv.id} />
+                <OnScreenMark label={onScreenLabel(conv.id)} focused={focusedId === conv.id} />
                 <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition items-center">
                   {editingId !== conv.id && (
                     <button

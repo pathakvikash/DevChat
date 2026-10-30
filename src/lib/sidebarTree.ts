@@ -20,12 +20,14 @@ export interface TreeRow<T extends TreeItem> {
 }
 
 /**
- * Orders `items` (already filtered and sorted) so each fork follows its parent, oldest fork first.
+ * Orders `items` (already filtered, newest activity first) so each fork follows its parent, oldest fork first.
+ * Pinned rows go first (a stable sort), as the server lists them, so a chat pinned just now moves up at once.
  * A fork whose parent is not in `items`, or a pinned fork of an unpinned parent, stays top-level.
  * Top-level rows keep their input order. A forkedFromId cycle never loops or drops a row: the first
  * member in input order is shown as a top-level row.
  */
-export function buildSidebarTree<T extends TreeItem>(items: T[], opts: { flat?: boolean } = {}): TreeRow<T>[] {
+export function buildSidebarTree<T extends TreeItem>(input: T[], opts: { flat?: boolean } = {}): TreeRow<T>[] {
+  const items = [...input].sort((a, b) => Number(!!b.pinned) - Number(!!a.pinned));
   const byId = new Map(items.map((item) => [item.id, item]));
   const index = new Map(items.map((item, i) => [item.id, i]));
   const kids = new Map<string, T[]>();

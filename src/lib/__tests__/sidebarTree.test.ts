@@ -70,6 +70,18 @@ describe("buildSidebarTree", () => {
     ]);
   });
 
+  it("lists pinned rows first, so a fork pinned after the list loaded leaves its parent at once", () => {
+    // Pinning does not re-sort the loaded list: the pinned fork still sits among the unpinned rows.
+    const items = [chat("x", 5), chat("p", 4, null, true), chat("f", 3, "p2", true), chat("p2", 2), chat("g", 1)];
+    expect(shape(items)).toEqual([
+      ["p", 0, true],
+      ["f", 0, true],
+      ["x", 0, true],
+      ["p2", 0, true],
+      ["g", 0, true],
+    ]);
+  });
+
   it("survives a cycle: every row shown once, nothing loops", () => {
     const rows = buildSidebarTree([chat("a", 1, "b"), chat("b", 2, "a")]);
     expect(rows.map((r) => [r.item.id, r.depth])).toEqual([
