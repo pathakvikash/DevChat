@@ -9,6 +9,7 @@ import { useSession } from "next-auth/react";
 import { useSidebar } from "@/app/contexts/SidebarContext";
 import { useChatModeOptional } from "@/app/contexts/ChatModeContext";
 import { CHAT_DRAG_TYPE, useSplitViewOptional } from "@/app/c/SplitViewContext";
+import { buildSidebarTree, type TreeRow } from "@/lib/sidebarTree";
 import ModeToggle from "./ModeToggle";
 import { useResource } from "@/app/hooks/useResource";
 import {
@@ -29,9 +30,55 @@ interface ConversationItem {
   updatedAt: string;
   pinned?: boolean;
   archived?: boolean;
+  forkedFromId?: string | null;
   _count: {
     messages: number;
   };
+}
+
+const INDENT_PX = 20;
+const LINE_X = 12; // how far left of a row its own level's line runs
+const LINE = "absolute -top-1 border-[var(--glass-border-strong)]";
+
+/** The tree lines beside a nested row. The wrapper is the row's border box (-inset-px), so each line starts one row gap above it and stays unbroken. */
+function TreeLines({ depth, isLastChild, through }: Omit<TreeRow<ConversationItem>, "item">) {
+  return (
+    <span aria-hidden="true" className="pointer-events-none absolute -inset-px">
+      {through.map((on, i) =>
+        on && (
+          <span
+            key={i}
+            className={`${LINE} bottom-0 border-l`}
+            style={{ left: -(LINE_X + INDENT_PX * (depth - 1 - i)) }}
+          />
+        ),
+      )}
+      {isLastChild ? (
+        <span
+          className={`${LINE} h-[calc(50%+0.25rem)] rounded-bl-lg border-b border-l`}
+          style={{ left: -LINE_X, width: LINE_X }}
+        />
+      ) : (
+        <span className={`${LINE} bottom-0 border-l`} style={{ left: -LINE_X }} />
+      )}
+    </span>
+  );
+}
+
+/** Marks a row that is on screen. It sits over the hover actions' slot, so no row changes size; hovering swaps it for them. */
+function OnScreenMark({ label, focused }: { label: string | null; focused: boolean }) {
+  if (!label) return null;
+  return (
+    <span
+      role="img"
+      aria-label={label}
+      className={`absolute right-3 top-1/2 flex size-[22px] -translate-y-1/2 items-center justify-center transition group-hover:pointer-events-none group-hover:opacity-0 ${
+        focused ? "text-zinc-200" : "text-zinc-400"
+      }`}
+    >
+      <Columns2 size={14} />
+    </span>
+  );
 }
 
 export default function Sidebar() {
@@ -87,6 +134,9 @@ export default function Sidebar() {
     if (activeFilter === "archived") return c.archived === true;
     return c.archived !== true;
   });
+
+  // A search shows a flat list; otherwise forks sit under their parent.
+  const rows = buildSidebarTree(filteredConversations, { flat: searchInput !== "" });
 
   async function createNewChat() {
     try {
@@ -175,7 +225,18 @@ export default function Sidebar() {
   }
 
   const currentConvId = pathname.startsWith("/c/") ? pathname.split("/")[2] : null;
-  const activeConvId = split?.ids.length ? split.focus : currentConvId;
+  // Side chats are not listed, so a focused side pane lights up its main chat's row.
+  const focusedId = split?.ids.length ? (split.parentOf[split.focus] ?? split.focus) : null;
+  const activeConvId = focusedId ?? currentConvId;
+
+  /** The label of the mark on a row that is on screen, or null. Only listed panes count; side chats are not listed. */
+  function onScreenLabel(id: string): string | null {
+    if (!split) return null;
+    const listed = split.ids.filter((open) => !split.parentOf[open]);
+    const pane = listed.indexOf(id);
+    if (pane >= 0 && listed.length > 1) return `Open in split view, pane ${pane + 1} of ${listed.length}`;
+    return split.ids.some((open) => split.parentOf[open] === id) ? "Side chat open" : null;
+  }
 
   function onChatDragStart(e: React.DragEvent, id: string) {
     e.dataTransfer.setData(CHAT_DRAG_TYPE, id);
@@ -356,19 +417,22 @@ export default function Sidebar() {
           <div className="p-4 text-zinc-400 text-sm">No conversations yet</div>
         ) : (
           <div className="space-y-1 p-2">
-            {filteredConversations.map((conv) => (
+            {rows.map(({ item: conv, depth, isLastChild, through }) => (
               <div
                 key={conv.id}
+                data-depth={depth}
+                style={depth ? { marginLeft: depth * INDENT_PX } : undefined}
                 draggable={editingId !== conv.id}
                 onDragStart={(e) => onChatDragStart(e, conv.id)}
                 onDragEnd={() => split?.endDrag()}
                 onContextMenu={(e) => { e.preventDefault(); setMenuOpenId(conv.id); }}
-                className={`group flex items-center gap-2 px-3 py-2 rounded-[var(--glass-radius-sm)] transition ${
+                className={`group relative flex items-center gap-2 px-3 py-2 rounded-[var(--glass-radius-sm)] transition ${
                   activeConvId === conv.id
                     ? "glass-strong text-[var(--foreground)]"
                     : "text-zinc-300 glass-button"
                 }`}
               >
+                {depth > 0 && <TreeLines depth={depth} isLastChild={isLastChild} through={through} />}
                 <button
                   onClick={() => toggleSelect(conv.id)}
                   className={`shrink-0 p-0.5 rounded transition ${
@@ -415,11 +479,7 @@ export default function Sidebar() {
                     </div>
                   )}
                 </Link>
-                {split?.ids.includes(conv.id) && split.focus !== conv.id && (
-                  <span title="Open in split view" className="shrink-0 text-zinc-400">
-                    <Columns2 size={12} />
-                  </span>
-                )}
+                <OnScreenMark label={onScreenLabel(conv.id)} focused={focusedId === conv.id} />
                 <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition items-center">
                   {editingId !== conv.id && (
                     <button

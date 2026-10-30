@@ -536,7 +536,18 @@ Options 2 and 3 are the keyboard alternative to dragging. Both work without a mo
 
 - Clicking a chat opens it **in the focused pane**, the same as today with one pane. If that chat is open in another pane, that pane gets focus instead. If the focused pane is busy, ask first: **Replace "<title>"? Its reply will stop and unsent text will be lost.**
 - New Chat opens in the focused pane.
-- Highlight: the focused pane's chat keeps today's `glass-strong` row (`Sidebar.tsx:327-329`). Other open chats show a 12px `Columns2` icon (`text-zinc-400`, title **Open in split view**) after their title.
+- Highlight: the focused pane's chat keeps today's `glass-strong` row (`Sidebar.tsx`).
+- **On-screen mark.** With more than one listed pane open, every row whose chat is open in a pane shows a 14px `Columns2` mark, the focused one included: `text-zinc-200` on the focused row, `text-zinc-400` on the others. It is a `role="img"` with `aria-label` **Open in split view, pane <n> of <total>**, counting only listed chats (side chat panes are left out; `n` is the position from the left). It has no `title`: on hover the actions cover it. A single open chat shows no mark.
+- A main chat whose side chat is open in a pane (side chats are not listed) shows the same mark with the label **Side chat open**, unless it is one of several listed panes, which wins. A main chat with only its side chat beside it is not a split, so it shows this label, not a pane number. When the side pane has focus, its main chat's row is the highlighted, focused one.
+- The mark is absolutely positioned (`absolute right-3`, centred on the row, 22px box) over the slot the hover actions already reserve, so no row changes size when it appears or goes. On hover it fades out (`group-hover:opacity-0`, `pointer-events-none`) and the pin and … buttons take its place, so the two never overlap.
+
+**The sidebar list: forks nested**
+
+- A chat with `forkedFromId` whose parent is in the same rendered list sits **directly under its parent**, indented 20px per level (`marginLeft`) and tagged `data-depth` (0 for top level). Children are oldest first (`createdAt`). A fork of a fork nests again, up to depth 3; deeper forks stay at depth 3. Top-level rows keep the list's sort (pinned, then newest activity). No collapse: always expanded.
+- A fork stays a normal top-level row when its parent is not in the rendered list (deleted, archived, hidden by the filter tab), when the fork is pinned and its parent is not (it stays with the pinned rows), and while a search is active (the list is flat).
+- Lines: 1px `--glass-border-strong`, drawn per row as absolutely positioned spans, 12px left of the row, in a wrapper that is the row's border box (`-inset-px`), starting one row gap (0.25rem) above it so they join without gaps. A vertical line runs beside every row of the group; the last row's line stops at the row's middle and turns into the row with a `rounded-bl-lg` corner (└). A grandchild adds its parent's line when that parent has later siblings. They are `aria-hidden` and `pointer-events-none`.
+- The grouping is the pure `buildSidebarTree` (`src/lib/sidebarTree.ts`); the list API returns `forkedFromId` for it. A `forkedFromId` cycle shows each chat once.
+- Rows stay draggable, pinnable, archivable and renamable; nesting changes the order and indent only.
 
 **Dragging and the drop zones**
 
@@ -609,7 +620,7 @@ A side chat is a pane whose chat is a child of the pane next to it. It takes one
 ### 3.9 Fork from here [P3]
 
 - **Action**: in MessageActions, on any saved message in a chat pane, a `GitFork` 12 button with `aria-label` and `title` **Fork from here**, placed after Copy. Hidden while streaming (existing rule, `MessageActions.tsx:84`) and in side chat panes. In split view the fork opens in the focused pane, like any sidebar click (3.8.2).
-- **Click**: the icon swaps to a 12px `Loader2`. Then the new chat opens (its messages up to and including this one, titled "<title> (fork)") and appears at the top of the sidebar. Error toast: **Couldn't fork this chat**.
+- **Click**: the icon swaps to a 12px `Loader2`. Then the new chat opens (its messages up to and including this one, titled "<title> (fork)") and appears in the sidebar directly under the original (3.8.2, forks nested). Error toast: **Couldn't fork this chat**.
 - **Header of the fork**: the first item in the meta row is 12px `GitFork` plus **Forked from** and a link to the source (`text-xs text-zinc-400`; the title is a link, `hover:text-[var(--foreground)] hover:underline`, truncated at 200px). If the source is gone: **Forked from a deleted chat** (no link).
 - Forking a temporary chat makes a normal, saved chat.
 

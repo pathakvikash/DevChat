@@ -26,6 +26,7 @@ export async function GET(req: NextRequest) {
         workingFolder: true,
         pinned: true,
         archived: true,
+        forkedFromId: true,
         createdAt: true,
         updatedAt: true,
         _count: {

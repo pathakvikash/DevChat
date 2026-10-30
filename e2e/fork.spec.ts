@@ -58,6 +58,35 @@ test("Fork from here opens a copy with the messages up to that reply", async ({
   expect(await storedMessages(request, id)).toHaveLength(4);
 });
 
+test("The sidebar lists a fork right under its parent, indented", async ({ page, request }) => {
+  const id = await createChat(request, { title: "Tree source" });
+  await openChat(page, id);
+  await askAndReload(page, "tree question", 1);
+
+  await messages(page).nth(1).getByRole("button", { name: "Fork from here" }).click();
+  await page.waitForURL(
+    (url) => url.pathname.startsWith("/c/") && !url.pathname.endsWith(`/${id}`),
+  );
+  const forkId = new URL(page.url()).pathname.split("/").pop()!;
+
+  // The list refetches on a fork. Other specs leave chats behind, so find the rows by their link.
+  const rowOf = (chatId: string) => page.locator(`[data-depth]:has(a[href='/c/${chatId}'])`);
+  const parentRow = rowOf(id);
+  const forkRow = rowOf(forkId);
+  await expect(forkRow).toHaveAttribute("data-depth", "1");
+  await expect(parentRow).toHaveAttribute("data-depth", "0");
+  // The fork is newer, so without nesting it would sit above its parent.
+  const next = parentRow.locator("xpath=following-sibling::*[1]");
+  await expect(next).toHaveAttribute("data-depth", "1");
+  await expect(next.getByRole("link")).toHaveAttribute("href", `/c/${forkId}`);
+  const [p, f] = await Promise.all([parentRow.boundingBox(), forkRow.boundingBox()]);
+  expect(f!.x - p!.x).toBeCloseTo(20, 0);
+
+  // A search shows a flat list.
+  await page.getByPlaceholder("Search conversations...").fill("Tree source");
+  await expect(forkRow).toHaveAttribute("data-depth", "0");
+});
+
 test("Fork works on a reply sent in this session, without a reload", async ({ page, request }) => {
   const id = await createChat(request, { title: "Fresh source" });
   await openChat(page, id);
