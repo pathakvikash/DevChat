@@ -847,6 +847,7 @@ export function useChatPane(conversationId: string, { focused, kind, searchProvi
     if (isLoading || sendingRef.current) return;
     sendingRef.current = true;
     const sent = quotes;
+    const typed = { input, files, mentions };
     try {
       const fileBlocks = await composeFileBlocks(
         await Promise.all(mentions.map(async (path) => ({ path, content: await readMention(conversationId, path) }))),
@@ -855,18 +856,22 @@ export function useChatPane(conversationId: string, { focused, kind, searchProvi
       const text = [composeQuoteMessage(sent, input), fileBlocks].filter(Boolean).join("\n\n");
       const { parts, attachments } = await buildMessageParts(text, files, conversation?.model);
       const sending = sendMessage({ parts }, { body: { attachments } });
-      // The message is in the transcript now, so the cards have done their job.
+      // The message is in the transcript now, so clear the box at once; `sending` only settles when the
+      // reply ends, and a cleared box also stops Enter-to-queue from queuing the same text again.
       setQuotes((prev) => prev.filter((q) => !sent.some((s) => s.id === q.id)));
-      await sending;
       setInput("");
       setFiles([]);
       setMentions([]);
       setSuggestion(null);
+      await sending;
     } catch (err) {
       console.error("[handleSubmit] sendMessage failed:", err);
       toast("Failed to send message", "error");
-      // Whatever didn't get sent stays: put back any card that was already cleared.
+      // Whatever didn't get sent comes back, unless something new was typed meanwhile.
       setQuotes((prev) => [...sent.filter((s) => !prev.some((q) => q.id === s.id)), ...prev]);
+      setInput((prev) => prev || typed.input);
+      setFiles((prev) => (prev.length ? prev : typed.files));
+      setMentions((prev) => (prev.length ? prev : typed.mentions));
     } finally {
       sendingRef.current = false;
     }

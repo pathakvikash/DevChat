@@ -6,6 +6,7 @@ describe("side chat labels", () => {
     expect(sideChatTitle("Pricing check", "ignored")).toBe("Pricing check");
     expect(sideChatTitle("  ", "what   is\n2+2")).toBe("what is 2+2");
     expect(sideChatTitle(null, undefined)).toBe("Side chat");
+    expect(sideChatTitle("New Chat", "ping from main")).toBe("ping from main");
   });
 
   it("folds a tool call to a one-line label with its input summary", () => {

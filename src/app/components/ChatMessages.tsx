@@ -72,7 +72,7 @@ function ChatMessages({
 
   return (
     <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 scrollbar-none">
-      <div className="mx-auto max-w-4xl space-y-6">
+      <div className={`mx-auto max-w-4xl ${compact ? "space-y-4" : "space-y-6"}`}>
         {(() => {
           const seen = new Set<string>();
           const unique: typeof messages = [];

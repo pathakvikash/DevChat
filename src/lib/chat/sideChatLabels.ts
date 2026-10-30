@@ -2,10 +2,10 @@
 
 const SUMMARY_KEYS = ["query", "q", "url", "path", "file", "command", "question", "title", "name", "prompt"];
 
-/** The tab chip's text: the side chat's own title, else its first message, else "Side chat". */
+/** The tab chip's text: the side chat's own title, else its first message, else "Side chat". "New Chat" is the placeholder every chat starts with, so it counts as no title. */
 export function sideChatTitle(title: string | null | undefined, firstMessage: string | null | undefined): string {
   const own = title?.trim();
-  if (own) return own;
+  if (own && own !== "New Chat") return own;
   const first = firstMessage?.replace(/\s+/g, " ").trim().slice(0, 80);
   return first || "Side chat";
 }

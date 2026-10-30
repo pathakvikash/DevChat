@@ -122,6 +122,7 @@ export default function MessageActions({
   if (!messageId || (isStreaming && !isUser)) return null;
 
   if (compact) {
+    if (isUser) return null; // side chats show actions on replies only, like Claude's side panel
     const ago = createdAt ? formatAgo(createdAt) : "";
     return (
       <div
