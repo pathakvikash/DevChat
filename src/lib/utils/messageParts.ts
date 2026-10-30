@@ -104,6 +104,29 @@ export function editPreview(input: unknown, max = 6): { minus: string[]; plus: s
   return { minus: side(i.old_string, "-"), plus: side(i.new_string, "+") };
 }
 
+// Zero-width and direction marks (they reorder or hide text), BOM, and control characters but for \n and \t.
+// eslint-disable-next-line no-control-regex
+const HIDDEN = /[\u0000-\u0008\u000B-\u001F\u007F-\u009F\u200B-\u200F\u202A-\u202E\u2066-\u2069\uFEFF]/g;
+const escapeChar = (c: string) => `\\u${c.charCodeAt(0).toString(16).toUpperCase().padStart(4, "0")}`;
+
+/** Text with its invisible characters written out (`\u202E`), for a place that cannot style them. */
+export function showHidden(text: string): string {
+  return text.replace(HIDDEN, escapeChar);
+}
+
+/** The same, as runs, so a card can style the written-out characters apart from the text. */
+export function hiddenRuns(text: string): Array<{ text: string; hidden: boolean }> {
+  const runs: Array<{ text: string; hidden: boolean }> = [];
+  let at = 0;
+  for (const m of text.matchAll(HIDDEN)) {
+    if (m.index > at) runs.push({ text: text.slice(at, m.index), hidden: false });
+    runs.push({ text: escapeChar(m[0]), hidden: true });
+    at = m.index + m[0].length;
+  }
+  if (at < text.length) runs.push({ text: text.slice(at), hidden: false });
+  return runs;
+}
+
 /** One line (or one text) of an approval card's main block. */
 export interface ApprovalLine {
   text: string;
@@ -114,6 +137,8 @@ export interface ApprovalLine {
 export interface ApprovalDetails {
   /** What will run: a command, a file's path and content, or every edit as a diff. */
   block: ApprovalLine[];
+  /** How many lines the block runs to; the card says so above a long one. */
+  lines: number;
   /** The model's own account of the call. It is the model's claim, so it is shown apart from what runs. */
   description?: string;
   /** Every key the block does not show. */
@@ -149,7 +174,8 @@ export function approvalDetails(toolName: string, input: unknown): ApprovalDetai
   }
   const description = typeof i.description === "string" && i.description ? i.description : undefined;
   if (description) shown.add("description");
-  return { block, description, rest: Object.entries(i).filter(([k]) => !shown.has(k)).map(([k, v]) => [k, asText(v)]) };
+  const lines = block.reduce((n, l) => n + l.text.split("\n").length, 0);
+  return { block, lines, description, rest: Object.entries(i).filter(([k]) => !shown.has(k)).map(([k, v]) => [k, asText(v)]) };
 }
 
 /** Approval reasons the page writes: shown as "Allowed for this chat", "Denied", "Stopped". */
@@ -166,9 +192,9 @@ export function approvalTitle(toolName: string, input: any): string {
   if (toolName === "rememberFact") return `Save to memory: "${i.key ?? ""}"`;
   if (toolName === "forgetFact") return `Forget memory: "${i.key ?? ""}"`;
   // Claude Code's own tools, asked for in Ask mode.
-  if (toolName === "Edit" || toolName === "MultiEdit") return `Edit ${i.file_path ?? ""}`;
+  if (toolName === "Edit" || toolName === "MultiEdit") return `Edit ${showHidden(String(i.file_path ?? ""))}`;
   // Write replaces a file that exists, so it is never worded as creating one.
-  if (toolName === "Write") return `Write file ${i.file_path ?? ""}`;
+  if (toolName === "Write") return `Write file ${showHidden(String(i.file_path ?? ""))}`;
   if (toolName === "Bash") return "Run a command";
   if (toolName.startsWith("mcp_")) return `Run ${toolName.replace(/^mcp_[^_]*_/, "")} on an MCP server`;
   return `Run ${toolName}`;
@@ -247,17 +273,18 @@ export type GroupedItem =
   | { type: "tool-group"; key: string; parts: Array<AnyPart & ToolPart> }
   | { type: "other"; key: string; part: AnyPart; index: number };
 
-const STATE_RANK: Record<string, number> = { "input-streaming": 0, "input-available": 1, "approval-requested": 2, "approval-responded": 3 };
-/** How far a call has got; an unknown or finished state (output-*, result) ranks last. */
-const progress = (p: ToolPart) => STATE_RANK[p.state ?? ""] ?? 4;
-
 export function groupToolParts(parts: AnyPart[]): GroupedItem[] {
   const groups = new Map<string, Array<AnyPart & ToolPart>>();
   const out: GroupedItem[] = [];
+  // Claude Code's second card is asked in a later step that announces its call again, so the reply holds the call
+  // twice. The earlier one only ever says "input-available": skipped, so the call shows once, where it is answered.
+  const lastAt = new Map<string, number>();
+  parts.forEach((p, i) => isToolPart(p) && p.toolCallId && lastAt.set(p.toolCallId, i));
 
   for (let i = 0; i < parts.length; i++) {
     const p = parts[i];
     if (isToolPart(p)) {
+      if (p.state === "input-available" && p.toolCallId && (lastAt.get(p.toolCallId) ?? i) > i) continue;
       const key = toolKey(p, i);
       if (!groups.has(key)) {
         groups.set(key, []);
@@ -268,8 +295,6 @@ export function groupToolParts(parts: AnyPart[]): GroupedItem[] {
       out.push({ type: "other", key: `part-${i}`, part: p, index: i });
     }
   }
-  // A call saved twice (an older reply repeated it in a later step) shows in its most advanced state.
-  for (const group of groups.values()) group.sort((a, b) => progress(b) - progress(a));
 
   return out;
 }

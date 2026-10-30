@@ -46,7 +46,6 @@ import {
   type QueuedInjection,
   type QueuedMarker,
 } from "@/lib/chat/queue";
-import { dropRepeatedToolCalls } from "@/lib/chat/dropRepeatedToolCalls";
 import { resolveChatSettings } from "@/lib/chat/resolveChatSettings";
 import { resolveModelCandidates } from "@/lib/chat/resolveModelCandidates";
 import { cliProviderForModel, dropParkedRuns } from "@/lib/cliProviders";
@@ -596,7 +595,6 @@ export async function POST(req: Request) {
                       pipeJsonRender(
                         result
                           .toUIMessageStream({ onError: onStreamError })
-                          .pipeThrough(dropRepeatedToolCalls(continuing))
                           .pipeThrough(queuedMarkerTransform(pendingMarkers)),
                       ),
                     );

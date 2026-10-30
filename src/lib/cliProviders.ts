@@ -813,17 +813,16 @@ export function dropParkedRuns(conversationId: string) {
   for (const run of [...parkedRuns.values()]) if (run.conversationId === conversationId) dropRun(run);
 }
 
-/** The newest approval answer in the prompt, if the last message carries one. It may follow older answers
- *  to cards of the same reply, which were already delivered. */
+/** The approval answer this request delivers, if the last message carries one. That message also holds the answers to
+ *  earlier cards of the same reply, already delivered, and the cards of one reply can be asked and answered in any
+ *  order: the answer for a card still parked is the one. With none parked, the first, so the failure names a real card. */
 function pendingAnswer(prompt: Prompt): { approvalId: string; approved: boolean } | undefined {
   const last = prompt[prompt.length - 1] as { role: string; content?: unknown } | undefined;
   if (last?.role !== "tool" || !Array.isArray(last.content)) return undefined;
-  for (const p of [...(last.content as any[])].reverse()) {
-    if (p?.type === "tool-approval-response" && typeof p.approvalId === "string") {
-      return { approvalId: p.approvalId, approved: p.approved === true };
-    }
-  }
-  return undefined;
+  const answers = (last.content as any[])
+    .filter((p) => p?.type === "tool-approval-response" && typeof p.approvalId === "string")
+    .map((p) => ({ approvalId: p.approvalId as string, approved: p.approved === true }));
+  return answers.find((a) => parkedRuns.has(a.approvalId)) ?? answers[0];
 }
 
 function wireRun(run: LiveRun, proc: ChildProcess) {
@@ -1098,7 +1097,7 @@ function runCli(
               // block regardless of order.
               emitReasoning(ev.text);
             } else if (ev.type === "permission") {
-              if (ask?.allowed.has(ev.toolName) && !ev.flagged && editInsideCwd(run.cwd, ev.input)) {
+              if (ask?.allowed.has(ev.toolName) && !ev.flagged && editInsideCwd(run.cwd, ev.toolName, ev.input)) {
                 run.proc.stdin?.write(controlResponse(ev.requestId, { behavior: "allow" }));
                 continue;
               }

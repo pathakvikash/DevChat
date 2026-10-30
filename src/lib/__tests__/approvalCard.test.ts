@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import ApprovalCard from "@/app/components/ApprovalCard";
-import { approvalDetails, approvalTitle, groupToolParts } from "@/lib/utils/messageParts";
+import { approvalDetails, approvalTitle, groupToolParts, hiddenRuns, showHidden } from "@/lib/utils/messageParts";
 
 const html = (toolName: string, input: unknown) =>
   renderToStaticMarkup(createElement(ApprovalCard, { toolName, approvalId: "cli-toolu_x", input }))
@@ -62,27 +62,83 @@ describe("the approval card shows what runs", () => {
   });
 
   it("copes with input that is not an object", () => {
-    expect(approvalDetails("Bash", undefined)).toEqual({ block: [], description: undefined, rest: [] });
+    expect(approvalDetails("Bash", undefined)).toEqual({ block: [], lines: 0, description: undefined, rest: [] });
     expect(approvalDetails("Bash", "ls").rest).toEqual([]);
     expect(approvalDetails("Bash", { command: 5 }).rest).toEqual([["command", "5"]]);
   });
 });
 
-describe("a call saved twice shows once, in its furthest state", () => {
-  it("puts the approval card ahead of the stale row, with one group and one key", () => {
-    const stale = { type: "tool-Edit", toolCallId: "toolu_B", state: "input-available" };
-    const real = { type: "tool-Edit", toolCallId: "toolu_B", state: "approval-requested", approval: { id: "cli-toolu_B" } };
-    const done = { type: "tool-Edit", toolCallId: "toolu_A", state: "output-available" };
-    const items = groupToolParts([done, stale, { type: "step-start" }, real]);
-    const groups = items.filter((i) => i.type === "tool-group");
-    expect(groups.map((g) => g.key)).toEqual(["toolu_A", "toolu_B"]);
-    expect(new Set(items.map((i) => i.key)).size).toBe(items.length);
-    expect((groups[1] as any).parts[0]).toBe(real);
+describe("the card writes out characters that hide or reorder text", () => {
+  const RLO = "\u202E";
+  // Right-to-left override, zero-width space and joiner marks, BOM, bell, carriage return, DEL, a C1 control, a bidi isolate.
+  const sneaky = `echo ok${RLO}\u200B\u200F\uFEFF\u0007\r\u007F\u0085\u2066`;
+  const hiddenChars = /[\u0000-\u0008\u000B-\u001F\u007F-\u009F\u200B-\u200F\u202A-\u202E\u2066-\u2069\uFEFF]/;
+
+  it("showHidden and hiddenRuns write each one as \\uXXXX and keep newlines, tabs and ordinary text", () => {
+    expect(showHidden(`a${RLO}b\u200Bc\nd\te`)).toBe("a\\u202Eb\\u200Bc\nd\te");
+    expect(showHidden("\u0000\u0007\u0085\uFEFF\u2069\u202A")).toBe("\\u0000\\u0007\\u0085\\uFEFF\\u2069\\u202A");
+    expect(showHidden("plain, émoji ✓ and 日本語")).toBe("plain, émoji ✓ and 日本語");
+    expect(hiddenRuns(`x${RLO}y`)).toEqual([{ text: "x", hidden: false }, { text: "\\u202E", hidden: true }, { text: "y", hidden: false }]);
+    expect(hiddenRuns("")).toEqual([]);
   });
 
-  it("keeps the order of equal states", () => {
-    const a = { type: "tool-Edit", toolCallId: "t", state: "output-available", output: 1 };
-    const b = { type: "tool-Edit", toolCallId: "t", state: "result", output: 2 };
+  it("shows the command, the path and the content with them written out, set apart, and none left raw", () => {
+    for (const [tool, input] of [
+      ["Bash", { command: sneaky, description: sneaky }],
+      ["Write", { file_path: `/w/a${RLO}txt.sh`, content: `line\n${sneaky}` }],
+      ["Edit", { file_path: `/w/a${RLO}`, old_string: sneaky, new_string: "b", note: sneaky }],
+    ] as const) {
+      const out = html(tool, input);
+      expect(hiddenChars.test(out.replace(/\n|\t/g, ""))).toBe(false);
+      expect(out).toContain('class="rounded-sm bg-white/10 px-0.5 text-zinc-500"');
+      expect(text(out)).toContain("\\u202E");
+    }
+    const bash = text(html("Bash", { command: sneaky }));
+    expect(bash).toContain("echo ok \\u202E \\u200B \\u200F \\uFEFF \\u0007 \\u000D \\u007F \\u0085 \\u2066");
+    expect(html("Write", { file_path: `/w/a${RLO}txt`, content: "x" })).toContain('aria-label="Needs your OK: Write file /w/a\\u202Etxt"');
+    expect(approvalTitle("Edit", { file_path: `/w/${RLO}x` })).toBe("Edit /w/\\u202Ex");
+  });
+
+  it("says how long a long block is, and says nothing for a short one", () => {
+    const lines = (n: number) => Array.from({ length: n }, (_, k) => `echo ${k}`).join("\n");
+    expect(approvalDetails("Bash", { command: lines(40) }).lines).toBe(40);
+    expect(text(html("Bash", { command: lines(40) }))).toContain("40 lines");
+    expect(text(html("Write", { file_path: "/w/a", content: lines(13) }))).toContain("14 lines");
+    expect(text(html("Bash", { command: lines(12) }))).not.toMatch(/\d+ lines/);
+    expect(text(html("Edit", { file_path: "/w/a", old_string: lines(7), new_string: lines(7) }))).toContain("14 lines");
+  });
+});
+
+describe("a call held twice shows once, where it is answered", () => {
+  const call = (toolCallId: string, state: string, extra: object = {}) => ({ type: "tool-Edit", toolCallId, state, ...extra });
+  const step = { type: "step-start" };
+
+  it("skips the earlier input-available row and keeps the card, with unique keys", () => {
+    const real = call("toolu_B", "approval-requested", { approval: { id: "cli-toolu_B" } });
+    const items = groupToolParts([step, call("toolu_A", "output-available"), call("toolu_B", "input-available"), { type: "text", text: "now B" }, step, real]);
+    const groups = items.filter((i) => i.type === "tool-group") as any[];
+    expect(groups.map((g) => g.key)).toEqual(["toolu_A", "toolu_B"]);
+    expect(groups[1].parts).toEqual([real]);
+    // The card sits after the text between the asks, not above it.
+    expect(items.findIndex((i) => i.key === "toolu_B")).toBeGreaterThan(items.findIndex((i) => i.type === "other" && (i.part as any).type === "text"));
+    expect(new Set(items.map((i) => i.key)).size).toBe(items.length);
+  });
+
+  it("skips it once the call is answered and has run, too", () => {
+    const done = call("toolu_B", "output-available", { output: "ok" });
+    const groups = groupToolParts([call("toolu_B", "input-available"), step, done]).filter((i) => i.type === "tool-group") as any[];
+    expect(groups).toHaveLength(1);
+    expect(groups[0].parts).toEqual([done]);
+  });
+
+  it("keeps a call that is announced once, whatever its state, and one that has no id", () => {
+    const parts = [call("toolu_A", "input-available"), call("toolu_C", "approval-requested"), { type: "tool-Edit", state: "input-available" }, { type: "tool-Edit", state: "input-available" }];
+    expect(groupToolParts(parts).map((i) => i.key)).toEqual(["toolu_A", "toolu_C", "tool-2", "tool-3"]);
+  });
+
+  it("keeps the result part next to its call when both are held", () => {
+    const a = call("t", "output-available", { output: 1 });
+    const b = call("t", "result", { output: 2 });
     expect((groupToolParts([a, b])[0] as any).parts).toEqual([a, b]);
   });
 });

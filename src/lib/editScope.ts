@@ -2,17 +2,21 @@ import { lstatSync, realpathSync } from "fs";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "path";
 
 /** Folders whose files run code or change what Claude Code may do: an edit there always asks. */
-const GUARDED = new Set([".git", ".claude"]);
+const GUARDED = new Set([".git", ".claude", ".husky", ".githooks"]);
 
-/** True when the file an Edit/Write/MultiEdit/NotebookEdit names is inside `cwd` once symlinks are followed,
- *  and not under `.git/` or `.claude/`. A file that does not exist yet is judged by its parent folder. */
-export function editInsideCwd(cwd: string, input: unknown): boolean {
-  const i = (input ?? {}) as { file_path?: unknown; notebook_path?: unknown };
-  const file = i.file_path ?? i.notebook_path;
-  if (typeof file !== "string" || !file) return false;
+/** The input key that names the file, by tool: a notebook has its own, and no other key stands in for it. */
+const PATH_KEY = new Map([["Edit", "file_path"], ["Write", "file_path"], ["MultiEdit", "file_path"], ["NotebookEdit", "notebook_path"]]);
+
+/** True when the file an Edit/Write/MultiEdit/NotebookEdit names, as an absolute path, is inside `cwd` once symlinks
+ *  are followed, and not under a guarded folder. A file that does not exist yet is judged by its parent folder.
+ *  A relative path (`~/.zshrc` too: the shell expands it, Claude Code does not) never qualifies. */
+export function editInsideCwd(cwd: string, toolName: string, input: unknown): boolean {
+  const key = PATH_KEY.get(toolName);
+  const file = key ? (input as Record<string, unknown> | null)?.[key] : undefined;
+  if (typeof file !== "string" || !isAbsolute(file)) return false;
   try {
     const root = realpathSync(cwd);
-    const target = resolve(cwd, file);
+    const target = resolve(file);
     let real: string;
     try {
       real = realpathSync(target);
