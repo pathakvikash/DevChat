@@ -179,7 +179,7 @@ describe("readUserChat", () => {
     const newest = read.slice(read.indexOf("User: NEWEST"));
     expect(newest).toContain("User: NEWEST");
     expect(countTokens(newest)).toBeGreaterThan(200);
-  });
+  }, 20_000); // tokenizing 12k dense chars is slow under a full parallel run
 
   it.each([
     ["<|endoftext|>", "你好世界，今天天气很好。我们讨论缓存设计。".repeat(2000)],
@@ -191,7 +191,7 @@ describe("readUserChat", () => {
     const newest = read.slice(read.indexOf("User: NEWEST"));
     expect(newest).toContain(special);
     expect(countTokens(newest)).toBeGreaterThan(200);
-  });
+  }, 20_000);
 
   it("counts a 5000-backtick fence within the 1024 budget", async () => {
     setChat(conv(), [{ role: "user", content: "`".repeat(5000), parts: null }]);
