@@ -3,6 +3,8 @@ import { createChat, deleteAllChats, openChat } from "./helpers";
 
 const link = (page: Page, title: string) => page.getByRole("link", { name: new RegExp(title) });
 const pane = (page: Page, title: string) => page.getByRole("region", { name: title });
+const row = (page: Page, title: string) => link(page, title).locator("xpath=..");
+const anyMarker = (page: Page) => page.getByRole("img", { name: /^Open in split view, pane / });
 
 async function openInSplitFromMenu(page: Page, title: string) {
   await link(page, title).locator("xpath=..").getByTitle("More actions").click();
@@ -23,6 +25,26 @@ test("a chat opens in split view from the sidebar menu", async ({ page, request 
   await expect(page).toHaveURL(new RegExp(`/c/${alpha}\\?split=${beta}&focus=${beta}$`));
   await expect(pane(page, "Alpha plan")).toBeVisible();
   await expect(pane(page, "Beta notes")).toHaveAttribute("data-focused", "true");
+});
+
+test("every chat open in a pane is marked in the sidebar, the focused one too", async ({ page, request }) => {
+  const alpha = await createChat(request, { title: "Alpha plan" });
+  await createChat(request, { title: "Beta notes" });
+  await createChat(request, { title: "Gamma ideas" });
+  await openChat(page, alpha);
+  // One open chat keeps the plain look.
+  await expect(anyMarker(page)).toHaveCount(0);
+
+  await openInSplitFromMenu(page, "Beta notes");
+  await expect(pane(page, "Beta notes")).toHaveAttribute("data-focused", "true");
+
+  await expect(row(page, "Alpha plan").getByRole("img", { name: "Open in split view, pane 1 of 2" })).toBeVisible();
+  await expect(row(page, "Beta notes").getByRole("img", { name: "Open in split view, pane 2 of 2" })).toBeVisible();
+  await expect(row(page, "Gamma ideas").getByRole("img")).toHaveCount(0);
+
+  await page.getByRole("button", { name: "Close Beta notes" }).click();
+  await expect(pane(page, "Beta notes")).toHaveCount(0);
+  await expect(anyMarker(page)).toHaveCount(0);
 });
 
 test("the split comes back from the URL after a reload", async ({ page, request }) => {
