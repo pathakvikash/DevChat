@@ -20,7 +20,8 @@ export function raiseHop(current: number, incoming: number): number {
  */
 export function exchangeEnded(id: string, partners: ReadonlyMap<string, string>, isBusy: (id: string) => boolean): string[] {
   const partner = partners.get(id);
-  return partner && !isBusy(partner) ? [id, partner] : [];
+  if (!partner) return [id]; // a leftover delivered without an exchange still ends with its own reply
+  return isBusy(partner) ? [] : [id, partner];
 }
 
 /**

@@ -1,6 +1,8 @@
 /** `text` inside a fence longer than any backtick run in it, so the text cannot close the fence. */
 export function fenceText(text: string): string {
-  const longestRun = Math.max(0, ...(text.match(/`+/g) ?? []).map((run) => run.length));
+  // A loop, not Math.max(...runs): spreading ~100k runs overflows the call stack.
+  let longestRun = 0;
+  for (const [run] of text.matchAll(/`+/g)) longestRun = Math.max(longestRun, run.length);
   const fence = "`".repeat(Math.max(3, longestRun + 1));
   return `${fence}\n${text}\n${fence}`;
 }

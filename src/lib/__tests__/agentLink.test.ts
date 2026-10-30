@@ -42,8 +42,8 @@ describe("exchangeEnded", () => {
     expect(hops.size).toBe(0);
   });
 
-  it("is empty for a pane that is not in an exchange", () => {
-    expect(exchangeEnded("c", partners, () => false)).toEqual([]);
+  it("resets a pane with no partner, e.g. one that got a leftover agent message after a reload", () => {
+    expect(exchangeEnded("c", partners, () => false)).toEqual(["c"]);
   });
 });
 

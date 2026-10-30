@@ -414,7 +414,8 @@ export function useChatPane(conversationId: string, { focused, kind, searchProvi
     for (const r of rest) if (r.agent) queueAgent(r.text, r.agent);
     if (!first?.agent) return;
     // The send counts at its own hop, so the chain's cap still holds after a reload or a busy turn.
-    split?.bumpHop(conversationId, first.agent.hop);
+    // Highest hop of the batch: the server may claim a re-queued one mid-turn without raising the pane.
+    split?.bumpHop(conversationId, Math.max(...items.map((i) => i.agent?.hop ?? 0)));
     setTimeout(() => {
       chatSend({ parts: [buildAgentMessagePart(first.agent!), { type: "text" as const, text: first.text }] }).catch((err: unknown) =>
         console.error("[agent] sending a queued agent message failed:", err),
