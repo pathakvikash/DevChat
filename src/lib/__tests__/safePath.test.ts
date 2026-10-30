@@ -119,6 +119,15 @@ describe("isSecretPath", () => {
     }
   });
 
+  it("lets source and docs in a secrets module through, but never an exact secret name", () => {
+    for (const p of ["src/modules/secrets/secrets.service.ts", "secrets/handler.py", "docs/credentials.md", "src/kubeconfig.ts", "secrets-manager/README.md"]) {
+      expect(isSecretPath(p), p).toBe(false);
+    }
+    for (const p of ["src/modules/secrets/.env", "secrets/prod.yaml", "secrets/passwords.txt", "secrets/server.pem", "kubeconfig", "ops/kubeconfig.yaml"]) {
+      expect(isSecretPath(p), p).toBe(true);
+    }
+  });
+
   it("allows public keys and the .github folder", () => {
     expect(isSecretPath("id_rsa.pub")).toBe(false);
     expect(isSecretPath(".github/workflows/x.yml")).toBe(false);

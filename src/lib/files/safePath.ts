@@ -9,8 +9,10 @@ const run = promisify(execFile);
 /** Files the picker lists at most; the walk stops here. */
 export const LIST_CAP = 5000;
 
-// Tested against every segment, so a `secrets/` or `credentials/` folder hides all it holds.
-const SECRET_SEGMENT = /secret|credential/i;
+// Tested against every segment, so a `secrets/` or `credentials/` folder hides all it holds,
+// except source and docs: a `secrets/` module's code or a credentials guide is not a secret.
+const SECRET_SEGMENT = /secret|credential|kube[-_]?config/i;
+const CODE_OR_DOC = /\.(ts|tsx|js|jsx|mjs|cjs|py|go|rs|java|kt|rb|php|cs|swift|c|h|cpp|md|mdx|rst|html|css|scss)$/i;
 
 // Tested against the file name only.
 const SECRET_NAMES = [
@@ -21,7 +23,6 @@ const SECRET_NAMES = [
   /\.tfvars(\.json)?$/i, // terraform.tfvars, prod.auto.tfvars.json
   /\.tfstate(\.|$)/i, // terraform.tfstate, .tfstate.backup, .tfstate.1234.backup
   /^\.(npmrc|netrc|pypirc|pgpass)$/i,
-  /kube[-_]?config/i, // kubeconfig, kubeconfig-prod.yaml, prod.kubeconfig
   /^service[-_]?account.*\.json$/i, // serviceAccountKey.json, service-account.json
   /[-_.]sa\.json$/i, // deploy-sa.json
   /^gcp.*key.*\.json$/i, // gcp-key.json, gcpServiceKey.json
@@ -32,7 +33,8 @@ export function isSecretPath(rel: string): boolean {
   const segments = rel.split(/[\\/]/).filter(Boolean);
   const name = segments[segments.length - 1] ?? "";
   if (/^id_.*\.pub$/i.test(name)) return false;
-  return segments.some((seg) => SECRET_SEGMENT.test(seg)) || SECRET_NAMES.some((pattern) => pattern.test(name));
+  if (SECRET_NAMES.some((pattern) => pattern.test(name))) return true;
+  return !CODE_OR_DOC.test(name) && segments.some((seg) => SECRET_SEGMENT.test(seg));
 }
 
 /** True when any segment is a dot-name (`.git`, `.ssh`, `.aws`, `.env`), except `.github`. */

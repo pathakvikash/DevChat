@@ -34,11 +34,16 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
 
     // Opening a FIFO for reading blocks until a writer shows up, so only a regular file is opened.
     // O_NONBLOCK covers a swap after the stat; the handle is checked again below.
-    if (!(await stat(real).catch(() => null))?.isFile()) return NextResponse.json({ error: "File not found" }, { status: 404 });
-    const handle = await open(real, constants.O_RDONLY | constants.O_NONBLOCK).catch(() => null);
+    // O_NOFOLLOW plus the same dev/inode refuses a swap for a symlink or another file between the checks and the open.
+    const checked = await stat(real).catch(() => null);
+    if (!checked?.isFile()) return NextResponse.json({ error: "File not found" }, { status: 404 });
+    const handle = await open(real, constants.O_RDONLY | constants.O_NONBLOCK | constants.O_NOFOLLOW).catch(() => null);
     if (!handle) return NextResponse.json({ error: "File not found" }, { status: 404 });
     try {
-      if (!(await handle.stat()).isFile()) return NextResponse.json({ error: "File not found" }, { status: 404 });
+      const opened = await handle.stat();
+      if (!opened.isFile() || opened.ino !== checked.ino || opened.dev !== checked.dev) {
+        return NextResponse.json({ error: "File not found" }, { status: 404 });
+      }
       // One read of at most the cap plus one byte, so a file that grows after a stat is still bounded.
       const buf = Buffer.alloc(MAX_READ_BYTES + 1);
       const { bytesRead } = await handle.read(buf, 0, buf.length, 0);
