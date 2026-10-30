@@ -243,7 +243,7 @@ export default function ConversationPane({ conversationId, focused, initialPromp
 
         <div className="relative flex-1 flex min-h-0">
           {p.messages.length === 0 && !p.isLoading && (
-            <EmptyState modelName={p.currentModelName} temporary={p.conversation.temporary} />
+            <EmptyState modelName={p.currentModelName} temporary={p.conversation.temporary} sideOf={isSide ? parentTitle : undefined} />
           )}
 
           {p.messages.length > 0 && (
