@@ -645,16 +645,25 @@ A side chat is a pane whose chat is a child of the pane next to it. It takes one
 
 ```
 [ShieldQuestion amber] Needs your OK                                         Ask mode
-Edit src/app/page.tsx                                    ← text-sm font-medium text-[var(--foreground)]
-  Tool   Edit (Claude Code)                              ← up to 4 key rows: label text-xs text-zinc-400 w-16,
-  File   src/app/page.tsx                                   value text-xs font-mono text-zinc-200 truncate
-  ┌ +3 −1 diff preview, ≤12 lines, font-mono text-xs ┐   ← add lines bg-emerald-500/10, remove lines bg-red-500/10,
-  └──────────────────────────────────────────────────┘     a +/− gutter in text-zinc-400; text stays foreground
+Run a command                                            ← text-sm font-medium text-[var(--foreground)]
+┌ the command, in full ─────────────────────────────┐   ← <pre> font-mono text-xs whitespace-pre-wrap break-all,
+│ npm test -- --run                                 │     max-h-64 overflow-auto. Edits: the whole diff here,
+└───────────────────────────────────────────────────┘     add lines bg-emerald-500/10, remove lines bg-red-500/10
+Model's description: Run the tests                       ← text-xs text-zinc-400, only if the model sent one
+  timeout   120000                                       ← every other key, uncut: label text-xs text-zinc-400 w-16,
+  …                                                         value text-xs font-mono text-zinc-200, one scrollable area (max-h-64)
   › Show all arguments                                   ← toggles a full JSON <pre> (ToolInvocation body style)
                                   [Deny] [Allow for this chat] [Allow]
 ```
 
-- Title by tool: **Create artifact "<title>"**, **Update artifact "<title>"**, **Update the todo list**, **Save to memory: "<key>"**, **Run <tool> on <MCP server>**, **Edit <path>**, **Create <path>**, **Run a command** (with the command as the first key row), otherwise **Run <toolName>**.
+- The card never hides what will run. Nothing is cut at a length and no key is dropped; the model's key order does not matter.
+  - **Bash**: `command` first, in full, in the scrollable block.
+  - **Write**: the file path (muted) and the full `content` in the block. Write replaces a file that exists, so it is not worded as creating one.
+  - **Edit**: the whole removed and added text as a diff. **MultiEdit**: every edit as a diff, headed **Edit n of N** when there are several.
+  - The model's `description` sits below, labelled **Model's description:** in muted text: it is the model's claim, not what runs.
+  - Every other key follows as a row, uncut, in one scrollable area.
+- Title by tool: **Create artifact "<title>"**, **Update artifact "<title>"**, **Update the todo list**, **Save to memory: "<key>"**, **Run <tool> on <MCP server>**, **Edit <path>**, **Write file <path>**, **Run a command**, otherwise **Run <toolName>**.
+- **Allow for this chat** only answers an Edit, Write, MultiEdit or NotebookEdit inside the chat's working folder and outside `.git/` and `.claude/`, and never one Claude Code raised for a protected path (it names a blocked path or a reason). Every other request still shows its card. Bash never auto-allows.
 - Buttons, left to right: **Deny** (`glass-button`), **Allow for this chat** (`glass-button`, tooltip **Don't ask again for <tool> in this chat**), **Allow** (`glass-button-primary`). All `h-8`.
 - After a decision the card collapses into the normal tool row (`ToolInvocation`). Its meta reads **Allowed**, **Allowed for this chat**, **Denied** (`XCircle text-zinc-400`, no output), or **Cancelled** (after Stop).
 - Several approvals in one step: one card each, stacked. No "allow all".

@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeAll, afterAll, beforeEach } from "vitest";
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "fs";
+import { execFileSync } from "child_process";
+import { closeSync, constants, mkdirSync, mkdtempSync, openSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import { NextRequest } from "next/server";
@@ -49,6 +50,11 @@ beforeAll(() => {
   symlinkSync(join(base, "outside.txt"), join(folder, "leak.txt"));
   symlinkSync(join(folder, ".env.local"), join(folder, "envlink"));
   symlinkSync(join(folder, ".ssh"), join(folder, "ssh-link"));
+  mkdirSync(join(folder, "secrets"));
+  writeFileSync(join(folder, "secrets", "prod.yaml"), "db_password: x\n");
+  writeFileSync(join(folder, "terraform.tfvars"), "token = 1\n");
+  execFileSync("mkfifo", [join(folder, "pipe")]);
+  symlinkSync(join(folder, "pipe"), join(folder, "pipe-link"));
 
   // A Claude Code transcript whose cwd is `folder`: that is what makes it a project.
   const projectDir = join(home, ".claude", "projects", "-work");
@@ -131,6 +137,28 @@ describe("GET /api/conversations/[id]/files", () => {
   it("refuses .env.local, also when reached through a symlink", async () => {
     expect((await call(".env.local")).status).toBe(403);
     expect((await call("envlink")).status).toBe(403);
+  });
+
+  it("refuses secrets in a folder or by file name", async () => {
+    expect((await call("secrets/prod.yaml")).status).toBe(403);
+    expect((await call("terraform.tfvars")).status).toBe(403);
+    const paths = (await call()).body.files.map((f: { path: string }) => f.path);
+    expect(paths).not.toContain("secrets/prod.yaml");
+    expect(paths).not.toContain("terraform.tfvars");
+  });
+
+  it("answers for a FIFO instead of blocking on it, also through a symlink", async () => {
+    // Opening a FIFO for reading waits for a writer, so a request for one used to hang.
+    const hung = Symbol("hung");
+    for (const name of ["pipe", "pipe-link"]) {
+      const result = await Promise.race([call(name), new Promise((r) => setTimeout(() => r(hung), 1500))]);
+      // Release a blocked open so the test worker can exit even when the route is broken.
+      try {
+        closeSync(openSync(join(folder, "pipe"), constants.O_WRONLY | constants.O_NONBLOCK));
+      } catch {}
+      expect(result, name).not.toBe(hung);
+      expect((result as { status: number }).status, name).toBe(404);
+    }
   });
 
   it("refuses binary files", async () => {

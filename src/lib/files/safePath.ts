@@ -1,7 +1,7 @@
 import { execFile } from "child_process";
 import { existsSync } from "fs";
 import { lstat, readdir, realpath } from "fs/promises";
-import { basename, isAbsolute, join, relative, resolve, sep } from "path";
+import { isAbsolute, join, relative, resolve, sep } from "path";
 import { promisify } from "util";
 
 const run = promisify(execFile);
@@ -9,20 +9,32 @@ const run = promisify(execFile);
 /** Files the picker lists at most; the walk stops here. */
 export const LIST_CAP = 5000;
 
+// Tested against every segment, so a `secrets/` or `credentials/` folder hides all it holds,
+// except source and docs: a `secrets/` module's code or a credentials guide is not a secret.
+const SECRET_SEGMENT = /secret|credential|kube[-_]?config/i;
+const CODE_OR_DOC = /\.(ts|tsx|js|jsx|mjs|cjs|py|go|rs|java|kt|rb|php|cs|swift|c|h|cpp|md|mdx|rst|html|css|scss)$/i;
+
+// Tested against the file name only.
 const SECRET_NAMES = [
   /^\.env/i, // .env, .env.local, .envrc
   /\.env$/i, // production.env
   /^id_/i, // id_rsa, ID_ED25519 (public keys are excluded below)
-  /\.(pem|key|p12|pfx|keystore|tfstate|ppk)$/i,
-  /^\.(npmrc|netrc|pgpass)$/i,
-  /credential|secret/i,
+  /\.(pem|key|p12|pfx|jks|keystore|ppk)$/i,
+  /\.tfvars(\.json)?$/i, // terraform.tfvars, prod.auto.tfvars.json
+  /\.tfstate(\.|$)/i, // terraform.tfstate, .tfstate.backup, .tfstate.1234.backup
+  /^\.(npmrc|netrc|pypirc|pgpass)$/i,
+  /^service[-_]?account.*\.json$/i, // serviceAccountKey.json, service-account.json
+  /[-_.]sa\.json$/i, // deploy-sa.json
+  /^gcp.*key.*\.json$/i, // gcp-key.json, gcpServiceKey.json
 ];
 
-/** Names of files that must never reach a model: env files, keys, state and credentials. */
+/** Paths that must never reach a model: env files, keys, state and credentials, by file name or any folder name. */
 export function isSecretPath(rel: string): boolean {
-  const name = basename(rel);
+  const segments = rel.split(/[\\/]/).filter(Boolean);
+  const name = segments[segments.length - 1] ?? "";
   if (/^id_.*\.pub$/i.test(name)) return false;
-  return SECRET_NAMES.some((pattern) => pattern.test(name));
+  if (SECRET_NAMES.some((pattern) => pattern.test(name))) return true;
+  return !CODE_OR_DOC.test(name) && segments.some((seg) => SECRET_SEGMENT.test(seg));
 }
 
 /** True when any segment is a dot-name (`.git`, `.ssh`, `.aws`, `.env`), except `.github`. */
@@ -36,16 +48,17 @@ export function looksBinary(buf: Buffer): boolean {
 }
 
 /**
- * The real path of `rel` inside `folder`, or null when it is outside, hidden, missing or not
- * reachable. Symlinks are followed first, so a link into a hidden folder is refused too.
+ * The real path of `rel` inside `folder`, or null when it is outside, hidden, secret, missing or
+ * not reachable. Symlinks are followed first, so a link into a hidden or secret folder is refused too.
  */
 export async function resolveInside(folder: string, rel: string): Promise<string | null> {
-  if (!rel || isAbsolute(rel) || rel.includes("\0") || isHiddenPath(rel)) return null;
+  if (!rel || isAbsolute(rel) || rel.includes("\0") || isHiddenPath(rel) || isSecretPath(rel)) return null;
   try {
     const root = await realpath(folder);
     const target = await realpath(resolve(root, rel));
     if (!target.startsWith(root + sep)) return null;
-    return isHiddenPath(relative(root, target)) ? null : target;
+    const inside = relative(root, target);
+    return isHiddenPath(inside) || isSecretPath(inside) ? null : target;
   } catch {
     return null;
   }

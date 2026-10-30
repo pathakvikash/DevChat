@@ -341,11 +341,14 @@ const HISTORY_CAP = 20_000;
 const OMITTED_NOTE = "\n\n(earlier turns omitted)";
 
 async function startSubAgentChild(opts: SubAgentToolOptions, title: string, task: string): Promise<string> {
+  // A helper of a temporary chat is temporary too: deleted with it, never in history, search or memory.
+  const parent = await prisma.conversation.findUnique({ where: { id: opts.parentId }, select: { temporary: true } });
   const child = await prisma.conversation.create({
     data: {
       userId: opts.userId,
       parentId: opts.parentId,
       kind: "subagent",
+      temporary: parent?.temporary ?? false,
       title,
       model: opts.model.id,
       workingFolder: opts.workingFolder ?? null,

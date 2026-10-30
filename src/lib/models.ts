@@ -339,6 +339,9 @@ function toCatalogEntry(def: ProviderDef, m: UpstreamModel): ModelCatalogEntry |
   };
 }
 
+/** A failure whose message is safe to show the user: built here, never from the provider's response. */
+class CatalogError extends Error {}
+
 async function fetchCatalog(
   def: ProviderDef,
   cred: { apiKey: string; baseUrl: string },
@@ -351,8 +354,11 @@ async function fetchCatalog(
     headers: requestHeaders(def, cred.apiKey),
     signal: AbortSignal.timeout(10000),
   });
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  const data = await res.json();
+  if (!res.ok) throw new CatalogError(`HTTP ${res.status}`);
+  // A JSON parse error quotes the start of the body, so it must not reach the client as is.
+  const data = await res.json().catch(() => {
+    throw new CatalogError("Invalid response");
+  });
   // OpenAI-style `{ data: [...] }`; a few servers return a bare array.
   const items: UpstreamModel[] = Array.isArray(data) ? data : data.data || [];
   const entries = items
@@ -391,16 +397,18 @@ function toModelConfig(
 }
 
 /** Every model these creds can reach. Provider failures land in `status` rather than
- *  throwing, so one broken key doesn't hide the rest. */
+ *  throwing, so one broken key doesn't hide the rest. CLI models run on the server's machine,
+ *  so they are listed only when `hostTools` says this user may use them (canUseHostTools). */
 export async function listModels(
   creds: ProviderCreds,
+  hostTools = false,
 ): Promise<{ models: ModelConfig[]; status: ProviderStatus[] }> {
   await initializeOllamaModels();
   const models: ModelConfig[] = Object.values(ollamaModelCache);
 
   // Coding-agent CLIs installed on this machine (local server only).
   const cliStatus: ProviderStatus[] = [];
-  if (detectionAvailable()) {
+  if (hostTools && detectionAvailable()) {
     const cli = await listCliModels();
     for (const e of cli.entries) models.push(cliModelConfig(e));
     cliStatus.push(...cli.status);
@@ -418,7 +426,8 @@ export async function listModels(
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         console.warn(`[models] ${def.label} unavailable: ${message}`);
-        return { id: def.id, label: def.label, configured: true, modelCount: 0, error: message };
+        const shown = error instanceof CatalogError ? message : "Could not reach this provider";
+        return { id: def.id, label: def.label, configured: true, modelCount: 0, error: shown };
       }
     }),
   );
@@ -427,8 +436,9 @@ export async function listModels(
 }
 
 /** Runnable config for one model id. Hosted models are built fresh from `creds` so
- *  concurrent users never share a client or a key. Throws on unknown id or no creds. */
-export function getModel(modelId: string, creds: ProviderCreds = {}): ModelConfig {
+ *  concurrent users never share a client or a key. Throws on unknown id or no creds.
+ *  A CLI model needs `hostTools` (canUseHostTools): it runs as the server's OS user. */
+export function getModel(modelId: string, creds: ProviderCreds = {}, hostTools = false): ModelConfig {
   const mock = mockModelConfig(modelId);
   if (mock) return mock;
   if (ollamaModelCache[modelId]) return ollamaModelCache[modelId];
@@ -452,6 +462,7 @@ export function getModel(modelId: string, creds: ProviderCreds = {}): ModelConfi
     if (!detectionAvailable()) {
       throw new Error(`${cliDef.label} is only available when DevChat runs on your own machine`);
     }
+    if (!hostTools) throw new Error(`${cliDef.label} is only available to the server's owner`);
     const upstreamId = bareModelId(modelId);
     return cliModelConfig({
       id: modelId,

@@ -55,9 +55,9 @@ describe("side chats are hidden from every list", () => {
     expect(stats.totalTokens).toBe(140);
   });
 
-  it("the dataset export takes feedback only from main chats", async () => {
+  it("the dataset export takes feedback only from main chats that are not temporary", async () => {
     await dataset(new Request("http://localhost/api/dataset") as any);
-    expect(db.message.findMany.mock.calls[0][0].where.conversation).toEqual({ userId: "user-1", parentId: null });
+    expect(db.message.findMany.mock.calls[0][0].where.conversation).toEqual({ userId: "user-1", parentId: null, temporary: false });
   });
 });
 
@@ -79,6 +79,28 @@ describe("side chats get no suggestions and no memory consolidation", () => {
     );
     expect(await res.json()).toEqual({ applied: 0, pruned: 0 });
     expect(consolidateMemory).not.toHaveBeenCalled();
+  });
+});
+
+describe("memory consolidation runs for a main chat only", () => {
+  const consolidateChat = (row: object) => {
+    db.conversation.findUnique.mockResolvedValue({ userId: "user-1", temporary: false, memoryDisabled: false, ...row });
+    return consolidate(
+      new Request("http://localhost/api/memory/consolidate", { method: "POST", body: JSON.stringify({ conversationId: "c1" }) }) as any,
+    );
+  };
+
+  it("applies nothing for a sub-agent run, even one saved with temporary: false", async () => {
+    const res = await consolidateChat({ kind: "subagent" });
+    expect(await res.json()).toEqual({ applied: 0, pruned: 0 });
+    expect(consolidateMemory).not.toHaveBeenCalled();
+  });
+
+  it("still runs for a main chat", async () => {
+    (consolidateMemory as any).mockResolvedValue({ applied: 2, pruned: 1 });
+    const res = await consolidateChat({ kind: "main" });
+    expect(await res.json()).toEqual({ applied: 2, pruned: 1 });
+    expect(consolidateMemory).toHaveBeenCalledTimes(1);
   });
 });
 

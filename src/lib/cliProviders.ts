@@ -6,6 +6,7 @@ import { delimiter, join } from "path";
 import { createInterface } from "readline";
 import type { LanguageModel } from "ai";
 import { PROVIDERS, ENV_ALIASES } from "./providers";
+import { editInsideCwd } from "./editScope";
 import { CHAT_ALLOWABLE_TOOLS } from "./utils/messageParts";
 
 // `ai` only exports the `LanguageModel` union publicly; carve the v3 provider
@@ -47,8 +48,9 @@ export type CliEvent =
   /** A tool the CLI ran itself (Claude Code's Read/Edit/…), shown as a provider-executed call. */
   | { type: "tool-call"; id: string; name: string; input: unknown }
   | { type: "tool-result"; id: string; name: string; result: unknown; isError: boolean }
-  /** Claude Code asks permission for a tool call (`--permission-prompt-tool stdio`). */
-  | { type: "permission"; requestId: string; toolUseId: string; toolName: string; input: unknown };
+  /** Claude Code asks permission for a tool call (`--permission-prompt-tool stdio`). `flagged`: it named a
+   *  blocked path or gave a reason for asking, so nothing may answer it for the user. */
+  | { type: "permission"; requestId: string; toolUseId: string; toolName: string; input: unknown; flagged?: boolean };
 
 export interface CliInvocation {
   model: string;
@@ -94,7 +96,8 @@ export function parseControlRequest(line: string): Omit<Extract<CliEvent, { type
   const r = e?.request;
   if (e?.type !== "control_request" || r?.subtype !== "can_use_tool") return null;
   if (typeof e.request_id !== "string" || typeof r.tool_use_id !== "string" || typeof r.tool_name !== "string") return null;
-  return { requestId: e.request_id, toolUseId: r.tool_use_id, toolName: r.tool_name, input: r.input ?? {} };
+  const flagged = r.blocked_path != null || Object.keys(r).some((k) => k.startsWith("decision_reason") && r[k] != null);
+  return { requestId: e.request_id, toolUseId: r.tool_use_id, toolName: r.tool_name, input: r.input ?? {}, ...(flagged ? { flagged } : {}) };
 }
 
 /** The answer line Claude Code reads on stdin for a `can_use_tool` request. */
@@ -761,6 +764,10 @@ interface LiveRun {
   /** stdin stays open for control responses until the result arrives. */
   stdinHeld: boolean;
   conversationId?: string;
+  /** Who started it, for the cap on parked runs per user. */
+  userId?: string;
+  /** The folder it was started in: "allow for this chat" never reaches outside it. */
+  cwd: string;
   /** Output read while no request was attached. */
   backlog: string[];
   reader: Reader | null;
@@ -773,8 +780,12 @@ interface LiveRun {
   pending?: { approvalId: string; requestId: string; ttl: ReturnType<typeof setTimeout> };
 }
 
-/** Parked runs by approval id (`cli-<tool_use id>`). Lives in this server process only. */
-const parkedRuns = new Map<string, LiveRun>();
+/** Parked runs by approval id (`cli-<tool_use id>`), oldest first. Lives in this server process only, on
+ *  globalThis so a dev hot reload keeps the map that holds the children instead of orphaning them. */
+const parkedRuns: Map<string, LiveRun> = ((globalThis as { __devchatParkedRuns?: Map<string, LiveRun> }).__devchatParkedRuns ??= new Map());
+/** A parked process is a live `claude` waiting on a card: bounded, so cards left open cannot pile them up. */
+const MAX_PARKED_PER_USER = 2;
+const MAX_PARKED = 8;
 
 /** Denies the card and closes the process. Used on timeout and when the chat moves on. */
 function dropRun(run: LiveRun) {
@@ -787,21 +798,31 @@ function dropRun(run: LiveRun) {
   run.proc.kill("SIGTERM");
 }
 
+/** Makes room for one more parked run: the oldest ones (the user's own first, then anyone's) are denied and closed. */
+function evictParkedRuns(userId?: string) {
+  const trim = (keep: number, match: (r: LiveRun) => boolean) => {
+    const runs = [...parkedRuns.values()].filter(match);
+    for (const r of runs.slice(0, Math.max(0, runs.length - keep))) dropRun(r);
+  };
+  trim(MAX_PARKED_PER_USER - 1, (r) => !!userId && r.userId === userId);
+  trim(MAX_PARKED - 1, () => true);
+}
+
 /** A chat that sends again while a card is open has moved on: its parked run is denied and closed. */
 export function dropParkedRuns(conversationId: string) {
   for (const run of [...parkedRuns.values()]) if (run.conversationId === conversationId) dropRun(run);
 }
 
-/** The newest approval answer in the prompt, if the last message carries one. */
-function pendingAnswer(prompt: Prompt): { approvalId: string; approved: boolean } | undefined {
+/** The approval answer this request delivers, if the last message carries one. That message also holds the answers to
+ *  earlier cards of the same reply, already delivered, and the cards of one reply can be asked and answered in any
+ *  order: the answer for a card still parked is the one. With none parked, the first, so the failure names a real card. */
+function pendingAnswer(prompt: Prompt, conversationId?: string): { approvalId: string; approved: boolean } | undefined {
   const last = prompt[prompt.length - 1] as { role: string; content?: unknown } | undefined;
   if (last?.role !== "tool" || !Array.isArray(last.content)) return undefined;
-  for (const p of last.content as any[]) {
-    if (p?.type === "tool-approval-response" && typeof p.approvalId === "string") {
-      return { approvalId: p.approvalId, approved: p.approved === true };
-    }
-  }
-  return undefined;
+  const answers = (last.content as any[])
+    .filter((p) => p?.type === "tool-approval-response" && typeof p.approvalId === "string")
+    .map((p) => ({ approvalId: p.approvalId as string, approved: p.approved === true }));
+  return answers.find((a) => parkedRuns.get(a.approvalId)?.conversationId === conversationId) ?? answers[0];
 }
 
 function wireRun(run: LiveRun, proc: ChildProcess) {
@@ -862,6 +883,7 @@ export interface AskOptions {
   /** Tools the chat allowed for the rest of the chat; their requests are answered without a card. */
   allowed: ReadonlySet<string>;
   conversationId?: string;
+  userId?: string;
 }
 
 function failedStream(warnings: Warning[], message: string): ReadableStream<StreamPart> {
@@ -912,6 +934,8 @@ function runCli(
           parse: def.parser(),
           stdinHeld: !!spec!.holdStdin,
           conversationId: ask?.conversationId,
+          userId: ask?.userId,
+          cwd,
           backlog: [],
           reader: null,
           stdoutEnded: false,
@@ -1053,6 +1077,7 @@ function runCli(
           requestId: ev.requestId,
           ttl: setTimeout(() => dropRun(run), PARK_MS),
         };
+        evictParkedRuns(run.userId);
         parkedRuns.set(approvalId, run);
         finished = true;
         controller.enqueue({ type: "tool-approval-request", approvalId, toolCallId: ev.toolUseId });
@@ -1072,7 +1097,7 @@ function runCli(
               // block regardless of order.
               emitReasoning(ev.text);
             } else if (ev.type === "permission") {
-              if (ask?.allowed.has(ev.toolName)) {
+              if (ask?.allowed.has(ev.toolName) && !ev.flagged && editInsideCwd(run.cwd, ev.toolName, ev.input)) {
                 run.proc.stdin?.write(controlResponse(ev.requestId, { behavior: "allow" }));
                 continue;
               }
@@ -1162,16 +1187,17 @@ export function createCliModel(def: CliProviderDef, modelArg: string): LanguageM
       .join("\n\n");
     const spec = def.invoke({ model: modelArg, system, user: flat.user, effort, cwd, access });
     const toolNames = new Set(tools.map((t) => t.name));
-    // Only the tools that may be allowed for a chat; anything else in the list is ignored.
+    // Only the tools that may be allowed for a chat, and only in Ask: Chat and Plan are read-only, whatever the list says.
     const allowed = new Set(
-      Array.isArray(po.allowedTools)
+      access === "ask" && Array.isArray(po.allowedTools)
         ? po.allowedTools.filter((t: unknown): t is string => typeof t === "string" && CHAT_ALLOWABLE_TOOLS.has(t))
         : [],
     );
     const conversationId = typeof po.conversationId === "string" && po.conversationId ? po.conversationId : undefined;
-    const ask: AskOptions = { allowed, conversationId };
+    const userId = typeof po.userId === "string" && po.userId ? po.userId : undefined;
+    const ask: AskOptions = { allowed, conversationId, userId };
     // The answer to a card is the newest message: resume the process that asked, or say it is gone.
-    const answer = pendingAnswer(options.prompt);
+    const answer = pendingAnswer(options.prompt, conversationId);
     if (answer) {
       const run = parkedRuns.get(answer.approvalId);
       if (!run) {
@@ -1183,13 +1209,13 @@ export function createCliModel(def: CliProviderDef, modelArg: string): LanguageM
       if (run.conversationId !== conversationId) {
         return { stream: failedStream(warnings, "This permission request belongs to another chat.") };
       }
-      // Allow only from the Ask mode of the provider that asked; anything else is denied and the process closed.
-      const allow = answer.approved && access === "ask" && run.providerId === def.id;
-      if (answer.approved && !allow) {
+      // Only the Ask mode of the provider that asked may resume it, with either answer: the process was
+      // started with edits allowed to ask, so in any other mode it is denied and closed, never continued.
+      if (access !== "ask" || run.providerId !== def.id) {
         dropRun(run);
         return { stream: failedStream(warnings, "The permission request was denied: the chat is no longer in Ask mode with this tool.") };
       }
-      return { stream: runCli(def, null, warnings, options.abortSignal, toolNames, ask, { run, approved: allow }) };
+      return { stream: runCli(def, null, warnings, options.abortSignal, toolNames, ask, { run, approved: answer.approved }) };
     }
     // A new request means the chat moved on from any card still open.
     if (conversationId) dropParkedRuns(conversationId);

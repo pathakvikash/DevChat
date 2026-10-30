@@ -3,22 +3,26 @@
 import { useState } from "react";
 import { ShieldQuestion } from "lucide-react";
 import { useToolAnswers } from "./ToolAnswers";
-import { approvalTitle, CHAT_ALLOWABLE_TOOLS, editPreview } from "@/lib/utils/messageParts";
+import { approvalDetails, approvalTitle, CHAT_ALLOWABLE_TOOLS, hiddenRuns, showHidden } from "@/lib/utils/messageParts";
 
-const MAX_ROWS = 4;
-const MAX_VALUE = 160;
+/** Past this many lines the block says how long it is. */
+const LONG_BLOCK = 12;
 
-/** Up to MAX_ROWS short "label: value" rows, so the card stays small. */
-function keyRows(input: unknown): Array<[string, string]> {
-  if (!input || typeof input !== "object") return [];
-  const hasDiff = editPreview(input).minus.length > 0;
-  return Object.entries(input as Record<string, unknown>)
-    .filter(([k]) => !(hasDiff && (k === "old_string" || k === "new_string")))
-    .slice(0, MAX_ROWS)
-    .map(([k, v]) => {
-      const text = typeof v === "string" ? v : JSON.stringify(v) ?? "";
-      return [k, text.length > MAX_VALUE ? `${text.slice(0, MAX_VALUE)}…` : text];
-    });
+/** Text with its invisible characters (direction marks, zero-width, control) written out and set apart. */
+function Visible({ text }: { text: string }) {
+  return (
+    <>
+      {hiddenRuns(text).map((r, n) =>
+        r.hidden ? (
+          <span key={n} title="Hidden character" className="rounded-sm bg-white/10 px-0.5 text-zinc-500">
+            {r.text}
+          </span>
+        ) : (
+          r.text
+        ),
+      )}
+    </>
+  );
 }
 
 /** Ask mode: a tool call waits here for Allow or Deny. Shown only in the latest message. */
@@ -36,8 +40,7 @@ export default function ApprovalCard({
   // One answer per card: a double click, or a second click while the reply resumes, does nothing.
   const [answered, setAnswered] = useState(false);
   const title = approvalTitle(toolName, input);
-  const rows = keyRows(input);
-  const diff = editPreview(input);
+  const { block, lines, description, rest } = approvalDetails(toolName, input);
   const answer = (approved: boolean, allowForChat = false) => {
     if (answered) return;
     setAnswered(true);
@@ -58,21 +61,32 @@ export default function ApprovalCard({
       </div>
       <div className="px-3 py-2">
         <p className="text-sm font-medium text-[var(--foreground)] break-words">{title}</p>
-        {(diff.minus.length > 0 || diff.plus.length > 0) && (
-          <pre className="mt-1.5 max-h-48 overflow-auto rounded-sm text-xs font-mono text-zinc-200 whitespace-pre-wrap break-all">
-            {[...diff.minus, ...diff.plus].map((l, n) => (
-              <div key={n} className={l.startsWith("+") ? "bg-emerald-500/10" : l.startsWith("-") ? "bg-red-500/10" : undefined}>
-                {l}
+        {block.length > 0 && lines > LONG_BLOCK && <p className="mt-1.5 text-xs text-zinc-400">{lines} lines</p>}
+        {block.length > 0 && (
+          <pre className="mt-1.5 max-h-64 overflow-auto rounded-sm text-xs font-mono text-zinc-200 whitespace-pre-wrap break-all">
+            {block.map((l, n) => (
+              <div
+                key={n}
+                className={l.tone === "add" ? "bg-emerald-500/10" : l.tone === "del" ? "bg-red-500/10" : l.tone === "muted" ? "text-zinc-400" : undefined}
+              >
+                <Visible text={l.text} />
               </div>
             ))}
           </pre>
         )}
-        {rows.length > 0 && (
-          <dl className="mt-1.5 space-y-0.5">
-            {rows.map(([k, v]) => (
+        {description && (
+          <p className="mt-1.5 text-xs text-zinc-400 whitespace-pre-wrap break-words">
+            Model&apos;s description: <Visible text={description} />
+          </p>
+        )}
+        {rest.length > 0 && (
+          <dl className="mt-1.5 max-h-64 overflow-auto space-y-0.5">
+            {rest.map(([k, v]) => (
               <div key={k} className="flex gap-2 min-w-0">
-                <dt className="text-xs text-zinc-400 w-16 shrink-0 truncate">{k}</dt>
-                <dd className="text-xs font-mono text-zinc-200 truncate">{v}</dd>
+                <dt className="text-xs text-zinc-400 w-16 shrink-0 truncate">{showHidden(k)}</dt>
+                <dd className="text-xs font-mono text-zinc-200 whitespace-pre-wrap break-all min-w-0">
+                  <Visible text={v} />
+                </dd>
               </div>
             ))}
           </dl>
@@ -86,8 +100,8 @@ export default function ApprovalCard({
           {showAll ? "▾ Hide arguments" : "› Show all arguments"}
         </button>
         {showAll && (
-          <pre className="mt-1 max-h-48 overflow-auto text-xs font-mono text-zinc-300 whitespace-pre-wrap break-all">
-            {JSON.stringify(input, null, 2)}
+          <pre className="mt-1 max-h-64 overflow-auto text-xs font-mono text-zinc-300 whitespace-pre-wrap break-all">
+            <Visible text={JSON.stringify(input, null, 2) ?? ""} />
           </pre>
         )}
       </div>
