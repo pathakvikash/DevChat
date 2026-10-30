@@ -4,6 +4,7 @@ import { open, stat } from "fs/promises";
 import { prisma } from "@/lib/db";
 import { requireUserId } from "@/lib/auth";
 import { isRunnableCwd } from "@/lib/claude/sessions";
+import { canUseHostTools, HOST_TOOLS_REFUSED } from "@/lib/hostAccess";
 import { listFolderFiles, looksBinary, resolveInside } from "@/lib/files/safePath";
 
 const MAX_READ_BYTES = 1024 * 1024;
@@ -20,6 +21,8 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     if (!conversation || conversation.userId !== userId) {
       return NextResponse.json({ error: "Conversation not found" }, { status: 404 });
     }
+    // Working folders are the host's Claude Code projects, so only the server's owner may read them.
+    if (!(await canUseHostTools(userId))) return NextResponse.json({ error: HOST_TOOLS_REFUSED }, { status: 403 });
     const folder = conversation.workingFolder;
     if (!folder || !(await isRunnableCwd(folder))) {
       return NextResponse.json({ error: "This chat has no working folder" }, { status: 400 });
