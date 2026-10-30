@@ -95,6 +95,8 @@ export interface PaneWarning {
 
 interface SplitViewValue {
   ids: string[];
+  /** Open side chat id → its main chat id. */
+  parentOf: Record<string, string>;
   focus: string;
   multi: boolean;
   limit: number;
@@ -535,6 +537,7 @@ export function SplitViewProvider({ children }: { children: React.ReactNode }) {
 
   const value: SplitViewValue = {
     ids,
+    parentOf,
     focus,
     multi: ids.length > 1,
     limit,

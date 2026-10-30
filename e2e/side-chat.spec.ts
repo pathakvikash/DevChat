@@ -30,6 +30,19 @@ test("Cmd+\\ opens a side chat docked next to the main chat, and it reloads from
   await expect(pane(page, side)).toBeVisible();
 });
 
+test("the Side chat button in the chat header opens and closes the side chat", async ({ page, request }) => {
+  const main = await createChat(request, { title: "Main plan" });
+  await openChat(page, main);
+
+  await pane(page, main).getByRole("button", { name: "Open side chat" }).click();
+  const side = await sideIdOf(request, main);
+  await expect(pane(page, side)).toBeVisible();
+
+  await pane(page, main).getByRole("button", { name: "Close side chat" }).click();
+  await expect(pane(page, side)).toBeHidden();
+  await expect(pane(page, main).getByRole("button", { name: "Open side chat" })).toBeVisible();
+});
+
 test("/side opens a side chat and sends the question there, not in the main chat", async ({ page, request }) => {
   const main = await createChat(request, { title: "Main plan" });
   await openChat(page, main);

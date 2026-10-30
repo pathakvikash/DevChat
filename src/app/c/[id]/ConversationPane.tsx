@@ -214,6 +214,8 @@ export default function ConversationPane({ conversationId, focused, initialPromp
           onToggleScratchpad={() => p.setScratchpadOpen((v: boolean) => !v)}
           artifactsOpen={p.artifactPanelOpen}
           onToggleArtifacts={() => p.setArtifactPanelOpen((v: boolean) => !v)}
+          sideOpen={!!split?.ids.some((id) => split.parentOf[id] === conversationId)}
+          onToggleSide={isSub || !split ? undefined : p.toggleSidePane}
           enabledToolsCount={p.enabledTools.length}
           enabledSkillsCount={p.enabledSkills.length}
           onOpenAdvanced={() => p.setAdvancedOpen(true)}

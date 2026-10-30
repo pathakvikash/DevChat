@@ -1,6 +1,6 @@
 "use client";
 
-import { Code2, Settings2, AlertCircle, Download, FileCode, GitFork, Menu, Keyboard, Brain, MoreHorizontal, MessageSquareDashed, ShieldCheck } from "lucide-react";
+import { Code2, Settings2, AlertCircle, Download, FileCode, GitFork, Menu, Keyboard, Brain, MoreHorizontal, MessageSquareDashed, ShieldCheck, PanelRight } from "lucide-react";
 import Link from "next/link";
 import { useState, useRef, useEffect } from "react";
 import { useSidebar } from "@/app/contexts/SidebarContext";
@@ -29,6 +29,9 @@ interface ConversationHeaderProps {
   onToggleScratchpad: () => void;
   artifactsOpen: boolean;
   onToggleArtifacts: () => void;
+  /** Main chats only: opens or closes this chat's side chat (same as ⌘\). */
+  sideOpen?: boolean;
+  onToggleSide?: () => void;
   enabledToolsCount: number;
   enabledSkillsCount: number;
   onOpenAdvanced: () => void;
@@ -48,6 +51,8 @@ export default function ConversationHeader({
   onToggleScratchpad,
   artifactsOpen,
   onToggleArtifacts,
+  sideOpen = false,
+  onToggleSide,
   enabledToolsCount,
   enabledSkillsCount,
   onOpenAdvanced,
@@ -104,6 +109,21 @@ export default function ConversationHeader({
               </button>
             )}
             <ModeToggle mode={mode} onModeChange={setMode} toolsAvailable={modelCaps.toolsAvailable} />
+            {onToggleSide && (
+              <button
+                type="button"
+                onClick={onToggleSide}
+                aria-pressed={sideOpen}
+                aria-label={sideOpen ? "Close side chat" : "Open side chat"}
+                title={`${sideOpen ? "Close" : "Open"} side chat: ask about this chat without adding to it (⌘\\)`}
+                className={`focus-ring flex h-7 items-center justify-center gap-1.5 rounded-[var(--glass-radius-md)] px-1.5 text-xs font-medium transition shrink-0 sm:px-2.5 ${
+                  sideOpen ? "glass-button-primary text-white" : "glass-button text-[var(--foreground)]"
+                }`}
+              >
+                <PanelRight size={16} aria-hidden />
+                <span className="hidden sm:inline">Side chat</span>
+              </button>
+            )}
             {/* These move into the More menu on small screens. */}
             <div className="hidden sm:flex items-center gap-2">
               <button
