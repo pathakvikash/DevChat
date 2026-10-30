@@ -1,9 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
-import { open } from "fs/promises";
+import { constants } from "fs";
+import { open, stat } from "fs/promises";
 import { prisma } from "@/lib/db";
 import { requireUserId } from "@/lib/auth";
 import { isRunnableCwd } from "@/lib/claude/sessions";
-import { isSecretPath, listFolderFiles, looksBinary, resolveInside } from "@/lib/files/safePath";
+import { listFolderFiles, looksBinary, resolveInside } from "@/lib/files/safePath";
 
 const MAX_READ_BYTES = 1024 * 1024;
 
@@ -29,9 +30,12 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
 
     // resolveInside refuses hidden and secret paths; the real path is what gets read.
     const real = await resolveInside(folder, rel);
-    if (!real || isSecretPath(real)) return NextResponse.json({ error: "This file can't be attached" }, { status: 403 });
+    if (!real) return NextResponse.json({ error: "This file can't be attached" }, { status: 403 });
 
-    const handle = await open(real, "r").catch(() => null);
+    // Opening a FIFO for reading blocks until a writer shows up, so only a regular file is opened.
+    // O_NONBLOCK covers a swap after the stat; the handle is checked again below.
+    if (!(await stat(real).catch(() => null))?.isFile()) return NextResponse.json({ error: "File not found" }, { status: 404 });
+    const handle = await open(real, constants.O_RDONLY | constants.O_NONBLOCK).catch(() => null);
     if (!handle) return NextResponse.json({ error: "File not found" }, { status: 404 });
     try {
       if (!(await handle.stat()).isFile()) return NextResponse.json({ error: "File not found" }, { status: 404 });

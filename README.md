@@ -41,10 +41,11 @@ Two ways to configure them:
 2. **Settings page** in the app. Per user, encrypted at rest with `AUTH_SECRET`.
    A key saved here overrides the env var for that user, so a public Vercel
    deployment works with no provider keys set at all: each person signs in and
-   adds their own.
+   adds their own. A Custom base URL saved here is that user's alone: the env
+   `CUSTOM_API_KEY` is never sent to it, so save a key next to it if it needs one.
 
 The Settings page shows each provider's status (configured by the deployment,
-N models available, or the error the provider returned), and the model picker
+N models available, or a short reason it failed), and the model picker
 lists everything reachable, grouped by provider.
 
 **Reusing keys you already have.** Settings has a "Find providers on this

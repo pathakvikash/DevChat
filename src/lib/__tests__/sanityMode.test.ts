@@ -21,6 +21,17 @@ describe("sanity mode gate", () => {
     expect(isSanityMode({ ...ON, NODE_ENV: "production" })).toBe(false);
   });
 
+  it("is off when the running process is production, whatever the env object says", () => {
+    // `NODE_ENV=test next start` or an env object cannot turn it on: the process's own NODE_ENV is checked first.
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("SANITY_TEST_AUTH", "1");
+    vi.stubEnv("DATABASE_URL", "file:/repo/prisma/sanity.db");
+    expect(isSanityMode()).toBe(false);
+    expect(isSanityMode(ON)).toBe(false);
+    expect(isSanityMode({ ...ON, NODE_ENV: "test" })).toBe(false);
+    expect(sanityAuthProviders(ON)).toEqual([]);
+  });
+
   it("is off without the flag", () => {
     expect(isSanityMode({ ...ON, SANITY_TEST_AUTH: undefined })).toBe(false);
     expect(isSanityMode({ ...ON, SANITY_TEST_AUTH: "true" })).toBe(false);

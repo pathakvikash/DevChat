@@ -339,6 +339,9 @@ function toCatalogEntry(def: ProviderDef, m: UpstreamModel): ModelCatalogEntry |
   };
 }
 
+/** A failure whose message is safe to show the user: built here, never from the provider's response. */
+class CatalogError extends Error {}
+
 async function fetchCatalog(
   def: ProviderDef,
   cred: { apiKey: string; baseUrl: string },
@@ -351,8 +354,11 @@ async function fetchCatalog(
     headers: requestHeaders(def, cred.apiKey),
     signal: AbortSignal.timeout(10000),
   });
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  const data = await res.json();
+  if (!res.ok) throw new CatalogError(`HTTP ${res.status}`);
+  // A JSON parse error quotes the start of the body, so it must not reach the client as is.
+  const data = await res.json().catch(() => {
+    throw new CatalogError("Invalid response");
+  });
   // OpenAI-style `{ data: [...] }`; a few servers return a bare array.
   const items: UpstreamModel[] = Array.isArray(data) ? data : data.data || [];
   const entries = items
@@ -418,7 +424,8 @@ export async function listModels(
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         console.warn(`[models] ${def.label} unavailable: ${message}`);
-        return { id: def.id, label: def.label, configured: true, modelCount: 0, error: message };
+        const shown = error instanceof CatalogError ? message : "Could not reach this provider";
+        return { id: def.id, label: def.label, configured: true, modelCount: 0, error: shown };
       }
     }),
   );

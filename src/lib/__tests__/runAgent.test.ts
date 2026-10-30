@@ -8,7 +8,7 @@ import type { ModelConfig } from "@/lib/models";
 
 vi.mock("@/lib/db", () => ({
   prisma: {
-    conversation: { create: vi.fn(), update: vi.fn() },
+    conversation: { create: vi.fn(), update: vi.fn(), findUnique: vi.fn() },
     message: { create: vi.fn(), findFirst: vi.fn() },
   },
 }));
@@ -64,6 +64,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   vi.mocked(prisma.conversation.create).mockResolvedValue({ id: "child-1" } as never);
   vi.mocked(prisma.conversation.update).mockResolvedValue({} as never);
+  vi.mocked(prisma.conversation.findUnique).mockResolvedValue({ temporary: false } as never);
   vi.mocked(prisma.message.create).mockResolvedValue({} as never);
   vi.mocked(prisma.message.findFirst).mockResolvedValue(null);
 });
@@ -121,6 +122,24 @@ describe("runAgentTool", () => {
       }),
     );
     expect(prisma.conversation.update).toHaveBeenCalledWith(expect.objectContaining({ data: { totalTokens: { increment: 42 } } }));
+  });
+
+  it("saves a helper of a temporary chat as temporary, so it goes with its parent", async () => {
+    run.mockResolvedValue(doneResult());
+    vi.mocked(prisma.conversation.findUnique).mockResolvedValue({ temporary: true } as never);
+    await collect(runAgentTool(parentTools(), options()), { task: "Read the notes" });
+    expect(prisma.conversation.findUnique).toHaveBeenCalledWith({ where: { id: "parent-1" }, select: { temporary: true } });
+    expect(prisma.conversation.create).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ parentId: "parent-1", kind: "subagent", temporary: true }) }),
+    );
+  });
+
+  it("saves a helper of an ordinary chat as not temporary", async () => {
+    run.mockResolvedValue(doneResult());
+    await collect(runAgentTool(parentTools(), options()), { task: "Read the notes" });
+    expect(prisma.conversation.create).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ temporary: false }) }),
+    );
   });
 
   it("returns the child id in the first output, and the report in the last", async () => {

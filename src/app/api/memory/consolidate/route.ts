@@ -27,8 +27,8 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Conversation not found" }, { status: 404 });
     }
     // Memory is off (temporary chat or the Memory toggle); nothing from this chat may be saved.
-    // Side chats never consolidate: their context is someone else's chat.
-    if (conv.temporary || conv.memoryDisabled || conv.kind === "side") return NextResponse.json({ applied: 0, pruned: 0 });
+    // Only a main chat consolidates: a side chat's context is someone else's chat, and a sub-agent's is a task brief.
+    if (conv.temporary || conv.memoryDisabled || conv.kind !== "main") return NextResponse.json({ applied: 0, pruned: 0 });
     const result = await consolidateMemory({ conversationId, userId, modelId: model });
     return NextResponse.json(result);
   } catch (e) {
