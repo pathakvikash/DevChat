@@ -5,10 +5,10 @@ import { spawn } from "child_process";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
-import { convertToModelMessages, readUIMessageStream, streamText } from "ai";
+import { convertToModelMessages, lastAssistantMessageIsCompleteWithApprovalResponses, readUIMessageStream, streamText } from "ai";
 import { CLI_PROVIDERS, controlResponse, createCliModel, dropParkedRuns, parseControlRequest } from "@/lib/cliProviders";
 import { helperProviderOptions, runSubAgent } from "@/lib/chat/subAgent";
-import { dropRepeatedToolCalls } from "@/lib/chat/dropRepeatedToolCalls";
+import { groupToolParts } from "@/lib/utils/messageParts";
 
 vi.mock("child_process", async (importOriginal) => ({ ...(await importOriginal<typeof import("child_process")>()), spawn: vi.fn() }));
 
@@ -137,6 +137,8 @@ describe("allow for this chat does not leave the working folder", () => {
     const dir = tmpFolder();
     expect(await autoAllowed(dir, { file_path: "/Users/v/.zshrc" })).toBe(false);
     expect(await autoAllowed(dir, { file_path: "/Users/v/.ssh/authorized_keys" })).toBe(false);
+    mkdirSync(join(dir, "~"));
+    expect(await autoAllowed(dir, { file_path: "~/.zshrc" })).toBe(false);
   });
 
   it("shows the card when Claude Code names a blocked path or gives a reason", async () => {
@@ -152,6 +154,7 @@ describe("allow for this chat does not leave the working folder", () => {
     symlinkSync(tmpdir(), join(dir, "escape"));
     expect(await autoAllowed(dir, { file_path: join(dir, ".git", "hooks", "pre-commit") })).toBe(false);
     expect(await autoAllowed(dir, { file_path: join(dir, ".claude", "settings.json") })).toBe(false);
+    expect(await autoAllowed(dir, { file_path: join(dir, ".husky", "pre-commit") })).toBe(false);
     expect(await autoAllowed(dir, { file_path: join(dir, "escape", "x") })).toBe(false);
   });
 
@@ -264,53 +267,109 @@ describe("helpers in Ask and Plan only read", () => {
   });
 });
 
-describe("two Claude Code edits in one reply", () => {
-  const po = { "claude-code": { cwd: "/w", access: "ask", conversationId: "conv-two", allowedTools: [] } } as any;
-  const edit = (p: string) => ({ file_path: p, old_string: "a", new_string: "b" });
+describe("two Claude Code cards in one reply, through the AI SDK", () => {
+  const read = (p: string) => ({ file_path: p });
   const last = async (stream: ReadableStream<any>, message?: any) => {
     let m: any;
     for await (const x of readUIMessageStream({ stream, message })) m = x;
     return m;
   };
-  const answered = (msg: any, approvalId: string) => ({
+  const answered = (msg: any, approvalId: string, approved = true) => ({
     ...msg,
-    parts: msg.parts.map((p: any) => (p.approval?.id === approvalId && p.state === "approval-requested" ? { ...p, state: "approval-responded", approval: { id: approvalId, approved: true } } : p)),
+    parts: msg.parts.map((p: any) => (p.approval?.id === approvalId && p.state === "approval-requested" ? { ...p, state: "approval-responded", approval: { id: approvalId, approved } } : p)),
   });
+  const ask = (tid: string) => request(`req_${tid}`, `toolu_${tid}`, "Read", read(`/etc/${tid}`));
 
-  it("shows one row per call, the second card where the call first appeared, and answers it", async () => {
-    chats.push("conv-two");
+  /** Request 1 announces A and B and asks for `first`; each answer goes through the SDK as the browser would send it. */
+  async function twoCards(conv: string, order: "AB" | "BA", textBetween: boolean, answerSecond: (id: string) => boolean = () => true) {
+    chats.push(conv);
+    const po = { "claude-code": { cwd: "/w", access: "ask", conversationId: conv, allowedTools: [] } } as any;
     const model = createCliModel(claude(), "default");
-    const userMsg = { id: "u1", role: "user", parts: [{ type: "text", text: "edit both" }] } as any;
+    const userMsg = { id: "u1", role: "user", parts: [{ type: "text", text: "read both" }] } as any;
+    const [x, y] = order.split("");
+    const before = spawned.length;
 
     const r1 = streamText({ model, messages: await convertToModelMessages([userMsg]), providerOptions: po });
     const ui1 = last(r1.toUIMessageStream({ originalMessages: [userMsg], generateMessageId: () => "a1" }));
-    await until(() => spawned.length === 1);
-    const c = spawned[0];
+    await until(() => spawned.length > before);
+    const c = spawned[before];
     c.say({ type: "assistant", message: { role: "assistant", content: [
-      { type: "tool_use", id: "toolu_A", name: "Edit", input: edit("/w/a.txt") },
-      { type: "tool_use", id: "toolu_B", name: "Edit", input: edit("/w/b.txt") },
+      { type: "tool_use", id: "toolu_A", name: "Read", input: read("/etc/A") },
+      { type: "tool_use", id: "toolu_B", name: "Read", input: read("/etc/B") },
     ] } });
-    c.say(request("req_A", "toolu_A", "Edit", edit("/w/a.txt")));
-    const a1 = answered(await ui1, "cli-toolu_A");
+    c.say(ask(x));
+    if (!textBetween) c.say(ask(y));
+    const m1 = answered(await ui1, `cli-toolu_${x}`);
 
-    const r2 = streamText({ model, messages: await convertToModelMessages([userMsg, a1]), providerOptions: po });
-    const ui2 = last(r2.toUIMessageStream({ originalMessages: [userMsg, a1] }).pipeThrough(dropRepeatedToolCalls(a1)), a1);
+    const r2 = streamText({ model, messages: await convertToModelMessages([userMsg, m1]), providerOptions: po });
+    const ui2 = last(r2.toUIMessageStream({ originalMessages: [userMsg, m1] }), m1);
     await until(() => c.written.length >= 2);
-    c.say({ type: "user", message: { role: "user", content: [{ type: "tool_result", tool_use_id: "toolu_A", content: "ok" }] } });
-    c.say(request("req_B", "toolu_B", "Edit", edit("/w/b.txt")));
-    const a2 = await ui2;
-    const tools = a2.parts.filter((p: any) => p.type === "dynamic-tool");
-    expect(tools.map((p: any) => [p.toolCallId, p.state])).toEqual([["toolu_A", "output-available"], ["toolu_B", "approval-requested"]]);
+    if (textBetween) {
+      c.say({ type: "assistant", message: { role: "assistant", content: [{ type: "text", text: `${x} is done; now ${y}.` }] } });
+      c.say(ask(y));
+    }
+    const asked = await ui2;
+    const m2 = answered(asked, `cli-toolu_${y}`, answerSecond(y));
+    return { c, userMsg, asked, m2, x, y, po, model, sent: lastAssistantMessageIsCompleteWithApprovalResponses({ messages: [userMsg, m2] }) };
+  }
 
-    const b = answered(a2, "cli-toolu_B");
-    const r3 = streamText({ model, messages: await convertToModelMessages([userMsg, b]), providerOptions: po });
-    const ui3 = last(r3.toUIMessageStream({ originalMessages: [userMsg, b] }).pipeThrough(dropRepeatedToolCalls(b)), b);
+  const cases: Array<[string, "AB" | "BA", boolean]> = [
+    ["asked one after the other", "AB", false],
+    ["asked together, the later one first", "BA", false],
+    ["with text between the asks", "AB", true],
+  ];
+  for (const [name, order, textBetween] of cases) {
+    it(`answering the second card sends, and resumes that card (${name})`, async () => {
+      const { c, userMsg, asked, m2, x, y, po, model, sent } = await twoCards(`two-${name}`, order, textBetween);
+      // The browser sends the reply on its own only when the last step holds a finished approval.
+      expect(sent).toBe(true);
+      // The first card was answered with its own request; the second is still waiting for the answer.
+      expect(c.written[1]).toBe(controlResponse(`req_${x}`, { behavior: "allow" }));
+      // The card shows once, and it is the one that waits.
+      const calls = asked.parts.filter((p: any) => p.type === "dynamic-tool").map((p: any) => ({ ...p, type: `tool-${p.toolName}` }));
+      const groups = groupToolParts(calls).filter((g) => g.type === "tool-group") as any[];
+      expect(groups.map((g) => g.key).sort()).toEqual(["toolu_A", "toolu_B"]);
+      expect(groups.find((g) => g.key === `toolu_${y}`).parts.map((p: any) => p.state)).toEqual(["approval-requested"]);
+
+      const r3 = streamText({ model, messages: await convertToModelMessages([userMsg, m2]), providerOptions: po });
+      const reading = (async () => { for await (const ch of r3.fullStream) if (ch.type === "error") throw ch.error; })();
+      await until(() => c.written.length >= 3);
+      expect(c.written[2]).toBe(controlResponse(`req_${y}`, { behavior: "allow" }));
+      expect(spawned).toHaveLength(1);
+      expect(c.kill).not.toHaveBeenCalled();
+      c.say({ type: "result", subtype: "success", is_error: false, result: "ok", usage: {} });
+      c.exit(0);
+      await reading;
+    });
+  }
+
+  it("a Deny on the second card reaches that card, and the process stays for the model to read it", async () => {
+    const { c, userMsg, m2, y, po, model, sent } = await twoCards("two-deny", "AB", true, () => false);
+    expect(sent).toBe(true);
+    const r3 = streamText({ model, messages: await convertToModelMessages([userMsg, m2]), providerOptions: po });
+    const reading = (async () => { for await (const ch of r3.fullStream) if (ch.type === "error") throw ch.error; })();
     await until(() => c.written.length >= 3);
-    expect(c.written[2]).toBe(controlResponse("req_B", { behavior: "allow" }));
-    c.say({ type: "user", message: { role: "user", content: [{ type: "tool_result", tool_use_id: "toolu_B", content: "ok" }] } });
-    c.say({ type: "result", subtype: "success", is_error: false, result: "done", usage: {} });
+    expect(c.written[2]).toBe(DENY(`req_${y}`));
+    expect(c.kill).not.toHaveBeenCalled();
+    c.say({ type: "result", subtype: "success", is_error: false, result: "ok", usage: {} });
     c.exit(0);
-    const a3 = await ui3;
-    expect(a3.parts.filter((p: any) => p.type === "dynamic-tool").map((p: any) => [p.toolCallId, p.state])).toEqual([["toolu_A", "output-available"], ["toolu_B", "output-available"]]);
+    await reading;
+  });
+
+  it("when one message holds several answers, the one for the parked card resolves, in either order", async () => {
+    for (const [conv, order] of [["multi-1", ["cli-toolu_old", "cli-toolu_new"]], ["multi-2", ["cli-toolu_new", "cli-toolu_old"]]] as const) {
+      const c = await park(conv, "toolu_new");
+      const prompt = [
+        ...user,
+        { role: "assistant", content: [{ type: "tool-call", toolCallId: "toolu_new", toolName: "Bash", input: {}, providerExecuted: true }] },
+        { role: "tool", content: order.map((approvalId) => ({ type: "tool-approval-response", approvalId, approved: true })) },
+      ] as any;
+      const reading = readAll(await start(conv, prompt));
+      await until(() => c.written.length >= 2);
+      expect(c.written[1]).toBe(controlResponse("req_toolu_new", { behavior: "allow" }));
+      expect(c.kill).not.toHaveBeenCalled();
+      c.exit(0);
+      await reading;
+    }
   });
 });

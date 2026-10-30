@@ -40,17 +40,10 @@ vi.mock("@/lib/cliProviders", () => ({
   cliProviderForModel: vi.fn((id: string) => (id.startsWith("claude-code/") ? { id: "claude-code" } : undefined)),
   dropParkedRuns: vi.fn(),
 }));
-const uiChunks = vi.hoisted(() => ({ current: [] as unknown[] }));
 vi.mock("ai", async (importOriginal) => ({
   ...(await importOriginal<typeof import("ai")>()),
   streamText: vi.fn(() => ({
-    toUIMessageStream: () =>
-      new ReadableStream({
-        start(c) {
-          for (const chunk of uiChunks.current) c.enqueue(chunk);
-          c.close();
-        },
-      }),
+    toUIMessageStream: () => new ReadableStream({ start: (c) => c.close() }),
   })),
   convertToModelMessages: vi.fn(async () => []),
 }));
@@ -81,7 +74,6 @@ beforeEach(() => {
   vi.clearAllMocks();
   resetHostAccessCache();
   delete process.env.OWNER_EMAILS;
-  uiChunks.current = [];
   db.conversation.findUnique.mockResolvedValue(row());
   db.user.findUnique.mockResolvedValue({ email: "someone@example.com" });
 });
@@ -140,25 +132,5 @@ describe("POST /api/chat: another user's open card is not theirs to close", () =
   it("closes the chat's own card when its owner sends something else", async () => {
     expect((await send("mock/chat")).status).toBe(200);
     expect(dropParkedRuns).toHaveBeenCalledWith("c1");
-  });
-});
-
-describe("POST /api/chat: a second card's tool call is not announced twice", () => {
-  it("drops the repeat of a call the continued message already holds, and keeps new ones", async () => {
-    const asked = { id: "a1", role: "assistant", parts: [{ type: "dynamic-tool", toolName: "Edit", toolCallId: "toolu_B", state: "input-available", input: {} }] };
-    uiChunks.current = [
-      { type: "start", messageId: "a1" },
-      { type: "start-step" },
-      { type: "tool-input-available", toolCallId: "toolu_B", toolName: "Edit", input: {}, providerExecuted: true, dynamic: true },
-      { type: "tool-input-available", toolCallId: "toolu_C", toolName: "Edit", input: {}, providerExecuted: true, dynamic: true },
-      { type: "tool-approval-request", approvalId: "cli-toolu_B", toolCallId: "toolu_B" },
-      { type: "finish-step" },
-      { type: "finish" },
-    ];
-    const res = await send("mock/chat", [userMessage, asked]);
-    const body = await res.text();
-    const announced = [...body.matchAll(/"type":"tool-input-available","toolCallId":"(\w+)"/g)].map((m) => m[1]);
-    expect(announced).toEqual(["toolu_C"]);
-    expect(body).toContain("tool-approval-request");
   });
 });
