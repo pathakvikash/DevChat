@@ -104,10 +104,14 @@ export function editPreview(input: unknown, max = 6): { minus: string[]; plus: s
   return { minus: side(i.old_string, "-"), plus: side(i.new_string, "+") };
 }
 
-// Zero-width and direction marks (they reorder or hide text), BOM, and control characters but for \n and \t.
+// Zero-width, direction and invisible format marks (they reorder or hide text), line/paragraph separators,
+// BOM, tag characters, and control characters but for \n and \t.
 // eslint-disable-next-line no-control-regex
-const HIDDEN = /[\u0000-\u0008\u000B-\u001F\u007F-\u009F\u200B-\u200F\u202A-\u202E\u2066-\u2069\uFEFF]/g;
-const escapeChar = (c: string) => `\\u${c.charCodeAt(0).toString(16).toUpperCase().padStart(4, "0")}`;
+const HIDDEN = /[\u0000-\u0008\u000B-\u001F\u007F-\u009F\u00AD\u061C\u200B-\u200F\u2028-\u202E\u2060-\u2064\u2066-\u2069\uFEFF\u{E0000}-\u{E007F}]/gu;
+const escapeChar = (c: string) => {
+  const code = c.codePointAt(0) ?? 0;
+  return code > 0xffff ? `\\u{${code.toString(16).toUpperCase()}}` : `\\u${code.toString(16).toUpperCase().padStart(4, "0")}`;
+};
 
 /** Text with its invisible characters written out (`\u202E`), for a place that cannot style them. */
 export function showHidden(text: string): string {

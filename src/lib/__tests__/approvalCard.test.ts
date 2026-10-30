@@ -142,3 +142,10 @@ describe("a call held twice shows once, where it is answered", () => {
     expect((groupToolParts([a, b])[0] as any).parts).toEqual([a, b]);
   });
 });
+
+describe("showHidden, wider set", () => {
+  it("writes out soft hyphens, the Arabic letter mark, word joiners, separators and tag characters", () => {
+    const tag = String.fromCodePoint(0xe0041);
+    expect(showHidden(`rm­ -rf؜ x⁠y z${tag}`)).toBe("rm\\u00AD -rf\\u061C x\\u2060y\\u2028z\\u{E0041}");
+  });
+});

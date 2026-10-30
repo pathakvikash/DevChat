@@ -816,13 +816,13 @@ export function dropParkedRuns(conversationId: string) {
 /** The approval answer this request delivers, if the last message carries one. That message also holds the answers to
  *  earlier cards of the same reply, already delivered, and the cards of one reply can be asked and answered in any
  *  order: the answer for a card still parked is the one. With none parked, the first, so the failure names a real card. */
-function pendingAnswer(prompt: Prompt): { approvalId: string; approved: boolean } | undefined {
+function pendingAnswer(prompt: Prompt, conversationId?: string): { approvalId: string; approved: boolean } | undefined {
   const last = prompt[prompt.length - 1] as { role: string; content?: unknown } | undefined;
   if (last?.role !== "tool" || !Array.isArray(last.content)) return undefined;
   const answers = (last.content as any[])
     .filter((p) => p?.type === "tool-approval-response" && typeof p.approvalId === "string")
     .map((p) => ({ approvalId: p.approvalId as string, approved: p.approved === true }));
-  return answers.find((a) => parkedRuns.has(a.approvalId)) ?? answers[0];
+  return answers.find((a) => parkedRuns.get(a.approvalId)?.conversationId === conversationId) ?? answers[0];
 }
 
 function wireRun(run: LiveRun, proc: ChildProcess) {
@@ -1197,7 +1197,7 @@ export function createCliModel(def: CliProviderDef, modelArg: string): LanguageM
     const userId = typeof po.userId === "string" && po.userId ? po.userId : undefined;
     const ask: AskOptions = { allowed, conversationId, userId };
     // The answer to a card is the newest message: resume the process that asked, or say it is gone.
-    const answer = pendingAnswer(options.prompt);
+    const answer = pendingAnswer(options.prompt, conversationId);
     if (answer) {
       const run = parkedRuns.get(answer.approvalId);
       if (!run) {
