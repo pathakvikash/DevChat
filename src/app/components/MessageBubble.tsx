@@ -9,6 +9,7 @@ import MessageActions from "./MessageActions";
 import MessageEditor from "./MessageEditor";
 import MarkdownMessage from "./MarkdownMessage";
 import ToolInvocation from "./ToolInvocation";
+import { SideFold } from "./sidechat/SideFold";
 import CompressionEvent from "./CompressionEvent";
 import { AgentBadge } from "./AgentMessageBubble";
 import { parseAgentMessagePart } from "@/lib/chat/agentMessages";
@@ -42,6 +43,12 @@ interface MessageBubbleProps {
   /** Explains the button for a model without tools. */
   planCaption?: string;
   feedback?: { id: string; rating: number } | null;
+  /** Side chat: no bubble for replies, a subtle one for the user, and an actions row that folds tools. */
+  compact?: boolean;
+  /** Compact: the actions row stays visible (the last reply). Otherwise it shows on hover. */
+  pinActions?: boolean;
+  /** Compact, assistant replies: "Send to main" in the actions row. */
+  sendToMain?: { title: string; text: string; onSend: (text: string) => void };
 }
 
 function MessageBubble({
@@ -64,6 +71,9 @@ function MessageBubble({
   onApprovePlan,
   planCaption,
   feedback,
+  compact = false,
+  pinActions = false,
+  sendToMain,
 }: MessageBubbleProps) {
   const { thinking: inlineThinking, content: cleanContent } =
     splitThinking(content);
@@ -123,27 +133,40 @@ function MessageBubble({
     <div className={`flex ${isUser ? "justify-end" : "justify-start"}`}>
       <div
         className={`
-          relative group flex flex-col max-w-[85%] min-w-0
+          relative group flex flex-col min-w-0
+          ${compact && !isUser ? "w-full max-w-full" : "max-w-[85%]"}
           ${isUser ? "items-end" : "items-start"}
         `}
       >
         <div
-          className={`
+          className={
+            compact
+              ? isUser
+                ? "relative w-fit max-w-full rounded-2xl bg-white/5 px-4 py-2.5 text-[var(--foreground)]"
+                : "relative w-full min-w-0 text-[15px] leading-7 text-[var(--foreground)]"
+              : `
             w-fit max-w-full rounded-[var(--glass-radius-xl)] px-4 py-3 relative
             ${isUser && !agentSender
               ? "glass-button-primary text-white"
               : "glass-card text-[var(--foreground)]"
             }
-          `}
+          `
+          }
         >
           {agentSender && <AgentBadge sender={agentSender} />}
           <FileAttachments fileParts={fileParts} />
 
           {!isUser && combinedThinking && (
-            <ThinkingBlock
-              text={combinedThinking}
-              streaming={isStreaming && !cleanContent}
-            />
+            compact ? (
+              <SideFold label="Reasoning">
+                <ThinkingBlock text={combinedThinking} streaming={isStreaming && !cleanContent} />
+              </SideFold>
+            ) : (
+              <ThinkingBlock
+                text={combinedThinking}
+                streaming={isStreaming && !cleanContent}
+              />
+            )
           )}
 
           {showEditor ? (
@@ -161,6 +184,7 @@ function MessageBubble({
               isStreaming={isStreaming}
               onOpenArtifact={onOpenArtifact}
               onClarificationAnswer={onClarificationAnswer}
+              compact={compact}
             />
           ) : (
             <>
@@ -242,6 +266,9 @@ function MessageBubble({
           onFork={onFork}
           onStartEditing={startEditing}
           onRegenerateMessage={onRegenerateMessage}
+          compact={compact}
+          pinned={pinActions}
+          sendToMain={sendToMain && { text: sendToMain.text, parentTitle: sendToMain.title, onSendToMain: sendToMain.onSend }}
         />
       </div>
     </div>
@@ -255,6 +282,8 @@ const MessageBubbleMemo = memo(MessageBubble, (prev, next) => {
   if (prev.reasoning !== next.reasoning) return false;
   if (prev.isStreaming !== next.isStreaming) return false;
   if (prev.createdAt !== next.createdAt) return false;
+  if (prev.compact !== next.compact || prev.pinActions !== next.pinActions) return false;
+  if (prev.sendToMain?.title !== next.sendToMain?.title || prev.sendToMain?.text !== next.sendToMain?.text) return false;
   if ((prev.feedback?.rating ?? null) !== (next.feedback?.rating ?? null)) return false;
   const prevParts = prev.allParts ?? [];
   const nextParts = next.allParts ?? [];

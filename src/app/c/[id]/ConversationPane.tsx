@@ -3,6 +3,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import PaneBar from "@/app/c/PaneBar";
 import SideChatHeader from "@/app/components/sidechat/SideChatHeader";
+import SideComposer from "@/app/components/sidechat/SideComposer";
+import { sideChatTitle } from "@/lib/chat/sideChatLabels";
 import { AgentTalkingRow } from "@/app/components/AgentMessageBubble";
 import { AgentSendContext } from "@/app/components/MessageActions";
 import { createSideChat, listSideChats, type SideChatSummary } from "@/lib/sideChat";
@@ -40,10 +42,13 @@ interface Props {
   initialPrompt?: string;
   searchProvider: "duckduckgo" | "tavily";
   onToggleSearchProvider: () => void;
+  /** Side chats: wide (half the row) rather than compact. */
+  sideWide?: boolean;
+  onToggleSideWide?: () => void;
 }
 
 /** One chat: header, transcript, composer and panels. Its state lives in useChatPane. */
-export default function ConversationPane({ conversationId, focused, initialPrompt, searchProvider, onToggleSearchProvider }: Props) {
+export default function ConversationPane({ conversationId, focused, initialPrompt, searchProvider, onToggleSearchProvider, sideWide = false, onToggleSideWide }: Props) {
   const p = useChatPane(conversationId, { focused, kind: "chat", searchProvider, initialPrompt });
   const split = useSplitViewOptional();
   const setPaneBusy = split?.setPaneBusy;
@@ -58,8 +63,12 @@ export default function ConversationPane({ conversationId, focused, initialPromp
   useEffect(() => { setPaneBusy?.(conversationId, busy); }, [conversationId, busy, setPaneBusy]);
   useEffect(() => () => setPaneBusy?.(conversationId, false), [conversationId, setPaneBusy]);
 
-  // A side chat: its header lists the main chat's side chats and shows what the side chat sees.
+  // A side chat: a floating card with its own header, a plain transcript and a one-box composer.
   const isSide = p.conversation?.kind === "side";
+  const firstUserText = useMemo(() => {
+    const first = p.messages.find((m) => m.role === "user");
+    return first ? joinTextParts(first.parts) : "";
+  }, [p.messages]);
   // A sub-agent transcript: read only, and never a target for sendToChat.
   const isSub = p.isSubagent;
   const parentId = p.conversation?.parentId ?? null;
@@ -78,18 +87,10 @@ export default function ConversationPane({ conversationId, focused, initialPromp
   const sendToPane = p.sendToPane;
   const agentSend = useMemo(() => ({ targets: sendTargets, send: sendToPane }), [sendTargets, sendToPane]);
   const [sideHistory, setSideHistory] = useState<SideChatSummary[]>([]);
-  const [shown, setShown] = useState<{ shown: number; total: number } | null>(null);
   useEffect(() => {
     if (!isSide || !parentId) return;
     listSideChats(parentId).then(setSideHistory).catch(() => {});
   }, [isSide, parentId]);
-  useEffect(() => {
-    if (!isSide) return;
-    fetch(`/api/conversations/${conversationId}/context`)
-      .then((r) => (r.ok ? r.json() : null))
-      .then((d) => setShown(d?.mainContext ? { shown: d.mainContext.shown, total: d.mainContext.total } : null))
-      .catch(() => {});
-  }, [isSide, conversationId, p.messages.length]);
 
   // Closing a pane stops its stream; unmounting alone does not (the server finishes and saves).
   const registerStop = split?.registerStop;
@@ -164,7 +165,13 @@ export default function ConversationPane({ conversationId, focused, initialPromp
   return (
     <ChatModeContext.Provider value={{ mode: p.mode, setMode: p.setMode, modelCaps: p.modelCaps, setModelCaps: p.setModelCaps }}>
     <div className="flex h-full bg-[var(--background)]">
-      <main className="flex h-full flex-1 min-w-0 flex-col bg-[var(--background)] text-[var(--foreground)]">
+      <main
+        className={
+          isSide
+            ? "m-2 flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-[var(--glass-radius-lg)] border border-[var(--glass-border)] bg-[var(--glass-bg-elevated)] text-[var(--foreground)] shadow-[var(--glass-shadow-sm)]"
+            : "flex h-full flex-1 min-w-0 flex-col bg-[var(--background)] text-[var(--foreground)]"
+        }
+      >
         {split?.multi && !isSide && (
           <PaneBar
             title={split.info[conversationId]?.title ?? "Chat"}
@@ -187,21 +194,14 @@ export default function ConversationPane({ conversationId, focused, initialPromp
         ) : isSide ? (
           parentId && (
             <SideChatHeader
-              title={p.conversation?.title ?? "Side chat"}
-              parentId={parentId}
-              parentTitle={parentTitle}
-              model={p.conversation?.model ?? ""}
-              onModelChange={p.handleModelChange}
+              title={sideChatTitle(p.conversation?.title, firstUserText)}
               history={sideHistory}
               activeId={conversationId}
               onSelect={(id) => split?.replaceAt(conversationId, id)}
               onNewSideChat={async () => split?.replaceAt(conversationId, (await createSideChat(parentId)).id)}
-              dock={split && split.ids.indexOf(conversationId) < split.ids.indexOf(parentId) ? "left" : "right"}
-              onToggleDock={() => split?.toggleDock(conversationId, parentId)}
               onClose={() => split?.closeChat(conversationId)}
-              onOpenParent={() => (split?.ids.includes(parentId) ? split.focusPane(parentId) : split?.replaceFocused(parentId))}
-              shown={shown?.shown}
-              total={shown?.total}
+              expanded={sideWide}
+              onToggleExpanded={() => onToggleSideWide?.()}
             />
           )
         ) : (
@@ -252,11 +252,11 @@ export default function ConversationPane({ conversationId, focused, initialPromp
             <ChatMessages
               messages={p.messages}
               isLoading={p.isLoading}
-              onEditMessage={isSub ? undefined : p.handleEditMessage}
-              onDeleteMessage={isSub ? undefined : p.handleDeleteMessage}
+              onEditMessage={isSub || isSide ? undefined : p.handleEditMessage}
+              onDeleteMessage={isSub || isSide ? undefined : p.handleDeleteMessage}
               onCopyMessage={p.handleCopyMessage}
-              onForkMessage={isSub ? undefined : p.handleForkMessage}
-              onRegenerateMessage={isSub ? undefined : p.handleRegenerateMessage}
+              onForkMessage={isSub || isSide ? undefined : p.handleForkMessage}
+              onRegenerateMessage={isSub || isSide ? undefined : p.handleRegenerateMessage}
               onOpenArtifact={(id: string) => { p.setSelectedArtifactId(id); p.setArtifactPanelOpen(true); }}
               onClarificationAnswer={p.handleClarificationAnswer}
               onApprovePlan={p.mode === "plan" && !p.toolsAvailable ? p.approvePlanReply : undefined}
@@ -266,22 +266,25 @@ export default function ConversationPane({ conversationId, focused, initialPromp
               onQuote={p.addQuote}
               quoteSuppressed={isSub || p.isDialogOpen}
               sendToMain={isSide && parentId ? { title: parentTitle, onSend: (text: string) => window.dispatchEvent(new CustomEvent("vas:send-to-main", { detail: { id: parentId, text } })) } : undefined}
+              compact={isSide}
             />
             </ToolAnswersProvider>
             </AgentSendContext.Provider>
           )}
 
-          {p.messages.length > 0 && (
+          {p.messages.length > 0 && !isSide && (
             <MinimapNavigator
               scrollRef={p.scrollRef}
               messages={p.minimapMessages}
             />
           )}
 
-          <TodoIndicator
-            conversationId={conversationId}
-            onOpen={() => p.setTodoPanelOpen(true)}
-          />
+          {!isSide && (
+            <TodoIndicator
+              conversationId={conversationId}
+              onOpen={() => p.setTodoPanelOpen(true)}
+            />
+          )}
           {/* Overlaid on the top of the list, so the list does not move when agents start or stop talking. */}
           {talk && (
             <div className="glass-card absolute inset-x-0 top-0 z-10 mx-4 mt-2 rounded-[var(--glass-radius-md)] px-3 py-2">
@@ -289,7 +292,24 @@ export default function ConversationPane({ conversationId, focused, initialPromp
             </div>
           )}
         </div>
-        {!isSub && (
+        {!isSub && isSide && (
+          <SideComposer
+            autoFocus={focused}
+            input={p.input}
+            setInput={p.setInput}
+            parentTitle={parentTitle}
+            isLoading={p.isLoading}
+            onSubmit={() => p.handleSubmit()}
+            onStop={p.stop}
+            onQueue={p.queueMessage}
+            queued={p.queued}
+            toolsAvailable={p.toolsAvailable}
+            onQueueEdit={p.editQueued}
+            onQueueRemove={p.removeQueued}
+            onQueueRetry={p.retryQueued}
+          />
+        )}
+        {!isSub && !isSide && (
         <ChatInput
           input={p.input}
           setInput={p.setInput}

@@ -99,6 +99,23 @@ export function equalShares(count: number): number[] {
   return Array.from({ length: Math.max(0, count) }, () => 1 / count);
 }
 
+/** A side chat's width when compact. Wide is half the row. */
+export const SIDE_COMPACT_PX = 400;
+
+/**
+ * Starting fractions with side chats at their width (compact, or half the row when wide).
+ * The other panes split what is left equally. Pass the result through clampWidths.
+ */
+export function sideShares(isSide: boolean[], wide: boolean[], areaPx: number): number[] {
+  const count = isSide.length;
+  const sideCount = isSide.filter(Boolean).length;
+  if (sideCount === 0 || sideCount === count) return equalShares(count);
+  const sides = isSide.map((side, i) => (side ? (wide[i] ? 0.5 : Math.min(0.5, SIDE_COMPACT_PX / Math.max(areaPx, 1))) : 0));
+  const sideTotal = sides.reduce((sum, x) => sum + x, 0);
+  const others = (1 - sideTotal) / (count - sideCount);
+  return isSide.map((side, i) => (side ? sides[i] : others));
+}
+
 /** Fractions of `areaPx` with every pane at least `minPx`. Too small an area gives equal shares. */
 export function clampWidths(fractions: number[], areaPx: number, minPx = SPLIT_MIN_PX): number[] {
   const n = fractions.length;

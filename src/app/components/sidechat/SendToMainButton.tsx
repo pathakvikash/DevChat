@@ -28,9 +28,9 @@ export default function SendToMainButton({ text, parentTitle, onSendToMain }: Se
       type="button"
       onClick={handleClick}
       title={`Add to the message box of "${parentTitle}"`}
-      className="focus-ring inline-flex items-center gap-1 rounded-[var(--glass-radius-sm)] glass-button px-2 py-1 text-xs text-zinc-400 transition hover:text-zinc-100"
+      className="focus-ring inline-flex h-7 items-center gap-1 rounded-[var(--glass-radius-sm)] px-2 text-xs text-zinc-500 transition hover:bg-[var(--glass-bg-hover)] hover:text-zinc-200"
     >
-      {added ? <Check size={12} /> : <ArrowLeftRight size={12} />}
+      {added ? <Check size={16} /> : <ArrowLeftRight size={16} />}
       {added ? "Added" : "Send to main"}
     </button>
   );
