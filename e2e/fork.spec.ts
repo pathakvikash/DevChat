@@ -1,4 +1,4 @@
-import { test, expect, type Page } from "@playwright/test";
+import { test, expect, type Page } from "./fixtures";
 import { createChat, messages, openChat, regenerateButtons, send, storedMessages } from "./helpers";
 
 // Replies are stored only after a reload (see message-actions.spec.ts), and fork copies stored messages.

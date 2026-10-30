@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect } from "./fixtures";
 import { composer, regenerateButtons } from "./helpers";
 
 test("New Chat in the sidebar opens an empty chat on the default model", async ({ page }) => {

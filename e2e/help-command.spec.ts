@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect } from "./fixtures";
 import { createChat, openChat, send } from "./helpers";
 
 test("/help opens the keyboard shortcuts dialog", async ({ page, request }) => {

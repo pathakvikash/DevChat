@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs";
-import { test, expect, type Page } from "@playwright/test";
+import { test, expect, type Page } from "./fixtures";
 import { createChat, openChat, regenerateButtons, send } from "./helpers";
 
 async function chatWithOneReply(page: Page, request: Parameters<typeof createChat>[0]) {

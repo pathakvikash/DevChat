@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect } from "./fixtures";
 import { composer, createChat, messages, openChat, send, storedMessages } from "./helpers";
 
 test("Stop ends a streaming reply early and keeps what arrived", async ({ page, request }) => {

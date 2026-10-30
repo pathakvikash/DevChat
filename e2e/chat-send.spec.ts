@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect } from "./fixtures";
 import { composer, createChat, messages, openChat, regenerateButtons, send, storedMessages } from "./helpers";
 
 test("sending a message streams the mock/echo reply and saves both messages", async ({ page, request }) => {

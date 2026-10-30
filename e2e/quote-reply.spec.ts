@@ -1,4 +1,4 @@
-import { test, expect, type Page } from "@playwright/test";
+import { test, expect, type Page } from "./fixtures";
 import { composer, createChat, messages, openChat, regenerateButtons, send, storedMessages } from "./helpers";
 
 const replyButton = (page: Page) => page.getByRole("button", { name: "Reply to selected text" });

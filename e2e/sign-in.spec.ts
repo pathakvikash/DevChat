@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect } from "./fixtures";
 
 // Every test here starts signed out.
 test.use({ storageState: { cookies: [], origins: [] } });

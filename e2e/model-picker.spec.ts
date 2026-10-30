@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect } from "./fixtures";
 import { createChat, openChat, regenerateButtons, send } from "./helpers";
 
 test("the model picker lists the mock models and switches the chat's model", async ({ page, request }) => {

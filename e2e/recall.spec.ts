@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect } from "./fixtures";
 import { composer, createChat, messages, openChat, regenerateButtons, send, storedMessages } from "./helpers";
 
 // mock/notools has no tool support, so /recall must work without the model's searchChats tool.

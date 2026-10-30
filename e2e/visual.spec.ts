@@ -1,4 +1,4 @@
-import { test, expect, type APIRequestContext, type Page } from "@playwright/test";
+import { test, expect, type APIRequestContext, type Page } from "./fixtures";
 import { createChat, deleteAllChats, openChat, regenerateButtons, send } from "./helpers";
 
 // Key screens in both themes. The desktop (1280px) and mobile (400px) projects each run this file.

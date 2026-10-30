@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect } from "./fixtures";
 import { PROVIDERS } from "../src/lib/providers";
 
 test("the settings page loads with its sections and the saved default model", async ({ page }) => {

@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect } from "./fixtures";
 import { createChat, openChat } from "./helpers";
 
 const heading = (page: import("@playwright/test").Page) => page.getByRole("heading", { name: "Keyboard Shortcuts" });

@@ -1,4 +1,4 @@
-import { test, expect, type Page } from "@playwright/test";
+import { test, expect, type Page } from "./fixtures";
 import { composer, createChat, messages, openChat, storedMessages } from "./helpers";
 
 const queued = (page: Page) => page.getByRole("list", { name: "Queued messages" });

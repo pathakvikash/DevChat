@@ -1,4 +1,4 @@
-import { test, expect, type Page } from "@playwright/test";
+import { test, expect, type Page } from "./fixtures";
 import { composer, createChat, messages, openChat, regenerateButtons, send, storedMessages } from "./helpers";
 
 const COMPRESS_URL = "**/api/conversations/*/compress";

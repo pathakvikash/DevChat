@@ -142,8 +142,23 @@ export async function listProjects(): Promise<ClaudeProject[]> {
     });
   }
 
-  projects.sort((a, b) => (b.lastActive || "").localeCompare(a.lastActive || ""));
-  return projects;
+  return mergeByCwd(projects);
+}
+
+/** One project per working folder, newest first: two project folders can record the same cwd
+ *  (a worktree's sessions often log the main repo), and pickers key their options by cwd. */
+export function mergeByCwd(projects: ClaudeProject[]): ClaudeProject[] {
+  const byCwd = new Map<string, ClaudeProject>();
+  for (const p of projects) {
+    const seen = byCwd.get(p.cwd);
+    if (!seen) {
+      byCwd.set(p.cwd, { ...p });
+      continue;
+    }
+    seen.sessionCount += p.sessionCount;
+    if ((p.lastActive || "") > (seen.lastActive || "")) Object.assign(seen, { slug: p.slug, lastActive: p.lastActive });
+  }
+  return [...byCwd.values()].sort((a, b) => (b.lastActive || "").localeCompare(a.lastActive || ""));
 }
 
 /** Where runs are allowed — only folders Claude Code has already worked in. */

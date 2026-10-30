@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect } from "./fixtures";
 import { createChat, messages, openChat, regenerateButtons, send } from "./helpers";
 
 test("mock/tool calls the calculator and shows a tool card with its output", async ({ page, request }) => {

@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect } from "./fixtures";
 import { createChat, openChat } from "./helpers";
 
 const palette = (page: import("@playwright/test").Page) => page.getByRole("dialog", { name: "Command palette" });

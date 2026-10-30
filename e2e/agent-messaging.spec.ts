@@ -1,4 +1,4 @@
-import { test, expect, type APIRequestContext, type Page } from "@playwright/test";
+import { test, expect, type APIRequestContext, type Page } from "./fixtures";
 import { createChat, deleteAllChats, messages, openChat, regenerateButtons, send } from "./helpers";
 
 const pane = (page: Page, id: string) => page.locator(`[data-pane-id="${id}"]`);

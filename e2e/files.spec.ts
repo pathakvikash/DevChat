@@ -1,6 +1,6 @@
 import path from "node:path";
 import { rmSync, writeFileSync } from "node:fs";
-import { test, expect, type APIRequestContext } from "@playwright/test";
+import { test, expect, type APIRequestContext } from "./fixtures";
 import { composer, createChat, openChat, regenerateButtons, storedMessages } from "./helpers";
 
 // The same folder playwright.config.ts passes as SANITY_WORKING_FOLDER.

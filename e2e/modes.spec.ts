@@ -1,4 +1,4 @@
-import { test, expect, type Page } from "@playwright/test";
+import { test, expect, type Page } from "./fixtures";
 import { createChat, messages, openChat, regenerateButtons, send } from "./helpers";
 
 /** The header's mode switch (the sidebar has a compact copy of the same radio group). */

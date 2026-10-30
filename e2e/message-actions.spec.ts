@@ -1,4 +1,4 @@
-import { test, expect, type Page } from "@playwright/test";
+import { test, expect, type Page } from "./fixtures";
 import { composer, createChat, messages, openChat, regenerateButtons, send, storedMessages } from "./helpers";
 
 // These specs reload first so they work on stored messages; the "sent in this session" cases below skip the reload.

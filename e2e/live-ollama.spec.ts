@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect } from "./fixtures";
 import { createChat, messages, openChat, regenerateButtons, send } from "./helpers";
 
 // Optional: talks to a real local model. Run with `npm run sanity -- --live`.

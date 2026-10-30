@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect } from "./fixtures";
 import { createChat, messages, openChat, regenerateButtons, send, storedMessages } from "./helpers";
 
 test("mock/subagent starts a helper, shows its card, and saves the helper as a child chat", async ({ page, request }) => {

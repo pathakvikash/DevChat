@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect } from "./fixtures";
 import { createChat, messages, openChat, regenerateButtons, send } from "./helpers";
 
 test("a reload keeps every message, and the chat still works afterwards", async ({ page, request }) => {
