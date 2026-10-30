@@ -2,6 +2,9 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { EventEmitter } from "events";
 import { PassThrough, Writable } from "stream";
 import { spawn } from "child_process";
+import { mkdtempSync } from "fs";
+import { tmpdir } from "os";
+import { join } from "path";
 import { editPreview } from "@/lib/utils/messageParts";
 import {
   CLI_PROVIDERS,
@@ -98,10 +101,10 @@ const toolUse = (id: string, name: string) => ({
   type: "assistant",
   message: { role: "assistant", content: [{ type: "tool_use", id, name, input: { file_path: "/w/a.txt" } }] },
 });
-const askRequest = (requestId: string, toolUseId: string, toolName = "Edit") => ({
+const askRequest = (requestId: string, toolUseId: string, toolName = "Edit", input: unknown = { file_path: "/w/a.txt" }) => ({
   type: "control_request",
   request_id: requestId,
-  request: { subtype: "can_use_tool", tool_name: toolName, input: { file_path: "/w/a.txt" }, tool_use_id: toolUseId },
+  request: { subtype: "can_use_tool", tool_name: toolName, input, tool_use_id: toolUseId },
 });
 const resultLine = { type: "result", subtype: "success", is_error: false, result: "done", usage: { input_tokens: 1, output_tokens: 1 } };
 /** The next request: the prompt ends with the user's answer to an approval. */
@@ -189,12 +192,14 @@ describe("Ask bridge: park and resume", () => {
   });
 
   it("honours the chat's allow-for-chat list on the next request without a card", async () => {
-    const stream = await start(prompt(), "ask", "/w", "conv-allow", ["Edit"]);
+    // The folder must exist: an allowed edit is only answered when its path resolves inside it.
+    const dir = mkdtempSync(join(tmpdir(), "devchat-allow-"));
+    const stream = await start(prompt(), "ask", dir, "conv-allow", ["Edit"]);
     const parts = readAll(stream);
     await until(() => spawned.length === 1);
     const c = spawned[0];
     c.say(toolUse("toolu_allow", "Edit"));
-    c.say(askRequest("req_allow", "toolu_allow"));
+    c.say(askRequest("req_allow", "toolu_allow", "Edit", { file_path: join(dir, "a.txt") }));
     await until(() => c.written.length >= 2);
     expect(c.written[1]).toBe(controlResponse("req_allow", { behavior: "allow" }));
     c.say(resultLine);

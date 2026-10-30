@@ -1,6 +1,7 @@
 import { spawn } from "child_process";
 import { requireUserId } from "@/lib/auth";
 import { isRunnableCwd } from "@/lib/claude/sessions";
+import { canUseHostTools, HOST_TOOLS_REFUSED } from "@/lib/hostAccess";
 
 // Spawning a CLI needs the Node runtime. 60s is the Vercel hobby ceiling; this
 // route only really works locally, where the limit doesn't apply.
@@ -57,7 +58,8 @@ function bad(error: string, status = 400) {
 }
 
 export async function POST(req: Request) {
-  await requireUserId();
+  const userId = await requireUserId();
+  if (!(await canUseHostTools(userId))) return bad(HOST_TOOLS_REFUSED, 403);
 
   let body: any;
   try {

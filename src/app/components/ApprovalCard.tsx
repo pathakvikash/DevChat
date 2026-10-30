@@ -3,23 +3,7 @@
 import { useState } from "react";
 import { ShieldQuestion } from "lucide-react";
 import { useToolAnswers } from "./ToolAnswers";
-import { approvalTitle, CHAT_ALLOWABLE_TOOLS, editPreview } from "@/lib/utils/messageParts";
-
-const MAX_ROWS = 4;
-const MAX_VALUE = 160;
-
-/** Up to MAX_ROWS short "label: value" rows, so the card stays small. */
-function keyRows(input: unknown): Array<[string, string]> {
-  if (!input || typeof input !== "object") return [];
-  const hasDiff = editPreview(input).minus.length > 0;
-  return Object.entries(input as Record<string, unknown>)
-    .filter(([k]) => !(hasDiff && (k === "old_string" || k === "new_string")))
-    .slice(0, MAX_ROWS)
-    .map(([k, v]) => {
-      const text = typeof v === "string" ? v : JSON.stringify(v) ?? "";
-      return [k, text.length > MAX_VALUE ? `${text.slice(0, MAX_VALUE)}…` : text];
-    });
-}
+import { approvalDetails, approvalTitle, CHAT_ALLOWABLE_TOOLS } from "@/lib/utils/messageParts";
 
 /** Ask mode: a tool call waits here for Allow or Deny. Shown only in the latest message. */
 export default function ApprovalCard({
@@ -36,8 +20,7 @@ export default function ApprovalCard({
   // One answer per card: a double click, or a second click while the reply resumes, does nothing.
   const [answered, setAnswered] = useState(false);
   const title = approvalTitle(toolName, input);
-  const rows = keyRows(input);
-  const diff = editPreview(input);
+  const { block, description, rest } = approvalDetails(toolName, input);
   const answer = (approved: boolean, allowForChat = false) => {
     if (answered) return;
     setAnswered(true);
@@ -58,21 +41,27 @@ export default function ApprovalCard({
       </div>
       <div className="px-3 py-2">
         <p className="text-sm font-medium text-[var(--foreground)] break-words">{title}</p>
-        {(diff.minus.length > 0 || diff.plus.length > 0) && (
-          <pre className="mt-1.5 max-h-48 overflow-auto rounded-sm text-xs font-mono text-zinc-200 whitespace-pre-wrap break-all">
-            {[...diff.minus, ...diff.plus].map((l, n) => (
-              <div key={n} className={l.startsWith("+") ? "bg-emerald-500/10" : l.startsWith("-") ? "bg-red-500/10" : undefined}>
-                {l}
+        {block.length > 0 && (
+          <pre className="mt-1.5 max-h-64 overflow-auto rounded-sm text-xs font-mono text-zinc-200 whitespace-pre-wrap break-all">
+            {block.map((l, n) => (
+              <div
+                key={n}
+                className={l.tone === "add" ? "bg-emerald-500/10" : l.tone === "del" ? "bg-red-500/10" : l.tone === "muted" ? "text-zinc-400" : undefined}
+              >
+                {l.text}
               </div>
             ))}
           </pre>
         )}
-        {rows.length > 0 && (
-          <dl className="mt-1.5 space-y-0.5">
-            {rows.map(([k, v]) => (
+        {description && (
+          <p className="mt-1.5 text-xs text-zinc-400 whitespace-pre-wrap break-words">Model&apos;s description: {description}</p>
+        )}
+        {rest.length > 0 && (
+          <dl className="mt-1.5 max-h-64 overflow-auto space-y-0.5">
+            {rest.map(([k, v]) => (
               <div key={k} className="flex gap-2 min-w-0">
                 <dt className="text-xs text-zinc-400 w-16 shrink-0 truncate">{k}</dt>
-                <dd className="text-xs font-mono text-zinc-200 truncate">{v}</dd>
+                <dd className="text-xs font-mono text-zinc-200 whitespace-pre-wrap break-all min-w-0">{v}</dd>
               </div>
             ))}
           </dl>
@@ -86,7 +75,7 @@ export default function ApprovalCard({
           {showAll ? "▾ Hide arguments" : "› Show all arguments"}
         </button>
         {showAll && (
-          <pre className="mt-1 max-h-48 overflow-auto text-xs font-mono text-zinc-300 whitespace-pre-wrap break-all">
+          <pre className="mt-1 max-h-64 overflow-auto text-xs font-mono text-zinc-300 whitespace-pre-wrap break-all">
             {JSON.stringify(input, null, 2)}
           </pre>
         )}

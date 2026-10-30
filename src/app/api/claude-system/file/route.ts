@@ -1,16 +1,20 @@
 import { NextRequest, NextResponse } from "next/server";
 import { readFileSync, writeFileSync, existsSync } from "fs";
 import { homedir } from "os";
-import { join, resolve } from "path";
+import { join, resolve, sep } from "path";
+import { requireUserId } from "@/lib/auth";
+import { canUseHostTools, HOST_TOOLS_REFUSED } from "@/lib/hostAccess";
 
 const CLAUDE_DIR = resolve(join(homedir(), ".claude"));
 
 function isInsideClaude(filePath: string): boolean {
   const resolved = resolve(filePath);
-  return resolved.startsWith(CLAUDE_DIR);
+  return resolved === CLAUDE_DIR || resolved.startsWith(CLAUDE_DIR + sep);
 }
 
 export async function POST(req: NextRequest) {
+  const userId = await requireUserId();
+  if (!(await canUseHostTools(userId))) return NextResponse.json({ error: HOST_TOOLS_REFUSED }, { status: 403 });
   try {
     const { path, content } = await req.json();
     if (!path || typeof path !== "string") {

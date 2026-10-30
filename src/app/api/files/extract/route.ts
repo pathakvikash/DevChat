@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getModel } from "@/lib/models";
 import { resolveProviderCreds } from "@/lib/apiKeys";
+import { canUseHostTools } from "@/lib/hostAccess";
 import { requireUserId } from "@/lib/auth";
 import { extractKnownFileText, validateFileSize } from "@/lib/file-extract";
 
@@ -59,7 +60,7 @@ export async function POST(req: NextRequest) {
     let contextWindow = 8192;
     if (modelId) {
       try {
-        contextWindow = getModel(modelId, await resolveProviderCreds(userId)).contextWindow;
+        contextWindow = getModel(modelId, await resolveProviderCreds(userId), await canUseHostTools(userId)).contextWindow;
       } catch {
         // modelId might be unknown to getModel (e.g. deleted). Fall through.
       }

@@ -46,6 +46,7 @@ import {
   type QueuedInjection,
   type QueuedMarker,
 } from "@/lib/chat/queue";
+import { dropRepeatedToolCalls } from "@/lib/chat/dropRepeatedToolCalls";
 import { resolveChatSettings } from "@/lib/chat/resolveChatSettings";
 import { resolveModelCandidates } from "@/lib/chat/resolveModelCandidates";
 import { cliProviderForModel, dropParkedRuns } from "@/lib/cliProviders";
@@ -57,6 +58,7 @@ import {
   getNextContextTier,
 } from "@/lib/contextManager";
 import { requireUserId } from "@/lib/auth";
+import { canUseHostTools, HOST_TOOLS_REFUSED } from "@/lib/hostAccess";
 import { effectiveToolMode, isChatMode, MODE_POLICY, toolsWithAnsweredApproval } from "@/lib/chat/modes";
 
 // A helper run can take minutes: the 5-minute limit plus the parent's own steps.
@@ -90,10 +92,11 @@ export async function POST(req: Request) {
   // A Claude Code card left open is closed when the chat sends anything that does not answer it.
   const lastParts = Array.isArray(messages) && messages.at(-1)?.role === "assistant" ? (messages.at(-1).parts ?? []) : [];
   const answeringCli = lastParts.some((p: any) => String(p?.approval?.id ?? "").startsWith("cli-"));
+  // Only once the chat is known to be this user's: anyone can send any conversation id.
+  let ownerVerified = false;
   const releaseCliRuns = () => {
-    if (conversationId) dropParkedRuns(conversationId);
+    if (conversationId && ownerVerified) dropParkedRuns(conversationId);
   };
-  if (!answeringCli) releaseCliRuns();
   // Anything unknown falls back to chat, the safest mode.
   const requestedMode: ToolMode = isChatMode(bodyMode) ? bodyMode : "chat";
   // Without AUTH_SECRET the SDK can't sign or verify approvals, so Ask would trust the browser's answers.
@@ -109,13 +112,14 @@ export async function POST(req: Request) {
       });
       // A side chat is only ever read against a main chat of the same user.
       if (!owned || owned.userId !== userId || (owned.parent && owned.parent.userId !== userId)) {
-        releaseCliRuns();
         return new Response(JSON.stringify({ error: "Conversation not found" }), {
           status: 404,
           headers: { "Content-Type": "application/json" },
         });
       }
       compressedAt = owned.compressedAt;
+      ownerVerified = true;
+      if (!answeringCli) releaseCliRuns();
     }
     const [settings, summarized] = await Promise.all([
       resolveChatSettings({
@@ -213,12 +217,21 @@ export async function POST(req: Request) {
     }
     model = resolution.model;
     const candidateModels = resolution.candidateModels;
+    // CLI models run as the server's OS user; a fallback that is one is skipped below (getModel refuses it).
+    const hostTools = await canUseHostTools(userId);
+    if (!hostTools && cliProviderForModel(model)) {
+      releaseCliRuns();
+      return new Response(
+        JSON.stringify({ error: `${HOST_TOOLS_REFUSED} Pick another model: this one runs on the server's own machine.` }),
+        { status: 403, headers: { "Content-Type": "application/json" } },
+      );
+    }
 
     let lastError: unknown;
     for (const servedModel of candidateModels) {
     let modelConfig: ReturnType<typeof getModel> | null = null;
     try {
-      modelConfig = getModel(servedModel, resolution.creds);
+      modelConfig = getModel(servedModel, resolution.creds, hostTools);
     } catch {
       console.error(
         `[chat] model config unavailable for ${servedModel} — skipping fallback candidate`,
@@ -348,6 +361,7 @@ export async function POST(req: Request) {
               cwd: cliCwd,
               access: MODE_POLICY[toolMode].cli,
               conversationId: conversationId ?? "",
+              userId,
               allowedTools: Array.isArray(bodyAllowedTools)
                 ? bodyAllowedTools.filter((t: unknown): t is string => typeof t === "string" && CHAT_ALLOWABLE_TOOLS.has(t))
                 : [],
@@ -582,6 +596,7 @@ export async function POST(req: Request) {
                       pipeJsonRender(
                         result
                           .toUIMessageStream({ onError: onStreamError })
+                          .pipeThrough(dropRepeatedToolCalls(continuing))
                           .pipeThrough(queuedMarkerTransform(pendingMarkers)),
                       ),
                     );
