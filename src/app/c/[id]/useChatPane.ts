@@ -164,6 +164,8 @@ export function useChatPane(conversationId: string, { focused, kind, searchProvi
   const [keyboardShortcutsOpen, setKeyboardShortcutsOpen] = useState(false);
   const [isCompressing, setIsCompressing] = useState(false);
   const [compressFocus, setCompressFocus] = useState("");
+  // Bumped by each manual /compress, so a late clear from an earlier reply's refresh (onFinish) cannot hide its status row.
+  const compressRunRef = useRef(0);
 
   /* ─── Settings persistence ─────────────────────────────────────────────── */
 
@@ -544,7 +546,10 @@ export function useChatPane(conversationId: string, { focused, kind, searchProvi
   }, [isLoading, conversation, messages, setMessages]);
 
   onFinishRef.current = useCallback((finish?: ChatFinish) => {
-    refreshConversation().finally(() => setIsCompressing(false));
+    const run = compressRunRef.current;
+    refreshConversation().finally(() => {
+      if (run === compressRunRef.current) setIsCompressing(false);
+    });
     fetchContextUsage();
     // `finish.messages` is the chat store's live array; the `messages` closure
     // is from the last render, which has not happened yet when onFinish runs.
@@ -679,6 +684,12 @@ export function useChatPane(conversationId: string, { focused, kind, searchProvi
     const prompt = initialPrompt ?? takeSideQuestion(conversationId);
     if (!prompt) return;
     autoSubmittedRef.current = true;
+    if (initialPrompt) {
+      // Drop ?q= once sent, so a reload doesn't send the prompt again.
+      const url = new URL(window.location.href);
+      url.searchParams.delete("q");
+      window.history.replaceState(null, "", url);
+    }
     setTimeout(() => {
       sendMessage({ parts: [{ type: "text" as const, text: prompt }] }).catch((e) =>
         console.error("auto-submit failed:", e),
@@ -891,7 +902,11 @@ export function useChatPane(conversationId: string, { focused, kind, searchProvi
       } else {
         await runCommandAction(command, arg, {
           conversationId, conversation, sendMessage, setMessages, setConversation,
-          setIsCompressing, setCompressFocus, setArtifactPanelOpen,
+          setIsCompressing: (v: boolean) => {
+            if (v) compressRunRef.current++;
+            setIsCompressing(v);
+          },
+          setCompressFocus, setArtifactPanelOpen,
           setScratchpadOpen, setModelSettingsOpen, setKeyboardShortcutsOpen, toast, refreshConversationAndMessages,
           setMode, setRequestBody, toolsAvailable,
           openSide: (question) => {
