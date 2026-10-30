@@ -16,7 +16,7 @@ import {
   type AgentPane,
   type AgentPaneKind,
 } from "@/lib/chat/agentMessages";
-import { AGENT_DELIVERED, AGENT_NOT_OPEN, raiseHop, routeAgentMessage } from "@/lib/utils/agentLink";
+import { AGENT_DELIVERED, AGENT_NOT_OPEN, exchangeEnded, raiseHop, routeAgentMessage } from "@/lib/utils/agentLink";
 import {
   closePane,
   fitsSideBySide,
@@ -185,6 +185,8 @@ export function SplitViewProvider({ children }: { children: React.ReactNode }) {
   const agentPanes = useRef(new Map<string, AgentPaneHandle>());
   // Hop of each pane's current agent exchange; a pane's own user send clears it.
   const hops = useRef(new Map<string, number>());
+  // Who each pane is talking with. A refusal clears `talk` but not this, so the exchange's end still resets both hops.
+  const partners = useRef(new Map<string, string>());
   // Counts Stop all: a sendToChat that was waiting on a side pane checks it before it delivers.
   const stopEpoch = useRef(0);
   // Latest committed state, for async steps (after an await) and for the close cascade.
@@ -416,8 +418,10 @@ export function SplitViewProvider({ children }: { children: React.ReactNode }) {
   const resetHop = useCallback((id: string) => hops.current.delete(id), []);
   const bumpHop = (id: string, hop: number) => setHop(id, raiseHop(hopOf(id), hop));
 
-  const startTalk = (a: string, b: string, hop: number) =>
+  const startTalk = (a: string, b: string, hop: number) => {
+    partners.current.set(a, b).set(b, a);
     setTalk((prev) => ({ ...prev, [a]: { withId: b, hop }, [b]: { withId: a, hop } }));
+  };
 
   const endTalkOf = (id: string) => {
     const partner = live.current.talk[id]?.withId;
@@ -475,16 +479,17 @@ export function SplitViewProvider({ children }: { children: React.ReactNode }) {
     return dispatch(fromId, toId, message, 1);
   };
 
-  /** A pane's reply ended: if the other pane of its exchange is idle too, the exchange is over. */
+  /** A pane's reply ended: if the other pane of its exchange is idle too, the exchange is over and both hops start again. */
   const agentIdle = (id: string) => {
-    const partner = live.current.talk[id]?.withId;
-    if (!partner || agentPanes.current.get(partner)?.isLoading()) return;
-    hops.current.delete(id);
-    hops.current.delete(partner);
+    const ended = exchangeEnded(id, partners.current, (p) => agentPanes.current.get(p)?.isLoading() ?? false);
+    if (!ended.length) return;
+    for (const x of ended) {
+      hops.current.delete(x);
+      partners.current.delete(x);
+    }
     setTalk((prev) => {
       const next = { ...prev };
-      delete next[id];
-      delete next[partner];
+      for (const x of ended) delete next[x];
       return next;
     });
   };
@@ -497,6 +502,7 @@ export function SplitViewProvider({ children }: { children: React.ReactNode }) {
       agentPanes.current.get(id)?.dropAgentQueued();
     }
     hops.current.clear();
+    partners.current.clear();
     setTalk({});
   };
 

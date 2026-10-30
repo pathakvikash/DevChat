@@ -15,6 +15,16 @@ export function raiseHop(current: number, incoming: number): number {
 }
 
 /**
+ * The panes whose hops start over when `id`'s reply ends: `id` and its exchange partner, once that
+ * one is idle too. `partners` is kept when a refusal clears the talk, so the cap's end still finds it.
+ */
+export function exchangeEnded(id: string, partners: ReadonlyMap<string, string>, isBusy: (id: string) => boolean): string[] {
+  const partner = partners.get(id);
+  if (!partner) return [id]; // a leftover delivered without an exchange still ends with its own reply
+  return isBusy(partner) ? [] : [id, partner];
+}
+
+/**
  * Where `to` goes from pane `fromId`: an open chat (id or exact title), or `"side"` for the sender's
  * own side chat, which is opened when it is closed. Refuses the sender itself, closed chats,
  * sub-agent transcripts, and `"side"` from a side chat.

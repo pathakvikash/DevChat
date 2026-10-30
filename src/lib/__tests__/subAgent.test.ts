@@ -320,6 +320,6 @@ describe("runSubAgent with resume", () => {
     const prompt = JSON.stringify(calls[0].prompt);
     expect(prompt).toContain("Read the notes.");
     expect(prompt).toContain("One note.");
-    expect(prompt).toContain("Message from Main (the main chat, not the user): Check the second folder.");
+    expect(prompt).toContain("Message from Main (the main chat, not the user):\\n```\\nCheck the second folder.\\n```");
   });
 });
