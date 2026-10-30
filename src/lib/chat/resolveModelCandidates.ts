@@ -1,6 +1,7 @@
 import { initializeOllamaModels, listModels, type ProviderCreds } from "@/lib/models";
 import { providerForModel } from "@/lib/providers";
 import { resolveProviderCreds } from "@/lib/apiKeys";
+import { canUseHostTools } from "@/lib/hostAccess";
 
 export interface ResolveModelCandidatesOptions {
   requestedModel: string | undefined;
@@ -21,7 +22,7 @@ export async function resolveModelCandidates(
 
   let model = opts.requestedModel;
   if (!model) {
-    const { models } = await listModels(creds);
+    const { models } = await listModels(creds, await canUseHostTools(opts.userId));
     const ollamaModels = models.filter((m) => m.id.startsWith("ollama/"));
     if (ollamaModels.length > 0) {
       model = (ollamaModels.find((m) => m.supportsTools) || ollamaModels[0]).id;

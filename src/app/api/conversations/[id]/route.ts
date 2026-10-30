@@ -4,6 +4,7 @@ import { requireUserId } from "@/lib/auth";
 import { isRunnableCwd } from "@/lib/claude/sessions";
 import { deleteTraces } from "@/lib/temporaryChat";
 import { dropParkedRuns } from "@/lib/cliProviders";
+import { canUseHostTools, HOST_TOOLS_REFUSED } from "@/lib/hostAccess";
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
@@ -53,12 +54,18 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     }
 
     // A working folder lets a CLI-backed model read (or, in agent mode, edit)
-    // files there, so it is confined to folders Claude Code already knows.
-    if (workingFolder && !(await isRunnableCwd(workingFolder))) {
-      return NextResponse.json(
-        { error: "Working folder must be one of your Claude Code project folders" },
-        { status: 400 },
-      );
+    // files there, so it is confined to folders Claude Code already knows,
+    // and to the server's owner: the folder list is the owner's home directory.
+    if (workingFolder) {
+      if (!(await canUseHostTools(userId))) {
+        return NextResponse.json({ error: HOST_TOOLS_REFUSED }, { status: 403 });
+      }
+      if (!(await isRunnableCwd(workingFolder))) {
+        return NextResponse.json(
+          { error: "Working folder must be one of your Claude Code project folders" },
+          { status: 400 },
+        );
+      }
     }
 
     if (kbId) {

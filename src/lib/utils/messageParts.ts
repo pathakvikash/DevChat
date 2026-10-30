@@ -104,6 +104,54 @@ export function editPreview(input: unknown, max = 6): { minus: string[]; plus: s
   return { minus: side(i.old_string, "-"), plus: side(i.new_string, "+") };
 }
 
+/** One line (or one text) of an approval card's main block. */
+export interface ApprovalLine {
+  text: string;
+  tone?: "add" | "del" | "muted";
+}
+
+/** Everything an approval card shows about a call. Nothing is cut and no key is dropped. */
+export interface ApprovalDetails {
+  /** What will run: a command, a file's path and content, or every edit as a diff. */
+  block: ApprovalLine[];
+  /** The model's own account of the call. It is the model's claim, so it is shown apart from what runs. */
+  description?: string;
+  /** Every key the block does not show. */
+  rest: Array<[string, string]>;
+}
+
+const asText = (v: unknown) => (typeof v === "string" ? v : (JSON.stringify(v, null, 2) ?? ""));
+
+export function approvalDetails(toolName: string, input: unknown): ApprovalDetails {
+  const i = (input && typeof input === "object" ? input : {}) as Record<string, unknown>;
+  const shown = new Set<string>();
+  const block: ApprovalLine[] = [];
+  const diff = (edit: unknown): ApprovalLine[] => {
+    const d = editPreview(edit, Infinity);
+    return [...d.minus, ...d.plus].map((text) => ({ text, tone: text.startsWith("+") ? "add" : "del" }));
+  };
+  if (toolName === "Bash" && typeof i.command === "string") {
+    shown.add("command");
+    block.push({ text: i.command });
+  } else if (toolName === "Write" && typeof i.content === "string") {
+    shown.add("file_path").add("content");
+    block.push({ text: asText(i.file_path), tone: "muted" }, { text: i.content });
+  } else if (toolName === "MultiEdit" && Array.isArray(i.edits)) {
+    shown.add("edits");
+    i.edits.forEach((edit, n, all) => {
+      if (all.length > 1) block.push({ text: `Edit ${n + 1} of ${all.length}`, tone: "muted" });
+      const lines = diff(edit);
+      block.push(...(lines.length ? lines : [{ text: asText(edit) }]));
+    });
+  } else if (diff(i).length) {
+    shown.add("old_string").add("new_string");
+    block.push(...diff(i));
+  }
+  const description = typeof i.description === "string" && i.description ? i.description : undefined;
+  if (description) shown.add("description");
+  return { block, description, rest: Object.entries(i).filter(([k]) => !shown.has(k)).map(([k, v]) => [k, asText(v)]) };
+}
+
 /** Approval reasons the page writes: shown as "Allowed for this chat", "Denied", "Stopped". */
 export const ALLOWED_FOR_CHAT = "Allowed for this chat";
 export const DENIED_BY_USER = "The user denied this action.";
@@ -119,7 +167,8 @@ export function approvalTitle(toolName: string, input: any): string {
   if (toolName === "forgetFact") return `Forget memory: "${i.key ?? ""}"`;
   // Claude Code's own tools, asked for in Ask mode.
   if (toolName === "Edit" || toolName === "MultiEdit") return `Edit ${i.file_path ?? ""}`;
-  if (toolName === "Write") return `Create ${i.file_path ?? ""}`;
+  // Write replaces a file that exists, so it is never worded as creating one.
+  if (toolName === "Write") return `Write file ${i.file_path ?? ""}`;
   if (toolName === "Bash") return "Run a command";
   if (toolName.startsWith("mcp_")) return `Run ${toolName.replace(/^mcp_[^_]*_/, "")} on an MCP server`;
   return `Run ${toolName}`;
@@ -198,6 +247,10 @@ export type GroupedItem =
   | { type: "tool-group"; key: string; parts: Array<AnyPart & ToolPart> }
   | { type: "other"; key: string; part: AnyPart; index: number };
 
+const STATE_RANK: Record<string, number> = { "input-streaming": 0, "input-available": 1, "approval-requested": 2, "approval-responded": 3 };
+/** How far a call has got; an unknown or finished state (output-*, result) ranks last. */
+const progress = (p: ToolPart) => STATE_RANK[p.state ?? ""] ?? 4;
+
 export function groupToolParts(parts: AnyPart[]): GroupedItem[] {
   const groups = new Map<string, Array<AnyPart & ToolPart>>();
   const out: GroupedItem[] = [];
@@ -215,6 +268,8 @@ export function groupToolParts(parts: AnyPart[]): GroupedItem[] {
       out.push({ type: "other", key: `part-${i}`, part: p, index: i });
     }
   }
+  // A call saved twice (an older reply repeated it in a later step) shows in its most advanced state.
+  for (const group of groups.values()) group.sort((a, b) => progress(b) - progress(a));
 
   return out;
 }

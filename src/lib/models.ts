@@ -397,16 +397,18 @@ function toModelConfig(
 }
 
 /** Every model these creds can reach. Provider failures land in `status` rather than
- *  throwing, so one broken key doesn't hide the rest. */
+ *  throwing, so one broken key doesn't hide the rest. CLI models run on the server's machine,
+ *  so they are listed only when `hostTools` says this user may use them (canUseHostTools). */
 export async function listModels(
   creds: ProviderCreds,
+  hostTools = false,
 ): Promise<{ models: ModelConfig[]; status: ProviderStatus[] }> {
   await initializeOllamaModels();
   const models: ModelConfig[] = Object.values(ollamaModelCache);
 
   // Coding-agent CLIs installed on this machine (local server only).
   const cliStatus: ProviderStatus[] = [];
-  if (detectionAvailable()) {
+  if (hostTools && detectionAvailable()) {
     const cli = await listCliModels();
     for (const e of cli.entries) models.push(cliModelConfig(e));
     cliStatus.push(...cli.status);
@@ -434,8 +436,9 @@ export async function listModels(
 }
 
 /** Runnable config for one model id. Hosted models are built fresh from `creds` so
- *  concurrent users never share a client or a key. Throws on unknown id or no creds. */
-export function getModel(modelId: string, creds: ProviderCreds = {}): ModelConfig {
+ *  concurrent users never share a client or a key. Throws on unknown id or no creds.
+ *  A CLI model needs `hostTools` (canUseHostTools): it runs as the server's OS user. */
+export function getModel(modelId: string, creds: ProviderCreds = {}, hostTools = false): ModelConfig {
   const mock = mockModelConfig(modelId);
   if (mock) return mock;
   if (ollamaModelCache[modelId]) return ollamaModelCache[modelId];
@@ -459,6 +462,7 @@ export function getModel(modelId: string, creds: ProviderCreds = {}): ModelConfi
     if (!detectionAvailable()) {
       throw new Error(`${cliDef.label} is only available when DevChat runs on your own machine`);
     }
+    if (!hostTools) throw new Error(`${cliDef.label} is only available to the server's owner`);
     const upstreamId = bareModelId(modelId);
     return cliModelConfig({
       id: modelId,

@@ -3,11 +3,16 @@ import { requireUserId } from "@/lib/auth";
 import { PROVIDERS } from "@/lib/providers";
 import { detectionAvailable, scanLocalCredentials } from "@/lib/providerDetect";
 import { setSettingsKey, maskKey } from "@/lib/settings";
+import { canUseHostTools, HOST_TOOLS_REFUSED } from "@/lib/hostAccess";
 
 /** Consent-based key import: POST {} scans, POST { import } saves only those items.
  *  Raw keys never leave the server — the client sees masked values and (provider, source). */
 export async function POST(req: NextRequest) {
   const userId = await requireUserId();
+  // The scan reads the server user's home directory: only its owner may see what it finds.
+  if (!(await canUseHostTools(userId))) {
+    return NextResponse.json({ error: HOST_TOOLS_REFUSED }, { status: 403 });
+  }
   if (!detectionAvailable()) {
     return NextResponse.json(
       { error: "Provider detection only works when DevChat runs on your own machine." },

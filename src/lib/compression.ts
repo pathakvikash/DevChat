@@ -1,6 +1,7 @@
 import { generateText } from "ai";
 import { getModel, initializeOllamaModels } from "@/lib/models";
 import { resolveProviderCreds } from "@/lib/apiKeys";
+import { canUseHostTools } from "@/lib/hostAccess";
 import { prisma } from "@/lib/db";
 import { countTokens } from "@/lib/tokens";
 import { liveSince } from "@/lib/liveSince";
@@ -82,7 +83,8 @@ export async function compressConversation(
 
   const effectiveModelId = isSanityMode() ? "mock/summary" : modelId; // sanity suite: never a real model
   const creds = conversation.userId ? await resolveProviderCreds(conversation.userId) : {};
-  const modelConfig = getModel(effectiveModelId, creds);
+  const hostTools = !!conversation.userId && (await canUseHostTools(conversation.userId));
+  const modelConfig = getModel(effectiveModelId, creds, hostTools);
   const isOllama = effectiveModelId.startsWith("ollama/");
 
   const MAX_COMPRESSION_TOKENS = 4000;

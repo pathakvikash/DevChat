@@ -76,6 +76,15 @@ function helperPrompt(mode: ToolMode, workingFolder?: string | null): string {
   ].join("\n");
 }
 
+/** The parent's provider options for a helper. A CLI helper outside Agent mode only reads: no permission bridge, no
+ *  allow list, and no chat id (so it cannot close the chat's open card). Ask and Plan promise read-only helpers. */
+export function helperProviderOptions(options: ProviderOptions | undefined, mode: ToolMode): ProviderOptions | undefined {
+  if (!options || mode === "agent") return options;
+  return Object.fromEntries(
+    Object.entries(options).map(([id, o]) => [id, "access" in o ? { ...o, access: "chat", allowedTools: [], conversationId: "" } : o]),
+  );
+}
+
 function helperTools(tools: Record<string, Tool>): Record<string, Tool> {
   return Object.fromEntries(Object.entries(tools).filter(([name]) => !STRIPPED_TOOLS.has(name)));
 }
@@ -98,6 +107,7 @@ const errorMessage = (err: unknown) => (err instanceof Error ? err.message : Str
  */
 export async function runSubAgent(opts: RunSubAgentOptions): Promise<SubAgentResult> {
   const { brief, model, mode, workingFolder, onProgress = () => {}, timeoutMs = SUB_AGENT_TIMEOUT_MS, resume } = opts;
+  const providerOptions = helperProviderOptions(opts.providerOptions, mode);
   const userMessage: UIMessage = resume?.message ?? { id: generateId(), role: "user", parts: [{ type: "text", text: brief }] };
   const zeroUsage = { inputTokens: 0, outputTokens: 0 };
 
@@ -207,7 +217,7 @@ export async function runSubAgent(opts: RunSubAgentOptions): Promise<SubAgentRes
       stopWhen: stepCountIs(SUB_AGENT_MAX_STEPS),
       abortSignal: signal,
       maxOutputTokens: model.maxTokens,
-      ...(opts.providerOptions ? { providerOptions: opts.providerOptions } : {}),
+      ...(providerOptions ? { providerOptions } : {}),
     });
   } catch (err) {
     return finish("error", undefined, zeroUsage, errorMessage(err));

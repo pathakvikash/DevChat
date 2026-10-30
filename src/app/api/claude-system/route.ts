@@ -1,4 +1,6 @@
 import { NextResponse } from "next/server";
+import { requireUserId } from "@/lib/auth";
+import { canUseHostTools, HOST_TOOLS_REFUSED } from "@/lib/hostAccess";
 import { readdirSync, readFileSync, statSync, existsSync } from "fs";
 import { homedir } from "os";
 import { join } from "path";
@@ -104,6 +106,8 @@ function getTasks(): { id: string; path: string; steps: { id: string; subject: s
 }
 
 export async function GET() {
+  const userId = await requireUserId();
+  if (!(await canUseHostTools(userId))) return NextResponse.json({ error: HOST_TOOLS_REFUSED }, { status: 403 });
   try {
     const settings = readJsonSafe(join(CLAUDE_DIR, "settings.json")) || {};
     const data: ClaudeSystemData = {

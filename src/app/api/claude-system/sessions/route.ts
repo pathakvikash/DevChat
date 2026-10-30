@@ -1,12 +1,14 @@
 import { NextResponse } from "next/server";
 import { requireUserId } from "@/lib/auth";
 import { listProjects, listSessions } from "@/lib/claude/sessions";
+import { canUseHostTools, HOST_TOOLS_REFUSED } from "@/lib/hostAccess";
 
 export const runtime = "nodejs";
 
 /** Projects that can host a run, plus recent sessions for the browser. */
 export async function GET(req: Request) {
-  await requireUserId();
+  const userId = await requireUserId();
+  if (!(await canUseHostTools(userId))) return NextResponse.json({ error: HOST_TOOLS_REFUSED }, { status: 403 });
   const url = new URL(req.url);
   const projectSlug = url.searchParams.get("project") || undefined;
   const limitParam = parseInt(url.searchParams.get("limit") || "", 10);

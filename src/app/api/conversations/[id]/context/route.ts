@@ -6,6 +6,7 @@ import { resolveActiveToolIds } from "@/lib/chat/buildTools";
 import { contextWindowFor } from "@/lib/chat/contextBudget";
 import { getModel } from "@/lib/models";
 import { resolveProviderCreds } from "@/lib/apiKeys";
+import { canUseHostTools } from "@/lib/hostAccess";
 import { requireUserId } from "@/lib/auth";
 import { liveSince } from "@/lib/liveSince";
 
@@ -50,7 +51,7 @@ export async function GET(
 
     let modelConfig;
     try {
-      modelConfig = getModel(conversation.model, await resolveProviderCreds(userId));
+      modelConfig = getModel(conversation.model, await resolveProviderCreds(userId), await canUseHostTools(userId));
     } catch {
       modelConfig = null;
     }
