@@ -216,6 +216,10 @@ export function useChatPane(conversationId: string, { focused, kind, searchProvi
 
   const { messages, setMessages, sendMessage: chatSend, status, stop: stopStream, regenerate, error, addToolResult, addToolApprovalResponse, setRequestBody, isLoading } = chatTransport;
   const isSubagent = conversation?.kind === "subagent";
+  // What other panes read through the agent handle, the moment a message goes out. It follows every status
+  // change and is set when a delivery starts a turn, so it is right before React renders `isLoading`.
+  const loadingRef = useRef(false);
+  useEffect(() => { loadingRef.current = isLoading; }, [isLoading]);
   // A user's own send starts this pane's agent count again. Agent messages go through chatSend directly.
   const sendMessage = (...args: Parameters<typeof chatSend>) => {
     split?.resetHop(conversationId);
@@ -404,10 +408,10 @@ export function useChatPane(conversationId: string, { focused, kind, searchProvi
   }
 
   /** A leftover agent message goes out as an agent message again, with its sender and hop. One turn at a
-   *  time: any others go back into the input box as text. */
+   *  time: any others go back into the agent queue, to be delivered one by one with their badges. */
   function sendAgentNext(items: Leftover[]) {
     const [first, ...rest] = items;
-    restoreInput(rest.map((r) => r.text));
+    for (const r of rest) if (r.agent) queueAgent(r.text, r.agent);
     if (!first?.agent) return;
     // The send counts at its own hop, so the chain's cap still holds after a reload or a busy turn.
     split?.bumpHop(conversationId, first.agent.hop);
@@ -554,10 +558,13 @@ export function useChatPane(conversationId: string, { focused, kind, searchProvi
     // `finish.messages` is the chat store's live array; the `messages` closure
     // is from the last render, which has not happened yet when onFinish runs.
     const all = finish?.messages ?? messages;
+    // The status is already ready or error here, though React has not rendered it.
+    loadingRef.current = false;
+    const stopped = !!(finish?.isAbort || finish?.isError);
+    const continues = !!(finish?.message && shouldAutoContinue(finish.message.parts as AnyPart[]));
     // Queued messages still waiting: after a Stop or an error they go back to the input; after a normal end
     // they go out as the next message. A reply that auto-continues keeps them.
-    if (mountedRef.current && queueRef.current.length && !(finish?.message && shouldAutoContinue(finish.message.parts as AnyPart[]))) {
-      const stopped = !!(finish?.isAbort || finish?.isError);
+    if (mountedRef.current && queueRef.current.length && !continues) {
       takeLeftovers(all)
         .then((rest) => {
           const own = rest.filter((r) => !r.agent);
@@ -571,8 +578,8 @@ export function useChatPane(conversationId: string, { focused, kind, searchProvi
         })
         .catch(() => toast("Couldn't restore queued messages. Reload to see them.", "error"));
     }
-    // The reply is over: if the other pane of its agent exchange is idle too, the exchange ends.
-    split?.agentIdle(conversationId);
+    // The reply is over (not just a leg before it auto-continues): if the other pane of its agent exchange is idle too, the exchange ends.
+    if (stopped || !continues) split?.agentIdle(conversationId);
     const parts = (finish?.message?.parts ?? all[all.length - 1]?.parts ?? []) as any[];
     // A card that just appeared is announced once, in the pane's live region (UX 2.5).
     if (!finish?.isAbort) {
@@ -633,9 +640,13 @@ export function useChatPane(conversationId: string, { focused, kind, searchProvi
     // Not before the chat has loaded: its model and settings go out with the message.
     if (!conversation) return;
     setAgentPane?.(conversationId, {
-      isLoading: () => isLoading,
+      isLoading: () => loadingRef.current,
       deliver: (parts) => {
-        chatSend({ parts }).catch((err: unknown) => console.error("[agent] delivery failed:", err));
+        loadingRef.current = true;
+        chatSend({ parts }).catch((err: unknown) => {
+          loadingRef.current = false;
+          console.error("[agent] delivery failed:", err);
+        });
       },
       queueAgent,
       dropAgentQueued,

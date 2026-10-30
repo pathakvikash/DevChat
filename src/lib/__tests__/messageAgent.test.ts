@@ -5,6 +5,8 @@ import { messageAgentTool, type SubAgentToolOptions } from "@/lib/chat/buildTool
 import { runSubAgent, type SubAgentOutput, type SubAgentResult } from "@/lib/chat/subAgent";
 import { prisma } from "@/lib/db";
 import type { ModelConfig } from "@/lib/models";
+import { budgetTokens } from "@/lib/chat/contextBudget";
+import { countTokens } from "@/lib/tokens";
 
 vi.mock("@/lib/db", () => ({
   prisma: {
@@ -117,6 +119,31 @@ describe("messageAgent", () => {
     expect(report.parts).toHaveLength(1);
     expect(report.parts[0]).toMatchObject({ type: "text" });
     expect((report.parts[0] as { text: string }).text.length).toBeLessThanOrEqual(8000);
+  });
+
+  it("resends the brief and only the newest turns that fit the token budget, with a note", async () => {
+    // 60 turns of about 2,000 tokens each, in a model with an 8,192-token window.
+    const turn = (i: number) => `turn-${i} ${"word ".repeat(2000)}`;
+    db.message.findMany.mockResolvedValue(
+      Array.from({ length: 60 }, (_, i) => savedRow(`m${i}`, i % 2 ? "assistant" : "user", i === 0 ? "The brief." : turn(i), "2026-10-30T10:00:00Z")),
+    );
+    const small = { id: "mock/subagent", supportsTools: true, contextWindow: 8192 } as unknown as ModelConfig;
+    await collect(messageAgentTool({}, options({ model: small })), { agentId: "child-1", message: "Go on" });
+    const history = run.mock.calls[0][0].resume!.history;
+    const text = (m: (typeof history)[number]) => (m.parts.at(-1) as { text: string }).text;
+    expect(history[0].id).toBe("m0");
+    expect(text(history[0])).toBe("The brief.\n\n(earlier turns omitted)");
+    expect(history.length).toBeLessThan(5);
+    expect(history.at(-1)!.id).toBe("m59");
+    const total = history.reduce((n, m) => n + countTokens(text(m)), 0);
+    expect(total).toBeLessThanOrEqual(budgetTokens(8192, 0.5, 20_000));
+  });
+
+  it("sends every turn, with no note, when they fit", async () => {
+    await collect(messageAgentTool({}, options()), { agentId: "child-1", message: "Go on" });
+    const history = run.mock.calls[0][0].resume!.history;
+    expect(history.map((m) => m.id)).toEqual(["m1", "m2"]);
+    expect(JSON.stringify(history)).not.toContain("omitted");
   });
 
   it("refuses a helper that is not this chat's", async () => {

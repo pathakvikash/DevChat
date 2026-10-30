@@ -404,7 +404,7 @@ describe("a queued message from another chat", () => {
     expect(out[1].parts).toEqual([
       {
         type: "text",
-        text: "Message from Pricing research (another chat, not the user; reply only through sendToChat): What is the price?",
+        text: "Message from Pricing research (another chat, not the user; reply only through sendToChat):\n```\nWhat is the price?\n```",
       },
     ]);
   });

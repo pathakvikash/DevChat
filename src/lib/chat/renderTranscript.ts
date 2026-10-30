@@ -1,5 +1,6 @@
 import { countTokens, cutTokens } from "@/lib/tokens";
-import { normalizeToolParts } from "@/lib/chat/normalizeToolParts";
+import { normalizeToolParts, splitAtQueuedMessages } from "@/lib/chat/normalizeToolParts";
+import { parseAgentMessagePart, senderName } from "@/lib/chat/agentMessages";
 import { isToolPart } from "@/lib/utils/messageParts";
 
 /** Longest tool input or result kept in a rendered transcript. */
@@ -35,10 +36,10 @@ export function partsOf(m: TranscriptMessage): any[] | null {
   return Array.isArray(parts) ? (normalizeToolParts(parts) as any[]) : null;
 }
 
-function renderMessage(m: TranscriptMessage): string {
-  const label = m.role === "user" ? "User" : "Assistant";
-  const parts = partsOf(m);
-  if (!parts) return `${label}: ${m.content ?? ""}`;
+/** One turn's text. A user message that came from another chat is labelled with its sender, not "User". */
+function renderTurn(role: string, parts: any[]): string {
+  const agent = role === "user" ? parts.map((p) => parseAgentMessagePart(p)).find((d) => d !== null) : null;
+  const label = role !== "user" ? "Assistant" : agent ? `From ${senderName(agent)} (another chat)` : "User";
   const lines = parts.flatMap((p) => {
     if (p?.type === "text") return p.text ? [p.text as string] : [];
     if (!isToolPart(p)) return [];
@@ -46,6 +47,15 @@ function renderMessage(m: TranscriptMessage): string {
     return [`[tool ${p.type.slice(5)} ${show(p.input)} → ${result}]`];
   });
   return `${label}: ${lines.join("\n")}`;
+}
+
+function renderMessage(m: TranscriptMessage): string {
+  const parts = partsOf(m);
+  if (!parts) return `${m.role === "user" ? "User" : "Assistant"}: ${m.content ?? ""}`;
+  // A message queued mid-reply is saved inside the reply, but it was a turn of its own.
+  return splitAtQueuedMessages({ role: m.role, parts })
+    .map((turn) => renderTurn(turn.role, turn.parts))
+    .join("\n\n");
 }
 
 /**

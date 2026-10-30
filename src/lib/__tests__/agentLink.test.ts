@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import type { AgentPane } from "@/lib/chat/agentMessages";
-import { AGENT_NOT_OPEN, raiseHop, routeAgentMessage } from "@/lib/utils/agentLink";
+import { AGENT_NOT_OPEN, exchangeEnded, raiseHop, routeAgentMessage } from "@/lib/utils/agentLink";
 import { canDeliver, nextHop } from "@/lib/chat/agentMessages";
 
 const panes: AgentPane[] = [
@@ -21,6 +21,29 @@ describe("raiseHop", () => {
     // A queued message at hop 3 leaves its pane at 3, so the pane's next message is refused.
     expect(canDeliver(nextHop(raiseHop(0, 3)))).toBe(false);
     expect(canDeliver(nextHop(raiseHop(0, 2)))).toBe(true);
+  });
+});
+
+describe("exchangeEnded", () => {
+  const partners = new Map([["a", "b"], ["b", "a"]]);
+
+  it("resets both panes of an exchange once the partner is idle", () => {
+    expect(exchangeEnded("b", partners, () => false)).toEqual(["b", "a"]);
+  });
+
+  it("leaves the hops while the partner still replies", () => {
+    expect(exchangeEnded("b", partners, (id) => id === "a")).toEqual([]);
+  });
+
+  it("finds the partner after a refusal at the cap, which clears the talk but not the partners", () => {
+    // a -> b -> a -> b are hops 1..3; b's next message is refused. Both panes hold hop 3 until b's reply ends.
+    const hops = new Map([["a", 3], ["b", 3]]);
+    for (const id of exchangeEnded("b", partners, () => false)) hops.delete(id);
+    expect(hops.size).toBe(0);
+  });
+
+  it("is empty for a pane that is not in an exchange", () => {
+    expect(exchangeEnded("c", partners, () => false)).toEqual([]);
   });
 });
 

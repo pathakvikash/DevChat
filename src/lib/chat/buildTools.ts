@@ -6,7 +6,8 @@ import { webSearch, formatSearchResults, type SearchProvider } from "@/lib/searc
 import { listServerTools, callServerTool } from "@/lib/mcp/client";
 import type { ToolExecutionContext } from "@/lib/registry/types";
 import { searchUserChats, readUserChat } from "@/lib/chatSearch";
-import { budgetTokens } from "@/lib/chat/contextBudget";
+import { budgetTokens, contextWindowFor } from "@/lib/chat/contextBudget";
+import { countTokens } from "@/lib/tokens";
 import { quoteSearchResults } from "@/lib/chat/quotePastChat";
 import { buildAgentMessagePart, parseAgentMessagePart, type AgentTarget } from "@/lib/chat/agentMessages";
 import { MODE_POLICY, needsApproval, type ChatMode } from "@/lib/chat/modes";
@@ -330,7 +331,14 @@ export interface SubAgentToolOptions {
   maxParallel: number;
   /** Helper ids running in this request. runAgent and messageAgent share one set, so a helper runs once at a time. */
   activeChildren?: Set<string>;
+  /** Helpers running in this request, counted by runAgent and messageAgent together against `maxParallel`. */
+  running?: { count: number };
 }
+
+/** The window share and the cap of the saved turns a resumed helper is sent. */
+const HISTORY_SHARE = 0.5;
+const HISTORY_CAP = 20_000;
+const OMITTED_NOTE = "\n\n(earlier turns omitted)";
 
 async function startSubAgentChild(opts: SubAgentToolOptions, title: string, task: string): Promise<string> {
   const child = await prisma.conversation.create({
@@ -392,14 +400,15 @@ function senderPart(raw: string | null) {
 /**
  * A helper's saved turns for a resumed run: each brief or follow-up (with its sender's part) and each
  * report, as text only and cut to the report cap. The raw saved parts, tool calls included, are not resent.
+ * The original brief stays; of the rest, the newest turns that fit `budget` tokens, with a note when some go.
  */
-async function loadChildHistory(childId: string): Promise<UIMessage[]> {
+async function loadChildHistory(childId: string, budget: number): Promise<UIMessage[]> {
   const rows = await prisma.message.findMany({
     where: { conversationId: childId, role: { in: ["user", "assistant"] } },
     orderBy: { createdAt: "asc" },
     select: { id: true, role: true, content: true, parts: true },
   });
-  return rows.map((r) => {
+  const turns = rows.map((r) => {
     const text = { type: "text" as const, text: capReport(r.content) };
     const sender = r.role === "user" ? senderPart(r.parts) : null;
     return {
@@ -408,6 +417,20 @@ async function loadChildHistory(childId: string): Promise<UIMessage[]> {
       parts: (sender ? [sender, text] : [text]) as UIMessage["parts"],
     };
   });
+  const [brief, ...later] = turns;
+  if (!brief) return [];
+  const textOf = (m: UIMessage) => (m.parts.at(-1) as { text: string }).text;
+  let left = budget - countTokens(textOf(brief));
+  let from = later.length;
+  while (from > 0) {
+    const cost = countTokens(textOf(later[from - 1])) + 1;
+    if (cost > left) break;
+    left -= cost;
+    from--;
+  }
+  if (from === 0) return turns;
+  const note = { type: "text" as const, text: textOf(brief) + OMITTED_NOTE };
+  return [{ ...brief, parts: [...brief.parts.slice(0, -1), note] as UIMessage["parts"] }, ...later.slice(from)];
 }
 
 /** One helper card: progress as preliminary outputs, then the final result. The run saves itself. */
@@ -477,7 +500,7 @@ async function* runChildCard(
 export function runAgentTool(parentTools: Record<string, Tool>, opts: SubAgentToolOptions): Tool {
   const helperTools = helperToolSet(parentTools, opts.mode);
   const active = opts.activeChildren ?? new Set<string>();
-  let running = 0;
+  const slots = (opts.running ??= { count: 0 });
 
   return tool({
     description:
@@ -492,7 +515,7 @@ export function runAgentTool(parentTools: Record<string, Tool>, opts: SubAgentTo
       const startedAt = Date.now();
       const label = title?.trim() || task.slice(0, 60);
       // Checked before any await, so the count is exact when calls in one step start together.
-      if (running >= opts.maxParallel) {
+      if (slots.count >= opts.maxParallel) {
         yield {
           ...startSubAgentOutput(label, startedAt),
           status: "error",
@@ -501,7 +524,7 @@ export function runAgentTool(parentTools: Record<string, Tool>, opts: SubAgentTo
         } satisfies SubAgentOutput;
         return;
       }
-      running++;
+      slots.count++;
       try {
         let childId: string;
         try {
@@ -523,7 +546,7 @@ export function runAgentTool(parentTools: Record<string, Tool>, opts: SubAgentTo
           active.delete(childId);
         }
       } finally {
-        running--;
+        slots.count--;
       }
     },
     toModelOutput: ({ output }) => subAgentModelOutput(output as SubAgentOutput),
@@ -538,6 +561,7 @@ export function runAgentTool(parentTools: Record<string, Tool>, opts: SubAgentTo
 export function messageAgentTool(parentTools: Record<string, Tool>, opts: SubAgentToolOptions): Tool {
   const helperTools = helperToolSet(parentTools, opts.mode);
   const active = opts.activeChildren ?? new Set<string>();
+  const slots = (opts.running ??= { count: 0 });
 
   return tool({
     description:
@@ -555,15 +579,16 @@ export function messageAgentTool(parentTools: Record<string, Tool>, opts: SubAge
         endedAt: Date.now(),
         error,
       });
-      // Reserved before any await, so two calls for one helper in one step cannot both start.
+      // Reserved before any await, so calls in one step cannot both start the same helper or pass the cap.
       if (active.has(agentId)) {
         yield refuse("That sub-agent is already running. Wait for it to finish, then ask again.");
         return;
       }
-      if (active.size >= opts.maxParallel) {
+      if (slots.count >= opts.maxParallel) {
         yield refuse(`Only ${opts.maxParallel} sub-agent${opts.maxParallel === 1 ? " runs" : "s run"} at once here. Wait for the others, then ask again.`);
         return;
       }
+      slots.count++;
       active.add(agentId);
       try {
         const child = await prisma.conversation.findFirst({
@@ -586,7 +611,10 @@ export function messageAgentTool(parentTools: Record<string, Tool>, opts: SubAge
         let history: UIMessage[];
         try {
           // History first: the new message must not be in it twice.
-          history = await loadChildHistory(child.id);
+          history = await loadChildHistory(
+            child.id,
+            budgetTokens(contextWindowFor(opts.model.id, opts.model), HISTORY_SHARE, HISTORY_CAP),
+          );
           await saveUserMessage({ conversationId: child.id, id: userMessage.id, text: message, parts: userMessage.parts });
         } catch (err) {
           console.error("[subagent] could not save the follow-up:", err);
@@ -601,6 +629,7 @@ export function messageAgentTool(parentTools: Record<string, Tool>, opts: SubAge
         );
       } finally {
         active.delete(agentId);
+        slots.count--;
       }
     },
     toModelOutput: ({ output }) => subAgentModelOutput(output as SubAgentOutput),

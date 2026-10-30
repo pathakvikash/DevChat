@@ -3,6 +3,8 @@
  * and how a message reaches the model. Pure; the pane wiring comes later.
  */
 
+import { fenceText } from "@/lib/chat/quotePastChat";
+
 export const AGENT_MESSAGE_PART = "data-agent-message";
 /** Agent messages per user send, across all panes. */
 export const MAX_AGENT_HOPS = 3;
@@ -167,36 +169,29 @@ export function agentBadgeText(d: Pick<AgentMessageData, "from" | "fromTitle">, 
   return `From "${shown}"`;
 }
 
-/** What the receiving model reads in place of the part: its sender, that it is not the user, and the text. */
+/**
+ * What the receiving model reads in place of the part: its sender, that it is not the user, and the
+ * text, fenced so a body cannot forge a header or a `User:` line.
+ */
 export function agentMessageModelText(d: AgentMessageData, body: string): string {
   const who =
     d.from === "parent"
       ? "(the main chat, not the user)"
       : "(another chat, not the user; reply only through sendToChat)";
-  return `Message from ${senderName(d)} ${who}: ${body}`;
+  return `Message from ${senderName(d)} ${who}:\n${fenceText(body)}`;
 }
 
 /**
- * Replay: each agent-message part becomes model text, merged into the text part that follows it.
- * `convertToModelMessages` would otherwise drop the part.
+ * Replay: the agent-message part is dropped and every text part of the message becomes framed model
+ * text (`convertToModelMessages` would otherwise drop the part). With no text, the header stays alone.
  */
 export function frameAgentMessageParts(parts: unknown): unknown {
   if (!Array.isArray(parts) || !parts.some((p) => p?.type === AGENT_MESSAGE_PART)) return parts;
-  const out: unknown[] = [];
-  let pending: { data: AgentMessageData; at: number } | null = null;
-  for (const p of parts) {
-    if (p?.type === AGENT_MESSAGE_PART) {
-      const data = parseAgentMessagePart(p);
-      pending = data ? { data, at: out.length } : null;
-      if (data) out.push({ type: "text", text: agentMessageModelText(data, "") });
-      continue;
-    }
-    if (pending && p?.type === "text") {
-      out[pending.at] = { type: "text", text: agentMessageModelText(pending.data, p.text) };
-      pending = null;
-      continue;
-    }
-    out.push(p);
-  }
-  return out;
+  const data = parts.map((p) => parseAgentMessagePart(p)).find((d) => d !== null);
+  const rest = parts
+    .filter((p) => p?.type !== AGENT_MESSAGE_PART)
+    .map((p) => (data && p?.type === "text" ? { ...p, text: agentMessageModelText(data, p.text) } : p));
+  return data && !rest.some((p) => p?.type === "text")
+    ? [{ type: "text", text: agentMessageModelText(data, "") }, ...rest]
+    : rest;
 }
