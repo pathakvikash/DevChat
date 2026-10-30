@@ -16,6 +16,7 @@ export async function deleteExpiredTemporaryChats(userId: string, now = Date.now
     where: {
       userId,
       temporary: true,
+      parentId: null, // helpers go with their parent by cascade, never on their own
       updatedAt: { lt: cutoff },
       children: { none: { updatedAt: { gte: cutoff } } },
     },

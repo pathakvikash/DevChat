@@ -29,6 +29,7 @@ describe("deleteExpiredTemporaryChats", () => {
       where: {
         userId: "user-1",
         temporary: true,
+        parentId: null,
         updatedAt: { lt: new Date(now - TEMPORARY_CHAT_TTL_MS) },
         children: { none: { updatedAt: { gte: new Date(now - TEMPORARY_CHAT_TTL_MS) } } },
       },

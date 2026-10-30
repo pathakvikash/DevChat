@@ -1,9 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
-import { open } from "fs/promises";
+import { constants } from "fs";
+import { open, stat } from "fs/promises";
 import { prisma } from "@/lib/db";
 import { requireUserId } from "@/lib/auth";
 import { isRunnableCwd } from "@/lib/claude/sessions";
-import { isSecretPath, listFolderFiles, looksBinary, resolveInside } from "@/lib/files/safePath";
+import { listFolderFiles, looksBinary, resolveInside } from "@/lib/files/safePath";
 
 const MAX_READ_BYTES = 1024 * 1024;
 
@@ -29,12 +30,20 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
 
     // resolveInside refuses hidden and secret paths; the real path is what gets read.
     const real = await resolveInside(folder, rel);
-    if (!real || isSecretPath(real)) return NextResponse.json({ error: "This file can't be attached" }, { status: 403 });
+    if (!real) return NextResponse.json({ error: "This file can't be attached" }, { status: 403 });
 
-    const handle = await open(real, "r").catch(() => null);
+    // Opening a FIFO for reading blocks until a writer shows up, so only a regular file is opened.
+    // O_NONBLOCK covers a swap after the stat; the handle is checked again below.
+    // O_NOFOLLOW plus the same dev/inode refuses a swap for a symlink or another file between the checks and the open.
+    const checked = await stat(real).catch(() => null);
+    if (!checked?.isFile()) return NextResponse.json({ error: "File not found" }, { status: 404 });
+    const handle = await open(real, constants.O_RDONLY | constants.O_NONBLOCK | constants.O_NOFOLLOW).catch(() => null);
     if (!handle) return NextResponse.json({ error: "File not found" }, { status: 404 });
     try {
-      if (!(await handle.stat()).isFile()) return NextResponse.json({ error: "File not found" }, { status: 404 });
+      const opened = await handle.stat();
+      if (!opened.isFile() || opened.ino !== checked.ino || opened.dev !== checked.dev) {
+        return NextResponse.json({ error: "File not found" }, { status: 404 });
+      }
       // One read of at most the cap plus one byte, so a file that grows after a stat is still bounded.
       const buf = Buffer.alloc(MAX_READ_BYTES + 1);
       const { bytesRead } = await handle.read(buf, 0, buf.length, 0);
