@@ -3,10 +3,13 @@ import { composer, createChat, messages, openChat, regenerateButtons, send, stor
 
 const replyButton = (page: Page) => page.getByRole("button", { name: "Reply to selected text" });
 
-// Selects `phrase` inside message `index` and fires the mouseup the Reply pill waits for.
+// Selects `phrase` inside message `index` and fires the mouseup the Reply pill waits for. Focus leaves the
+// message box first, as a real mousedown on the text does: a focused text field takes the page's selection
+// back whenever it updates (the suggestion lands in its placeholder just after a reply), collapsing this one.
 async function select(page: Page, index: number, phrase: string) {
   await page.evaluate(
     ([i, text]) => {
+      (document.activeElement as HTMLElement | null)?.blur();
       const walker = document.createTreeWalker(document.querySelectorAll("[data-message-id]")[Number(i)], NodeFilter.SHOW_TEXT);
       for (let n = walker.nextNode(); n; n = walker.nextNode()) {
         const at = n.textContent?.indexOf(text) ?? -1;
