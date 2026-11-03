@@ -92,22 +92,40 @@ test("Edit of a message sent in this session is saved", async ({ page, request }
   await expect.poll(async () => (await storedMessages(request, id))[0].content, { timeout: 3000 }).toBe("fresh edit");
 });
 
-test("Delete removes a message after you confirm", async ({ page, request }) => {
+test("Delete removes the message and the ones after it once you confirm", async ({ page, request }) => {
   const id = await createChat(request, { title: "Delete test" });
   await openChat(page, id);
   await sendAndReload(page, "delete me");
 
   page.once("dialog", (d) => {
-    expect(d.message()).toContain("delete this message");
+    expect(d.message()).toContain("Delete this message and the message after it?");
     return d.accept();
   });
   await page.getByRole("button", { name: "Delete message" }).first().click();
 
-  await expect(messages(page)).toHaveCount(1);
-  await expect(page.getByText("delete me", { exact: true })).toBeHidden();
-  await expect.poll(async () => (await storedMessages(request, id)).map((m) => m.role)).toEqual(["assistant"]);
+  await expect(messages(page)).toHaveCount(0);
+  await expect.poll(async () => await storedMessages(request, id)).toEqual([]);
   await page.reload();
+  await expect(messages(page)).toHaveCount(0);
+});
+
+test("Delete on a reply keeps the earlier messages and drops everything after it", async ({ page, request }) => {
+  const id = await createChat(request);
+  await openChat(page, id);
+  await send(page, "one");
+  await expect(regenerateButtons(page)).toHaveCount(1);
+  await send(page, "two");
+  await expect(regenerateButtons(page)).toHaveCount(2);
+
+  page.once("dialog", (d) => {
+    expect(d.message()).toContain("Delete this message and the 2 messages after it?");
+    return d.accept();
+  });
+  await page.getByRole("button", { name: "Delete message" }).nth(1).click();
+
   await expect(messages(page)).toHaveCount(1);
+  await expect.poll(async () => (await storedMessages(request, id)).map((m) => m.role)).toEqual(["user"]);
+  expect((await storedMessages(request, id))[0].content).toBe("one");
 });
 
 test("Delete keeps the message when you decline", async ({ page, request }) => {
@@ -131,5 +149,5 @@ test("Delete of a message sent in this session is saved", async ({ page, request
   page.once("dialog", (d) => d.accept());
   await page.getByRole("button", { name: "Delete message" }).first().click();
   await expect(page.getByText("fresh delete", { exact: true })).toBeHidden();
-  await expect.poll(async () => (await storedMessages(request, id)).map((m) => m.role), { timeout: 3000 }).toEqual(["assistant"]);
+  await expect.poll(async () => (await storedMessages(request, id)).map((m) => m.role), { timeout: 3000 }).toEqual([]);
 });

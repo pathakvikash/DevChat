@@ -145,7 +145,7 @@ export default function ContextDetailsPanel({
     setCompressError(null);
     try {
       const res = await fetch(
-        `/api/conversations/${conversationId}/messages`,
+        `/api/conversations/${conversationId}/messages?all=1`,
         { method: "DELETE" },
       );
       if (!res.ok) {

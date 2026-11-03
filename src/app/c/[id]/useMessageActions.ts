@@ -17,6 +17,8 @@ interface UseMessageActionsOptions {
   temporary?: boolean;
   /** The fork exists: the pane shows it in place of the original. */
   onForked: (id: string) => void;
+  /** A delete went through: the pane drops what hung on the old tail and reloads the saved chat. */
+  onDeleted: () => void;
 }
 
 export function useMessageActions({
@@ -30,6 +32,7 @@ export function useMessageActions({
   toast,
   temporary = false,
   onForked,
+  onDeleted,
 }: UseMessageActionsOptions) {
   const [regenModal, setRegenModal] = useState<{
     type: "retry" | "message";
@@ -87,20 +90,44 @@ export function useMessageActions({
   }
 
   async function handleDeleteMessage(messageId: string) {
+    if (status === "streaming" || status === "submitted") {
+      toast("Stop the reply first, then delete", "info");
+      return;
+    }
+    const idx = messages.findIndex((m) => m.id === messageId);
+    if (idx < 0) return;
+    const after = messages.length - idx - 1;
+    const ask =
+      after === 0
+        ? "Delete this message?"
+        : after === 1
+          ? "Delete this message and the message after it?"
+          : `Delete this message and the ${after} messages after it?`;
+    if (!confirm(ask)) return;
+
     const snapshot = messages;
-    setMessages((prev: any[]) => prev.filter((m) => m.id !== messageId));
+    // Everything after a message was written in reply to it, so it goes too.
+    setMessages(snapshot.slice(0, idx));
+    // Put the cut messages back; whatever was added after the cut (a turn started meanwhile) stays after them.
+    // A rebuild in the meantime can hold messages the snapshot already has, so those are skipped.
+    const kept = new Set(snapshot.map((m: any) => m.id));
+    const restore = () => setMessages((prev: any[]) => [...snapshot, ...prev.slice(idx).filter((m) => !kept.has(m.id))]);
     try {
-      const res = await fetch(`/api/conversations/${conversationId}/messages/${messageId}`, {
+      // Some of these ids may have no saved row (a rejected send, client-only results); the server cuts at the earliest saved one.
+      const res = await fetch(`/api/conversations/${conversationId}/messages`, {
         method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ fromIds: snapshot.slice(idx).map((m) => m.id) }),
       });
-      if (!res.ok && res.status !== 404) {
+      if (!res.ok) {
         console.error(`Failed to delete message (server returned ${res.status})`);
-        setMessages(() => snapshot);
-      }
+        toast("Failed to delete message", "error");
+        restore();
+      } else onDeleted();
     } catch (error) {
       console.error("Failed to delete message:", error);
       toast("Failed to delete message", "error");
-      setMessages(() => snapshot);
+      restore();
     }
   }
 

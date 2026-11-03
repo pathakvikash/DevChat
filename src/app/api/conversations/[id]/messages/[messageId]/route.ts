@@ -45,25 +45,3 @@ export async function PATCH(
     return NextResponse.json({ error: "Failed to update message" }, { status: 500 });
   }
 }
-
-export async function DELETE(
-  req: NextRequest,
-  { params }: { params: Promise<{ id: string; messageId: string }> }
-) {
-  try {
-    const userId = await requireUserId();
-    const { id, messageId } = await params;
-
-    const result = await findConversationMessage(id, messageId, userId);
-    if (!result.ok) return messageLookupErrorResponse(result.reason);
-
-    await prisma.message.delete({
-      where: { id: messageId },
-    });
-
-    return NextResponse.json({ success: true });
-  } catch (error) {
-    console.error("Failed to delete message:", error);
-    return NextResponse.json({ error: "Failed to delete message" }, { status: 500 });
-  }
-}

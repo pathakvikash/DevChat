@@ -17,7 +17,8 @@ async function fetchConversationData(
 export interface DataActions {
   fetchConversation: () => Promise<void>;
   refreshConversation: () => Promise<void>;
-  refreshConversationAndMessages: () => Promise<void>;
+  /** `shouldApplyMessages` is asked once the response is in: say no when a turn started meanwhile, so its messages are not replaced. */
+  refreshConversationAndMessages: (shouldApplyMessages?: () => boolean) => Promise<void>;
   fetchContextUsage: () => Promise<void>;
   handleModelSettingsSave: (settings: any) => Promise<void>;
   handleModelChange: (modelId: string) => Promise<void>;
@@ -86,10 +87,10 @@ export function useConversationData(
     }
   }, [conversationId, applyConversation, toast]);
 
-  const refreshConversationAndMessages = useCallback(async () => {
+  const refreshConversationAndMessages = useCallback(async (shouldApplyMessages?: () => boolean) => {
     try {
       const result = await fetchConversationData(conversationId);
-      if (result.ok) applyConversation(result.conv, true);
+      if (result.ok) applyConversation(result.conv, shouldApplyMessages?.() ?? true);
     } catch (e) {
       console.error("Failed to refresh conversation:", e);
       toast("Failed to refresh conversation", "error");

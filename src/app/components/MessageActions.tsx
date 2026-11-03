@@ -114,9 +114,7 @@ export default function MessageActions({
 
   const handleDelete = async () => {
     if (!messageId || !onDelete) return;
-    if (confirm("Are you sure you want to delete this message?")) {
-      await onDelete(messageId);
-    }
+    await onDelete(messageId);
   };
 
   if (!messageId || (isStreaming && !isUser)) return null;

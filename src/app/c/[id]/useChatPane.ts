@@ -124,6 +124,8 @@ export function useChatPane(conversationId: string, { focused, kind, searchProvi
   const sendingRef = useRef(false);
   /** Suggested next message, shown greyed in the box after a reply. */
   const [suggestion, setSuggestion] = useState<string | null>(null);
+  // Bumped by a delete: a suggestion fetched for the exchange it cut must not show.
+  const suggestSeq = useRef(0);
   const [quotes, setQuotes] = useState<QuoteCard[]>([]);
   const [announcement, setAnnouncement] = useState("");
   const quoteSeq = useRef(0);
@@ -611,6 +613,7 @@ export function useChatPane(conversationId: string, { focused, kind, searchProvi
       if (!finish?.isAbort) console.debug("[suggest] skipped: no completed assistant turn to suggest from");
       return;
     }
+    const seq = suggestSeq.current;
     fetch(`/api/conversations/${conversationId}/suggest`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -618,6 +621,7 @@ export function useChatPane(conversationId: string, { focused, kind, searchProvi
     })
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
       .then((d) => {
+        if (seq !== suggestSeq.current) return;
         if (d?.suggestion) setSuggestion(d.suggestion);
         else console.warn("[suggest] no suggestion returned");
       })
@@ -785,6 +789,13 @@ export function useChatPane(conversationId: string, { focused, kind, searchProvi
     conversationId, messages, setMessages, status, sendMessage, regenerate, addToolResult, toast,
     temporary: !!conversation?.temporary,
     onForked: (newId) => split?.replaceAt(conversationId, newId),
+    // A refresh from the last reply may have landed after the cut; rebuild from the saved chat so the deleted messages
+    // stay gone, unless a turn started meanwhile (the snapshot may predate its message).
+    onDeleted: () => {
+      suggestSeq.current++;
+      setSuggestion(null);
+      refreshConversationAndMessages(() => !loadingRef.current);
+    },
   });
 
   const {
