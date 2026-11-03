@@ -2,6 +2,7 @@
 
 import { Loader2, CheckCircle2, XCircle, Check, ChevronDown, ChevronRight } from "lucide-react";
 import { useState } from "react";
+import { toolSummary } from "@/lib/chat/sideChatLabels";
 import { ALLOWED_FOR_CHAT, NOT_ANSWERED, type ToolPart } from "@/lib/utils/messageParts";
 import ApprovalCard from "./ApprovalCard";
 import ArtifactCard from "./ArtifactCard";
@@ -139,6 +140,8 @@ function ToolCall({
 
   const hasResult = !!resultPart;
   const resultErrored = !!resultPart?.errorText;
+  // The span cuts a long one with CSS; the title shows it whole.
+  const summary = isExec ? "" : toolSummary(part.input, 300);
 
   const [collapsed, setCollapsed] = useState(true);
 
@@ -187,6 +190,7 @@ function ToolCall({
         <span className="font-medium text-zinc-200">
           {isExec ? `Executed ${lang || "code"}` : `Tool: ${toolName}`}
         </span>
+        {summary && <span title={summary} className="min-w-0 truncate text-zinc-500">{summary}</span>}
         {meta && <span className="ml-auto text-zinc-400 shrink-0">{meta}</span>}
         {(running && !hasResult) && <span className="text-zinc-500">running…</span>}
         {hasResult && !running && <span className="text-emerald-400">done</span>}

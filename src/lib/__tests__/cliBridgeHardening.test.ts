@@ -373,3 +373,85 @@ describe("two Claude Code cards in one reply, through the AI SDK", () => {
     }
   });
 });
+
+describe("a CLI run's process", () => {
+  const def = (id: string) => CLI_PROVIDERS.find((d) => d.id === id)!;
+  async function run(d: ReturnType<typeof def>, po: Record<string, unknown> = {}) {
+    const { stream } = await createCliModel(d, "default").doStream({ prompt: user, providerOptions: { [d.id]: po }, tools: [] } as any);
+    return stream;
+  }
+  /** The options `spawn` was last called with. */
+  const spawnOpts = () => vi.mocked(spawn).mock.calls.at(-1)![2] as { cwd: string; env: NodeJS.ProcessEnv };
+
+  it("gets PWD equal to the cwd it is spawned in, with a folder or without", async () => {
+    for (const [po, cwd] of [[{}, join(tmpdir(), "devchat-cli")], [{ cwd: "/w", access: "chat" }, "/w"]] as const) {
+      const before = spawned.length;
+      const reading = readAll(await run(def("opencode"), po));
+      await until(() => spawned.length > before);
+      expect(spawnOpts().cwd).toBe(cwd);
+      expect(spawnOpts().env.PWD).toBe(cwd);
+      spawned[before].exit(0);
+      await reading;
+    }
+  });
+
+  it("refuses Codex without a working folder, and runs it inside one", async () => {
+    const before = spawned.length;
+    const parts = await readAll(await run(def("codex")));
+    expect(spawned.length).toBe(before);
+    expect(parts.find((p) => p.type === "error")?.error.message).toMatch(/Codex needs a working folder/);
+    const reading = readAll(await run(def("codex"), { cwd: "/w", access: "chat" }));
+    await until(() => spawned.length > before);
+    expect(vi.mocked(spawn).mock.calls.at(-1)![1]).toEqual(expect.arrayContaining(["--sandbox", "read-only", "-C", "/w"]));
+    spawned[before].exit(0);
+    await reading;
+  });
+
+  describe("watchdog", () => {
+    beforeEach(() => vi.useFakeTimers({ toFake: ["setInterval", "clearInterval", "Date"] }));
+    afterEach(() => vi.useRealTimers());
+
+    /** Starts a silent run of `d` and lets `ms` pass; returns the child and what the stream said. */
+    async function silentFor(d: ReturnType<typeof def>, ms: number) {
+      const before = spawned.length;
+      const reading = readAll(await run(d, { cwd: "/w", access: "chat" }));
+      await until(() => spawned.length > before);
+      vi.advanceTimersByTime(ms);
+      return { c: spawned[before], reading };
+    }
+
+    it("stops a silent Claude Code run after 120s and says so", async () => {
+      const { c, reading } = await silentFor(def("claude-code"), 125_000);
+      expect(c.kill).toHaveBeenCalled();
+      expect((await reading).find((p) => p.type === "error")?.error.message).toMatch(/produced no output for 120s/);
+    });
+
+    it("lets OpenCode stay silent through a long sub-agent, and stops it after 15 minutes", async () => {
+      const { c, reading } = await silentFor(def("opencode"), 600_000);
+      expect(c.kill).not.toHaveBeenCalled();
+      vi.advanceTimersByTime(310_000);
+      expect(c.kill).toHaveBeenCalled();
+      expect((await reading).find((p) => p.type === "error")?.error.message).toMatch(/produced no output for 900s/);
+    });
+  });
+
+  it("cuts a long tool result to 8000 characters, whichever CLI ran the tool", async () => {
+    const before = spawned.length;
+    const reading = readAll(await run(def("claude-code"), { cwd: "/w", access: "chat" }));
+    await until(() => spawned.length > before);
+    const c = spawned[before];
+    c.say({ type: "assistant", message: { role: "assistant", content: [{ type: "tool_use", id: "t1", name: "Read", input: {} }] } });
+    c.say({ type: "user", message: { role: "user", content: [{ type: "tool_result", tool_use_id: "t1", content: "x".repeat(20_000) }] } });
+    c.say({ type: "user", message: { role: "user", content: [{ type: "tool_result", tool_use_id: "t2", content: "short" }] } });
+    // Text blocks: joined, so the cut result is plain text, not JSON with escaped quotes and newlines.
+    const blocks = [{ type: "text", text: `a "quoted"\n${"y".repeat(5_000)}` }, { type: "text", text: "z".repeat(5_000) }];
+    c.say({ type: "user", message: { role: "user", content: [{ type: "tool_result", tool_use_id: "t3", content: blocks }] } });
+    c.say({ type: "user", message: { role: "user", content: [{ type: "tool_result", tool_use_id: "t4", content: [{ type: "text", text: "small" }] }] } });
+    c.exit(0);
+    const results = (await reading).filter((p) => p.type === "tool-result");
+    expect(results[0].result).toBe(`${"x".repeat(8_000)}\n[…truncated]`);
+    expect(results[1].result).toBe("short");
+    expect(results[2].result).toBe(`${blocks.map((b) => b.text).join("\n").slice(0, 8_000)}\n[…truncated]`);
+    expect(results[3].result).toEqual([{ type: "text", text: "small" }]); // under the cap: as it came
+  });
+});

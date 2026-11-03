@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { formatAgo, sideChatTitle, toolLineLabel } from "@/lib/chat/sideChatLabels";
+import { formatAgo, sideChatTitle, toolLineLabel, toolSummary } from "@/lib/chat/sideChatLabels";
 
 describe("side chat labels", () => {
   it("uses the title, then the first message, then the default", () => {
@@ -12,6 +12,16 @@ describe("side chat labels", () => {
   it("folds a tool call to a one-line label with its input summary", () => {
     expect(toolLineLabel("searchChats", { query: "react hooks" })).toBe("Used Search chats: react hooks");
     expect(toolLineLabel("executeCode", { code: "print(1)" })).toBe("Used Execute code");
+    // OpenCode's own tools: a task is named by its description, a grep by its pattern, a read by its file.
+    expect(toolLineLabel("task", { description: "Reply with hi", prompt: "Say hi" })).toBe("Used Task: Reply with hi");
+    expect(toolLineLabel("grep", { pattern: "TODO", path: "/repo" })).toBe("Used Grep: TODO");
+    expect(toolLineLabel("read", { filePath: "/repo/a.ts" })).toBe("Used Read: /repo/a.ts");
+    // Not its description: a Bash call is named by the command, a todo by its title.
+    expect(toolLineLabel("Bash", { command: "npm test", description: "Run the tests" })).toBe("Used Bash: npm test");
+    expect(toolLineLabel("createTodo", { title: "Ship it", description: "later" })).toBe("Used Create todo: Ship it");
+    // A bidi mark in a file name is written out, not left to reorder the line.
+    expect(toolLineLabel("read", { filePath: "/repo/\u202Etxt.exe" })).toBe("Used Read: /repo/\\u202Etxt.exe");
+    expect(toolSummary({ filePath: "a".repeat(400) }, 300)).toHaveLength(300);
   });
 
   it("says how long ago a message was", () => {

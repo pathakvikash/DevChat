@@ -28,6 +28,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       prompt: `User: ${user}\n\nAssistant: ${assistant}`,
       temperature: 0.7,
       maxOutputTokens: 40,
+      abortSignal: AbortSignal.timeout(60_000), // a CLI model has no Stop button here
     });
     // Models like to answer with `- "Show me the code."` or `**Show me…**`
     // even when told not to; strip the wrapping rather than show it greyed.

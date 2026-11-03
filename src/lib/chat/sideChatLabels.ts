@@ -1,6 +1,9 @@
 /** Labels for side-chat panes: the tab title, a folded tool line, and "19 hours ago". Pure. */
 
-const SUMMARY_KEYS = ["query", "q", "url", "path", "file", "command", "question", "title", "name", "prompt"];
+import { showHidden } from "@/lib/utils/messageParts";
+
+// A call is named by what it acts on: a grep by its pattern (before path), a Bash call by its command (before its description).
+const SUMMARY_KEYS = ["query", "q", "url", "pattern", "filePath", "file_path", "path", "file", "command", "title", "description", "question", "name", "prompt"];
 
 /** The tab chip's text: the side chat's own title, else its first message, else "Side chat". "New Chat" is the placeholder every chat starts with, so it counts as no title. */
 export function sideChatTitle(title: string | null | undefined, firstMessage: string | null | undefined): string {
@@ -42,14 +45,16 @@ function humanize(name: string): string {
   return words ? words.charAt(0).toUpperCase() + words.slice(1) : "Tool";
 }
 
-function toolSummary(input: unknown): string {
+/** A short text for what a tool call was given (its description, url, path, ...), or "". File names can hide bidi or
+ *  invisible characters, so those come out written (`\u202E`). */
+export function toolSummary(input: unknown, max = 60): string {
   if (!input || typeof input !== "object") return "";
   const record = input as Record<string, unknown>;
   for (const key of SUMMARY_KEYS) {
     const value = record[key];
     if (typeof value === "string" && value.trim()) {
       const text = value.replace(/\s+/g, " ").trim();
-      return text.length > 60 ? `${text.slice(0, 59)}…` : text;
+      return showHidden(text.length > max ? `${text.slice(0, max - 1)}…` : text);
     }
   }
   return "";

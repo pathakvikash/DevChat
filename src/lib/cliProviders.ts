@@ -1,9 +1,11 @@
 import { spawn, execFile, type ChildProcess } from "child_process";
 import { randomUUID } from "crypto";
+import { readFileSync } from "fs";
 import { access, constants, mkdir } from "fs/promises";
 import { homedir, tmpdir } from "os";
 import { delimiter, join } from "path";
 import { createInterface } from "readline";
+import { parseEnv } from "util";
 import type { LanguageModel } from "ai";
 import { PROVIDERS, ENV_ALIASES } from "./providers";
 import { editInsideCwd } from "./editScope";
@@ -73,6 +75,10 @@ export interface CliProviderDef {
   contextWindow: number;
   /** Fixed list, or "discover" to ask the tool (currently `opencode models`). */
   models: CliModel[] | "discover";
+  /** Silence this long (ms) means the tool is stuck; default `INACTIVITY_MS`. */
+  inactivityMs?: number;
+  /** Refuse a run with no working folder: the tool can read any file on disk, whatever its sandbox flag says. */
+  needsFolder?: boolean;
   invoke(p: CliInvocation): { args: string[]; stdin?: string; env?: Record<string, string>; cwd?: string; holdStdin?: boolean };
   /** Stateful line parser factory: one instance per run. */
   parser(): (line: string) => CliEvent[];
@@ -210,7 +216,40 @@ export function opencodeParser(): (line: string) => CliEvent[] {
         },
       ];
     }
-    if (e.type === "error") return [{ type: "error", message: e.error?.message ?? e.message ?? JSON.stringify(e) }];
+    if (e.type === "tool_use") {
+      // One line per finished call (OpenCode's own read/glob/grep/webfetch/task...), so call and result come together.
+      const part = e.part;
+      const st = part?.state;
+      if (typeof part?.callID !== "string" || typeof part.tool !== "string") return [];
+      if (st?.status !== "completed" && st?.status !== "error") return [];
+      const errored = st.status === "error";
+      // A sub-agent session has its own call ids, so one reply can repeat an id across sessions.
+      const id = e.sessionID ? `${e.sessionID}:${part.callID}` : part.callID;
+      let result: unknown = errored ? st.error ?? "Tool failed" : st.output ?? "";
+      if (typeof result === "string") {
+        // A denial lists every permission rule, home path included.
+        const rules = result.indexOf(" Here are some of the relevant rules");
+        if (rules >= 0) result = result.slice(0, rules);
+        // A sub-agent's answer comes wrapped in <task id=...><task_result>...</task_result></task>; greedy, so the answer may quote the tag.
+        if (part.tool === "task") result = /<task_result>\n?([\s\S]*)<\/task_result>/.exec(result as string)?.[1].replace(/\n$/, "") ?? result;
+      }
+      return [
+        { type: "tool-call", id, name: part.tool, input: st.input ?? {} },
+        // "invalid" is where OpenCode sends a malformed call; it reports as completed, but it did fail.
+        { type: "tool-result", id, name: part.tool, result, isError: errored || part.tool === "invalid" },
+      ];
+    }
+    if (e.type === "error") {
+      // OpenCode nests the text at error.data.message (error.message for older builds).
+      const raw = e.error?.data?.message ?? e.error?.message ?? e.message;
+      const msg = typeof raw === "string" ? raw.trim() : "";
+      if (/rejected permission|specified a rule which prevents/i.test(msg)) {
+        return [{ type: "error", message: "OpenCode stopped: the model got stuck on a tool call this chat doesn't allow. Try again, or pick a stronger model." }];
+      }
+      // A denial lists every permission rule, home path included.
+      const rules = msg.indexOf(" Here are some of the relevant rules");
+      return [{ type: "error", message: (rules >= 0 ? msg.slice(0, rules) : msg) || "OpenCode stopped with an error." }];
+    }
     return [];
   };
 }
@@ -229,7 +268,10 @@ export function codexParser(): (line: string) => CliEvent[] {
       const u = e.usage ?? {};
       return [{ type: "usage", usage: { input: u.input_tokens, cacheRead: u.cached_input_tokens, output: u.output_tokens } }];
     }
-    if (e.type === "error" || e.type === "turn.failed") return [{ type: "error", message: e.message ?? e.error?.message ?? JSON.stringify(e) }];
+    if (e.type === "error" || e.type === "turn.failed") {
+      const raw = e.message ?? e.error?.message;
+      return [{ type: "error", message: typeof raw === "string" && raw.trim() ? raw : "Codex stopped with an error." }];
+    }
     return [];
   };
 }
@@ -263,7 +305,7 @@ export const CLI_PROVIDERS: readonly CliProviderDef[] = [
           "--no-session-persistence",
           "--setting-sources", "",
           ...(!cwd
-            ? ["--tools", ""]
+            ? ["--tools", "", "--strict-mcp-config"] // no --mcp-config given: none of the user's MCP servers start
             : access === "agent"
               ? ["--tools", "default", "--permission-mode", "acceptEdits"]
               : bridged
@@ -287,6 +329,8 @@ export const CLI_PROVIDERS: readonly CliProviderDef[] = [
     bin: "codex",
     contextWindow: 200_000,
     models: [{ id: "default", name: "Default (your Codex setting)" }],
+    // --sandbox read-only still reads any file on disk, and no flag limits reads to the cwd.
+    needsFolder: true,
     invoke: ({ model, system, user, effort, cwd, access }) => ({
       args: [
         "exec",
@@ -309,6 +353,8 @@ export const CLI_PROVIDERS: readonly CliProviderDef[] = [
     bin: "opencode",
     contextWindow: 128_000,
     models: "discover",
+    // `opencode run --format json` prints a part only when it finishes, so a task sub-agent leaves both pipes silent for minutes.
+    inactivityMs: 15 * 60_000,
     invoke: ({ model, system, user, effort, cwd, access }) => ({
       args: [
         "run",
@@ -324,12 +370,24 @@ export const CLI_PROVIDERS: readonly CliProviderDef[] = [
       env: {
         // Shell is never allowed; edits only with a folder in agent mode; web
         // fetch only with a folder (mirrors Claude Code's tool set above).
+        // `opencode run` has no UI, so an "ask" is auto-rejected and ends the run.
+        // external_directory (reads outside the folder) defaults to ask; deny hands
+        // the model an error it can recover from. doom_loop (the same call three
+        // times) is checked outside the tool, so ask and deny both end the run:
+        // allow it and let the step limit below stop a model that never recovers.
         OPENCODE_CONFIG_CONTENT: JSON.stringify({
           permission: {
+            // Later rules win. Reading a .env file defaults to "ask", which ends the run, so say deny.
+            read: { "*": "allow", "*.env": "deny", "*.env.*": "deny", "*.env.example": "allow" },
             bash: "deny",
             edit: cwd && access === "agent" ? "allow" : "deny",
             webfetch: cwd ? "allow" : "deny",
+            websearch: cwd ? "allow" : "deny",
+            doom_loop: "allow",
+            external_directory: "deny",
           },
+          // A model that keeps repeating a call stops after this many steps.
+          agent: { build: { steps: 50 } },
         }),
       },
       cwd,
@@ -366,7 +424,10 @@ const STRIPPED_ENV = new Set([
   ...PROVIDERS.flatMap((p) => (p.envBaseUrl ? [p.envBaseUrl] : [])),
   ...Object.keys(ENV_ALIASES),
   "ANTHROPIC_AUTH_TOKEN",
+  "ANTHROPIC_BASE_URL",
   "ANTHROPIC_API_URL",
+  // OpenCode lets it override the permission block in OPENCODE_CONFIG_CONTENT (bash and external_directory came back).
+  "OPENCODE_PERMISSION",
 ]);
 
 /** Start the dev server from inside Claude Code and these leak in, making the
@@ -380,10 +441,46 @@ function isSessionVar(key: string): boolean {
   );
 }
 
-export function childEnv(extra?: Record<string, string>): NodeJS.ProcessEnv {
-  const env: NodeJS.ProcessEnv = { ...process.env, ...extra, PATH: searchPath() };
-  for (const k of Object.keys(env)) if (STRIPPED_ENV.has(k) || isSessionVar(k)) delete env[k];
-  return env;
+const appEnvCache = new Map<string, Set<string>>();
+/** Keys DevChat's own .env files define (DATABASE_URL, AUTH_SECRET, ...), from the files Next reads, once per folder and mode.
+ *  Not `@next/env`: inside Next it has already run (`__NEXT_PROCESSED_ENV`), and a second load returns no keys. */
+function appEnvKeys(): Set<string> {
+  const dir = process.cwd();
+  const mode = process.env.NODE_ENV === "production" ? "production" : process.env.NODE_ENV === "test" ? "test" : "development";
+  const id = `${mode}\0${dir}`;
+  let keys = appEnvCache.get(id);
+  if (!keys) {
+    keys = new Set();
+    // Read relative to the cwd (that is where Next reads them): a path joined from process.cwd() makes Turbopack trace the whole project.
+    // Next skips .env.local in test so a test run is the same on every machine.
+    for (const file of [`.env.${mode}.local`, ...(mode === "test" ? [] : [".env.local"]), `.env.${mode}`, ".env"]) {
+      try {
+        for (const k of Object.keys(parseEnv(readFileSync(file, "utf8")))) keys.add(k);
+      } catch {
+        // no such file, or one that does not parse
+      }
+    }
+    appEnvCache.set(id, keys);
+  }
+  return keys;
+}
+// What the tool needs to run and reach its own login and the network, so these stay even when a .env file sets one.
+const KEEP_ENV = new Set([
+  "PATH", "HOME", "USER", "LOGNAME", "SHELL", "TMPDIR", "LANG", "LC_ALL", "TERM", "PWD",
+  "HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "no_proxy", "all_proxy",
+  "NODE_EXTRA_CA_CERTS", "SSL_CERT_FILE", "SSL_CERT_DIR",
+  "CLAUDE_CONFIG_DIR", "CODEX_HOME", "XDG_CONFIG_HOME", "XDG_DATA_HOME",
+]);
+
+/** `cwd` is where the child is spawned: PWD must match it, since OpenCode takes its
+ *  project folder from PWD, which would otherwise be DevChat's own folder. */
+export function childEnv(extra?: Record<string, string>, cwd?: string): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = { ...process.env };
+  const app = appEnvKeys();
+  for (const k of Object.keys(env)) {
+    if (STRIPPED_ENV.has(k) || isSessionVar(k) || (app.has(k) && !KEEP_ENV.has(k))) delete env[k];
+  }
+  return { ...env, ...extra, PATH: searchPath(), ...(cwd ? { PWD: cwd } : {}) };
 }
 
 const binCache = new Map<string, { at: number; found: boolean }>();
@@ -482,6 +579,8 @@ export async function listCliModels(): Promise<{ entries: CliCatalogEntry[]; sta
  *  messages go separately, via a flag or prepended by `invoke`. */
 const MAX_TOOL_RESULT_CHARS = 8_000;
 
+const capChars = (text: string) => (text.length > MAX_TOOL_RESULT_CHARS ? `${text.slice(0, MAX_TOOL_RESULT_CHARS)}\n[…truncated]` : text);
+
 function toolOutputText(output: { type: string; value?: unknown; reason?: string }): string {
   let text: string;
   switch (output.type) {
@@ -501,7 +600,7 @@ function toolOutputText(output: { type: string; value?: unknown; reason?: string
       text = JSON.stringify(output.value ?? null);
   }
   if (output.type.startsWith("error")) text = `ERROR: ${text}`;
-  return text.length > MAX_TOOL_RESULT_CHARS ? `${text.slice(0, MAX_TOOL_RESULT_CHARS)}\n[…truncated]` : text;
+  return capChars(text);
 }
 
 export function flattenPrompt(prompt: Prompt): { system: string; user: string; warnings: Warning[] } {
@@ -526,6 +625,8 @@ export function flattenPrompt(prompt: Prompt): { system: string; user: string; w
     const text = m.content
       .map((p) => {
         if (p.type === "text") return p.text;
+        // A call the CLI ran itself is not one the model may repeat as a fence.
+        if (p.type === "tool-call" && p.providerExecuted) return "";
         if (p.type === "tool-call") {
           sawTools = true;
           return `\`\`\`tool_call\n${JSON.stringify({ name: p.toolName, arguments: p.input ?? {} })}\n\`\`\``;
@@ -897,6 +998,18 @@ function failedStream(warnings: Warning[], message: string): ReadableStream<Stre
   });
 }
 
+/** A tool's result as DevChat keeps it: cut to `MAX_TOOL_RESULT_CHARS`, so one big read can't fill the chat. */
+function capResult(result: unknown): unknown {
+  // Claude Code sends text blocks as an array: join their text, so a cut result isn't JSON-escaped.
+  const text =
+    typeof result === "string"
+      ? result
+      : Array.isArray(result) && result.every((b) => typeof b?.text === "string")
+        ? result.map((b) => b.text).join("\n")
+        : (JSON.stringify(result) ?? "");
+  return text.length > MAX_TOOL_RESULT_CHARS ? capChars(text) : (result ?? "");
+}
+
 function runCli(
   def: CliProviderDef,
   spec: ReturnType<CliProviderDef["invoke"]> | null,
@@ -927,7 +1040,7 @@ function runCli(
         const scratch = join(tmpdir(), "devchat-cli");
         await mkdir(scratch, { recursive: true });
         const cwd = spec!.cwd || scratch;
-        child = spawn(def.bin, spec!.args, { cwd, env: childEnv(spec!.env), stdio: ["pipe", "pipe", "pipe"] });
+        child = spawn(def.bin, spec!.args, { cwd, env: childEnv(spec!.env, cwd), stdio: ["pipe", "pipe", "pipe"] });
         run = {
           proc: child,
           providerId: def.id,
@@ -971,10 +1084,11 @@ function runCli(
         if (!errorMsg) errorMsg = reason;
         proc.kill("SIGTERM");
       };
+      const inactivityMs = def.inactivityMs ?? INACTIVITY_MS;
       // Paused while parked: a pending permission card is not a stuck tool.
       const watchdog = setInterval(() => {
-        if (Date.now() - run.lastActivity > INACTIVITY_MS) {
-          stop(`${def.label} produced no output for ${INACTIVITY_MS / 1000}s and was stopped. Check that \`${def.bin}\` works in a terminal.`);
+        if (Date.now() - run.lastActivity > inactivityMs) {
+          stop(`${def.label} produced no output for ${inactivityMs / 1000}s and was stopped. Check that \`${def.bin}\` works in a terminal.`);
         }
       }, 5_000);
       const onAbort = () => proc.kill("SIGTERM");
@@ -1123,7 +1237,7 @@ function runCli(
                 type: "tool-result",
                 toolCallId: ev.id,
                 toolName: ev.name,
-                result: (ev.result ?? "") as NonNullable<Extract<StreamPart, { type: "tool-result" }>["result"]>,
+                result: capResult(ev.result) as NonNullable<Extract<StreamPart, { type: "tool-result" }>["result"]>,
                 isError: ev.isError,
                 dynamic: true,
               });
@@ -1185,6 +1299,14 @@ export function createCliModel(def: CliProviderDef, modelArg: string): LanguageM
     const system = [flat.system, tools.length ? buildToolInstructions(tools) : "", folderNote]
       .filter(Boolean)
       .join("\n\n");
+    if (def.needsFolder && !cwd) {
+      return {
+        stream: failedStream(
+          warnings,
+          `${def.label} needs a working folder: it can read any file on this computer, so DevChat only runs it inside one. Pick a folder for this chat and send again.`,
+        ),
+      };
+    }
     const spec = def.invoke({ model: modelArg, system, user: flat.user, effort, cwd, access });
     const toolNames = new Set(tools.map((t) => t.name));
     // Only the tools that may be allowed for a chat, and only in Ask: Chat and Plan are read-only, whatever the list says.
