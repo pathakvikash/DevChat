@@ -19,6 +19,7 @@ describe("1 MB of unclosed fences and links", () => {
     ["json fences with no closer", fill("```json\n{\"a\":")],
     ["fences with text between", fill("```json x ")],
     ["bare fences", fill("```")],
+    ["one opener then a long whitespace run", "```json" + "\n".repeat(200_000)],
   ])("the agent output parser reads %s fast", (_n, text) => {
     expect(took(() => parseCardOutput(text, []))).toBeLessThan(LIMIT_MS);
   });
