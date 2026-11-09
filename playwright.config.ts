@@ -15,6 +15,10 @@ const providerEnv = Object.fromEntries(
 );
 const storageState = path.join(__dirname, "e2e/.auth/user.json");
 // An absolute path keeps Prisma from resolving it against the schema folder, and keeps dev.db out of reach.
+// SANITY_DIST_DIR_OVERRIDE lets suites in separate worktrees (or beside a stuck server) use their own Next dist dir.
+// It is also deleted by scripts/sanity.mjs, so only a plain `.next-sanity…` folder name is accepted (never "", "." or "..").
+const DIST = process.env.SANITY_DIST_DIR_OVERRIDE || ".next-sanity";
+if (!/^\.next-sanity[\w-]*$/.test(DIST)) throw new Error(`SANITY_DIST_DIR_OVERRIDE must look like ".next-sanity-3215", got "${DIST}"`);
 const DB_URL = `file:${path.join(__dirname, "prisma/sanity.db")}`;
 
 export default defineConfig({
@@ -67,7 +71,7 @@ export default defineConfig({
       // Working folder for the @ files spec (a stand-in for a Claude Code project).
       SANITY_WORKING_FOLDER: path.join(__dirname, "e2e/fixtures/project"),
       DATABASE_URL: DB_URL,
-      SANITY_DIST_DIR: ".next-sanity",
+      SANITY_DIST_DIR: DIST,
       AUTH_SECRET: "sanity-suite-secret-not-a-real-secret",
       AUTH_TRUST_HOST: "true",
       GOOGLE_OAUTH_CLIENT_ID: "sanity",

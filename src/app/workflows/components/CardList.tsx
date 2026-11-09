@@ -7,7 +7,7 @@ import { topoOrder, type CardRun, type FlowNode, type RunState, type WorkflowGra
 import { CardIcon } from "./ConfigPanel";
 import { cardStatus, formatTokens, STATUS_META, StatusBadge } from "./RunStatus";
 
-function footerOf(node: FlowNode, card: CardRun | undefined): string {
+export function footerOf(node: FlowNode, card: CardRun | undefined): string {
   const parts: string[] = [];
   if (CATALOG[node.type].perItem && node.config.perItem === true) parts.push("Each item");
   if (card?.items) parts.push(`${card.items.done}/${card.items.total}`);

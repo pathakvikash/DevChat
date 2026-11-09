@@ -1,0 +1,96 @@
+/* The workflow canvas look (8.4). React Flow's base.css is structural only; everything visual comes from the glass tokens,
+   so both themes follow `data-theme` with no per-theme rules here. */
+
+.devchat-flow.react-flow {
+  --xy-edge-stroke-default: var(--glass-border-strong);
+  --xy-edge-stroke-width-default: 1.5;
+  --xy-edge-stroke-selected-default: var(--glass-accent-strong);
+  --xy-connectionline-stroke-default: var(--glass-accent-strong);
+  --xy-connectionline-stroke-width-default: 2;
+  --xy-background-color-default: transparent;
+  --xy-background-pattern-dots-color-default: var(--glass-border);
+  --xy-handle-background-color-default: transparent;
+  --xy-attribution-background-color-default: transparent;
+  color: var(--foreground);
+}
+
+/* Cards: the focus ring and the selected ring are outlines, because the glass box-shadows beat Tailwind's ring. */
+.devchat-flow .react-flow__node {
+  outline: none;
+}
+.devchat-flow .flow-card[data-selected] {
+  outline: 2px solid var(--glass-accent-strong);
+  outline-offset: 0;
+}
+.devchat-flow .react-flow__node:focus-visible .flow-card {
+  outline: 2px solid var(--glass-accent-strong);
+  outline-offset: 2px;
+}
+
+/* Handles: 10px glass circles, input left and output right. The ::after widens the target you can hit. */
+.devchat-flow .flow-handle {
+  width: 10px;
+  height: 10px;
+  border-radius: 9999px;
+  background: var(--glass-bg-strong);
+  border: 1px solid var(--glass-border-strong);
+  transition: border-color 0.15s, background 0.15s;
+}
+.devchat-flow .flow-handle::after {
+  content: "";
+  position: absolute;
+  inset: -8px;
+}
+.devchat-flow .flow-handle:hover,
+.devchat-flow .flow-handle.connectingfrom {
+  background: var(--glass-accent);
+  border-color: var(--glass-accent-strong);
+}
+
+/* Edges and the arrow heads. */
+.devchat-flow .react-flow__edge-path {
+  stroke-linecap: round;
+}
+.devchat-flow .react-flow__edge.selected .react-flow__edge-path {
+  stroke-width: 2.5;
+}
+.devchat-flow .react-flow__edge.animated .react-flow__edge-path {
+  stroke: var(--glass-accent-strong);
+}
+
+/* Zoom controls as glass buttons. */
+.devchat-flow .react-flow__controls {
+  gap: 4px;
+  box-shadow: none;
+}
+.devchat-flow .react-flow__controls-button {
+  width: 30px;
+  height: 30px;
+  background: var(--glass-bg);
+  backdrop-filter: blur(var(--glass-blur-sm));
+  -webkit-backdrop-filter: blur(var(--glass-blur-sm));
+  border: 1px solid var(--glass-border);
+  border-radius: var(--glass-radius-sm);
+  box-shadow: var(--glass-shadow-sm);
+  color: var(--foreground);
+  cursor: pointer;
+}
+.devchat-flow .react-flow__controls-button:hover {
+  background: var(--glass-bg-hover);
+  border-color: var(--glass-border-hover);
+}
+.devchat-flow .react-flow__controls-button:focus-visible {
+  outline: 2px solid var(--glass-accent-strong);
+}
+.devchat-flow .react-flow__controls-button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.devchat-flow .react-flow__attribution {
+  font-size: 10px;
+  opacity: 0.6;
+}
+.devchat-flow .react-flow__attribution a {
+  color: inherit;
+}

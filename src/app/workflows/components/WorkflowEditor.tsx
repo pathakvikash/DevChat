@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { History, MoreHorizontal, Play, Settings2, Square, Trash2, X } from "lucide-react";
+import { History, List, MoreHorizontal, Play, Settings2, Square, Trash2, Workflow, X } from "lucide-react";
 import AppShell, { SidebarToggleButton } from "@/app/components/AppShell";
 import { useCommandPaletteActions } from "@/app/components/CommandPalette";
 import { useToast } from "@/app/components/Toast";
@@ -12,14 +12,16 @@ import type { ModelInfo } from "@/app/components/conversation/types";
 import SidePanel from "@/app/components/ui/SidePanel";
 import { fetchModels } from "@/app/hooks/useModelsApi";
 import { CATALOG, type CardType } from "@/lib/workflows/catalog";
-import { ancestorsOf, checkGraph, MAX_NODES, newCard, type CardRun, type FlowNode, type WorkflowGraph } from "@/lib/workflows/graph";
+import { ancestorsOf, autoLayout, checkGraph, connectNew, MAX_NODES, newCard, TRIGGER_ID, type CardRun, type FlowNode, type WorkflowGraph } from "@/lib/workflows/graph";
 import { renderText, renderTemplate, templateRefs, refRoot, type TemplateContext } from "@/lib/workflows/template";
+import Canvas, { type AddOptions } from "./Canvas";
 import CardList from "./CardList";
 import ConfigPanel from "./ConfigPanel";
 import type { FieldEnv } from "./ConfigField";
 import { pickerRows } from "./FieldPicker";
 import { fetchNodeRun, useWorkflowRun } from "./useWorkflowRun";
-import { formatRunDate, ResumeButton, RunsDrawer, runStatus, STATUS_META, type RunRow } from "./RunStatus";
+import RunsDrawer from "./RunsDrawer";
+import { formatRunDate, ResumeButton, runStatus, STATUS_META, type RunRow } from "./RunStatus";
 
 interface Wf {
   name: string;
@@ -39,6 +41,16 @@ function useMatchMedia(query: string): boolean {
     () => false,
   );
 }
+
+type View = "canvas" | "list";
+const VIEW_KEY = "vas:workflowView";
+const savedView = (): View => {
+  try {
+    return localStorage.getItem(VIEW_KEY) === "list" ? "list" : "canvas";
+  } catch {
+    return "canvas";
+  }
+};
 
 const inputClass = "focus-ring glass-input w-full rounded-[var(--glass-radius-md)] px-3 py-2 text-sm";
 
@@ -62,6 +74,13 @@ export default function WorkflowEditor({ id }: { id: string }) {
   const [chats, setChats] = useState<{ id: string; title: string }[]>([]);
   const [outputs, setOutputs] = useState<Record<string, unknown>>({});
   const [announce, setAnnounce] = useState("");
+  const [view, setViewState] = useState<View>(savedView);
+  const setView = (v: View) => {
+    setViewState(v);
+    try {
+      localStorage.setItem(VIEW_KEY, v);
+    } catch {}
+  };
   const moreRef = useRef<HTMLDivElement>(null);
 
   const wide = useMatchMedia("(min-width: 1024px)");
@@ -171,16 +190,21 @@ export default function WorkflowEditor({ id }: { id: string }) {
   const editNode = (nodeId: string, patch: Partial<FlowNode>) =>
     editGraph((g) => ({ ...g, nodes: g.nodes.map((n) => (n.id === nodeId ? { ...n, ...patch } : n)) }));
 
-  function addCard(type: CardType) {
+  function addCard(type: CardType, opts?: AddOptions) {
     if (!wf) return;
-    const node = newCard(wf.graph, type);
+    const base = newCard(wf.graph, type);
+    const wanted = opts ? { ...base, fromIds: opts.fromId ? [opts.fromId] : base.fromIds, ui: { ...base.ui, position: opts.position ?? base.ui.position } } : base;
+    // The same rules as a save: a connection that breaks one is refused, and the card lands unconnected.
+    const { node, error } = connectNew(wf.graph, wanted);
+    if (error) toast(`Added it unconnected. ${error}`, "error");
     editGraph((g) => ({ ...g, nodes: [...g.nodes, node] }));
     setSelectedId(node.id);
   }
 
   function deleteCard(nodeId: string) {
     const node = wf?.graph.nodes.find((n) => n.id === nodeId);
-    if (!node || nodeId === "trigger") return;
+    if (!node) return;
+    if (nodeId === TRIGGER_ID) return toast("The first card starts the flow, so it can't be deleted", "info");
     if (!window.confirm(`Delete “${node.ui.label}”?`)) return;
     // Cards that came after it connect to what it was connected to.
     editGraph((g) => ({
@@ -191,6 +215,12 @@ export default function WorkflowEditor({ id }: { id: string }) {
     }));
     setSelectedId(null);
   }
+
+  // Canvas edits: positions, connectors (already checked by the canvas with connectionError), and tidy-up.
+  const moveCards = (positions: Record<string, { x: number; y: number }>) =>
+    editGraph((g) => ({ ...g, nodes: g.nodes.map((n) => (positions[n.id] ? { ...n, ui: { ...n.ui, position: positions[n.id] } } : n)) }));
+  const connectCards = (from: string, to: string) => editNode(to, { fromIds: [...(wf?.graph.nodes.find((n) => n.id === to)?.fromIds ?? []), from] });
+  const disconnectCards = (from: string, to: string) => editNode(to, { fromIds: (wf?.graph.nodes.find((n) => n.id === to)?.fromIds ?? []).filter((f) => f !== from) });
 
   // ─── Running ────────────────────────────────────────────────────────────
   async function startRun() {
@@ -360,6 +390,7 @@ export default function WorkflowEditor({ id }: { id: string }) {
     );
   }
 
+  const showCanvas = !narrow && view === "canvas";
   const live = run && (run.state === "running" || run.state === "waiting");
   const canResume = run && (run.state === "failed" || run.state === "interrupted");
   const interruptedAt = run ? graph.nodes.find((n) => run.nodes[n.id]?.status === "running" || run.nodes[n.id]?.status === "failed")?.ui.label : undefined;
@@ -367,6 +398,7 @@ export default function WorkflowEditor({ id }: { id: string }) {
   const interruptedCard = interruptedNode && run ? run.nodes[interruptedNode.id] : undefined;
   const panel = selected && env && (
     <ConfigPanel
+      key={selected.id}
       node={selected}
       graph={graph}
       card={nodes[selected.id]}
@@ -398,6 +430,21 @@ export default function WorkflowEditor({ id }: { id: string }) {
           </span>
           {live && !viewingPast && <span className="text-xs text-zinc-400">A run is in progress. Changes apply to the next run.</span>}
           <div className="ml-auto flex items-center gap-2">
+            {!narrow && (
+              <div role="group" aria-label="View" className="glass-button flex rounded-[var(--glass-radius-md)] p-0.5 text-xs">
+                {([["canvas", "Canvas", Workflow], ["list", "List", List]] as const).map(([v, label, Icon]) => (
+                  <button
+                    key={v}
+                    type="button"
+                    aria-pressed={view === v}
+                    onClick={() => setView(v)}
+                    className={`focus-ring inline-flex h-7 items-center gap-1.5 rounded-[calc(var(--glass-radius-md)-2px)] px-2.5 font-medium ${view === v ? "glass-button-primary text-[var(--foreground)]" : "text-zinc-400 hover:text-zinc-200"}`}
+                  >
+                    <Icon size={14} aria-hidden="true" /> {label}
+                  </button>
+                ))}
+              </div>
+            )}
             <button type="button" onClick={() => void openRuns()} className="focus-ring glass-button inline-flex h-8 items-center gap-1.5 rounded-[var(--glass-radius-md)] px-3 text-sm">
               <History size={14} aria-hidden="true" /> Runs
             </button>
@@ -467,8 +514,12 @@ export default function WorkflowEditor({ id }: { id: string }) {
         )}
 
         <div className="flex min-h-0 flex-1">
-          <main className="min-w-0 flex-1 overflow-y-auto">
+          <main className={`min-w-0 flex-1 ${showCanvas ? "relative" : "overflow-y-auto"}`}>
+            {showCanvas ? (
+              <Canvas graph={graph} nodes={nodes} runState={run?.state} selectedId={selectedId} invalid={invalid} readOnly={readOnly} onSelect={setSelectedId} onAdd={addCard} onMove={moveCards} onConnect={connectCards} onDisconnect={disconnectCards} onDelete={deleteCard} onTidy={() => editGraph(autoLayout)} />
+            ) : (
             <CardList canAdd={graph.nodes.length < MAX_NODES} graph={graph} nodes={nodes} runState={run?.state} selectedId={selectedId} invalid={invalid} readOnly={readOnly} onSelect={setSelectedId} onAdd={addCard} />
+            )}
           </main>
           {wide && panel}
         </div>
