@@ -3,7 +3,7 @@ import { getSettingsKeys, setSettingsKey, deleteSettingsKey, maskKey } from "@/l
 import { PROVIDERS } from "@/lib/providers";
 import { detectionAvailable } from "@/lib/providerDetect";
 import { requireUserId } from "@/lib/auth";
-import { canUseHostTools } from "@/lib/hostAccess";
+import { canUseHostTools, hostToolsReason } from "@/lib/hostAccess";
 
 const PROVIDER_KEYS = PROVIDERS.flatMap((p) =>
   p.baseUrlSettingKey ? [p.settingKey, p.baseUrlSettingKey] : [p.settingKey],
@@ -28,6 +28,9 @@ export async function GET() {
   keys.envProviders = PROVIDERS.filter(
     (p) => process.env[p.envKey] || (p.envBaseUrl && process.env[p.envBaseUrl]),
   ).map((p) => p.id);
+  const why = await hostToolsReason(userId);
+  keys.hostTools = why === null;
+  keys.hostToolsReason = why;
   keys.detectionAvailable = detectionAvailable() && (await canUseHostTools(userId));
   return NextResponse.json(keys);
 }

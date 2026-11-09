@@ -8,7 +8,7 @@ import { budgetTokens, contextWindowFor } from "@/lib/chat/contextBudget";
 import { providerOptionsFor } from "@/lib/chat/providerOptions";
 import { isTransientProviderError } from "@/lib/chat/providerErrors";
 import { fenceText } from "@/lib/chat/quotePastChat";
-import { applySubAgentProgress, runSubAgent, startSubAgentOutput, type SubAgentOutput } from "@/lib/chat/subAgent";
+import { applySubAgentProgress, runSubAgent, startSubAgentOutput, SUB_AGENT_TIMEOUT_MS, type SubAgentOutput } from "@/lib/chat/subAgent";
 import { resolveProviderCreds } from "@/lib/apiKeys";
 import { canUseHostTools, HOST_TOOLS_REFUSED } from "@/lib/hostAccess";
 import { cliProviderForModel } from "@/lib/cliProviders";
@@ -37,6 +37,9 @@ export const BLOCKED_TOOLS = new Set([
   "rememberFact",
   "forgetFact",
 ]);
+
+/** How long a command-line model may work on one card. */
+const CLI_CARD_TIMEOUT_MS = 15 * 60_000;
 
 /** The model this card runs on. Not `resolveModel`: that one swaps in another model when the chosen one is missing,
  *  which a workflow must never do. Throws with a message fit to show on the card. */
@@ -220,6 +223,8 @@ export const agentCard: CardImpl = {
 
     let progress: SubAgentOutput = startSubAgentOutput("workflow", Date.now());
     const system = workflowSystemPrompt(fields, mcpIds.length > 0);
+    // A command-line model reading a folder is slow: 15 minutes, inside the 30-minute run limit (the default is 5).
+    const timeoutMs = cliProviderForModel(model.id) ? CLI_CARD_TIMEOUT_MS : undefined;
     const started = Date.now();
     const call = () =>
       runSubAgent({
@@ -231,6 +236,7 @@ export const agentCard: CardImpl = {
         abortSignal: c.signal,
         system,
         maxReportChars: OUTPUT_CAP_BYTES,
+        timeoutMs,
         onProgress: (e) => {
           progress = applySubAgentProgress(progress, e);
         },
@@ -264,7 +270,7 @@ export const agentCard: CardImpl = {
     }
     if (result.status === "timeout") {
       await trace("error");
-      throw fail("The agent took more than 5 minutes");
+      throw fail(`The agent took more than ${Math.round((timeoutMs ?? SUB_AGENT_TIMEOUT_MS) / 60_000)} minutes`);
     }
     if (result.status === "error") {
       await trace("error");

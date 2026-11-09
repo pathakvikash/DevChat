@@ -25,6 +25,19 @@ export default function WorkflowsPage() {
   const [rows, setRows] = useState<Row[] | null>(null);
   const [menu, setMenu] = useState(false);
   const wrap = useRef<HTMLDivElement>(null);
+  // Whether command-line models and folders can be used here; the local templates are disabled when not.
+  const [hostTools, setHostTools] = useState(false);
+  const [hostWhy, setHostWhy] = useState("");
+  useEffect(() => {
+    fetch("/api/settings/keys")
+      .then((res) => (res.ok ? res.json() : null))
+      .then((k) => {
+        if (!k) return;
+        setHostTools(k.hostTools === true);
+        setHostWhy(typeof k.hostToolsReason === "string" ? k.hostToolsReason : "");
+      })
+      .catch(() => {});
+  }, []);
 
   const [tick, setTick] = useState(0);
   const load = useCallback(() => setTick((t) => t + 1), []);
@@ -62,7 +75,10 @@ export default function WorkflowsPage() {
   async function create(template: TemplateKind) {
     setMenu(false);
     const res = await fetch("/api/workflows", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ template }) });
-    if (!res.ok) return toast("Couldn't create the workflow. Try again.", "error");
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      return toast(res.status === 403 && body.error ? body.error : "Couldn't create the workflow. Try again.", "error");
+    }
     router.push(`/workflows/${(await res.json()).id}`);
   }
 
@@ -93,14 +109,20 @@ export default function WorkflowsPage() {
               </button>
               {menu && (
                 <ul role="menu" className="glass-panel-strong absolute right-0 top-full z-50 mt-1 w-72 rounded-[var(--glass-radius-md)] p-1 shadow-lg">
-                  {TEMPLATE_OPTIONS.map((t) => (
-                    <li key={t.kind} role="none">
-                      <button type="button" role="menuitem" onClick={() => void create(t.kind)} className="focus-ring w-full rounded-[var(--glass-radius-sm)] px-3 py-2 text-left hover:bg-[var(--glass-bg-hover)]">
-                        <span className="block text-sm text-zinc-200">{t.label}</span>
-                        <span className="block text-xs text-zinc-400">{t.description}</span>
-                      </button>
-                    </li>
-                  ))}
+                  {TEMPLATE_OPTIONS.map((t) => {
+                    const off = !!t.local && !hostTools;
+                    return (
+                      <li key={t.kind} role="none">
+                        <button type="button" role="menuitem" disabled={off} onClick={() => void create(t.kind)} className="focus-ring w-full rounded-[var(--glass-radius-sm)] px-3 py-2 text-left hover:bg-[var(--glass-bg-hover)] disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:bg-transparent">
+                          <span className="flex items-center gap-2 text-sm text-zinc-200">
+                            {t.label}
+                            {t.local && <span className="rounded-full border border-[var(--glass-border)] px-1.5 text-[10px] text-zinc-400">Local</span>}
+                          </span>
+                          <span className="block text-xs text-zinc-400">{off ? `Not available here. ${hostWhy}`.trim() : t.description}</span>
+                        </button>
+                      </li>
+                    );
+                  })}
                 </ul>
               )}
             </div>

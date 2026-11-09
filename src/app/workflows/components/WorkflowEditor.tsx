@@ -17,6 +17,7 @@ import { renderText, renderTemplate, templateRefs, refRoot, type TemplateContext
 import Canvas, { type AddOptions } from "./Canvas";
 import CardList from "./CardList";
 import ConfigPanel from "./ConfigPanel";
+import { varValues } from "@/lib/workflows/vars";
 import { mergeVars } from "@/lib/workflows/describe";
 import DescribeBox, { PreviewBar, type Proposal } from "./DescribeBox";
 import type { FieldEnv } from "./ConfigField";
@@ -410,7 +411,7 @@ export default function WorkflowEditor({ id }: { id: string }) {
     const perItem = itemList !== undefined;
     const ctx = (item?: unknown): TemplateContext => ({
       nodes: byId,
-      vars: Object.fromEntries(graph.vars.map((v) => [v.key, v.value])),
+      vars: varValues(graph.vars),
       item,
       index: 1,
       run: { id: run?.id ?? "", date: (run?.startedAt ?? new Date().toISOString()).slice(0, 10), startedAt: run?.startedAt ?? "" },

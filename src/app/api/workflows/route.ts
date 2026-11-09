@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { getSettingsKey } from "@/lib/settings";
+import { hostToolsReason } from "@/lib/hostAccess";
 import { withUser } from "@/lib/workflows/http";
 import { sweepOrphans } from "@/lib/workflows/runner";
 import { buildTemplate, isTemplateKind } from "@/lib/workflows/templates";
@@ -53,6 +54,10 @@ export async function POST(req: NextRequest) {
     const defaultModel =
       (typeof body.model === "string" && body.model) || (await getSettingsKey(userId, "defaultModel")) || "";
     const kind = isTemplateKind(body.template) ? body.template : "blank";
+    if (kind === "explain-folder") {
+      const why = await hostToolsReason(userId);
+      if (why) return NextResponse.json({ error: why }, { status: 403 });
+    }
     // The News template saves into the user's "News" table, which is made here the first time.
     // The Jobs template saves into "Job leads", made the same way.
     const table = kind === "news" ? await newsTable(userId) : kind === "jobs" ? await jobsTable(userId) : null;

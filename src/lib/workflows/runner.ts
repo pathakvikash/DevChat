@@ -17,6 +17,7 @@ import {
   type RunState,
   type WorkflowGraph,
 } from "./graph";
+import { varValues } from "./vars";
 import { renderTemplate, type TemplateContext } from "./template";
 import { loadTable, offeredRows, toTableInfo } from "./tables";
 
@@ -313,7 +314,7 @@ export async function advanceRun(runId: string, deps: RunnerDeps = defaultDeps):
     const finish = (state: RunState, error?: string) => save({ state, error: error ?? null, endedAt: new Date() });
 
     const startedAt = run.startedAt.toISOString();
-    const vars = Object.fromEntries(graph.vars.map((v) => [v.key, v.value]));
+    const vars = varValues(graph.vars);
     const outputs = (): Record<string, unknown> =>
       Object.fromEntries(Object.entries(nodes).filter(([, r]) => r.status === "succeeded").map(([id, r]) => [id, r.output]));
     let lastItemSave = 0;

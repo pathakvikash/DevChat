@@ -185,6 +185,7 @@ function MessageBubble({
               onOpenArtifact={onOpenArtifact}
               onClarificationAnswer={onClarificationAnswer}
               compact={compact}
+              markdown={agentSender?.from === "workflow"}
             />
           ) : (
             <>

@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { CATALOG, CODEX_BLOCKED, hasToolConflict, isCodexModelId, isCardType, leaksTo, parseConfig, PRIVATE_LEAK_MESSAGE, reachesOpenWeb, readsPrivate, templateValues, MCP_WEB_WARNING, pickStatuses, TOOL_CONFLICT_MESSAGE, usesMcp, type CardType } from "./catalog";
+import { CATALOG, CODEX_BLOCKED, FOLDER_PRESET, isFolderModelId, hasToolConflict, isCodexModelId, isCardType, leaksTo, parseConfig, PRIVATE_LEAK_MESSAGE, reachesOpenWeb, readsPrivate, templateValues, MCP_WEB_WARNING, pickStatuses, TOOL_CONFLICT_MESSAGE, usesMcp, type CardType } from "./catalog";
 import { refRoot, templateRefs } from "./template";
 import { boardLines, detectBoard } from "./jobBoards";
 
@@ -20,7 +20,7 @@ const graphSchema = z.object({
   version: z.literal(1),
   defaultModel: z.string().default(""),
   maxRunTokens: z.number().int().min(1000).max(5_000_000).default(DEFAULT_MAX_RUN_TOKENS),
-  vars: z.array(z.object({ key: z.string(), label: z.string(), value: z.string() })).default([]),
+  vars: z.array(z.object({ key: z.string(), label: z.string(), value: z.string(), format: z.enum(["githubRepo"]).optional() })).default([]),
   nodes: z.array(nodeSchema),
 });
 
@@ -35,7 +35,8 @@ export interface WorkflowGraph {
   version: 1;
   defaultModel: string;
   maxRunTokens: number;
-  vars: { key: string; label: string; value: string }[];
+  /** `format`: set by a template, never by a model (see vars.ts). */
+  vars: { key: string; label: string; value: string; format?: "githubRepo" }[];
   nodes: FlowNode[];
 }
 
@@ -195,6 +196,10 @@ export function checkGraph(graph: WorkflowGraph): GraphIssue[] {
       }
     }
     if (n.type === "agent" && config.allowEdits === true && !config.folder) issues.push({ nodeId: n.id, field: "allowEdits", message: `${label}: Allow edits needs a working folder` });
+    if (n.type === "agent" && config.preset === FOLDER_PRESET) {
+      if (!isFolderModelId(String(config.model || graph.defaultModel))) issues.push({ nodeId: n.id, field: "model", message: `${label}: Pick a Claude Code or OpenCode model` });
+      if (!config.folder) issues.push({ nodeId: n.id, field: "folder", message: `${label}: Pick the project folder` });
+    }
     const ancestors = ancestorsOf(graph, n.id);
     if (usesMcp(n.type, config)) {
       const web = reachesOpenWeb(n.type, config, graph.defaultModel) || [...ancestors].some((a) => {
