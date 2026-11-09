@@ -364,6 +364,12 @@ describe("generateFlow hardening", () => {
       expect(graph.nodes.find((n) => n.id === "digest")!.config).toMatchObject({ folder: "/work", allowEdits: true, mcpTools: ["srv/list"] });
     });
 
+    it("keeps a kept mcpTool card's own inputs when the model rewires it", async () => {
+      const reply = { vars: [], nodes: [node("trigger", "trigger", []), node("news", "webSearch", ["trigger"]), node("digest", "agent", ["trigger"], { instructions: "summarise" }), node("notify", "mcpTool", ["news"])] };
+      const { graph } = await generateFlow({ description: "change", model: scripted([fence(reply)]).model, current });
+      expect(graph.nodes.find((n) => n.id === "notify")!.fromIds).toEqual(["digest"]);
+    });
+
     it("warns when a by-hand card is missing from the reply", async () => {
       const reply = { vars: [], nodes: [node("trigger", "trigger", []), node("digest", "agent", ["trigger"], { instructions: "summarise" })] };
       const { graph, warnings } = await generateFlow({ description: "change", model: scripted([fence(reply)]).model, current });

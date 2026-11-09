@@ -159,8 +159,12 @@ function sanitize(raw: Rec, current: WorkflowGraph | undefined, warnings: string
       const ui = isRec(n.ui) ? n.ui : {};
       const def = isCardType(n.type) ? CATALOG[n.type] : undefined;
       const card = { id: n.id, type: n.type, fromIds, ui: { label: String(ui.label ?? n.label ?? def?.label ?? n.id), position: { x: 0, y: 0 } } };
-      // A by-hand card that is still the same card is the user's, whatever the reply says about it.
-      if (before && SENSITIVE_TYPES.includes(String(n.type))) return { ...card, config: structuredClone(before.config) };
+      // A by-hand card that is still the same card is the user's, whatever the reply says about it: its settings, and its
+      // inputs while they still exist (if the reply removed them all, it keeps the reply's wiring, shown in the preview).
+      if (before && SENSITIVE_TYPES.includes(String(n.type))) {
+        const mine = before.fromIds.filter((id) => keptIds.has(id));
+        return { ...card, fromIds: mine.length ? mine : fromIds, config: structuredClone(before.config) };
+      }
 
       for (const k of Object.keys(config)) {
         if (!isUserOnlyKey(k)) continue;
