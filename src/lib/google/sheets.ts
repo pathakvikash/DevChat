@@ -1,5 +1,5 @@
 import { prisma } from "@/lib/db";
-import { deleteSettingsKey, getSettingsKey, setSettingsKey } from "@/lib/settings";
+import { deleteSettingsKey, getSettingsKey, setSettingsKey, updateSettingsKey } from "@/lib/settings";
 import { isSanityMode } from "@/lib/sanityMode";
 import { parseRowData, toTableInfo, type Column } from "@/lib/workflows/tables";
 
@@ -119,12 +119,15 @@ export async function disconnect(userId: string): Promise<void> {
   if (token) await googleFetch(REVOKE_URL, { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body: new URLSearchParams({ token }) }).catch(() => undefined);
 }
 
-/** Saves refreshed tokens only if the ones we started from are still the stored ones (not disconnected, not replaced, in between). */
+/**
+ * Saves refreshed tokens only if the same grant is still stored: not disconnected, not replaced by a new connection. The
+ * access token may differ (a concurrent refresh), so only the refresh token is compared. The write itself is an update
+ * that never creates the row, so a Disconnect that lands at any point wins.
+ */
 async function saveIfCurrent(userId: string, from: Stored, next: Stored): Promise<void> {
   const now = await load(userId);
-  if (!now || now.refreshToken !== from.refreshToken || now.accessToken !== from.accessToken) throw new ReconnectError(!!now?.needsReconnect);
-  // ponytail: a Disconnect landing between this read and the write can still be undone; a version column would close it.
-  await save(userId, next);
+  if (!now || now.refreshToken !== from.refreshToken) throw new ReconnectError(!!now?.needsReconnect);
+  if (!(await updateSettingsKey(userId, TOKEN_KEY, JSON.stringify(next)))) throw new ReconnectError(false);
 }
 
 async function refresh(userId: string, s: Stored): Promise<string> {
@@ -196,9 +199,6 @@ export function chunkValues(values: string[][], maxRows = CHUNK_ROWS, maxBytes =
   return out;
 }
 
-/** Column number (1-based) to letters: 1 → A, 27 → AA. */
-const colName = (n: number): string => (n > 26 ? colName(Math.floor((n - 1) / 26)) : "") + String.fromCharCode(65 + ((n - 1) % 26));
-
 export const sheetUrlOf = (id: string) => `https://docs.google.com/spreadsheets/d/${encodeURIComponent(id)}/edit`;
 
 /**
@@ -217,8 +217,42 @@ async function createSheet(userId: string, tableId: string, title: string, expec
   return body.spreadsheetId;
 }
 
-/** Writes every chunk at its row. Returns the first refused response, or null when all went through. */
-async function writeAll(userId: string, id: string, chunks: { start: number; rows: string[][] }[]): Promise<Response | null> {
+interface Tab {
+  sheetId: number;
+  rows: number;
+  cols: number;
+}
+
+/** The first tab's id and grid size. A new sheet's grid is 1,000 rows by 26 columns, and a write outside the grid is refused. */
+async function firstTab(userId: string, id: string): Promise<Tab | Response> {
+  const res = await call(userId, `${SHEETS_URL}/${encodeURIComponent(id)}?fields=sheets.properties(sheetId,gridProperties)`);
+  if (!res.ok) return res;
+  const p = ((await res.json().catch(() => ({}))) as { sheets?: { properties?: { sheetId?: number; gridProperties?: { rowCount?: number; columnCount?: number } } }[] }).sheets?.[0]?.properties;
+  if (typeof p?.sheetId !== "number") throw new SyncError("Google couldn't update the sheet. Try again.");
+  return { sheetId: p.sheetId, rows: p.gridProperties?.rowCount ?? 1000, cols: p.gridProperties?.columnCount ?? 26 };
+}
+
+async function resizeGrid(userId: string, id: string, tab: Tab, rows: number, cols: number): Promise<Response> {
+  return call(userId, `${SHEETS_URL}/${encodeURIComponent(id)}:batchUpdate`, {
+    method: "POST",
+    body: JSON.stringify({ requests: [{ updateSheetProperties: { properties: { sheetId: tab.sheetId, gridProperties: { rowCount: rows, columnCount: cols } }, fields: "gridProperties.rowCount,gridProperties.columnCount" } }] }),
+  });
+}
+
+/**
+ * Puts the rows into sheet `id`. Returns the first refused response, or null when all went through. The grid is grown first
+ * (writes outside it are refused), the chunks are written, then the grid is cut to exactly the content, which also deletes
+ * the rows and columns an older, bigger table left behind.
+ */
+async function writeSheet(userId: string, id: string, values: string[][], chunks: { start: number; rows: string[][] }[]): Promise<Response | null> {
+  const tab = await firstTab(userId, id);
+  if (tab instanceof Response) return tab;
+  const rows = Math.max(values.length, 1);
+  const cols = Math.max(values[0]?.length ?? 1, 1);
+  if (rows > tab.rows || cols > tab.cols) {
+    const grown = await resizeGrid(userId, id, tab, Math.max(rows, tab.rows), Math.max(cols, tab.cols));
+    if (!grown.ok) return grown;
+  }
   for (const c of chunks) {
     const res = await call(userId, `${SHEETS_URL}/${encodeURIComponent(id)}/values/A${c.start}?valueInputOption=RAW`, {
       method: "PUT",
@@ -226,7 +260,8 @@ async function writeAll(userId: string, id: string, chunks: { start: number; row
     });
     if (!res.ok) return res;
   }
-  return null;
+  const grid = await resizeGrid(userId, id, tab, rows, cols);
+  return grid.ok ? null : grid;
 }
 
 /**
@@ -234,9 +269,10 @@ async function writeAll(userId: string, id: string, chunks: { start: number; row
  * destination is only ever `DataTable.sheetId` for a table this user owns: nothing from a card, a template or the model
  * can name a sheet. RAW keeps Google from reading a cell such as "=HYPERLINK(...)" as a formula.
  *
- * The rows are written first and only the leftover rows and columns of the old content are cleared afterwards, so a
- * write that fails leaves the old sheet as it was. A sheet moved to Drive's Trash is still written by id until the trash
- * is emptied; only a deleted or unreachable one (404, 403) gets replaced.
+ * Failure: the rows are written before anything is deleted, so a small table (one write) that fails leaves the old sheet.
+ * A table written in several chunks that fails after the first chunk leaves the new rows over the old ones, and the grid
+ * not yet cut down; the next sync fixes it. A sheet moved to Drive's Trash is still written by id until the trash is
+ * emptied; only a deleted or unreachable one (404, 403) gets replaced.
  */
 export async function syncTableToSheet(userId: string, tableId: string): Promise<{ sheetUrl: string; rows: number }> {
   const row = await prisma.dataTable.findFirst({ where: { id: tableId, userId } });
@@ -247,18 +283,12 @@ export async function syncTableToSheet(userId: string, tableId: string): Promise
   const chunks = chunkValues(values);
 
   let id = row.sheetId ?? (await createSheet(userId, tableId, table.name, null));
-  let failed = await writeAll(userId, id, chunks);
+  let failed = await writeSheet(userId, id, values, chunks);
   if (failed && (failed.status === 404 || failed.status === 403) && row.sheetId) {
     // Deleted in Drive, or no longer this account's to write: start a fresh one.
     id = await createSheet(userId, tableId, table.name, row.sheetId);
-    failed = await writeAll(userId, id, chunks);
+    failed = await writeSheet(userId, id, values, chunks);
   }
   if (failed) throw new SyncError("Google couldn't update the sheet. Try again.");
-
-  // What an older, longer table left below the new last row, and to the right of the new last column.
-  const width = values[0].length;
-  const ranges = [`A${values.length + 1}:ZZ`, ...(width < 702 ? [`${colName(width + 1)}1:ZZ`] : [])];
-  const cleared = await call(userId, `${SHEETS_URL}/${encodeURIComponent(id)}/values:batchClear`, { method: "POST", body: JSON.stringify({ ranges }) });
-  if (!cleared.ok) throw new SyncError("Google couldn't finish updating the sheet. Try again.");
   return { sheetUrl: sheetUrlOf(id), rows: data.length };
 }

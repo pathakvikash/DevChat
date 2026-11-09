@@ -2,7 +2,7 @@
 // State lives on globalThis because Next dev can load a module once per route bundle.
 
 export interface FakeGoogle {
-  sheets: Map<string, { title: string; values: unknown[][]; raw: boolean }>;
+  sheets: Map<string, { title: string; values: unknown[][]; raw: boolean; rows: number; cols: number }>;
   /** Access tokens this fake still accepts. */
   live: Set<string>;
   failRefresh: boolean;
@@ -39,28 +39,33 @@ export async function fakeGoogle(url: string, init: RequestInit = {}): Promise<R
   const method = init.method ?? "GET";
   if (method === "POST" && u.pathname === "/v4/spreadsheets") {
     const id = `fake-sheet-${++st.seq}`;
-    st.sheets.set(id, { title: JSON.parse(String(init.body)).properties.title, values: [], raw: false });
+    st.sheets.set(id, { title: JSON.parse(String(init.body)).properties.title, values: [], raw: false, rows: 1000, cols: 26 });
     return json({ spreadsheetId: id });
   }
-  const batch = u.pathname.match(/^\/v4\/spreadsheets\/([^/]+)\/values:batchClear$/);
+  const idOf = (m: RegExpMatchArray | null) => decodeURIComponent(m?.[1] ?? "");
+  const grid = u.pathname.match(/^\/v4\/spreadsheets\/([^/:]+)$/);
+  const update = u.pathname.match(/^\/v4\/spreadsheets\/([^/:]+):batchUpdate$/);
   const whole = u.pathname.match(/^\/v4\/spreadsheets\/([^/]+)\/values\/A(\d+)$/);
-  const sheet = st.sheets.get(decodeURIComponent((batch ?? whole)?.[1] ?? ""));
+  const sheet = st.sheets.get(idOf(grid ?? update ?? whole));
   if (!sheet) return json({ error: { code: 404 } }, 404);
-  if (batch) {
-    for (const r of JSON.parse(String(init.body)).ranges as string[]) {
-      const rowsBelow = r.match(/^A(\d+):ZZ$/);
-      const colsRight = r.match(/^([A-Z]+)1:ZZ$/);
-      if (rowsBelow) sheet.values.length = Math.min(sheet.values.length, Number(rowsBelow[1]) - 1);
-      else if (colsRight) {
-        const col = [...colsRight[1]].reduce((n, c) => n * 26 + c.charCodeAt(0) - 64, 0);
-        sheet.values = sheet.values.map((row) => row.slice(0, col - 1));
-      }
+  // Like Google: a new sheet is 1,000 x 26, and a write outside the grid is refused.
+  if (grid) return json({ sheets: [{ properties: { sheetId: 0, gridProperties: { rowCount: sheet.rows, columnCount: sheet.cols } } }] });
+  if (update) {
+    for (const r of JSON.parse(String(init.body)).requests as { updateSheetProperties: { properties: { gridProperties: { rowCount: number; columnCount: number } } } }[]) {
+      const g = r.updateSheetProperties.properties.gridProperties;
+      sheet.rows = g.rowCount;
+      sheet.cols = g.columnCount;
+      sheet.values = sheet.values.slice(0, g.rowCount).map((row) => row.slice(0, g.columnCount));
     }
     return json({});
   }
   if (!whole) return json({ error: { code: 404 } }, 404);
   const rows = JSON.parse(String(init.body)).values as unknown[][];
-  sheet.values.splice(Number(whole[2]) - 1, rows.length, ...rows);
+  const first = Number(whole[2]);
+  if (first + rows.length - 1 > sheet.rows || rows.some((r) => r.length > sheet.cols)) {
+    return json({ error: { code: 400, message: `Range (A${first}) exceeds grid limits. Max rows: ${sheet.rows}, max columns: ${sheet.cols}`, status: "INVALID_ARGUMENT" } }, 400);
+  }
+  sheet.values.splice(first - 1, rows.length, ...rows);
   sheet.raw = u.searchParams.get("valueInputOption") === "RAW";
   return json({ updatedRows: rows.length });
 }

@@ -53,6 +53,12 @@ export async function setSettingsKey(userId: string, key: string, value: string)
   });
 }
 
+/** Updates a setting that already exists; never creates one. False when there is none (so a racing delete wins). */
+export async function updateSettingsKey(userId: string, key: string, value: string): Promise<boolean> {
+  const r = await prisma.appSetting.updateMany({ where: { userId, key }, data: { value: encryptValue(value) } });
+  return r.count > 0;
+}
+
 export async function deleteSettingsKey(userId: string, key: string): Promise<void> {
   await prisma.appSetting.deleteMany({ where: { userId, key } });
 }

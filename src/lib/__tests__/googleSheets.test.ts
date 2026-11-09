@@ -9,6 +9,8 @@ vi.mock("@/lib/settings", () => ({
   getSettingsKey: vi.fn(async (_u: string, k: string) => settings.get(k) ?? null),
   setSettingsKey: vi.fn(async (_u: string, k: string, v: string) => void settings.set(k, v)),
   deleteSettingsKey: vi.fn(async (_u: string, k: string) => void settings.delete(k)),
+  // like the real one: never creates a row
+  updateSettingsKey: vi.fn(async (_u: string, k: string, v: string) => (settings.has(k) ? (settings.set(k, v), true) : false)),
 }));
 vi.mock("@/lib/db", () => ({
   prisma: {
@@ -20,7 +22,8 @@ vi.mock("@/lib/db", () => ({
   },
 }));
 vi.mock("@/lib/auth", () => ({ requireUserId: vi.fn(async () => "u1"), UnauthorizedError: class extends Error {} }));
-vi.mock("@/lib/sanityMode", () => ({ isSanityMode: () => false }));
+const mode = vi.hoisted(() => ({ sanity: false }));
+vi.mock("@/lib/sanityMode", () => ({ isSanityMode: () => mode.sanity }));
 
 import { appOrigin } from "@/lib/appOrigin";
 import { chunkValues, authorizeUrl, connectionState, disconnect, exchangeCode, syncTableToSheet, tableToValues, ReconnectError, SHEETS_SCOPE } from "@/lib/google/sheets";
@@ -55,7 +58,8 @@ function google(opts: { refreshStatus?: number; refreshError?: string; deleted?:
     const token = new Headers(init.headers).get("Authorization")?.replace("Bearer ", "") ?? "";
     if (!live.has(token)) return json({}, 401);
     if (init.method === "POST" && u.pathname === "/v4/spreadsheets") return json({ spreadsheetId: `sheet${++n}` });
-    if ((opts.deleted || opts.forbidden) && u.pathname.includes("/sheetgone/")) return json({}, opts.deleted ? 404 : 403);
+    if ((opts.deleted || opts.forbidden) && u.pathname.includes("/sheetgone")) return json({}, opts.deleted ? 404 : 403);
+    if (!init.method && /^\/v4\/spreadsheets\/[^/]+$/.test(u.pathname)) return json({ sheets: [{ properties: { sheetId: 0, gridProperties: { rowCount: 1000, columnCount: 26 } } }] });
     if (init.method === "PUT" && ++puts === opts.failPutAt) return json({ error: { code: 400 } }, 400);
     return json({});
   });
@@ -180,20 +184,55 @@ describe("size limits and write order", () => {
     expect(chunkValues([["only"]])).toEqual([{ start: 1, rows: [["only"]] }]);
   });
 
-  it("a big table is written in chunks, then the tail is cleared; a failed write leaves the old sheet (nothing is cleared)", async () => {
+  it("a big table: the grid is grown first, rows go in chunks, then the grid is cut to the content; a failed chunk never shrinks it", async () => {
     google();
     await exchangeCode("u1", "c", "http://x/cb");
     dataRows = Array.from({ length: 1500 }, (_, i) => ({ id: `r${i}`, status: "new", data: JSON.stringify({ title: `t${i}`, url: "u" }) }));
     fetchMock.mockClear();
     await syncTableToSheet("u1", "t1");
-    const seq = calls().map((c) => `${c.method} ${new URL(c.url).pathname.split("/values")[1] ?? ""}`);
-    expect(seq).toEqual(["POST ", "PUT /A1", "PUT /A1001", "POST :batchClear"]);
+    const seq = calls().map((c) => `${c.method} ${new URL(c.url).pathname.replace("/v4/spreadsheets", "").replace("/values", "")}`);
+    expect(seq).toEqual(["POST ", "GET /sheet1", "POST /sheet1:batchUpdate", "PUT /sheet1/A1", "PUT /sheet1/A1001", "POST /sheet1:batchUpdate"]);
+    const grow = JSON.parse(String(calls()[2].body)).requests[0].updateSheetProperties.properties.gridProperties;
+    expect(grow).toEqual({ rowCount: 1501, columnCount: 26 });
 
     google({ failPutAt: 2 });
     await exchangeCode("u1", "c", "http://x/cb");
     fetchMock.mockClear();
     await expect(syncTableToSheet("u1", "t1")).rejects.toThrow("Google couldn't update the sheet. Try again.");
-    expect(calls().some((c) => c.url.includes("batchClear"))).toBe(false);
+    // grown before the writes, never cut down after the failed one
+    expect(calls().filter((c) => c.url.includes("batchUpdate"))).toHaveLength(1);
+  });
+
+  it("1,500 rows by 30 columns against a grid-checking Google: the grid grows, every row lands, and the grid ends exactly the size of the table", async () => {
+    mode.sanity = true;
+    try {
+      const { fakeState, fakeGoogle } = await import("@/lib/google/fake");
+      fakeState().sheets.clear();
+      fakeState().live.clear();
+      table.columns = JSON.stringify(Array.from({ length: 30 }, (_, i) => ({ key: `c${i}`, label: `C${i}`, type: "text" })));
+      table.sheetId = null;
+      dataRows = Array.from({ length: 1500 }, (_, i) => ({ id: `r${i}`, status: "new", data: JSON.stringify({ c0: `row${i}`, c29: "end" }) }));
+      await exchangeCode("u1", "c", "http://x/cb");
+      await syncTableToSheet("u1", "t1");
+      const sheet = [...fakeState().sheets.values()][0];
+      expect(sheet.values).toHaveLength(1501);
+      expect(sheet.values[1500][0]).toBe("row1499");
+      expect([sheet.rows, sheet.cols]).toEqual([1501, 31]);
+      // the same Google refuses a write outside the grid, the way the real one does
+      const [id] = [...fakeState().sheets.keys()];
+      const token = [...fakeState().live][0];
+      const bad = await fakeGoogle(`https://sheets.googleapis.com/v4/spreadsheets/${id}/values/A2000?valueInputOption=RAW`, { method: "PUT", headers: { Authorization: `Bearer ${token}` }, body: JSON.stringify({ values: [["x"]] }) });
+      expect(bad.status).toBe(400);
+      expect(JSON.stringify(await bad.json())).toContain("exceeds grid limits");
+      // a smaller table cuts the grid down: no leftover rows or columns
+      table.columns = JSON.stringify([{ key: "c0", label: "C0", type: "text" }]);
+      dataRows = dataRows.slice(0, 2);
+      await syncTableToSheet("u1", "t1");
+      expect(sheet.values).toEqual([["C0", "Status"], ["row0", "new"], ["row1", "new"]]);
+      expect([sheet.rows, sheet.cols]).toEqual([3, 2]);
+    } finally {
+      mode.sanity = false;
+    }
   });
 
   it("a network failure is a plain message", async () => {
@@ -212,17 +251,17 @@ describe("sync", () => {
     const first = await syncTableToSheet("u1", "t1");
     expect(first).toEqual({ sheetUrl: "https://docs.google.com/spreadsheets/d/sheet1/edit", rows: 1 });
     expect(table.sheetId).toBe("sheet1");
-    expect(calls().map((c) => `${c.method} ${new URL(c.url).pathname}`)).toEqual(["POST /v4/spreadsheets", "PUT /v4/spreadsheets/sheet1/values/A1", "POST /v4/spreadsheets/sheet1/values:batchClear"]);
+    expect(calls().map((c) => `${c.method} ${new URL(c.url).pathname}`)).toEqual(["POST /v4/spreadsheets", "GET /v4/spreadsheets/sheet1", "PUT /v4/spreadsheets/sheet1/values/A1", "POST /v4/spreadsheets/sheet1:batchUpdate"]);
     expect(JSON.parse(String(calls()[0].body))).toEqual({ properties: { title: "Jobs" } });
 
     fetchMock.mockClear();
     dataRows.push({ id: "r2", status: "new", data: JSON.stringify({ title: "Two", url: "https://b.test" }) });
     const second = await syncTableToSheet("u1", "t1");
     expect(second.rows).toBe(2);
-    expect(calls().map((c) => `${c.method} ${new URL(c.url).pathname}`)).toEqual(["PUT /v4/spreadsheets/sheet1/values/A1", "POST /v4/spreadsheets/sheet1/values:batchClear"]);
-    expect(JSON.parse(String(calls()[0].body)).values).toHaveLength(3);
-    // only the leftover rows below and columns to the right are cleared, after the write
-    expect(JSON.parse(String(calls()[1].body)).ranges).toEqual(["A4:ZZ", "D1:ZZ"]);
+    expect(calls().map((c) => `${c.method} ${new URL(c.url).pathname}`)).toEqual(["GET /v4/spreadsheets/sheet1", "PUT /v4/spreadsheets/sheet1/values/A1", "POST /v4/spreadsheets/sheet1:batchUpdate"]);
+    expect(JSON.parse(String(calls()[1].body)).values).toHaveLength(3);
+    // after the write the grid is cut to exactly the content: 3 rows by 3 columns
+    expect(JSON.parse(String(calls()[2].body)).requests[0].updateSheetProperties.properties.gridProperties).toEqual({ rowCount: 3, columnCount: 3 });
   });
 
   it("the destination is the table's own sheetId and nothing else: a table that is not the user's cannot be synced", async () => {
@@ -318,6 +357,32 @@ describe("token refresh", () => {
       return json({ access_token: "fresh" });
     });
     await expect(syncTableToSheet("u1", "t1")).rejects.toBeInstanceOf(ReconnectError);
+    expect(settings.size).toBe(0);
+  });
+
+  it("two syncs with an expired token both succeed (a concurrent refresh is not a different grant)", async () => {
+    google();
+    settings.set("googleSheetsTokens", JSON.stringify({ accessToken: "stale", refreshToken: "r1" }));
+    table.sheetId = "sheet0";
+    const both = await Promise.allSettled([syncTableToSheet("u1", "t1"), syncTableToSheet("u1", "t1")]);
+    expect(both.map((r) => r.status)).toEqual(["fulfilled", "fulfilled"]);
+    expect(stored().refreshToken).toBe("r1");
+  });
+
+  it("Disconnect wins in either order: before the refresh saves, or after it", async () => {
+    google();
+    // before: the row disappears between saveIfCurrent's read and its write, and nothing is created
+    settings.set("googleSheetsTokens", JSON.stringify({ accessToken: "stale", refreshToken: "r1" }));
+    const { updateSettingsKey } = await import("@/lib/settings");
+    vi.mocked(updateSettingsKey).mockImplementationOnce(async (_u, k) => (settings.delete(k), false));
+    table.sheetId = "sheet0";
+    await expect(syncTableToSheet("u1", "t1")).rejects.toBeInstanceOf(ReconnectError);
+    expect(settings.size).toBe(0);
+    // after: a disconnect once the tokens are saved leaves them gone
+    google();
+    settings.set("googleSheetsTokens", JSON.stringify({ accessToken: "stale", refreshToken: "r1" }));
+    await syncTableToSheet("u1", "t1");
+    await disconnect("u1");
     expect(settings.size).toBe(0);
   });
 
