@@ -1,5 +1,4 @@
 import { randomBytes } from "crypto";
-import type { NextRequest } from "next/server";
 import { prisma } from "./db";
 import { setSettingsKey } from "./settings";
 import { PROVIDERS } from "./providers";
@@ -46,19 +45,7 @@ export async function redeemPairingCode(
   return imported;
 }
 
-/** Public origin of this deployment, for the command shown to the user. */
-export function appOrigin(req: NextRequest): string {
-  if (process.env.AUTH_URL) {
-    try {
-      return new URL(process.env.AUTH_URL).origin;
-    } catch {
-      // fall through to headers
-    }
-  }
-  const host = req.headers.get("x-forwarded-host") ?? req.headers.get("host") ?? "localhost:3000";
-  const proto = req.headers.get("x-forwarded-proto") ?? (host.startsWith("localhost") ? "http" : "https");
-  return `${proto}://${host}`;
-}
+export { appOrigin } from "./appOrigin";
 
 /** The script the user runs: plain Node, no dependencies. Provider data and patterns come
  *  from providerDetect.ts so there is one source of truth for what counts as a key. */

@@ -21,11 +21,12 @@ export async function GET(req: NextRequest, { params }: Ctx) {
     const table = await loadTable(userId, id);
     if (!table) return NextResponse.json({ error: "Table not found" }, { status: 404 });
     const url = req.nextUrl.searchParams;
-    const status = url.get("status");
+    // `status` can repeat: pick mode shows every status a Pick rows card offers.
+    const status = url.getAll("status").filter(Boolean);
     const q = url.get("q")?.trim();
     const cursor = url.get("cursor");
     const rows = await prisma.dataTableRow.findMany({
-      where: { tableId: id, ...(status ? { status } : {}), ...(q ? { data: contains(q) } : {}) },
+      where: { tableId: id, ...(status.length === 1 ? { status: status[0] } : status.length > 1 ? { status: { in: status } } : {}), ...(q ? { data: contains(q) } : {}) },
       orderBy: [{ createdAt: "desc" }, { id: "desc" }],
       // The cursor row starts the page and is dropped here, not with `skip`: if it no longer matches the filter,
       // `skip: 1` would drop a real row instead.

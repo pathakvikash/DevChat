@@ -1,12 +1,13 @@
 import { FOLDER_PRESET } from "./catalog";
 import { emptyGraph, TRIGGER_ID, type WorkflowGraph } from "./graph";
 
-export type TemplateKind = "blank" | "news" | "explain-repo" | "explain-folder";
+export type TemplateKind = "blank" | "news" | "jobs" | "explain-repo" | "explain-folder";
 
 /** `local`: needs a command-line model and a folder on the server's own machine (no Vercel, owner only). */
 export const TEMPLATE_OPTIONS: { kind: TemplateKind; label: string; description: string; local?: boolean }[] = [
   { kind: "blank", label: "Blank", description: "Just the Run manually card." },
   { kind: "news", label: "News digest", description: "Search the web for your topics, have a model write a digest, post it to a new chat." },
+  { kind: "jobs", label: "Jobs", description: "Read company job boards, pick the jobs you like, and get a draft application for each. You submit it yourself." },
   // Sample flows: Explain a project or feature (docs/design/workflows.md).
   { kind: "explain-repo", label: "Explain a GitHub repo", description: "Reads a public repo and explains the project, or one feature, with diagrams." },
   { kind: "explain-folder", label: "Explain a project folder", description: "Local only. Claude Code or OpenCode reads a folder and explains it with diagrams.", local: true },
@@ -174,12 +175,104 @@ function explainFolder(defaultModel: string): WorkflowGraph {
   return g;
 }
 
-/** `tableId` is the user's News table, for the Save card of the News template. */
+/** `tableId` is the user's News table (or Job leads table, for the Jobs template), for the Save card of the template. */
 export function buildTemplate(kind: TemplateKind, defaultModel = "", tableId = ""): { name: string; graph: WorkflowGraph } {
   if (kind === "news") return { name: "News digest", graph: news(defaultModel, tableId) };
+  if (kind === "jobs") return { name: "Jobs", graph: jobs(defaultModel, tableId) };
   if (kind === "explain-repo") return { name: "Explain a GitHub repo", graph: explainRepo(defaultModel) };
   if (kind === "explain-folder") return { name: "Explain a project folder", graph: explainFolder(defaultModel) };
   return { name: "Untitled workflow", graph: emptyGraph(defaultModel) };
 }
 
 export const isTemplateKind = (k: unknown): k is TemplateKind => k === "blank" || TEMPLATE_OPTIONS.some((t) => t.kind === k);
+
+// ─── Phase 3: the Jobs template ───
+
+/** Instructions of the Draft application preset (4). The profile is the user's own text; the job is fenced data. */
+export const DRAFT_INSTRUCTIONS =
+  "Draft, never submit. Using my profile, write a cover letter under 250 words, 3–5 notes on tailoring my CV, and answers to the form's likely questions (the job is in the input; if it names none, answer 'Why this company?' and 'Why you?'). Don't invent experience. If my profile is empty, say so in the cover letter instead of making one up.\n\nMy profile: {{vars.profile}}";
+
+/**
+ * The Jobs template: the public boards → save to the Job leads table (new jobs only get status `new`) → pause and pick →
+ * a draft for each picked job (cover letter, CV notes, form answers) → save the drafts (with the board's own link as the
+ * apply link) and mark the rows `drafted`. Nothing is submitted, and the draft card has no tools at all: it sees the
+ * user's profile next to untrusted job text, so it must not be able to reach the web (a page, or the text of a posting,
+ * could otherwise steer it into sending the profile out in a request). The job's description is already in its input.
+ */
+function jobs(defaultModel: string, tableId: string): WorkflowGraph {
+  const g = emptyGraph(defaultModel);
+  g.vars = [{ key: "profile", label: "Your profile (paste your CV or a short summary)", value: "" }];
+  g.nodes.push(
+    {
+      id: "jobs",
+      type: "jobBoards",
+      fromIds: [TRIGGER_ID],
+      config: {
+        boards: "https://jobs.ashbyhq.com/supabase\nhttps://job-boards.greenhouse.io/vercel",
+        titleInclude: "Frontend\nFull stack",
+        titleExclude: "Intern",
+        locationAllow: "Remote",
+        locationBlock: "",
+        maxItems: 60,
+      },
+      ui: { label: "Job boards", position: { x: 280, y: 0 } },
+    },
+    {
+      id: "save",
+      type: "table",
+      fromIds: ["jobs"],
+      // New jobs get status `new`. A job saved by an earlier run keeps its status, so `drafted` and `applied` stay.
+      config: { tableId, action: "upsert", list: "{{jobs.items}}", keyField: "url", fields: [], status: "" },
+      ui: { label: "Save to Job leads", position: { x: 560, y: 0 } },
+    },
+    {
+      id: "pick",
+      type: "pickRows",
+      fromIds: ["save"],
+      config: { tableId, statuses: "new,picked", sortBy: "", maxPick: 10, message: "Draft application", setStatus: "picked" },
+      ui: { label: "Pick jobs", position: { x: 840, y: 0 } },
+    },
+    {
+      id: "draft",
+      type: "agent",
+      fromIds: ["pick"],
+      config: {
+        instructions: DRAFT_INSTRUCTIONS,
+        input: "{{item}}",
+        model: "",
+        tools: [],
+        outputFields: [
+          { name: "coverLetter", type: "text", description: "The cover letter, under 250 words" },
+          { name: "cvNotes", type: "text", description: "3 to 5 notes on tailoring my CV to this job" },
+          { name: "answers", type: "text", description: "Answers to the application form's questions" },
+        ],
+        preset: "Draft application",
+        perItem: true,
+        items: "{{pick.items}}",
+        maxItems: 25,
+      },
+      ui: { label: "Draft application", position: { x: 1120, y: 0 } },
+    },
+    {
+      id: "drafts",
+      type: "table",
+      fromIds: ["draft"],
+      config: {
+        tableId,
+        action: "update",
+        list: "{{draft.items}}",
+        keyField: "url",
+        fields: [
+          { column: "url", value: "{{item.url}}" },
+          { column: "coverLetter", value: "{{item.coverLetter}}" },
+          { column: "cvNotes", value: "{{item.cvNotes}}" },
+          { column: "answers", value: "{{item.answers}}" },
+          { column: "applyUrl", value: "{{item.url}}" },
+        ],
+        status: "drafted",
+      },
+      ui: { label: "Save drafts", position: { x: 1400, y: 0 } },
+    },
+  );
+  return g;
+}

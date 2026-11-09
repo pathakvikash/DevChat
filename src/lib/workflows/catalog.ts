@@ -2,7 +2,7 @@
 import { z } from "zod";
 import { FILTER_OPS } from "./filterRules";
 
-export type CardType = "trigger" | "webSearch" | "agent" | "chatMessage" | "mcpTool" | "fetch" | "filter" | "table";
+export type CardType = "trigger" | "webSearch" | "agent" | "chatMessage" | "mcpTool" | "fetch" | "filter" | "table" | "jobBoards" | "pickRows" | "sheetSync";
 export type CardCategory = "Start" | "Get data" | "AI" | "Logic" | "Table" | "Output";
 
 export interface FieldSpec {
@@ -166,9 +166,9 @@ export const usesMcp = (type: string, config: Cfg): boolean => type === "mcpTool
 export const readsPrivate = (type: string, config: Cfg, defaultModel = ""): boolean =>
   readsChats(type, config) || usesMcp(type, config) || hasCliFolder(type, config, defaultModel);
 
-/** The open web: a search or fetch card, or an agent with a web tool. */
+/** The open web: a search, fetch or job boards card, or an agent with a web tool. */
 export const reachesOpenWeb = (type: string, config: Cfg, _defaultModel = ""): boolean =>
-  type === "webSearch" || type === "fetch" || (type === "agent" && toolList(config).some((t) => OUTBOUND_TOOLS.includes(t)));
+  type === "webSearch" || type === "fetch" || type === "jobBoards" || (type === "agent" && toolList(config).some((t) => OUTBOUND_TOOLS.includes(t)));
 
 /** Can send data out: the open web, or MCP (servers can make network calls). */
 export const reachesWeb = (type: string, config: Cfg, defaultModel = ""): boolean => reachesOpenWeb(type, config, defaultModel) || usesMcp(type, config);
@@ -380,10 +380,98 @@ const mcpTool: CardDef = {
   summary: (c) => (c.tool ? `Calls ${trim(c.tool, 40)}` : "No tool picked yet"),
 };
 
-export const CATALOG: Record<CardType, CardDef> = { trigger, webSearch, agent, chatMessage, mcpTool, fetch: fetchCard, filter: filterCard, table: tableCard };
+// Phase 7. Config is only the table: the sheet it writes to is DataTable.sheetId, created by DevChat on the first sync.
+// Nothing here can name a sheet, an id, a URL or a range.
+const sheetSyncCard: CardDef = {
+  type: "sheetSync",
+  label: "Sync to Google Sheet",
+  category: "Table",
+  icon: "Sheet",
+  description: "Copies every row of a DevChat table to its own Google Sheet, replacing what the sheet held. DevChat creates the sheet on the first sync, and can only touch sheets it created.",
+  schema: z.object({ tableId: z.string().default("") }),
+  defaults: () => ({ tableId: "" }),
+  fields: [{ key: "tableId", label: "Table", kind: "table" }],
+  perItem: false,
+  outputs: () => ["sheetUrl", "rows"],
+  summary: () => "Overwrites the table's sheet",
+};
+
+
+// ─── Phase 3: Job boards and Pick rows (new cards go at the end of the lists) ───
+
+export const DEFAULT_MAX_JOBS = 60;
+export const DEFAULT_MAX_PICK = 10;
+export const MAX_PICK_LIMIT = 25; // the same as the default of a per-item card after it, and keeps Continue's output well under 200 KB
+/** The status a picked row gets, and the one pickRows offers, unless the card says otherwise. */
+export const DEFAULT_PICK_STATUS = "picked";
+
+const jobBoards: CardDef = {
+  type: "jobBoards",
+  label: "Job boards",
+  category: "Get data",
+  icon: "Briefcase",
+  description: "Reads the public job boards of companies on Greenhouse, Ashby and Lever, and keeps the jobs that match.",
+  schema: z.object({
+    boards: z.string().default(""),
+    titleInclude: z.string().default(""),
+    titleExclude: z.string().default(""),
+    locationAllow: z.string().default(""),
+    locationBlock: z.string().default(""),
+    maxItems: z.number().int().min(1).max(1000).default(DEFAULT_MAX_JOBS),
+  }),
+  defaults: () => ({ boards: "", titleInclude: "", titleExclude: "", locationAllow: "", locationBlock: "", maxItems: DEFAULT_MAX_JOBS }),
+  fields: [
+    { key: "boards", label: "Careers pages", kind: "textarea", rows: 3, help: "One address per line: jobs.ashbyhq.com/<company>, jobs.lever.co/<company> or job-boards.greenhouse.io/<company>." },
+    { key: "titleInclude", label: "Title has any of", kind: "textarea", rows: 2, help: "One word per line. Empty keeps every title." },
+    { key: "titleExclude", label: "Title has none of", kind: "textarea", rows: 2, help: "One word per line." },
+    { key: "locationAllow", label: "Location has any of", kind: "textarea", rows: 2, help: "One word per line. Empty keeps every location. A job with no location is kept." },
+    { key: "locationBlock", label: "Location has none of", kind: "textarea", rows: 2, help: "One word per line. Wins over the list above." },
+    { key: "maxItems", label: "Most jobs to keep", kind: "number" },
+  ],
+  perItem: false,
+  outputs: () => ["items", "count", "errors"],
+  summary: (c) => {
+    const n = String(c.boards ?? "").split("\n").filter((l) => l.trim()).length;
+    return `${n} ${n === 1 ? "board" : "boards"}${c.titleInclude ? ` · title has ${trim(String(c.titleInclude).split("\n")[0], 30)}` : ""}`;
+  },
+};
+
+const pickRows: CardDef = {
+  type: "pickRows",
+  label: "Pick rows",
+  category: "Table",
+  icon: "ListChecks",
+  description: "Pauses the run so you can tick rows in a table. The cards after it work on the rows you pick.",
+  schema: z.object({
+    tableId: z.string().default(""),
+    /** The statuses on offer, separated by commas. */
+    statuses: z.string().default("new"),
+    sortBy: z.string().default(""),
+    maxPick: z.number().int().min(1).max(MAX_PICK_LIMIT).default(DEFAULT_MAX_PICK),
+    message: z.string().max(200).default(""),
+    setStatus: z.string().max(60).default(DEFAULT_PICK_STATUS),
+  }),
+  defaults: () => ({ tableId: "", statuses: "new", sortBy: "", maxPick: DEFAULT_MAX_PICK, message: "", setStatus: DEFAULT_PICK_STATUS }),
+  fields: [
+    { key: "tableId", label: "Table", kind: "table" },
+    { key: "statuses", label: "Offer rows with status", kind: "text", help: "Separate several with commas. Only rows with one of these statuses can be picked." },
+    { key: "sortBy", label: "Sort by", kind: "text", help: "A column to sort by, highest first. Empty keeps the newest rows first." },
+    { key: "maxPick", label: "Most rows to pick", kind: "number" },
+    { key: "message", label: "What the rows are for", kind: "text", help: "Shown in the banner, for example “Draft application”." },
+    { key: "setStatus", label: "Status of picked rows", kind: "text", help: "Rows you pick get this status. Empty leaves it as it is." },
+  ],
+  perItem: false,
+  outputs: () => ["items", "count"],
+  summary: (c) => `Pick up to ${Number(c.maxPick) || DEFAULT_MAX_PICK} rows${c.message ? ` · ${trim(c.message, 30)}` : ""}`,
+};
+
+/** The statuses a Pick rows card offers, from its comma-separated field. */
+export const pickStatuses = (c: Record<string, unknown>): string[] => [...new Set(String(c.statuses ?? "").split(",").map((s) => s.trim()).filter(Boolean))];
+
+export const CATALOG: Record<CardType, CardDef> = { trigger, webSearch, agent, chatMessage, mcpTool, fetch: fetchCard, filter: filterCard, table: tableCard, jobBoards, pickRows, sheetSync: sheetSyncCard };
 export const CARD_TYPES = Object.keys(CATALOG) as CardType[];
 /** Cards the user can add (the trigger is created with the workflow). */
-export const ADDABLE_TYPES: CardType[] = ["webSearch", "fetch", "agent", "filter", "table", "mcpTool", "chatMessage"];
+export const ADDABLE_TYPES: CardType[] = ["webSearch", "fetch", "agent", "filter", "table", "mcpTool", "chatMessage", "jobBoards", "pickRows", "sheetSync"];
 
 /** The template whose list gives a card its {{item}}: the Items field of a per-item card, or the List field of a card (Filter,
  *  Save to table) that reads {{item}} in its rules and columns. Undefined when the card has no item. */

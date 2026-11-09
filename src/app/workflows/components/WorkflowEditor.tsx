@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { History, List, MoreHorizontal, Play, Settings2, Square, Trash2, Workflow, X } from "lucide-react";
+import { History, List, MoreHorizontal, Play, Settings2, ShieldQuestion, Square, Trash2, Workflow, X } from "lucide-react";
 import AppShell, { SidebarToggleButton } from "@/app/components/AppShell";
 import { useCommandPaletteActions } from "@/app/components/CommandPalette";
 import { useToast } from "@/app/components/Toast";
@@ -463,6 +463,8 @@ export default function WorkflowEditor({ id }: { id: string }) {
   const select = previewing || describing ? undefined : setSelectedId;
   const live = run && (run.state === "running" || run.state === "waiting");
   const canResume = run && (run.state === "failed" || run.state === "interrupted");
+  // A Pick rows card is waiting for the user (8.2): the banner leads to the table's pick mode.
+  const waiting = run && run.state === "waiting" && !viewingPast && !previewing ? Object.values(run.nodes).find((c) => c.status === "waiting" && c.waiting)?.waiting : undefined;
   const interruptedAt = run ? graph.nodes.find((n) => run.nodes[n.id]?.status === "running" || run.nodes[n.id]?.status === "failed")?.ui.label : undefined;
   const interruptedNode = run ? graph.nodes.find((n) => run.nodes[n.id]?.status === "running") : undefined;
   const interruptedCard = interruptedNode && run ? run.nodes[interruptedNode.id] : undefined;
@@ -550,7 +552,7 @@ export default function WorkflowEditor({ id }: { id: string }) {
                 </ul>
               )}
             </div>
-            {live && !viewingPast && (
+            {live && !viewingPast && !waiting && (
               <button type="button" onClick={() => void cancelRun()} className="focus-ring glass-button-danger inline-flex h-8 items-center gap-1.5 rounded-[var(--glass-radius-md)] px-3 text-sm font-medium">
                 <Square size={14} aria-hidden="true" /> Cancel run
               </button>
@@ -560,6 +562,19 @@ export default function WorkflowEditor({ id }: { id: string }) {
             </button>
           </div>
         </header>
+
+        {waiting && run && (
+          <div data-testid="waiting-banner" className="glass-card mx-4 mt-2 flex flex-wrap items-center gap-x-3 gap-y-2 rounded-[var(--glass-radius-md)] border-amber-900/50 px-4 py-2 text-sm">
+            <ShieldQuestion size={16} className="shrink-0 text-amber-400" aria-hidden="true" />
+            <span className="min-w-0 flex-1 basis-60 text-zinc-200">Waiting for you: pick rows in “{waiting.tableName}”, then continue.</span>
+            <Link href={`/tables/${waiting.tableId}?pick=${run.id}`} className="focus-ring glass-button-primary inline-flex h-8 items-center rounded-[var(--glass-radius-md)] px-3 text-sm font-medium text-white">
+              Open table
+            </Link>
+            <button type="button" onClick={() => void cancelRun()} className="focus-ring glass-button-danger inline-flex h-8 items-center gap-1.5 rounded-[var(--glass-radius-md)] px-3 text-sm font-medium">
+              <Square size={14} aria-hidden="true" /> Cancel run
+            </button>
+          </div>
+        )}
 
         {(viewingPast || canResume) && run && (
           <div className="flex flex-wrap items-center gap-2 border-b border-[var(--glass-border)] px-4 py-2 text-sm">

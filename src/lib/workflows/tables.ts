@@ -32,6 +32,20 @@ export const NEWS_COLUMNS: Column[] = [
   { key: "query", label: "Query", type: "text" },
 ];
 export const NEWS_STATUSES = ["new", "read"];
+/** What the Jobs template's table starts with: a job from a board, and the draft the agent writes for it. */
+export const JOB_COLUMNS: Column[] = [
+  { key: "title", label: "Title", type: "text" },
+  { key: "company", label: "Company", type: "text" },
+  { key: "location", label: "Location", type: "text" },
+  { key: "url", label: "URL", type: "url" },
+  { key: "description", label: "Description", type: "longtext" },
+  { key: "source", label: "Source", type: "text" },
+  { key: "coverLetter", label: "Cover letter", type: "longtext" },
+  { key: "cvNotes", label: "CV notes", type: "longtext" },
+  { key: "answers", label: "Form answers", type: "longtext" },
+  { key: "applyUrl", label: "Apply link", type: "url" },
+];
+export const JOB_STATUSES = ["new", "picked", "drafted", "applied"];
 
 function parseJson<T>(text: string, fallback: T): T {
   try {
@@ -207,4 +221,11 @@ export async function writeRows(table: TableInfo, action: "upsert" | "update", i
     if (isClash(e)) throw new Error(`Another run is saving to “${table.name}” at the same time. Run this one again.`);
     throw e;
   }
+}
+
+/** Rows of this table, by id, that carry one of `statuses`: what a Pick rows card may hand on. Others (another table's, or a status no longer on offer) are left out. Kept in the order of `ids`. */
+export async function offeredRows(tableId: string, statuses: string[], ids: string[]): Promise<RowItem[]> {
+  const rows = await prisma.dataTableRow.findMany({ where: { tableId, id: { in: ids }, status: { in: statuses } } });
+  const byId = new Map(rows.map((r) => [r.id, item(r, parseRowData(r.data))]));
+  return ids.flatMap((id) => (byId.has(id) ? [byId.get(id)!] : []));
 }

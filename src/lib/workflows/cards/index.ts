@@ -9,6 +9,9 @@ import { fetchCard } from "./fetch";
 import { filterCard } from "./filter";
 import { tableCard } from "./table";
 import { mcpToolCard } from "./mcpTool";
+import { jobBoardsCard } from "./jobBoards";
+import { pickRowsCard } from "./pickRows";
+import { sheetSyncCard } from "./sheetSync";
 
 /** What a card gets when it runs. For a per-item card the runner calls `run` once per item, with `tctx.item` set. */
 export interface CardCtx {
@@ -35,6 +38,8 @@ export interface CardOutcome {
   skip?: string;
   /** The card is Done but the cards after it have nothing to work on: they are Skipped with this reason. */
   stop?: string;
+  /** Pick rows: the card pauses the run. The runner saves it as Waiting and stops until `continueRun` hands it the rows. */
+  wait?: CardRun["waiting"];
 }
 
 export interface CardImpl {
@@ -52,4 +57,7 @@ export const CARDS: Record<CardType, CardImpl> = {
   filter: filterCard,
   table: tableCard,
   mcpTool: mcpToolCard,
+  jobBoards: jobBoardsCard,
+  pickRows: pickRowsCard,
+  sheetSync: sheetSyncCard,
 };
