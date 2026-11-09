@@ -113,7 +113,7 @@ if (!lintOnly && (await portInUse())) {
 }
 
 // Next writes route types into the dist dir that `tsc` also reads; stale ones from another branch fail the typecheck.
-if (!has("--e2e") && !lintOnly) rmSync(path.join(root, ".next-sanity"), { recursive: true, force: true });
+if (!has("--e2e") && !lintOnly) rmSync(path.join(root, process.env.SANITY_DIST_DIR_OVERRIDE ?? ".next-sanity"), { recursive: true, force: true });
 
 const results = [];
 for (const step of steps) {
