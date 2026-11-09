@@ -147,6 +147,11 @@ export const TOOL_CONFLICT_MESSAGE = "This card can read your chats and reach th
 type Cfg = Record<string, unknown>;
 const toolList = (c: Cfg): string[] => (Array.isArray(c.tools) ? (c.tools as string[]) : []);
 
+/** An agent card with this `preset` (the "Explain a project folder" template) is checked for a Claude Code or OpenCode model and a folder. */
+export const FOLDER_PRESET = "explain-folder";
+/** Claude Code or OpenCode (Codex is blocked for workflow cards). */
+export const isFolderModelId = (id: string): boolean => /^(claude-code|opencode)\//.test(id);
+
 /** A command-line model with a folder: it can read the folder. Workflow cards run it with its own web tools switched off (`web: false`). */
 export const hasCliFolder = (type: string, config: Cfg, defaultModel = ""): boolean =>
   type === "agent" && !!config.folder && isCliModelId(String(config.model || defaultModel));

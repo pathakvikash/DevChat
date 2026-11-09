@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { CATALOG, CODEX_BLOCKED, hasToolConflict, isCodexModelId, isCardType, leaksTo, parseConfig, PRIVATE_LEAK_MESSAGE, reachesOpenWeb, readsPrivate, templateValues, MCP_WEB_WARNING, TOOL_CONFLICT_MESSAGE, usesMcp, type CardType } from "./catalog";
+import { CATALOG, CODEX_BLOCKED, FOLDER_PRESET, isFolderModelId, hasToolConflict, isCodexModelId, isCardType, leaksTo, parseConfig, PRIVATE_LEAK_MESSAGE, reachesOpenWeb, readsPrivate, templateValues, MCP_WEB_WARNING, TOOL_CONFLICT_MESSAGE, usesMcp, type CardType } from "./catalog";
 import { refRoot, templateRefs } from "./template";
 
 export const MAX_NODES = 30;
@@ -173,6 +173,10 @@ export function checkGraph(graph: WorkflowGraph): GraphIssue[] {
     if (n.type === "table" && !String(config.tableId ?? "").trim()) issues.push({ nodeId: n.id, field: "tableId", message: `${label}: pick a table` });
     if (n.type === "mcpTool" && !String(config.tool ?? "").trim()) issues.push({ nodeId: n.id, field: "tool", message: `${label}: pick a tool` });
     if (n.type === "agent" && config.allowEdits === true && !config.folder) issues.push({ nodeId: n.id, field: "allowEdits", message: `${label}: Allow edits needs a working folder` });
+    if (n.type === "agent" && config.preset === FOLDER_PRESET) {
+      if (!isFolderModelId(String(config.model || graph.defaultModel))) issues.push({ nodeId: n.id, field: "model", message: `${label}: Pick a Claude Code or OpenCode model` });
+      if (!config.folder) issues.push({ nodeId: n.id, field: "folder", message: `${label}: Pick the project folder` });
+    }
     const ancestors = ancestorsOf(graph, n.id);
     if (usesMcp(n.type, config)) {
       const web = reachesOpenWeb(n.type, config, graph.defaultModel) || [...ancestors].some((a) => {

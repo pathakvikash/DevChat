@@ -16,6 +16,7 @@ import {
   type RunState,
   type WorkflowGraph,
 } from "./graph";
+import { normalizeRepo } from "./templates";
 import { renderTemplate, type TemplateContext } from "./template";
 
 export const RUN_LIMIT_MS = 30 * 60_000;
@@ -290,7 +291,8 @@ export async function advanceRun(runId: string, deps: RunnerDeps = defaultDeps):
     const finish = (state: RunState, error?: string) => save({ state, error: error ?? null, endedAt: new Date() });
 
     const startedAt = run.startedAt.toISOString();
-    const vars = Object.fromEntries(graph.vars.map((v) => [v.key, v.value]));
+    // A variable named "repo" may hold a full GitHub URL (the Explain a GitHub repo template); it is read as owner/name.
+    const vars = Object.fromEntries(graph.vars.map((v) => [v.key, v.key === "repo" ? normalizeRepo(v.value) : v.value]));
     const outputs = (): Record<string, unknown> =>
       Object.fromEntries(Object.entries(nodes).filter(([, r]) => r.status === "succeeded").map(([id, r]) => [id, r.output]));
     let lastItemSave = 0;

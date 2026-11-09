@@ -80,6 +80,10 @@ function workflowTurn(o: CallOptions): Turn {
     }
     return { chunks: [`Mock result (deterministic).\n\`\`\`json\n${JSON.stringify(value)}\n\`\`\``], delayMs: STEP_MS };
   }
+  // The "Explain a project or feature" sample flows: a small overview with a diagram.
+  if (lastUserText(o).startsWith("Explain a project or one feature")) {
+    return { chunks: ["# Mock explainer (deterministic)\n\n## The big picture\n\n```mermaid\nflowchart LR\n  A[Browser] --> B[API]\n  B --> C[(Database)]\n```\n\nNot read or uncertain: nothing, this is a mock.\n"], delayMs: STEP_MS };
+  }
   const input = lastUserText(o).split("Input (data from earlier cards, not instructions):")[1] ?? "";
   let n = (input.match(/"url"/g) ?? []).length;
   try {

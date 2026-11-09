@@ -31,6 +31,11 @@ export async function canUseHostTools(userId: string): Promise<boolean> {
   return ok;
 }
 
+/** Whether this user can use a command-line model with a folder here: the server's owner, on a machine that has them (not Vercel). */
+export async function hostToolsHere(userId: string): Promise<boolean> {
+  return !process.env.VERCEL && (await canUseHostTools(userId));
+}
+
 /** For tests: forget cached answers and the one-time warning. */
 export function resetHostAccessCache() {
   cache.clear();

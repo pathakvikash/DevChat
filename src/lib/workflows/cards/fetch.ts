@@ -1,3 +1,6 @@
+import { readFile } from "node:fs/promises";
+import path from "node:path";
+import { isSanityMode } from "@/lib/sanityMode";
 import { safeFetch, type SafeFetchResult } from "@/lib/net/safeFetch";
 import { htmlToText } from "@/lib/net/htmlText";
 import { parseFeed } from "../feed";
@@ -13,6 +16,11 @@ const HEADERS = {
 
 /** GET through safeFetch (DNS check, private ranges, redirects by hand, 2 MB cap). One retry after 2 s on a 429 or 5xx. */
 async function get(url: string, signal: AbortSignal): Promise<SafeFetchResult> {
+  // Sanity mode reads recorded answers for the GitHub API: no network and no rate limit.
+  if (isSanityMode() && new URL(url).hostname === "api.github.com") {
+    const file = path.join(process.cwd(), "e2e/fixtures/workflows", url.includes("/git/trees/") ? "repo-tree.json" : "repo-info.json");
+    return { status: 200, ok: true, url, contentType: "application/json", text: await readFile(file, "utf8") };
+  }
   let res = await safeFetch(url, { headers: HEADERS, signal });
   if (res.status === 429 || res.status >= 500) {
     await sleep(2000, signal);

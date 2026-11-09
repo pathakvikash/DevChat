@@ -89,7 +89,7 @@ export function buildSystemPrompt(window: number): string {
     ].join("\n"),
   ];
   if (window >= SMALL_WINDOW) {
-    const ex = TEMPLATE_OPTIONS.filter((t) => t.kind !== "blank").map((t) => JSON.stringify(forModel(buildTemplate(t.kind).graph)));
+    const ex = TEMPLATE_OPTIONS.filter((t) => t.kind !== "blank" && !t.kind.startsWith("explain")).map((t) => JSON.stringify(forModel(buildTemplate(t.kind).graph)));
     parts.push(`Example workflows:\n${ex.join("\n")}`);
   }
   return parts.join("\n\n");

@@ -400,6 +400,24 @@ On save these are warnings; on Run they are errors:
 
 A reference to a field the card has not output yet is only a warning, because outputs can be dynamic.
 
+### 5.4 Sample flows: Explain a project or feature
+
+Two platform-provided templates at the end of **New workflow**, built on the `flow-explainer` skill's approach: a project overview (a mermaid `flowchart` of the parts, the key files, how to run it) or, when the **focus** variable names a feature, an end-to-end flow (a `sequenceDiagram`, a numbered walkthrough, the edge and error paths). The agent's reply is posted to a new chat, where mermaid fences draw as diagrams. A workflow's posted message is drawn as markdown (other chats' messages stay plain text).
+
+| | Explain a GitHub repo | Explain a project folder (Local) |
+|---|---|---|
+| Cards | Run manually → Fetch the repo info → Fetch the file tree → Agent "Explain it" → Post to a chat | Run manually → Agent "Explain it" → Post to a chat |
+| Variables | `repo` (owner/name or a full URL, read as owner/name by the runner), `focus` | `focus` |
+| Model | Any API model | Claude Code or OpenCode, picked by the user (Codex is blocked) |
+| Where | Local and Vercel | Local only: the owner, on a machine with the CLI (`hostToolsHere`); on Vercel the menu entry is disabled with a reason and the create call returns 403 |
+| Agent tools | Fetch URL only | None. Read-only folder (`allowEdits` off) |
+
+The folder card carries `preset: "explain-folder"`, so `checkGraph` says "Pick a Claude Code or OpenCode model" and "Pick the project folder" until both are set; Run refuses with the same messages.
+
+**Leak rules.** The GitHub flow reads only the public web and nothing private, so there is no private reader and the rules in 5.3 pass with no warning. The folder flow has one private reader (a CLI model with a folder, run with its own web tools off) and nothing after it reaches the web: the only later card is Post to a chat. The card has no tools, so it is not also a web reader. Adding a Fetch, Web search or web tool after it is refused as for any folder card.
+
+**Limits.** GitHub's unauthenticated API allows about 60 requests an hour, so the flow makes two fetches and the agent is told to fetch at most 8 more URLs (the README, then a few files). The Fetch URL tool has no allowlist, so "only raw.githubusercontent.com and api.github.com" is an instruction, not a lock; fetched text is data and the agent is told to ignore any instructions in it. The tree is cut to the model's input budget, and a fetched file is cut at 8,000 characters, so line references from the GitHub flow are only given for lines the agent saw. In tests (sanity mode) the GitHub API answers come from `e2e/fixtures/workflows/repo-*.json` and the `mock/workflow` model replies with a small flowchart.
+
 ---
 
 ## 6. Runner
@@ -595,7 +613,7 @@ This section follows `docs/design/ux-guidelines.md` sections 0–2. It uses the 
 
 | Route | What |
 |---|---|
-| `/workflows` | A list inside `AppShell` (pattern from `src/app/notes/page.tsx`). Each row: name, last run status (icon and word) with relative time, card count, a **Run** button, and **Open** when waiting. **New workflow** (primary) opens a menu: Blank, Jobs, News digest. |
+| `/workflows` | A list inside `AppShell` (pattern from `src/app/notes/page.tsx`). Each row: name, last run status (icon and word) with relative time, card count, a **Run** button, and **Open** when waiting. **New workflow** (primary) opens a menu: Blank, Jobs, News digest, then the two sample flows in 5.4. |
 | `/workflows/[id]` | The editor. `?run=<runId>` opens a past run read-only, against that run's own snapshot. |
 | `/tables` | A list of tables: name, row count, last updated. |
 | `/tables/[id]` | The table view. `?pick=<runId>` turns on pick mode. |

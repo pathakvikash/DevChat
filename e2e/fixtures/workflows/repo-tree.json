@@ -1,0 +1,11 @@
+{
+  "sha": "0000000000000000000000000000000000000000",
+  "tree": [
+    { "path": "README.md", "type": "blob" },
+    { "path": "package.json", "type": "blob" },
+    { "path": "src", "type": "tree" },
+    { "path": "src/index.ts", "type": "blob" },
+    { "path": "src/widgets.ts", "type": "blob" }
+  ],
+  "truncated": false
+}

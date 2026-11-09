@@ -24,6 +24,8 @@ interface MessageContentProps {
   onClarificationAnswer?: (toolCallId: string, answer: string) => void;
   /** Side chat: tool calls fold to one line, and prose has no width cap. */
   compact?: boolean;
+  /** A user-role message that is formatted text (a workflow's "Post to a chat"): drawn as markdown, with diagrams. */
+  markdown?: boolean;
 }
 
 export default function MessageContent({
@@ -35,6 +37,7 @@ export default function MessageContent({
   onOpenArtifact,
   onClarificationAnswer,
   compact = false,
+  markdown = false,
 }: MessageContentProps) {
   const isAssistant = role === "assistant";
   const merged = groupToolParts(allParts);
@@ -75,7 +78,7 @@ export default function MessageContent({
         if (p.type === "text") {
           return (
             <div key={item.key} className={isAssistant && !compact ? "max-w-2xl" : ""}>
-              {isUser ? (
+              {isUser && !markdown ? (
                 <>
                 {/* `>` runs (quote-reply) get a quote style; the rest stays plain text. */}
                 {splitQuoteBlocks((p as any).text ?? "").map((seg, i) =>

@@ -1,0 +1,6 @@
+{
+  "full_name": "acme/widgets",
+  "description": "A tiny widget service used by the sanity tests.",
+  "language": "TypeScript",
+  "default_branch": "main"
+}
