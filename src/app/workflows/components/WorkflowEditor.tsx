@@ -196,7 +196,7 @@ export default function WorkflowEditor({ id }: { id: string }) {
     const wanted = opts ? { ...base, fromIds: opts.fromId ? [opts.fromId] : base.fromIds, ui: { ...base.ui, position: opts.position ?? base.ui.position } } : base;
     // The same rules as a save: a connection that breaks one is refused, and the card lands unconnected.
     const { node, error } = connectNew(wf.graph, wanted);
-    if (error) toast(error, "error");
+    if (error) toast(`Added it unconnected. ${error}`, "error");
     editGraph((g) => ({ ...g, nodes: [...g.nodes, node] }));
     setSelectedId(node.id);
   }

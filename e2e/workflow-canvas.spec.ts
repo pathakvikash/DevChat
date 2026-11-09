@@ -72,7 +72,7 @@ test("adding a card keeps the save rules: a refused connection leaves the new ca
   await card(page, "Reader", "Agent", "Not run").click();
   await page.getByRole("button", { name: "Add card" }).click();
   await page.getByRole("dialog", { name: "Add card" }).getByRole("button", { name: /Web search/ }).click();
-  await expect(toast(page, "reads your chats")).toBeVisible();
+  await expect(toast(page, "a later card reaches the web")).toBeVisible();
   await expect(card(page, "Web search", "Web search", "Not run")).toBeVisible();
   await expect.poll(async () => (await saved(request, id)).nodes.find((n) => n.id === "web_search")?.fromIds).toEqual([]);
 });
@@ -84,7 +84,7 @@ test("Runs after refuses a connection that breaks a save rule", async ({ page, r
   await page.getByRole("button", { name: "Advanced" }).click();
   const box = page.getByRole("checkbox", { name: "Reader" });
   await box.click();
-  await expect(toast(page, "reads your chats")).toBeVisible();
+  await expect(toast(page, "a later card reaches the web")).toBeVisible();
   await expect(box).not.toBeChecked();
   expect((await saved(request, id)).nodes.find((n) => n.id === "web")!.fromIds).toEqual(["trigger"]);
   await page.getByRole("checkbox", { name: "Run manually" }).click(); // unticking is always allowed
@@ -111,6 +111,28 @@ test("the Add card button toggles its menu, and Esc returns the focus to it", as
   await page.keyboard.press("Escape");
   await expect(page.getByRole("dialog", { name: "Add card" })).toHaveCount(0);
   await expect(button).toBeFocused();
+});
+
+test("closing the Add card menu by clicking into a field keeps the focus there", async ({ page, request }) => {
+  const id = await create(request, "news");
+  await openCanvas(page, id);
+  await card(page, "Write the digest", "Agent", "Not run").click();
+  await page.getByRole("button", { name: "Add card" }).click();
+  await expect(page.getByRole("dialog", { name: "Add card" })).toBeVisible();
+  const instructions = page.getByLabel("Instructions");
+  await instructions.click();
+  await expect(page.getByRole("dialog", { name: "Add card" })).toHaveCount(0);
+  await page.keyboard.type("typed here");
+  await expect(instructions).toHaveValue(/typed here$/);
+  await expect(page.getByRole("button", { name: "Add card" })).not.toBeFocused();
+});
+
+test("picking a card type in the menu focuses the new card", async ({ page, request }) => {
+  const id = await create(request, "blank");
+  await openCanvas(page, id);
+  await page.getByRole("button", { name: "Add card" }).click();
+  await page.getByRole("dialog", { name: "Add card" }).getByRole("button", { name: /Agent/ }).click();
+  await expect(card(page, "Agent", "Agent", "Not run")).toBeFocused();
 });
 
 test("at 900px dragging a card does not open its settings", async ({ page, request }) => {

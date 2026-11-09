@@ -19,6 +19,14 @@ const has = (f) => argv.includes(f);
 const lintOnly = has("--update-lint-baseline");
 const passthrough = argv.filter((a) => !flags.has(a));
 
+// Next's dist dir for the suite (must match playwright.config.ts). It gets deleted below, so refuse anything but a
+// plain `.next-sanity…` folder name: "", "." and ".." would resolve to the repo itself.
+const DIST = process.env.SANITY_DIST_DIR_OVERRIDE || ".next-sanity";
+if (!/^\.next-sanity[\w-]*$/.test(DIST)) {
+  console.error(`SANITY_DIST_DIR_OVERRIDE must look like ".next-sanity-3215", got "${DIST}". Nothing was touched.`);
+  process.exit(1);
+}
+
 const run = (cmd, args, env = process.env) =>
   spawnSync(cmd, args, { cwd: root, stdio: "inherit", env }).status === 0;
 
@@ -113,7 +121,7 @@ if (!lintOnly && (await portInUse())) {
 }
 
 // Next writes route types into the dist dir that `tsc` also reads; stale ones from another branch fail the typecheck.
-if (!has("--e2e") && !lintOnly) rmSync(path.join(root, process.env.SANITY_DIST_DIR_OVERRIDE ?? ".next-sanity"), { recursive: true, force: true });
+if (!has("--e2e") && !lintOnly) rmSync(path.join(root, DIST), { recursive: true, force: true });
 
 const results = [];
 for (const step of steps) {

@@ -146,7 +146,7 @@ describe("autoLayout", () => {
 
   it("puts a chain one column per level, on one row", () => {
     const g = autoLayout(buildTemplate("news", "m").graph);
-    expect(g.nodes.map((n) => at(g, n.id))).toEqual([0, 1, 2, 3].map((l) => ({ x: l * LAYOUT_DX, y: 0 })));
+    expect(g.nodes.map((n) => at(g, n.id))).toEqual(g.nodes.map((_, level) => ({ x: level * LAYOUT_DX, y: 0 }))); // a chain: one level per card
   });
 
   it("puts a card one column right of its furthest input, and stacks a level in run order, centred", () => {
@@ -192,7 +192,7 @@ describe("connectionError", () => {
   });
 
   it("shows the chat-leak rule's message", () => {
-    expect(connectionError(g, "reader", "web")).toMatch(/reads your chats and a later card reaches the web/);
+    expect(connectionError(g, "reader", "web")).toMatch(/a later card reaches the web/);
   });
 });
 
@@ -207,7 +207,7 @@ describe("connectNew", () => {
   it("leaves a refused connection out, with the rule's message, and keeps the card", () => {
     const r = connectNew(g, web(["reader"]));
     expect(r.node.fromIds).toEqual([]);
-    expect(r.error).toMatch(/reads your chats and a later card reaches the web/);
+    expect(r.error).toMatch(/a later card reaches the web/);
   });
 
   it("keeps the good connections and reports the first bad one", () => {

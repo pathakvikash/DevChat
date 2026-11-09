@@ -169,11 +169,24 @@ function Flow(props: CanvasProps) {
 
   const closeMenu = useCallback(() => {
     setMenu(null);
-    requestAnimationFrame(() => (addButton.current ?? root.current)?.focus());
+    // Only if the focus was lost: a click into a field elsewhere must keep it.
+    requestAnimationFrame(() => {
+      const a = document.activeElement;
+      if (!a || a === document.body) (addButton.current ?? root.current)?.focus();
+    });
   }, []);
 
   function add(type: CardType) {
     refit.current = true;
+    const before = new Set(graph.nodes.map((n) => n.id));
+    // The new card takes the focus (it may need a few frames to render).
+    let tries = 0;
+    const focusNew = () => {
+      const el = [...(root.current?.querySelectorAll<HTMLElement>(".react-flow__node") ?? [])].find((n) => !before.has(n.dataset.id ?? ""));
+      if (el && el.style.visibility !== "hidden") el.focus(); // a card is hidden until React Flow has measured it
+      else if (tries++ < 30) requestAnimationFrame(focusNew);
+    };
+    requestAnimationFrame(focusNew);
     if (menu?.at) onAdd(type, { fromId: menu.fromId, position: { x: Math.round(menu.at.flow.x / 20) * 20, y: Math.round(menu.at.flow.y / 20) * 20 } });
     else if (selectedId) onAdd(type, { fromId: selectedId, position: spotRightOf(graph, selectedId) });
     else onAdd(type);
