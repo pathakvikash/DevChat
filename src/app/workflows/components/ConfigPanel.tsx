@@ -2,7 +2,7 @@
 
 import GoogleConnection from "@/app/components/GoogleConnection";
 import { useState } from "react";
-import { AlertTriangle, Bot, Copy, Check, MessageSquare, Funnel, Globe, Plug, Play, Search, Table2, Sheet, Trash2, X, ChevronDown, ChevronRight } from "lucide-react";
+import { AlertTriangle, Bot, Briefcase, Copy, Check, ListChecks, MessageSquare, Funnel, Globe, Plug, Play, Search, Table2, Sheet, Trash2, X, ChevronDown, ChevronRight } from "lucide-react";
 import { CATALOG, isCliModelId, MCP_WEB_WARNING, reachesOpenWeb, type FieldSpec } from "@/lib/workflows/catalog";
 import { useToast } from "@/app/components/Toast";
 import { ancestorsOf, connectionError, TRIGGER_ID, type CardRun, type FlowNode, type GraphIssue, type RunState, type WorkflowGraph } from "@/lib/workflows/graph";
@@ -10,7 +10,7 @@ import ConfigField, { type FieldEnv } from "./ConfigField";
 import { cardStatus, formatDuration, formatTokens, StatusBadge } from "./RunStatus";
 import { fetchNodeRun } from "./useWorkflowRun";
 
-const CARD_ICONS = { Play, Search, Bot, MessageSquare, Plug, Globe, Funnel, Table2, Sheet } as const;
+const CARD_ICONS = { Play, Search, Bot, MessageSquare, Plug, Globe, Funnel, Table2, Briefcase, ListChecks, Sheet } as const;
 
 /** A card type's icon, by the catalog's icon name. */
 export function CardIcon({ name, size = 14, className }: { name: string; size?: number; className?: string }) {

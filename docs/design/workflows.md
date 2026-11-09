@@ -84,15 +84,15 @@ Design decisions (made in this doc):
 
 ### 2.1 Jobs
 
-1. On `/workflows`, click **New workflow → Jobs**. The editor opens with 8 cards and a note: "Fill in: Your profile".
+1. On `/workflows`, click **New workflow → Jobs**. The editor opens with 6 cards (Run manually, Job boards, Save to Job leads, Pick jobs, Draft application, Save drafts). Fill in **Your profile** before you run.
 2. Open **Workflow settings → Variables** and paste your CV or profile into **Your profile**. In **Job boards**, paste careers URLs one per line (`https://jobs.ashbyhq.com/supabase`, `https://job-boards.greenhouse.io/vercel`), title keywords (`Frontend`, `Full stack`), words to exclude (`Intern`), and allowed locations (`Remote`, `India`).
 3. Click **Run**. Each card goes Running → Done. Job boards calls each board's public API and keeps the matching titles and locations. The rules are the same as `scan.mjs`.
-4. **Save to table** adds the new jobs to "Job leads", deduped by URL. Jobs from earlier runs are not added or scored again.
-5. **Score fit** runs once for each new job and returns a score from 0 to 100, a one-line reason, and `shortlist` or `skip`. **Update table** writes these into the rows.
-6. **Pick jobs** pauses the run, and the run shows "Waiting for you". Click **Open table**. The table is filtered to `shortlist` and sorted by score. Tick 3 rows, then click **Continue run (3)**.
-7. **Draft application** runs once per picked job. It reads the posting with `fetchUrl` and writes a cover letter, CV notes, answers to the form questions and the apply link. **Save drafts** stores them and sets the status to `drafted`.
+4. **Save to table** adds the new jobs to "Job leads", deduped by URL. Jobs from earlier runs are not added again, and keep their status.
+5. **Pick jobs** pauses the run, and the run shows "Waiting for you". Click **Open table**. The table shows the rows with status `new` (and `picked`, for rows an earlier cancelled run left behind). Tick up to 10 rows, then click **Continue run (3)**.
+6. **Draft application** runs once for each picked job. It has no tools: the job's description is already in its input. It writes a cover letter, CV notes and answers to the form's likely questions. **Save drafts** stores them, sets the apply link to the board's own job URL, and sets the status to `drafted`.
+7. There is no score card in v1: you pick from the list yourself.
 8. Click a row. A drawer shows the draft, a Copy button on each field and the job link. Apply on the company's site, then set the row's status to `applied`.
-9. A week later, click **Run** again. Only new jobs are scored. Rows marked `drafted` or `applied` keep their status.
+9. A week later, click **Run** again. Only new jobs are offered. Rows marked `drafted` or `applied` keep their status.
 
 ### 2.2 News digest
 
@@ -321,7 +321,7 @@ When a key is a URL, it is normalised before matching: lowercase host, no traili
 - `tableId`.
 - `statuses`: the rows to offer. Default `["new"]`.
 - `sortBy`: a column, sorted descending.
-- `maxPick`: default 10.
+- `maxPick`: default 10, at most 25 (the default `maxItems` of a per-item card after it). Run warns when a per-item card on the picked rows has a lower `maxItems`, and refuses an empty `statuses`.
 - `message`: shown in the banner.
 - `setStatus`: default `picked`.
 
@@ -330,14 +330,14 @@ The card sets status `waiting`, and the run's state becomes `waiting`. On Contin
 **jobBoards.** Config:
 - `boards`: careers URLs, one per line: `jobs.ashbyhq.com/<org>`, `jobs.lever.co/<org>`, `job-boards.greenhouse.io/<org>`, `boards.greenhouse.io/<org>`.
 - Filters: `titleInclude`, `titleExclude`, `locationAllow`, `locationBlock`. These follow `scan.mjs` `buildTitleFilter` / `buildLocationFilter`: matching is a case-insensitive substring; an empty include list allows everything; a job with no location passes; block beats allow.
-- `maxItems`: default 200.
+- `maxItems`: default 60. A job is about 4 KB in the run record, so 60 stay under the 200 KB output cap. When the cap cuts any card's list, the card shows the warning "Kept the first N of M items: output over 200 KB" and `count` says what was kept.
 
 Org slugs must match `^[\w.-]+$`, so a board URL can only reach these three API hosts:
 - `boards-api.greenhouse.io/v1/boards/<org>/jobs?content=true`
 - `api.ashbyhq.com/posting-api/job-board/<org>?includeCompensation=true`
 - `api.lever.co/v0/postings/<org>?mode=json`
 
-Boards are fetched 5 at a time, each with a 15 s timeout. Each job comes out as `{ title, company, location, url, description, source }`, with `description` as plain text up to 4,000 characters. Jobs are deduped by URL. The card fails only if every board fails; a board that fails on its own becomes a warning. `scan.mjs` reads only title, URL and location, so the description fields need checking in the phase-3 spike, against recorded fixtures.
+Boards are fetched 5 at a time, each with a 15 s timeout. Each job comes out as `{ title, company, location, url, description, source }`, with `description` as plain text up to 2,500 characters. A board whose answer comes from a different host (a redirect) fails. Jobs are deduped by URL. The card fails only if every board fails; a board that fails on its own becomes a warning. `scan.mjs` reads only title, URL and location, so the description fields need checking in the phase-3 spike, against recorded fixtures.
 
 **mcpTool.** Config `serverId`, `tool` and `args` (an object of templates). Before calling, the card checks that the server belongs to the user and is enabled, then calls `callServerTool` (`src/lib/mcp/client.ts:90`). `data` holds the parsed JSON when the text parses. An item fails when `isError` is set. The card is labelled "Can change things outside DevChat".
 
@@ -348,12 +348,12 @@ Boards are fetched 5 at a time, each with a 15 s timeout. Each job comes out as 
 | Preset | Instructions (short) | Input | Output fields | Tools |
 |---|---|---|---|---|
 | Score fit | "Score 0–100 how well this job fits my profile. Shortlist at 60 or more, else skip. One sentence why. My profile: {{vars.profile}}" | `{{item}}` | `score` number, `fit` text, `status` choice shortlist/skip | none |
-| Draft application | "Draft, never submit. Using my profile, write a cover letter under 250 words, 3–5 notes on tailoring my CV, and answers to the form's questions (fetch the job page; if it lists none, answer 'Why this company?' and 'Why you?'). Don't invent experience." | `{{item}}` | `coverLetter`, `cvNotes`, `answers` (text), `applyUrl` | `fetchUrl` |
+| Draft application | "Draft, never submit. Using my profile, write a cover letter under 250 words, 3–5 notes on tailoring my CV, and answers to the form's likely questions (the job is in the input; if it names none, answer 'Why this company?' and 'Why you?'). Don't invent experience." | `{{item}}` | `coverLetter`, `cvNotes`, `answers` (text) | none (the apply link is the job's own URL, set by the Save drafts card) |
 | Digest | "Write a short digest: one or two lines per article, grouped by topic, each with its link." | `{{fresh.items}}` | none (`{ text }`) | none |
 
 **Templates** (`src/lib/workflows/templates.ts`):
 
-- **Jobs:** `trigger` → `jobs` (jobBoards) → `save` (table upsert into "Job leads", key `url`) → `score` (agent, per item over `{{save.inserted}}`) → `scored` (table update: score, fit, status `{{item.status}}`) → `pick` (pickRows: shortlist, sorted by score) → `draft` (agent, per item over `{{pick.items}}`) → `drafts` (table update, status `drafted`).
+- **Jobs:** `trigger` → `jobs` (jobBoards) → `save` (table upsert into "Job leads", key `url`) → `pick` (pickRows, offers `new,picked`, up to 10) → `draft` (agent with no tools, per item over `{{pick.items}}`; output fields `coverLetter`, `cvNotes`, `answers`) → `drafts` (table update: the three fields, and `applyUrl` = `{{item.url}}`, status `drafted`). Six cards in all. A score card is a later add-on.
 - **News:** `trigger` → `news` (webSearch, queries `{{vars.topics}}`) → `save` (table upsert into "News") → `fresh` (filter over `{{save.items}}`, keep status `new`) → `digest` (agent) → `post` (chatMessage, new chat, `{{digest.text}}`) → `mark` (table update, status `read`, over `{{fresh.items}}`).
 - **Phase-1 News:** `trigger` → `news` → `digest` (input `{{news.items}}`) → `post`.
 
@@ -674,7 +674,7 @@ Saving is automatic: a `PATCH` 800 ms after the last change. The header reads "S
 ### 8.6 Runs drawer and run view
 
 - **Runs** opens a `SidePanel`. Each row shows the status icon and word, "Manual", relative time (`getRelativeTime`), duration, and tokens with cost in `font-mono tabular-nums`. Clicking a row opens `?run=<id>`: a read-only canvas, a header chip "Run · 9 Nov 14:02 · Done ×", and **Resume** when the run failed or was interrupted.
-- **Polling:** `GET /api/workflow-runs/[id]` every 1.5 s while running, or every 5 s while the tab is hidden. Polling stops when the run ends or starts waiting.
+- **Polling:** `GET /api/workflow-runs/[id]` every 1.5 s while running, or every 5 s while the tab is hidden, and every 10 s while the run waits for you, so a banner in a second tab does not stay after the run was continued or cancelled elsewhere. Polling stops when the run ends.
 - **Live region:** one `aria-live="polite"` region per page. It announces only "Run started", "Run waiting for you", "Run done", "Run failed at <card>" and "Run cancelled", plus the describe box's "Building your flow…", "Preview ready: n cards", "Flow applied" and "Preview discarded". Errors are not announced here: Retry's `aria-describedby` reads them.
 
 ### 8.7 Table view
@@ -781,7 +781,7 @@ Section 6.10 lists it. There is no shell, no file writes without the folder opt-
 
 - No card or built-in tool can POST to an outside site. Fetch and `safeFetch` only GET.
 - The Draft preset says "Draft, never submit", and so does the workflow system prompt.
-- The Jobs template's draft card has only `fetchUrl`.
+- The Jobs template's draft card has no tools at all. It reads the user's profile next to untrusted job text, so even `fetchUrl` (a GET to an address the text could name) could carry the profile out. Its input already holds the job's description (up to 2,500 characters).
 
 ### 10.5 Prompt injection
 
@@ -794,7 +794,7 @@ Section 6.10 lists it. There is no shell, no file writes without the folder opt-
 - Across the flow, no web reacher may come after a private reader; Save and Run refuse it with the same message. One exception: MCP followed by MCP is allowed with a warning, because both are servers the user set up (read issues, then post to Slack). The warning shows on the later card, as does the "A page could try to steer it" warning on an MCP card that follows a card reaching the open web.
 - The folder and `allowEdits` are cleared when the card's model is not a CLI model, and `allowEdits` is cleared with the folder.
 - A table that a Save to table card fills after a private reader (as defined above: chats, MCP or a CLI folder) is marked **private**, for good, and records which kinds it took in (`DataTable.privateFrom`: `chats`, `mcp`, `folder`). A Save card on a private table is itself a private reader of those kinds, so a copy into a second table inherits them. At Run, and again just before each Save card runs (which also covers Resume), a card on a private table with a web reacher after it is refused: "<table> holds private data (it was filled from chats), and <card> reaches the web …". The MCP-to-MCP exception holds for a table filled only from MCP: an MCP card may follow it, Fetch and Web search may not. The table list and view show a Private badge naming the sources.
-- The worst outcome left is a bad draft, which the user reads before using.
+- The worst outcome left is a bad draft, which the user reads before using. That holds for the Jobs template because its draft card has no tools: there is nothing a posting can steer the model into calling. The apply link is the board's own URL, copied by the flow, never written by the model.
 
 ### 10.6 Output safety
 
@@ -880,6 +880,13 @@ Sanity mode uses no network and no real model, following the precedent at `src/l
 **Done when** both runs behave as above against real DuckDuckGo results.
 
 ### Phase 3: Pause, Jobs
+
+**Status: built (2026-11-10).** `jobBoards.test.ts`, the extended `workflowRunner.test.ts` and `workflowPrivacy.test.ts`, `e2e/workflow-jobs.spec.ts` and the pick-mode baselines (`e2e/workflow-jobs-visual.spec.ts`) pass. Not yet done: the "real boards with a real model" run in Done when below. Decisions made while building it:
+- **The Jobs template** is `trigger → Job boards → Save to Job leads → Pick jobs → Draft application → Save drafts` (no score card). Pick jobs offers the rows still `new` and those left `picked`, so an earlier run's leads can be picked again. The profile is the variable `profile` ("Your profile (paste your CV or a short summary)"), read by the Draft card.
+- **Pick rows `statuses`** is one comma-separated text field (`"new"`; the Jobs template offers `"new,picked"`, so rows left `picked` by a cancelled run come back), not a list, so the config panel needs no new control. `sortBy` sorts the pick-mode grid; `maxPick` and `setStatus` are as in section 4.
+- **Private tables.** A Pick rows card on a table with `privateFrom` is a private reader, like a Save card on it: `planKinds` counts it as a reader of the table's kinds, `webAfter` refuses any card that reaches the web after it (Job boards included, which counts as the open web), and `advanceRun` checks again right before it runs and again at Continue. It never marks its own table.
+- **The resume route** (`POST /api/workflow-runs/[id]/resume`) takes `{ nodeId, rowIds }` for a waiting run and no body for a failed or interrupted one. Continue is owner-gated like the other run routes, needs the waiting card, at most `maxPick` unique rows that belong to the card's table and still have an offered status (else 400, nothing changes), and wins one race: the run, the card and the rows change in one transaction, so a second request gets a 409.
+- **Spike results** (recorded in `e2e/fixtures/workflows/`, trimmed to four jobs each). Greenhouse `?content=true` has `content` as HTML escaped once more (`&lt;div&gt;`) and `company_name`; Ashby has `descriptionPlain` and no company name, and lists jobs with `isListed: false`, which are dropped; Lever has `descriptionPlain`, `lists[]` (requirements as HTML) and `additionalPlain`, and no company name. There is no `boards-api.eu.greenhouse.io` (no DNS), and EU companies' boards (for example Celonis, N26) answer on `boards-api.greenhouse.io`, so `job-boards.eu.greenhouse.io` maps to that host. Board responses can pass 2 MB with `content=true`, so the Job boards card reads up to 8 MB (the hosts are fixed; `safeFetch` still checks every address).
 
 **Files**
 - `cards/{pickRows,jobBoards}.ts`, the `resume` route, the waiting banner, table pick mode, the Jobs template and presets, `e2e/fixtures/workflows/{greenhouse,ashby,lever}-*.json`.

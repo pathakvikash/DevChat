@@ -1,0 +1,91 @@
+{
+  "jobs": [
+    {
+      "absolute_url": "https://job-boards.greenhouse.io/vercel/jobs/6230763004",
+      "id": 6230763004,
+      "title": "Customer Support Engineer",
+      "company_name": "Vercel",
+      "location": {
+        "name": "Hybrid - Sydney"
+      },
+      "updated_at": "2026-11-08T18:21:47-05:00",
+      "first_published": "2026-10-21T13:00:26-04:00",
+      "content": "&lt;div class=&quot;content-intro&quot;&gt;&lt;h2&gt;About Vercel:&lt;/h2&gt;\n&lt;p&gt;&lt;span data-sheets-root=&quot;1&quot;&gt;Vercel is the agentic infrastructure company, freeing people and agents to ship what&#39;s next. For more than a decade we&#39;ve helped builders move from idea to production with speed, security, and exceptional developer experience.&lt;/span&gt;&lt;/p&gt;\n&lt;p&gt;&lt;span data-sheets-root=&quot;1&quot;&gt;Now we&#39;re scaling our products for both agents and people to ship and run software, built in the open and trusted by OpenAI, PayPal, Ramp, Supreme, and millions of developers worldwide.&lt;/span&gt;&lt;/p&gt;&lt;/div&gt;&lt;h2&gt;&lt;strong&gt;About the Role:&lt;/strong&gt;&lt;/h2&gt;\n&lt;p&gt;Vercel is looking for a Customer Support Engineer to assist our customers with technical problems and questions when using Vercel products and services. Customer Support Engineer responsibilities include resolving customer concerns, creating and improving internal tooling, and engineering solutions to help Vercel customers get the most out of the platform.&lt;/p&gt;\n&lt;p&gt;To be successful in this role, you must be an excellent communicator who’s able to earn our customers’ trust and understand technical problems quickly. You will also ideally have a background in frontend development, enjoy technical writing, and have a passion for digging deep to find and resolve root causes. In addition to this, you will be comfortable with evening, weekend, and on-call work based on a rota system.&lt;/p&gt;\n&lt;p&gt;Ultimately, you will help establish our reputation as a company that is exceptional at helping its customers meet their goals throughout all parts of the customer journey while engineering solutions to constantly improve the customer experience.&lt;/p&gt;\n&lt;h2&gt;&lt;strong&gt;What You Will Do:&lt;/strong&gt;&lt;/h2&gt;\n&lt;ul&gt;\n&lt;li&gt;Handle cases for all Vercel customers.&lt;/li&gt;\n&lt;li&gt;Handle customer issues outside of regular case channels.&lt;/li&gt;\n&lt;li&gt;Work with the community to provide advice and assistance.&lt;/li&gt;\n&lt;li&gt;Develop and improve internal tools alongside engineering.&lt;/li&gt;\n&lt;li&gt;Complete engineering work on a regular basis.&lt;/li&gt;\n&lt;li&gt;Specialize in a specific product area and owning that within the team.&lt;/li&gt;\n&lt;li&gt;Improve internal documentation, processes, a",
+      "departments": [
+        {
+          "id": 4147565004,
+          "name": "Support",
+          "child_ids": [],
+          "parent_id": null
+        }
+      ],
+      "offices": []
+    },
+    {
+      "absolute_url": "https://job-boards.greenhouse.io/vercel/jobs/6122437004",
+      "id": 6122437004,
+      "title": "DevRel Engineer, Agentic Infrastructure",
+      "company_name": "Vercel",
+      "location": {
+        "name": "Hybrid - San Francisco, New York City, Austin"
+      },
+      "updated_at": "2026-11-07T16:12:27-05:00",
+      "first_published": "2026-07-22T13:27:13-04:00",
+      "content": "&lt;div class=&quot;content-intro&quot;&gt;&lt;h2&gt;About Vercel:&lt;/h2&gt;\n&lt;p&gt;&lt;span data-sheets-root=&quot;1&quot;&gt;Vercel is the agentic infrastructure company, freeing people and agents to ship what&#39;s next. For more than a decade we&#39;ve helped builders move from idea to production with speed, security, and exceptional developer experience.&lt;/span&gt;&lt;/p&gt;\n&lt;p&gt;&lt;span data-sheets-root=&quot;1&quot;&gt;Now we&#39;re scaling our products for both agents and people to ship and run software, built in the open and trusted by OpenAI, PayPal, Ramp, Supreme, and millions of developers worldwide.&lt;/span&gt;&lt;/p&gt;&lt;/div&gt;&lt;h2&gt;About the role&lt;/h2&gt;\n&lt;p&gt;We&#39;re hiring a DevRel Engineer to work inside the product teams building Vercel&#39;s agentic infrastructure: &lt;a href=&quot;https://vercel.com/ai-gateway&quot;&gt;AI Gateway&lt;/a&gt;, &lt;a href=&quot;https://vercel.com/docs/vercel-sandbox&quot;&gt;Sandbox&lt;/a&gt;, and the primitives that come after them. You&#39;ll sit with product and engineering, build with these tools before anyone else can, and show the world what they make possible. You will report to the Head of AI Infrastructure and can be located anywhere.&lt;/p&gt;\n&lt;p&gt;If you’re based within a pre-determined commuting distance of one of our offices (SF, NY, London, or Berlin), the role includes in-office anchor days on Monday, Tuesday, and Friday, even if the role is listed as remote. For location-specific details, please connect with our recruiting team.&lt;/p&gt;\n&lt;p&gt;&lt;strong&gt;When applying, include a link to something you made that taught developers something, a talk, a repo, a post, a video. Applications without one will not be considered.&lt;/strong&gt;&lt;/p&gt;\n&lt;h2&gt;What you&#39;ll do&lt;/h2&gt;\n&lt;ul&gt;\n&lt;li&gt;Build agents and applications on AI Gateway and Sandbox before they ship, then turn what you learn into demos, templates, and open source projects developers actually clone and run.&lt;/li&gt;\n&lt;li&gt;Teach developers how to build with agentic infrastructure through writing, talks, videos, and live coding. You set the canonical examples the ecosystem emulates.&lt;/li&gt;\n&lt;li&gt;Shape the products themselves. You sit in the same planning meetings as the PMs and engineers, and your job is to hit the rough edges first and make sure they get fixed before ",
+      "departments": [
+        {
+          "id": 4042495004,
+          "name": "Engineering",
+          "child_ids": [],
+          "parent_id": null
+        }
+      ],
+      "offices": []
+    },
+    {
+      "absolute_url": "https://job-boards.greenhouse.io/vercel/jobs/6231045004",
+      "id": 6231045004,
+      "title": "Engineering Director, Vercel for Platforms",
+      "company_name": "Vercel",
+      "location": {
+        "name": "Hybrid - San Francisco"
+      },
+      "updated_at": "2026-11-04T18:17:55-05:00",
+      "first_published": "2026-10-21T12:40:43-04:00",
+      "content": "&lt;div class=&quot;content-intro&quot;&gt;&lt;h2&gt;About Vercel:&lt;/h2&gt;\n&lt;p&gt;&lt;span data-sheets-root=&quot;1&quot;&gt;Vercel is the agentic infrastructure company, freeing people and agents to ship what&#39;s next. For more than a decade we&#39;ve helped builders move from idea to production with speed, security, and exceptional developer experience.&lt;/span&gt;&lt;/p&gt;\n&lt;p&gt;&lt;span data-sheets-root=&quot;1&quot;&gt;Now we&#39;re scaling our products for both agents and people to ship and run software, built in the open and trusted by OpenAI, PayPal, Ramp, Supreme, and millions of developers worldwide.&lt;/span&gt;&lt;/p&gt;&lt;/div&gt;&lt;h2&gt;About the role:&lt;/h2&gt;\n&lt;p&gt;As an Engineering Director, Vercel for Platforms, you’ll lead the engineering team behind the product that lets companies build their own platforms on Vercel, from AI app builders and coding agents to SaaS products serving thousands of customers. The team is intentionally small, and its scope spans deployment infrastructure, domains, tenant isolation, identity, billing, observability, and developer tooling. You’ll evolve the platform to support millions of tenants and applications while keeping that complexity out of your customers’ way, combining cross-team coordination, technical direction, and product judgment to shape a strategic growth engine for Vercel. Winning a platform means powering the applications and businesses built on top of it. This is a hybrid role based in San Francisco, in the office on Monday, Tuesday, and Friday.&lt;/p&gt;\n&lt;h2&gt;What you&#39;ll do:&lt;/h2&gt;\n&lt;ul&gt;\n&lt;li&gt;Build and grow the team through hiring, coaching, and career development, and hold a high bar for engineering standards&lt;/li&gt;\n&lt;li&gt;Partner with Product, Design, and other engineering teams to set roadmap priorities and deliver against product goals&lt;/li&gt;\n&lt;li&gt;Balance short-term product delivery with long-term investment in technical quality and platform scalability, so the platform holds up at millions of tenants and applications&lt;/li&gt;\n&lt;li&gt;Run operational excellence through engineering processes, incident management, and continuous improvement&lt;/li&gt;\n&lt;li&gt;Review and contribute code to stay close to the technology and unblock the team&lt;/li&gt;\n&lt;/ul&gt;\n&lt;h2&gt;What you need:&lt;/h2&gt;\n&lt;ul&gt;\n&lt;li&gt;8+ years b",
+      "departments": [
+        {
+          "id": 4042495004,
+          "name": "Engineering",
+          "child_ids": [],
+          "parent_id": null
+        }
+      ],
+      "offices": []
+    },
+    {
+      "absolute_url": "https://job-boards.greenhouse.io/vercel/jobs/6231864004",
+      "id": 6231864004,
+      "title": "Account Executive, Commercial",
+      "company_name": "Vercel",
+      "location": {
+        "name": "Remote - Germany"
+      },
+      "updated_at": "2026-10-30T14:45:41-04:00",
+      "first_published": "2026-10-22T11:22:01-04:00",
+      "content": "&lt;div class=&quot;content-intro&quot;&gt;&lt;h2&gt;About Vercel:&lt;/h2&gt;\n&lt;p&gt;&lt;span data-sheets-root=&quot;1&quot;&gt;Vercel is the agentic infrastructure company, freeing people and agents to ship what&#39;s next. For more than a decade we&#39;ve helped builders move from idea to production with speed, security, and exceptional developer experience.&lt;/span&gt;&lt;/p&gt;\n&lt;p&gt;&lt;span data-sheets-root=&quot;1&quot;&gt;Now we&#39;re scaling our products for both agents and people to ship and run software, built in the open and trusted by OpenAI, PayPal, Ramp, Supreme, and millions of developers worldwide.&lt;/span&gt;&lt;/p&gt;&lt;/div&gt;&lt;div&gt;&amp;nbsp;&lt;/div&gt;\n&lt;div&gt;\n&lt;h2&gt;About the role&lt;/h2&gt;\n&lt;p&gt;Vercel&#39;s sales team is built on people who are technically fluent, commercially sharp, and deeply curious about the companies they sell into.&lt;/p&gt;\n&lt;p&gt;You’ll run full-cycle deals in close partnership with Solutions Architects, Marketing, and Customer Success, and you’ll help shape how Vercel goes to market as we continue to expand our Commercial segment. We’re building a team with a strong preference to grow talent internally. If you want a path to larger scopes and leadership over time, this is a great place to do it.&lt;/p&gt;\n&lt;p&gt;This is a high-impact, net-new logo role on a fast-growing, technical sales team. You’ll sell to developers and engineering leaders at modern, digital-native companies, connecting Vercel’s front-end cloud and developer experience to measurable business outcomes (speed, conversion, productivity, reliability).&lt;/p&gt;\n&lt;p&gt;You’ll be at the leading edge of modern web and AI, working with customers who build and ship fast. You’ll collaborate closely with Solutions Architects, Marketing, Product, and Customer Success to help teams adopt Vercel and expand their impact as they scale.&lt;/p&gt;\n&lt;h2&gt;What you&#39;ll do&lt;/h2&gt;\n&lt;ul&gt;\n&lt;li&gt;Own a net-new revenue number by building and progressing pipeline from first meeting through close&lt;/li&gt;\n&lt;li&gt;Build pipeline in partnership with your BDR and generate your own outbound pipeline through prospecting, multi-threading, and thoughtful account research&lt;/li&gt;\n&lt;li&gt;Develop and execute territory and account plans to drive consistent new logo acquisition&lt;/li&gt;\n&lt;li&gt;Run end-to-end sales ",
+      "departments": [
+        {
+          "id": 4085775004,
+          "name": "Account Executive",
+          "child_ids": [],
+          "parent_id": null
+        }
+      ],
+      "offices": []
+    }
+  ],
+  "meta": {
+    "total": 4
+  }
+}

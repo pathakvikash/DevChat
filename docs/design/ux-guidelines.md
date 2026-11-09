@@ -746,6 +746,13 @@ An inline card (2.3), one per helper. Up to 3 stack with the normal `my-2` gap. 
 - When Google refuses the saved access, the Sync button is replaced by a primary **Reconnect Google** link (also on later visits) and the toast says "Google access ended. Reconnect Google, then try again." No raw Google error, stack or token is ever shown.
 - Settings has a "Google Sheets" card with one line of state ("Google isn't connected.", "Google is connected. DevChat can only open the sheets it creates.", "Google access ended.") and one button: **Connect Google**, **Reconnect Google** or **Disconnect**. If the state cannot be read, the line says "Couldn't check the Google connection." with Connect Google. A `?google=` result flag is shown once as a toast and then removed from the address. The card's own settings show the same state in one line, with a link to Settings, so connecting never leaves unsaved card edits behind.
 
+**Waiting for you and pick mode** (Pick rows, workflows 3):
+
+- A run that waits shows a `glass-card border-amber-900/50` banner under the header (the amber border of 2.3: this card needs the user): `ShieldQuestion text-amber-400`, "Waiting for you: pick rows in “<table>”, then continue.", **Open table** (the one primary button) and **Cancel run**. While the banner shows, the header's Cancel run is hidden, so there is one Cancel run on the page. The banner does not move focus and has no live region of its own: "Run waiting for you" goes through the editor's one polite region. It stays after a reload and comes back whenever the run is waiting.
+- The table's pick mode (`/tables/<id>?pick=<runId>`) puts the same kind of banner above the toolbar: "Pick up to 10 rows for “Draft application”, then continue.", a "3 picked" count (with " · Up to 10" at the limit), a secondary **Continue with none** and a primary **Continue run (3)**. Continue run is `disabled` at 0 picked; Continue with none is the way to continue with nothing. The grid shows only the statuses on offer, with the line "Showing rows with status new" and **Show all rows**; rows that are not on offer have a disabled checkbox. There is no select-all, no bulk status change and no Delete in pick mode. A tick over the limit is refused with the toast "Up to 10". **Continue with none** with rows ticked asks `confirm("Continue without the 2 ticked rows?")`, so ticks are never dropped silently.
+- Pick mode on a run that is no longer waiting says "That run is not waiting for rows from this table any more." with a link back, and shows no banner.
+- Pick mode at 400px: the banner wraps (buttons under the text), the grid scrolls inside its own container, and the page itself never scrolls sideways.
+
 ---
 
 ## 4. Compatibility at a glance

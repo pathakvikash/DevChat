@@ -1,0 +1,128 @@
+[
+  {
+    "id": "785989a6-b219-43b1-92d9-750a67054f24",
+    "text": "AV Engineer - Platform",
+    "categories": {
+      "commitment": "Permanent",
+      "department": "Engineering",
+      "location": "Stockholm",
+      "team": "IT and Network Engineering",
+      "allLocations": [
+        "Stockholm"
+      ]
+    },
+    "country": "SE",
+    "workplaceType": "onsite",
+    "createdAt": 1791537508142,
+    "hostedUrl": "https://jobs.lever.co/spotify/785989a6-b219-43b1-92d9-750a67054f24",
+    "applyUrl": "https://jobs.lever.co/spotify/785989a6-b219-43b1-92d9-750a67054f24/apply",
+    "descriptionPlain": "",
+    "description": "",
+    "lists": [
+      {
+        "text": "What You’ll Do",
+        "content": "<div>\n\n<li>Own the AV experience across EMEA, including meeting rooms, boardrooms, common areas, labs, lounges, and digital signage.</li>\n<li>Provide thoughtful, high-quality AV support for executive and VIP meetings, helping ensure technology works reliably when it matters most.</li>\n<li>Design, document, deliver, and maintain AV solutions and technical standards in partnership with the global AV"
+      },
+      {
+        "text": "Who You Are",
+        "content": "<div>\n\n<li>You have 3+ years of AV experience and have delivered AV projects through design, integration, commissioning, and ongoing support.</li>\n<li>You understand the hardware behind sophisticated AV systems, including DSP, control processors, amplifiers, and related technologies, with experience using platforms such as Crestron, Q-SYS, and Dante. Experience configuring Q-SYS designs is a plus,"
+      }
+    ],
+    "additionalPlain": "Spotify is an equal opportunity employer. You are welcome at Spotify for who you are, no matter where you come from, what you look like, or what’s playing in your headphones. Our platform is for everyone, and so is our workplace. The more voices we have represented and amplified in our business, the more we will all thrive, contribute, and be forward-thinking! So bring us your personal experience,"
+  },
+  {
+    "id": "186b763a-2a61-4563-8813-ff6b40c9c8a7",
+    "text": "Backend Engineer - Data Platform",
+    "categories": {
+      "commitment": "Permanent",
+      "department": "Engineering",
+      "location": "Stockholm",
+      "team": "Platform",
+      "allLocations": [
+        "Stockholm",
+        "London"
+      ]
+    },
+    "country": "SE",
+    "workplaceType": "hybrid",
+    "createdAt": 1790590791162,
+    "hostedUrl": "https://jobs.lever.co/spotify/186b763a-2a61-4563-8813-ff6b40c9c8a7",
+    "applyUrl": "https://jobs.lever.co/spotify/186b763a-2a61-4563-8813-ff6b40c9c8a7/apply",
+    "descriptionPlain": "Every dataset at Spotify, from the data behind creator royalties to the signals powering recommendations, is registered, published and traced through systems our team builds. We're the source of truth for what data exists at Spotify, where it lives, who owns it, and how it flows from one pipeline to the next.\nThese systems sit on the critical path of the platform. Data teams use them every day to publish and find data, and other platform teams build on them for access, retention, governance and incident response. That means our work is judged on correctness and reliability, because every system built on top of ours is only as good as the metadata we provide.\nThis is a backend role focused on data management, working on the problems at the core of any large data platform: running a data catalog that stays accurate at scale, capturing lineage across batch and streaming workloads, managing schemas as they evolve, and guaranteeing that consumers only read complete data. We build on open standards like OpenLineage and Apache Iceberg, and define the internal standards for naming, storage and metadata that the rest of Spotify builds against. As the platform takes on new storage technologies and new kinds of data assets, those standards and the systems behind them have to evolve with it, and you'll help decide how.\n \n",
+    "description": "<div>\n<p>Every dataset at Spotify, from the data behind creator royalties to the signals powering recommendations, is registered, published and traced through systems our team builds. We're the source of truth for what data exists at Spotify, where it lives, who owns it, and how it flows from one pipeline to the next.</p>\n<p>These systems sit on the critical path of the platform. Data teams use them every day to publish and find data, and other platform teams build on them for access, retention, governance and incident response. That means our work is judged on correctness and reliability, because every system built on top of ours is only as good as the metadata we provide.</p>\n<p>This is a backend role focused on data management, working on the problems at the core of any large data platform: running a data catalog that stays accurate at scale, capturing lineage across batch and streaming workloads, managing schemas as they evolve, and guaranteeing that consumers only read complete data. We build on open standards like OpenLineage and Apache Iceberg, and define the internal standards for naming, storage and metadata that the rest of Spotify builds against. As the platform takes on new storage technologies and new kinds of data assets, those standards and the systems behind them have to evolve with it, and you'll help decide how.</p>\n<h2>&nbsp;</h2>\n</div>",
+    "lists": [
+      {
+        "text": "What You'll Do",
+        "content": "<div>\n\n<li>Build and Evolve Core Services: Design, build and operate the backend services and APIs behind our data catalog, lineage and publishing systems, and evolve them as the platform adopts new storage technologies and new kinds of data. Hold them to a high bar for correctness, performance and reliability.</li>\n<li>Build Data Pipelines: Develop and run the batch and streaming pipelines that k"
+      },
+      {
+        "text": "Who You Are",
+        "content": "<div>\n\n<li>You have solid experience building and running backend services and APIs in production with Java, and you care about API design, versioning and backward compatibility.</li>\n<li>You're comfortable with SQL and have worked with data pipelines or a cloud data warehouse such as BigQuery, Snowflake or Databricks. Hands-on experience with batch or streaming frameworks like Beam, Flink or Spar"
+      }
+    ],
+    "additionalPlain": "Spotify is an equal opportunity employer. You are welcome at Spotify for who you are, no matter where you come from, what you look like, or what’s playing in your headphones. Our platform is for everyone, and so is our workplace. The more voices we have represented and amplified in our business, the more we will all thrive, contribute, and be forward-thinking! So bring us your personal experience,"
+  },
+  {
+    "id": "926149ab-6999-4058-b35d-41e302b70e05",
+    "text": "Backend Engineer - Data Platform",
+    "categories": {
+      "commitment": "Permanent",
+      "department": "Engineering",
+      "location": "Stockholm",
+      "team": "Platform",
+      "allLocations": [
+        "Stockholm",
+        "London"
+      ]
+    },
+    "country": "SE",
+    "workplaceType": "hybrid",
+    "createdAt": 1790854925650,
+    "hostedUrl": "https://jobs.lever.co/spotify/926149ab-6999-4058-b35d-41e302b70e05",
+    "applyUrl": "https://jobs.lever.co/spotify/926149ab-6999-4058-b35d-41e302b70e05/apply",
+    "descriptionPlain": "LilEngine is leading the Lakehouse, a company-strategic effort to make Apache Iceberg a first-class citizen in Spotify's data ecosystem. We're building it in close collaboration with Google, on open standards, so that different kinds of data are queryable the same way and teams can bring the right engine, from BigQuery to Dataflow to Trino, to the job.\nThe work has two parts. Hecate enables Iceberg for the Parquet datasets that already exist across Spotify, so teams get the benefits without rewriting their data. Alongside it, we're building the foundations of a new Lakehouse architecture that lets workflows write Iceberg tables natively. We're shipping the MVP this cycle, and you'll help shape what comes next.\nWe also own BigQuery for all of Spotify. Thousands of engineers, data scientists and pipelines depend on it every day, which puts us on the critical path for storing, finding and querying data. We're judged on reliability, cost efficiency and how quickly we unblock users when something breaks. This backend role sits where open table formats, cloud data warehouses and processing engines meet.\n \n",
+    "description": "<div>\n<p>LilEngine is leading the Lakehouse, a company-strategic effort to make Apache Iceberg a first-class citizen in Spotify's data ecosystem. We're building it in close collaboration with Google, on open standards, so that different kinds of data are queryable the same way and teams can bring the right engine, from BigQuery to Dataflow to Trino, to the job.</p>\n<p>The work has two parts. Hecate enables Iceberg for the Parquet datasets that already exist across Spotify, so teams get the benefits without rewriting their data. Alongside it, we're building the foundations of a new Lakehouse architecture that lets workflows write Iceberg tables natively. We're shipping the MVP this cycle, and you'll help shape what comes next.</p>\n<p>We also own BigQuery for all of Spotify. Thousands of engineers, data scientists and pipelines depend on it every day, which puts us on the critical path for storing, finding and querying data. We're judged on reliability, cost efficiency and how quickly we unblock users when something breaks. This backend role sits where open table formats, cloud data warehouses and processing engines meet.</p>\n<p>&nbsp;</p>\n</div>",
+    "lists": [
+      {
+        "text": "What You'll Do",
+        "content": "<div>\n\n<li><strong>Build and evolve the lakehouse:</strong> Help build the foundations that let data workflows read and write Iceberg tables directly, from this cycle's MVP to a production-grade platform.</li>\n<li><strong>Drive adoption:&nbsp;</strong>Help migrate data pipelines from across Spotify onto the new stack, making the move as painless as possible through tooling, standards and hands-on "
+      },
+      {
+        "text": "Who You Are",
+        "content": "<div>\n\n<li>You have solid experience building and operating backend services in production with Java or Scala.</li>\n<li>You're comfortable on GCP and Kubernetes. You can read kubectl output, reason about IAM and quotas, and work with CRDs and operators. You don't need deep expertise in all of these on day one.</li>\n<li>You've worked with Apache Iceberg or JVM-based processing frameworks like Spark"
+      }
+    ],
+    "additionalPlain": "Spotify is an equal opportunity employer. You are welcome at Spotify for who you are, no matter where you come from, what you look like, or what’s playing in your headphones. Our platform is for everyone, and so is our workplace. The more voices we have represented and amplified in our business, the more we will all thrive, contribute, and be forward-thinking! So bring us your personal experience,"
+  },
+  {
+    "id": "2a55d6c9-c564-443a-be3e-a3851db5a93b",
+    "text": "Account Executive - Commercial, Spotify Technology",
+    "categories": {
+      "commitment": "Permanent",
+      "department": "Operations and Business Support",
+      "location": "New York, NY",
+      "team": "Platform",
+      "allLocations": [
+        "New York, NY"
+      ]
+    },
+    "country": "US",
+    "workplaceType": "hybrid",
+    "createdAt": 1792767640768,
+    "hostedUrl": "https://jobs.lever.co/spotify/2a55d6c9-c564-443a-be3e-a3851db5a93b",
+    "applyUrl": "https://jobs.lever.co/spotify/2a55d6c9-c564-443a-be3e-a3851db5a93b/apply",
+    "descriptionPlain": "Spotify Technology is our business-to-business software team, helping organizations improve how they build and deliver software. Our products, including Backstage Portal, Confidence, and Xirp, support developers and AI-powered systems as they navigate increasingly complex engineering environments.\nAs an Account Executive on our Commercial team, you will drive new business for Spotify Technology. You'll focus on companies with fewer than 1,000 employees, where sales cycles typically run from weeks to a few months and success depends on a repeatable, scalable sales motion. You'll manage a high volume of opportunities, work with one or a small group of decision-makers (often a hands-on engineering leader or CTO), and move deals efficiently from the first conversation to close. You'll also help shape the playbook that enables our commercial business to grow.\nYou'll collaborate with Sales Engineering, Marketing, Product, and Customer Success to create a seamless customer experience. Your ability to quickly understand customers' technical needs and connect them to clear business value will be key to your success.\n",
+    "description": "<div>\n<p>Spotify Technology is our business-to-business software team, helping organizations improve how they build and deliver software. Our products, including Backstage Portal, Confidence, and Xirp, support developers and AI-powered systems as they navigate increasingly complex engineering environments.</p>\n<p>As an Account Executive on our Commercial team, you will drive new business for Spotify Technology. You'll focus on companies with fewer than 1,000 employees, where sales cycles typically run from weeks to a few months and success depends on a repeatable, scalable sales motion. You'll manage a high volume of opportunities, work with one or a small group of decision-makers (often a hands-on engineering leader or CTO), and move deals efficiently from the first conversation to close. You'll also help shape the playbook that enables our commercial business to grow.</p>\n<p>You'll collaborate with Sales Engineering, Marketing, Product, and Customer Success to create a seamless customer experience. Your ability to quickly understand customers' technical needs and connect them to clear business value will be key to your success.</p>\n</div>",
+    "lists": [
+      {
+        "text": "What You'll Do",
+        "content": "<div>\n<p>• Identify and pursue new business opportunities with companies of fewer than 1,000 employees. While significant inbound demand supports the pipeline, top performers will exceed targets by treating this as a “Hunter” role in addition to converting inbound demand.</p>\n<p>• Own the full sales cycle, from prospecting and discovery through demos, proposals, negotiations, and close.</p>\n<p>• M"
+      },
+      {
+        "text": "Who You Are",
+        "content": "<div>\n<p>• You have 4+ years of experience in a quota-carrying sales role, including 2+ years in a revenue-closing role, ideally in SaaS, developer platforms, or cloud services.</p>\n<p>• You have a proven track record of achieving and exceeding targets in a fast-paced, high-volume B2B environment, ideally selling to small and medium-sized businesses (SMB) or mid-market companies.</p>\n<p>• You are "
+      }
+    ],
+    "additionalPlain": "The United States base range for this position is $87,069-$124,385 plus equity. The benefits available for this position include health insurance, six month paid parental leave, 401(k) retirement plan, monthly meal allowance, 23 paid days off, 13 paid flexible holidays, paid sick leave. These ranges may be modified in the future.\n"
+  }
+]

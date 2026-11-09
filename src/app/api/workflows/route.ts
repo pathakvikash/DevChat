@@ -5,13 +5,21 @@ import { withUser } from "@/lib/workflows/http";
 import { sweepOrphans } from "@/lib/workflows/runner";
 import { buildTemplate, isTemplateKind } from "@/lib/workflows/templates";
 import { parseGraph } from "@/lib/workflows/graph";
-import { NEWS_COLUMNS, NEWS_STATUSES } from "@/lib/workflows/tables";
+import { JOB_COLUMNS, JOB_STATUSES, NEWS_COLUMNS, NEWS_STATUSES } from "@/lib/workflows/tables";
 
 const newsTable = (userId: string) =>
   prisma.dataTable.upsert({
     where: { userId_name: { userId, name: "News" } },
     update: {},
     create: { userId, name: "News", columns: JSON.stringify(NEWS_COLUMNS), statuses: JSON.stringify(NEWS_STATUSES) },
+    select: { id: true },
+  });
+
+const jobsTable = (userId: string) =>
+  prisma.dataTable.upsert({
+    where: { userId_name: { userId, name: "Job leads" } },
+    update: {},
+    create: { userId, name: "Job leads", columns: JSON.stringify(JOB_COLUMNS), statuses: JSON.stringify(JOB_STATUSES) },
     select: { id: true },
   });
 
@@ -46,7 +54,8 @@ export async function POST(req: NextRequest) {
       (typeof body.model === "string" && body.model) || (await getSettingsKey(userId, "defaultModel")) || "";
     const kind = isTemplateKind(body.template) ? body.template : "blank";
     // The News template saves into the user's "News" table, which is made here the first time.
-    const table = kind === "news" ? await newsTable(userId) : null;
+    // The Jobs template saves into "Job leads", made the same way.
+    const table = kind === "news" ? await newsTable(userId) : kind === "jobs" ? await jobsTable(userId) : null;
     const { name, graph } = buildTemplate(kind, defaultModel, table?.id);
     const given = typeof body.name === "string" ? body.name.trim().slice(0, 120) : "";
     const row = await prisma.workflow.create({ data: { userId, name: given || name, graph: JSON.stringify(graph) } });

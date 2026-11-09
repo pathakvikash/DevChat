@@ -1,6 +1,7 @@
 import { z } from "zod";
-import { CATALOG, CODEX_BLOCKED, hasToolConflict, isCodexModelId, isCardType, leaksTo, parseConfig, PRIVATE_LEAK_MESSAGE, reachesOpenWeb, readsPrivate, templateValues, MCP_WEB_WARNING, TOOL_CONFLICT_MESSAGE, usesMcp, type CardType } from "./catalog";
+import { CATALOG, CODEX_BLOCKED, hasToolConflict, isCodexModelId, isCardType, leaksTo, parseConfig, PRIVATE_LEAK_MESSAGE, reachesOpenWeb, readsPrivate, templateValues, MCP_WEB_WARNING, pickStatuses, TOOL_CONFLICT_MESSAGE, usesMcp, type CardType } from "./catalog";
 import { refRoot, templateRefs } from "./template";
+import { boardLines, detectBoard } from "./jobBoards";
 
 export const MAX_NODES = 30;
 export const DEFAULT_MAX_RUN_TOKENS = 500_000;
@@ -147,6 +148,7 @@ export interface GraphIssue {
   warning?: boolean;
 }
 
+const refsCard = (template: string, id: string) => templateRefs(template).some((r) => refRoot(r) === id);
 const SINGLE_REF = /^\s*\{\{\s*[^{}]+?\s*\}\}\s*$/;
 
 /** Config and reference problems (5.3). The editor shows them as warnings; Run refuses on them. */
@@ -172,6 +174,26 @@ export function checkGraph(graph: WorkflowGraph): GraphIssue[] {
     if ((n.type === "filter" || n.type === "table") && !String(config.list ?? "").trim()) issues.push({ nodeId: n.id, field: "list", message: `${label}: add the list to work on, like {{news.items}}` });
     if ((n.type === "table" || n.type === "sheetSync") && !String(config.tableId ?? "").trim()) issues.push({ nodeId: n.id, field: "tableId", message: `${label}: pick a table` });
     if (n.type === "mcpTool" && !String(config.tool ?? "").trim()) issues.push({ nodeId: n.id, field: "tool", message: `${label}: pick a tool` });
+    if (n.type === "jobBoards") {
+      const lines = boardLines(config.boards);
+      if (lines.length === 0) issues.push({ nodeId: n.id, field: "boards", message: `${label}: add at least one careers page` });
+      for (const line of lines) {
+        const d = detectBoard(line);
+        if (!d.ok) issues.push({ nodeId: n.id, field: "boards", message: `${label}: ${d.error}` });
+      }
+    }
+    if (n.type === "pickRows" && !String(config.tableId ?? "").trim()) issues.push({ nodeId: n.id, field: "tableId", message: `${label}: pick a table` });
+    if (n.type === "pickRows" && pickStatuses(config).length === 0) issues.push({ nodeId: n.id, field: "statuses", message: `${label}: add at least one status to offer` });
+    if (n.type === "pickRows") {
+      // A per-item card that reads the picked rows and stops short of maxPick leaves picked rows undone.
+      for (const m of graph.nodes) {
+        if (!isCardType(m.type)) continue;
+        const mc = parseConfig(m.type, m.config).config;
+        if (CATALOG[m.type].perItem && mc.perItem === true && Number(mc.maxItems) < Number(config.maxPick) && refsCard(String(mc.items ?? ""), n.id)) {
+          issues.push({ nodeId: m.id, field: "maxItems", warning: true, message: `${m.ui.label || m.id}: it runs on at most ${mc.maxItems} items, but ${label} can pick ${config.maxPick}. The rest are picked and left undone.` });
+        }
+      }
+    }
     if (n.type === "agent" && config.allowEdits === true && !config.folder) issues.push({ nodeId: n.id, field: "allowEdits", message: `${label}: Allow edits needs a working folder` });
     const ancestors = ancestorsOf(graph, n.id);
     if (usesMcp(n.type, config)) {
@@ -266,6 +288,8 @@ export interface CardRun {
   itemErrors?: { index: number; error: string }[];
   usage?: { inputTokens: number; outputTokens: number };
   log?: CardStep[];
+  /** A Pick rows card that is waiting: what the banner and the table's pick mode show. */
+  waiting?: { tableId: string; tableName: string; statuses: string[]; maxPick: number; message: string; sortBy: string; setStatus: string; offered: number };
   /** A per-item card's finished items, kept so a resume runs only the rest. Gone once the card ends. */
   partial?: { total: number; results: Record<string, Record<string, unknown>>; usage: { inputTokens: number; outputTokens: number } };
 }
