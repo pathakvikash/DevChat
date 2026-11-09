@@ -42,21 +42,48 @@ beforeEach(() => {
   findFirst.mockResolvedValue({ id: "s1", name: "gh" });
 });
 
-describe("a folder on a CLI agent reaches the web and reads private data", () => {
-  it("refuses readChat plus a folder on one card, but not a folder on an API model", () => {
-    const one = (model: string, dm = "m") => graphOf(dm, node("a", ["trigger"], "agent", { instructions: "x", tools: ["readChat"], folder: "/work/app", model }));
-    expect(validateStructure(one(CLI)).join()).toContain(TOOL_CONFLICT_MESSAGE);
-    expect(validateStructure(one("")).join()).not.toContain(TOOL_CONFLICT_MESSAGE);
-    expect(validateStructure(one("", CLI)).join()).toContain(TOOL_CONFLICT_MESSAGE); // empty model = the workflow's default
-    expect(hasToolConflict(["readChat"], [], true)).toBe(true);
+describe("one card that reads private data and reaches the web", () => {
+  const MCP = ["mcp_gh_create_issue"];
+  const one = (config: Record<string, unknown>, dm = "m") => graphOf(dm, node("a", ["trigger"], "agent", { instructions: "x", ...config }));
+  const refused = (config: Record<string, unknown>, dm?: string) => validateStructure(one(config, dm)).length > 0;
+  const folder = { model: CLI, folder: "/work/app" };
+
+  it.each([
+    ["MCP + fetchUrl", { mcpTools: MCP, tools: ["fetchUrl"] }],
+    ["MCP + webSearch", { mcpTools: MCP, tools: ["webSearch"] }],
+    ["folder + fetchUrl", { ...folder, tools: ["fetchUrl"] }],
+    ["folder + webSearch", { ...folder, tools: ["webSearch"] }],
+    ["folder + MCP", { ...folder, mcpTools: MCP }],
+    ["chat + MCP", { tools: ["readChat"], mcpTools: MCP }],
+    ["chat + fetchUrl", { tools: ["readChat", "fetchUrl"] }],
+  ])("refuses %s at save and at Run", (_n, config) => {
+    expect(refused(config)).toBe(true);
+    expect(checkGraph(one(config)).some((i) => !i.warning && /private data|read your chats/.test(i.message))).toBe(true);
   });
 
-  it("refuses a chat reader followed by a CLI card with a folder, and a folder before the open web", () => {
-    const cli = node("cli", ["reader"], "agent", { instructions: "x", model: CLI, folder: "/work/app" });
-    expect(chatLeaks(graphOf("m", reader, cli)).map((l) => l.nodeId)).toEqual(["reader"]);
-    expect(chatLeaks(graphOf("m", reader, node("cli", ["reader"], "agent", { instructions: "x", model: CLI })))).toEqual([]);
-    const folderFirst = node("f", ["trigger"], "agent", { instructions: "x", model: CLI, folder: "/work/app" });
+  it.each([
+    ["MCP alone", { mcpTools: MCP }],
+    ["a folder alone", folder],
+    ["a folder and chat tools (its own web tools are off)", { ...folder, tools: ["readChat"] }],
+    ["web tools alone", { tools: ["fetchUrl", "webSearch"] }],
+    ["a folder on an API model with fetchUrl (the folder is ignored)", { model: "mock/wf", folder: "/work/app", tools: ["fetchUrl"] }],
+  ])("allows %s", (_n, config) => {
+    expect(refused(config)).toBe(false);
+  });
+
+  it("an mcpTool card alone is fine, and an empty model means the workflow's default", () => {
+    expect(validateStructure(graphOf("m", node("m", ["trigger"], "mcpTool", { serverId: "s1", tool: "t" })))).toEqual([]);
+    expect(refused({ folder: "/work/app", tools: ["fetchUrl"] }, "m")).toBe(false);
+    expect(refused({ folder: "/work/app", tools: ["fetchUrl"] }, CLI)).toBe(true);
+  });
+
+  it("a folder is a private reader only: nothing refuses a chat reader before a folder card, but a folder before the open web is refused", () => {
+    expect(hasToolConflict(["readChat"], [])).toBe(false);
+    const cli = node("cli", ["reader"], "agent", { instructions: "x", ...folder });
+    expect(chatLeaks(graphOf("m", reader, cli))).toEqual([]);
+    const folderFirst = node("f", ["trigger"], "agent", { instructions: "x", ...folder });
     expect(chatLeaks(graphOf("m", folderFirst, node("w", ["f"], "webSearch", { queries: "q" }))).map((l) => l.nodeId)).toEqual(["f"]);
+    expect(chatLeaks(graphOf("m", folderFirst, node("n", ["f"], "mcpTool", { serverId: "s1", tool: "t" }))).map((l) => l.nodeId)).toEqual(["f"]);
   });
 });
 

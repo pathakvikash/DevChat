@@ -211,6 +211,7 @@ export const agentCard: CardImpl = {
       conversationId: "",
       userId,
       allowedTools: [],
+      web: false, // a workflow card gets only the web tools it ticked, never the CLI's own
     });
 
     let progress: SubAgentOutput = startSubAgentOutput("workflow", Date.now());

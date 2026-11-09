@@ -15,6 +15,8 @@ export interface ProviderOptionsInput {
   conversationId: string;
   userId: string;
   allowedTools: string[];
+  /** false = the CLI's own web search and fetch are switched off (workflow cards). */
+  web?: boolean;
 }
 
 /**
@@ -42,6 +44,7 @@ export function providerOptionsFor(i: ProviderOptionsInput) {
       conversationId: i.conversationId,
       userId: i.userId,
       allowedTools: i.allowedTools,
+      ...(i.web === false ? { web: false } : {}),
     },
   };
 }

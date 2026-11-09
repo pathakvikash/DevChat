@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { exchangeCode } from "@/lib/mcp/oauth2";
+import { disconnectFromServer } from "@/lib/mcp/client";
 import { getPrismaMcp, findMcpServer } from "@/lib/api/mcpServers";
 import { requireUserId } from "@/lib/auth";
 
@@ -35,7 +36,6 @@ export async function GET(
       );
     }
 
-    const clientSecret = req.cookies.get("mcp_oauth_client_secret")?.value || "";
     const tokenUrl = req.cookies.get("mcp_oauth_token_url")?.value || "";
 
     // Clear cookies
@@ -60,6 +60,7 @@ export async function GET(
     }
 
     const clientId = authConfig.clientId || "";
+    const clientSecret = authConfig.clientSecret || "";
     const redirectUri = `${req.nextUrl.origin}/api/mcp/servers/${id}/oauth/callback`;
 
     const tokens = await exchangeCode({
@@ -84,6 +85,7 @@ export async function GET(
       },
     });
 
+    await disconnectFromServer(id).catch(() => {});
     return clearResponse;
   } catch (error) {
     console.error("[MCP OAuth] Callback failed:", error);

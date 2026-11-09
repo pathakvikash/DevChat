@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Bot, Copy, Check, MessageSquare, Plug, Play, Search, Trash2, X, ChevronDown, ChevronRight } from "lucide-react";
+import { AlertTriangle, Bot, Copy, Check, MessageSquare, Plug, Play, Search, Trash2, X, ChevronDown, ChevronRight } from "lucide-react";
 import { CATALOG, isCliModelId, MCP_WEB_WARNING, reachesOpenWeb, type FieldSpec } from "@/lib/workflows/catalog";
 import { ancestorsOf, TRIGGER_ID, type CardRun, type FlowNode, type GraphIssue, type RunState, type WorkflowGraph } from "@/lib/workflows/graph";
 import ConfigField, { type FieldEnv } from "./ConfigField";
@@ -137,6 +137,8 @@ export default function ConfigPanel({
   const [advanced, setAdvanced] = useState(false);
   const def = CATALOG[node.type];
   const mine = issues.filter((i) => i.nodeId === node.id && !i.warning);
+  // The MCP web warning already shows inside the MCP section, so it is left out of this list.
+  const warnings = issues.filter((i) => i.nodeId === node.id && i.warning && !i.message.endsWith(MCP_WEB_WARNING));
   const descendants = new Set(graph.nodes.filter((n) => ancestorsOf(graph, n.id).has(node.id)).map((n) => n.id));
   const canRunAfter = graph.nodes.filter((n) => n.id !== node.id && !descendants.has(n.id));
   const visible = (f: FieldSpec) => !f.when || f.when(node.config);
@@ -201,7 +203,22 @@ export default function ConfigPanel({
             {def.fields.filter(visible).map((spec) => (
               <ConfigField key={spec.key} spec={spec} config={node.config} onChange={setConfig} env={fieldEnv} error={mine.find((i) => i.field === spec.key)?.message.replace(/^[^:]*: /, "")} />
             ))}
-            {node.type === "mcpTool" && (upstreamWeb || reachesOpenWeb(node.type, node.config)) && <p className="text-xs text-zinc-300">{MCP_WEB_WARNING}</p>}
+            {node.type === "mcpTool" && upstreamWeb && (
+              <p className="flex items-start gap-1.5 text-xs text-zinc-300">
+                <AlertTriangle size={14} className="mt-px shrink-0 text-amber-400" aria-hidden="true" />
+                <span>
+                  <span className="font-medium">Warning:</span> {MCP_WEB_WARNING}
+                </span>
+              </p>
+            )}
+            {warnings.map((w, i) => (
+              <p key={i} className="flex items-start gap-1.5 text-xs text-zinc-300">
+                <AlertTriangle size={14} className="mt-px shrink-0 text-amber-400" aria-hidden="true" />
+                <span>
+                  <span className="font-medium">Warning:</span> {w.message.replace(/^[^:]*: /, "")}
+                </span>
+              </p>
+            ))}
             {def.fields.length === 0 && <p className="text-sm text-zinc-400">Nothing to set. This card starts the flow.</p>}
             {node.type !== "trigger" && (
               <div className="border-t border-[var(--glass-border)] pt-3">

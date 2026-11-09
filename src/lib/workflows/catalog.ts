@@ -141,7 +141,7 @@ export const TOOL_CONFLICT_MESSAGE = "This card can read your chats and reach th
 type Cfg = Record<string, unknown>;
 const toolList = (c: Cfg): string[] => (Array.isArray(c.tools) ? (c.tools as string[]) : []);
 
-/** A command-line model with a folder: Claude Code and OpenCode get their own web tools once they have a folder, and it can read the folder. */
+/** A command-line model with a folder: it can read the folder. Workflow cards run it with its own web tools switched off (`web: false`). */
 export const hasCliFolder = (type: string, config: Cfg, defaultModel = ""): boolean =>
   type === "agent" && !!config.folder && isCliModelId(String(config.model || defaultModel));
 
@@ -155,9 +155,9 @@ export const usesMcp = (type: string, config: Cfg): boolean => type === "mcpTool
 export const readsPrivate = (type: string, config: Cfg, defaultModel = ""): boolean =>
   readsChats(type, config) || usesMcp(type, config) || hasCliFolder(type, config, defaultModel);
 
-/** The open web: a search or fetch card, an agent with a web tool, or a CLI agent with a folder (its own web tools). */
+/** The open web: a search or fetch card, or an agent with a web tool. */
 export const reachesOpenWeb = (type: string, config: Cfg, defaultModel = ""): boolean =>
-  type === "webSearch" || type === "fetch" || (type === "agent" && toolList(config).some((t) => OUTBOUND_TOOLS.includes(t))) || hasCliFolder(type, config, defaultModel);
+  type === "webSearch" || type === "fetch" || (type === "agent" && toolList(config).some((t) => OUTBOUND_TOOLS.includes(t)));
 
 /** Can send data out: the open web, or MCP (servers can make network calls). */
 export const reachesWeb = (type: string, config: Cfg, defaultModel = ""): boolean => reachesOpenWeb(type, config, defaultModel) || usesMcp(type, config);
@@ -174,11 +174,11 @@ export const leaksTo = (earlier: { type: string; config: Cfg }, later: { type: s
 export const PRIVATE_LEAK_MESSAGE = (label: string) =>
   `${label} reads private data (chats, MCP or a folder) and a later card reaches the web. Split them into two workflows, so a web page can't make it send your data out.`;
 
-/** A card that reads chats must not also reach the web, use MCP or have a folder: a page it reads could steer it into sending chat text out. */
-export const hasToolConflict = (tools: unknown, mcpTools: unknown = [], folder = false): boolean =>
+/** A card that reads chats must not also reach the web or use MCP: a page it reads could steer it into sending chat text out. */
+export const hasToolConflict = (tools: unknown, mcpTools: unknown = []): boolean =>
   Array.isArray(tools) &&
   tools.some((t) => CHAT_READ_TOOLS.includes(t)) &&
-  (tools.some((t) => OUTBOUND_TOOLS.includes(t)) || (Array.isArray(mcpTools) && mcpTools.length > 0) || folder);
+  (tools.some((t) => OUTBOUND_TOOLS.includes(t)) || (Array.isArray(mcpTools) && mcpTools.length > 0));
 
 const agent: CardDef = {
   type: "agent",

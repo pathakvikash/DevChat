@@ -25,7 +25,6 @@ export async function GET(
     let authorizationUrl = authConfig.authorizationUrl || "";
     let tokenUrl = authConfig.tokenUrl || "";
     const clientId = authConfig.clientId || "";
-    const clientSecret = authConfig.clientSecret || "";
     const scopes = authConfig.scopes || "";
 
     // Look up well-known provider endpoints from server name
@@ -67,15 +66,7 @@ export async function GET(
       maxAge: 600,
     });
 
-    // Store code verifier hint and client secret in cookie for callback
-    response.cookies.set("mcp_oauth_client_secret", clientSecret, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
-      sameSite: "lax",
-      path: `/api/mcp/servers/${id}/oauth`,
-      maxAge: 600,
-    });
-
+    // The client secret stays in the database; the callback reads it from there.
     response.cookies.set("mcp_oauth_token_url", tokenUrl, {
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",

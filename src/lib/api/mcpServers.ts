@@ -32,14 +32,23 @@ export function redactAuthConfig(raw: string | null | undefined): { authConfig?:
 }
 
 /** An edit's auth settings on top of the stored ones. A secret left empty keeps the stored one. */
-export function mergeAuthConfig(stored: string | null | undefined, incoming: Record<string, unknown>): string {
+export function mergeAuthConfig(stored: string | null | undefined, incoming: Record<string, unknown>, authType?: string): string {
   let cfg: Record<string, unknown> = {};
   try {
     cfg = stored ? JSON.parse(stored) : {};
   } catch {}
-  const next = { ...incoming };
-  for (const k of SECRET_KEYS) if (!next[k]) delete next[k];
-  return JSON.stringify({ ...cfg, ...next });
+  const next: Record<string, unknown> = { ...cfg };
+  for (const [k, v] of Object.entries(incoming)) {
+    if (v === null) delete next[k]; // an explicit null removes the key
+    else if ((SECRET_KEYS as readonly string[]).includes(k) && !v) continue; // an empty secret keeps the stored one
+    else next[k] = v;
+  }
+  // A secret the auth type doesn't use goes away when the type changes.
+  if (authType !== undefined) {
+    if (authType !== "apikey") delete next.apiKey;
+    if (authType !== "oauth2") delete next.clientSecret;
+  }
+  return JSON.stringify(next);
 }
 
 export function mcpServerNotFoundResponse() {

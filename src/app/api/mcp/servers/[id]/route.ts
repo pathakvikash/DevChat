@@ -50,11 +50,15 @@ export async function PATCH(
     if (body.name !== undefined) data.name = body.name;
     if (body.url !== undefined) data.url = body.url;
     if (body.authType !== undefined) data.authType = body.authType;
-    if (body.authConfig !== undefined) data.authConfig = mergeAuthConfig(result.server.authConfig, body.authConfig ?? {});
+    if (body.authConfig !== undefined || body.authType !== undefined) {
+      data.authConfig = mergeAuthConfig(result.server.authConfig, body.authConfig ?? {}, body.authType ?? result.server.authType);
+    }
     if (body.enabled !== undefined) data.enabled = body.enabled;
     if (body.token !== undefined) data.authToken = JSON.stringify(body.token);
 
     const server = await getPrismaMcp().update({ where: { id }, data });
+    // A changed address or credentials make the cached connection and tool list stale.
+    if (["url", "authType", "authConfig", "authToken"].some((k) => k in data)) await disconnectFromServer(id).catch(() => {});
 
     if (body.enabled === false) {
       await disconnectFromServer(id).catch(() => {});

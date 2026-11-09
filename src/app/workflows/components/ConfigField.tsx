@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useId, useRef, useState } from "react";
-import { Plus, Trash2, Wrench, XCircle } from "lucide-react";
+import { AlertTriangle, Plus, Trash2, Wrench, XCircle } from "lucide-react";
 import ModelSelector from "@/app/components/conversation/ModelSelector";
 import WorkingFolderPicker from "@/app/components/conversation/WorkingFolderPicker";
 import type { ModelInfo } from "@/app/components/conversation/types";
@@ -190,11 +190,19 @@ function McpToolChoices({ labelledBy, value, other, folder, onChange, readOnly, 
   const { tools, state } = useMcp(true);
   const known = new Set(tools.map((t) => t.id));
   const rows = [...tools, ...value.filter((v) => !known.has(v)).map((id) => ({ id, server: "", tool: `${id} (not available now)` }))];
-  const web = upstreamWeb || folder || other.includes("fetchUrl") || other.includes("webSearch");
+  const webOn = other.includes("fetchUrl") || other.includes("webSearch");
   return (
     <div role="group" aria-labelledby={labelledBy} className="space-y-1">
       <p className="text-[11px] text-zinc-400">{MCP_WARNING}</p>
-      {value.length > 0 && web && <p className="text-[11px] text-zinc-300">{MCP_WEB_WARNING}</p>}
+      {value.length > 0 && upstreamWeb && (
+        <p className="flex items-start gap-1.5 text-[11px] text-zinc-300">
+          <AlertTriangle size={12} className="mt-px shrink-0 text-amber-400" aria-hidden="true" />
+          <span>
+            <span className="font-medium">Warning:</span> {MCP_WEB_WARNING}
+          </span>
+        </p>
+      )}
+      {(webOn || folder) && value.length === 0 && <p className="text-[11px] text-zinc-400">MCP tools can&apos;t be mixed with web tools or a working folder on one card, so a web page can&apos;t make it send your data out.</p>}
       {state === "loading" && <p className="text-[11px] text-zinc-400">Loading tools…</p>}
       {state === "error" && <p className="text-[11px] text-zinc-300">Couldn&apos;t load your MCP servers.</p>}
       {state === "ready" && rows.length === 0 && <p className="text-[11px] text-zinc-400">No MCP tools. Turn on a server in Settings first.</p>}
@@ -203,7 +211,7 @@ function McpToolChoices({ labelledBy, value, other, folder, onChange, readOnly, 
           <input
             type="checkbox"
             checked={value.includes(t.id)}
-            disabled={readOnly || disabled || (!value.includes(t.id) && hasToolConflict(other, [...value, t.id], folder))}
+            disabled={readOnly || disabled || (!value.includes(t.id) && (hasToolConflict(other, [...value, t.id]) || webOn || folder))}
             onChange={(e) => onChange(e.target.checked ? [...value, t.id] : value.filter((x) => x !== t.id))}
             className="h-4 w-4"
           />
@@ -260,6 +268,9 @@ export default function ConfigField({ spec, config, onChange, error, env }: { sp
   const set = (v: unknown) => onChange(spec.key, v);
   const cardModel = String(config.model || env.defaultModel);
   const modelHasTools = env.models.find((m) => m.id === cardModel)?.supportsTools !== false;
+  const webOn = ((config.tools as string[]) ?? []).some((t) => t === "fetchUrl" || t === "webSearch");
+  const mcpOn = ((config.mcpTools as string[]) ?? []).length > 0;
+  const folderOn = !!config.folder && isCliModelId(cardModel);
   // A folder and edits only mean something to a command-line model.
   if ((spec.kind === "folder" || spec.kind === "allowEdits") && !isCliModelId(cardModel)) return null;
 
@@ -310,12 +321,13 @@ export default function ConfigField({ spec, config, onChange, error, env }: { sp
         <div role="group" aria-label="Tools" aria-disabled={!modelHasTools || undefined} className={`space-y-1 ${modelHasTools ? "" : "opacity-60"}`}>
           {!modelHasTools && <p className="text-[11px] text-zinc-400">{NEEDS_TOOLS}</p>}
           {(chosen.has("searchChats") || chosen.has("readChat") || chosen.has("fetchUrl") || chosen.has("webSearch")) && <p className="text-[11px] text-zinc-400">Chat-reading tools and web tools can&apos;t be on the same card, so a web page can&apos;t make it send your chats out.</p>}
+          {(mcpOn || folderOn) && <p className="text-[11px] text-zinc-400">Web tools are off while this card has MCP tools or a working folder, so a web page can&apos;t make it send your data out.</p>}
           {AGENT_TOOL_CHOICES.map((t) => (
             <label key={t.id} className="flex items-center gap-2 text-sm text-zinc-300">
               <input
                 type="checkbox"
                 checked={chosen.has(t.id)}
-                disabled={env.readOnly || !modelHasTools || (!chosen.has(t.id) && hasToolConflict([...chosen, t.id], config.mcpTools, !!config.folder && isCliModelId(cardModel)))}
+                disabled={env.readOnly || !modelHasTools || (!chosen.has(t.id) && (hasToolConflict([...chosen, t.id], config.mcpTools) || ((t.id === "fetchUrl" || t.id === "webSearch") && (mcpOn || folderOn))))}
                 onChange={(e) => set(e.target.checked ? [...chosen, t.id] : [...chosen].filter((x) => x !== t.id))}
                 className="h-4 w-4"
               />
@@ -328,7 +340,7 @@ export default function ConfigField({ spec, config, onChange, error, env }: { sp
       break;
     }
     case "mcpTools":
-      control = <McpToolChoices labelledBy={`${id}-l`} value={(value as string[]) ?? []} other={(config.tools as string[]) ?? []} folder={!!config.folder && isCliModelId(cardModel)} onChange={set} readOnly={env.readOnly} disabled={!modelHasTools} upstreamWeb={!!env.upstreamWeb} />;
+      control = <McpToolChoices labelledBy={`${id}-l`} value={(value as string[]) ?? []} other={(config.tools as string[]) ?? []} folder={folderOn} onChange={set} readOnly={env.readOnly} disabled={!modelHasTools} upstreamWeb={!!env.upstreamWeb} />;
       break;
     case "mcpServer":
       control = <McpServerSelect id={id} value={String(value ?? "")} onChange={set} readOnly={env.readOnly} />;
@@ -340,7 +352,18 @@ export default function ConfigField({ spec, config, onChange, error, env }: { sp
       control = <ArgsField labelledBy={`${id}-l`} value={(value as Record<string, string>) ?? {}} onChange={set} readOnly={env.readOnly} />;
       break;
     case "folder":
-      control = <WorkingFolderPicker label={spec.label} hint="The folder this command-line model can read in this card. It also gets its own web tools there." value={String(value ?? "") || null} onChange={(f) => set(f ?? "")} disabled={env.readOnly} />;
+      control = (
+        <div className="space-y-1">
+          <WorkingFolderPicker
+            label={spec.label}
+            hint={!value && (webOn || mcpOn) ? "Turn off the web tools and MCP tools on this card to pick a folder" : "The folder this command-line model can read in this card. Its own web tools are off in workflows."}
+            value={String(value ?? "") || null}
+            onChange={(f) => set(f ?? "")}
+            disabled={env.readOnly || (!value && (webOn || mcpOn))}
+          />
+          {!value && (webOn || mcpOn) && <p className="text-[11px] text-zinc-400">A folder can&apos;t be mixed with web tools or MCP tools on one card, so a web page can&apos;t make it send your files out.</p>}
+        </div>
+      );
       break;
     case "allowEdits":
       control = (
