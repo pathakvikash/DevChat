@@ -580,7 +580,7 @@ The user message is the description. When the workflow already has cards, it als
 **Clean-up.** This happens after validation:
 - Fill in config defaults and drop unknown keys.
 - Remove settings that only the user may set by hand: MCP tools in allowlists, `folder`, `allowEdits`, and `mcpTool` cards. Each removal becomes a warning.
-- Lay the cards out automatically: x = level × 280, y = index within the level × 160. Positions from the model are ignored.
+- Lay the cards out with `autoLayout` (graph.ts). Positions from the model are ignored; the model's card order breaks ties within a level.
 - Warnings list the variables that need values ("Fill in: Your profile").
 
 **Preview, then apply.** The proposed cards show with dashed borders in place of the current flow, under a bar: "Preview · 6 cards · **Apply** · Discard". Apply saves through `PATCH` and asks the native `confirm("Replace the current flow?")` first if the canvas has cards. Nothing runs until the user clicks Run.
@@ -675,7 +675,7 @@ Saving is automatic: a `PATCH` 800 ms after the last change. The header reads "S
 
 - **Runs** opens a `SidePanel`. Each row shows the status icon and word, "Manual", relative time (`getRelativeTime`), duration, and tokens with cost in `font-mono tabular-nums`. Clicking a row opens `?run=<id>`: a read-only canvas, a header chip "Run · 9 Nov 14:02 · Done ×", and **Resume** when the run failed or was interrupted.
 - **Polling:** `GET /api/workflow-runs/[id]` every 1.5 s while running, or every 5 s while the tab is hidden. Polling stops when the run ends or starts waiting.
-- **Live region:** one `aria-live="polite"` region per page. It announces only "Run started", "Run waiting for you", "Run done", "Run failed at <card>" and "Run cancelled".
+- **Live region:** one `aria-live="polite"` region per page. It announces only "Run started", "Run waiting for you", "Run done", "Run failed at <card>" and "Run cancelled", plus the describe box's "Building your flow…", "Preview ready: n cards", "Flow applied" and "Preview discarded". Errors are not announced here: Retry's `aria-describedby` reads them.
 
 ### 8.7 Table view
 
