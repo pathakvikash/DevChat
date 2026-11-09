@@ -5,14 +5,15 @@ import { ADDABLE_TYPES, CATALOG, type CardType } from "@/lib/workflows/catalog";
 import { CardIcon } from "./ConfigPanel";
 
 /** The catalog popover (8.4): grouped by category, type to filter, ↑↓ to move, Enter to add, Esc to close. */
-export default function AddCardMenu({ onPick, onClose }: { onPick: (type: CardType) => void; onClose: () => void }) {
+/** `anchor`: the button that opens it, so a click on that button is not an outside click and can toggle the menu shut. */
+export default function AddCardMenu({ onPick, onClose, anchor }: { onPick: (type: CardType) => void; onClose: () => void; anchor?: React.RefObject<HTMLElement | null> }) {
   const [query, setQuery] = useState("");
   const wrap = useRef<HTMLDivElement>(null);
   const input = useRef<HTMLInputElement>(null);
   useEffect(() => input.current?.focus(), []);
 
   useEffect(() => {
-    const outside = (e: MouseEvent) => !wrap.current?.contains(e.target as Node) && onClose();
+    const outside = (e: MouseEvent) => !wrap.current?.contains(e.target as Node) && !anchor?.current?.contains(e.target as Node) && onClose();
     const esc = (e: KeyboardEvent) => e.key === "Escape" && (e.stopPropagation(), onClose());
     document.addEventListener("mousedown", outside);
     document.addEventListener("keydown", esc, true);
@@ -20,7 +21,7 @@ export default function AddCardMenu({ onPick, onClose }: { onPick: (type: CardTy
       document.removeEventListener("mousedown", outside);
       document.removeEventListener("keydown", esc, true);
     };
-  }, [onClose]);
+  }, [onClose, anchor]);
 
   const groups = useMemo(() => {
     const q = query.trim().toLowerCase();

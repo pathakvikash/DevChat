@@ -206,7 +206,7 @@ export function newCard(graph: WorkflowGraph, type: CardType): FlowNode {
     type,
     fromIds: last ? [last.id] : [],
     config: def.defaults(),
-    ui: { label: def.label, position: { x: (last?.ui.position.x ?? -280) + 280, y: last?.ui.position.y ?? 0 } },
+    ui: { label: def.label, position: { x: (last?.ui.position.x ?? -LAYOUT_DX) + LAYOUT_DX, y: last?.ui.position.y ?? 0 } },
   };
 }
 
@@ -263,7 +263,7 @@ export function autoLayout(graph: WorkflowGraph): WorkflowGraph {
     const l = level.get(n.id)!;
     columns.set(l, [...(columns.get(l) ?? []), n.id]);
   }
-  const snap = (v: number) => Math.round(v / 20) * 20;
+  const snap = (v: number) => Math.sign(v) * Math.round(Math.abs(v) / 20) * 20; // symmetric, so -70 and 70 mirror
   const pos = new Map<string, { x: number; y: number }>();
   for (const [l, ids] of columns) ids.forEach((id, row) => pos.set(id, { x: l * LAYOUT_DX, y: snap((row - (ids.length - 1) / 2) * LAYOUT_DY) }));
   return { ...graph, nodes: graph.nodes.map((n) => ({ ...n, ui: { ...n.ui, position: pos.get(n.id)! } })) };
@@ -278,4 +278,19 @@ export function connectionError(graph: WorkflowGraph, from: string, to: string):
   const before = new Set(validateStructure(graph));
   const candidate = { ...graph, nodes: graph.nodes.map((n) => (n.id === to ? { ...n, fromIds: [...n.fromIds, from] } : n)) };
   return validateStructure(candidate).find((e) => !before.has(e)) ?? null;
+}
+
+/**
+ * `node` with its `fromIds` checked one by one against the save rules, as if it were added unconnected first.
+ * A connection that breaks a rule is left out and its message returned, so the card still lands, unconnected.
+ */
+export function connectNew(graph: WorkflowGraph, node: FlowNode): { node: FlowNode; error: string | null } {
+  let current: FlowNode = { ...node, fromIds: [] };
+  let error: string | null = null;
+  for (const from of node.fromIds) {
+    const err = connectionError({ ...graph, nodes: [...graph.nodes, current] }, from, node.id);
+    if (err) error ??= err;
+    else current = { ...current, fromIds: [...current.fromIds, from] };
+  }
+  return { node: current, error };
 }

@@ -12,7 +12,7 @@ import type { ModelInfo } from "@/app/components/conversation/types";
 import SidePanel from "@/app/components/ui/SidePanel";
 import { fetchModels } from "@/app/hooks/useModelsApi";
 import { CATALOG, type CardType } from "@/lib/workflows/catalog";
-import { ancestorsOf, autoLayout, checkGraph, MAX_NODES, newCard, TRIGGER_ID, type CardRun, type FlowNode, type WorkflowGraph } from "@/lib/workflows/graph";
+import { ancestorsOf, autoLayout, checkGraph, connectNew, MAX_NODES, newCard, TRIGGER_ID, type CardRun, type FlowNode, type WorkflowGraph } from "@/lib/workflows/graph";
 import { renderText, renderTemplate, templateRefs, refRoot, type TemplateContext } from "@/lib/workflows/template";
 import Canvas, { type AddOptions } from "./Canvas";
 import CardList from "./CardList";
@@ -193,7 +193,10 @@ export default function WorkflowEditor({ id }: { id: string }) {
   function addCard(type: CardType, opts?: AddOptions) {
     if (!wf) return;
     const base = newCard(wf.graph, type);
-    const node = opts ? { ...base, fromIds: opts.fromId ? [opts.fromId] : base.fromIds, ui: { ...base.ui, position: opts.position ?? base.ui.position } } : base;
+    const wanted = opts ? { ...base, fromIds: opts.fromId ? [opts.fromId] : base.fromIds, ui: { ...base.ui, position: opts.position ?? base.ui.position } } : base;
+    // The same rules as a save: a connection that breaks one is refused, and the card lands unconnected.
+    const { node, error } = connectNew(wf.graph, wanted);
+    if (error) toast(error, "error");
     editGraph((g) => ({ ...g, nodes: [...g.nodes, node] }));
     setSelectedId(node.id);
   }
@@ -395,6 +398,7 @@ export default function WorkflowEditor({ id }: { id: string }) {
   const interruptedCard = interruptedNode && run ? run.nodes[interruptedNode.id] : undefined;
   const panel = selected && env && (
     <ConfigPanel
+      key={selected.id}
       node={selected}
       graph={graph}
       card={nodes[selected.id]}

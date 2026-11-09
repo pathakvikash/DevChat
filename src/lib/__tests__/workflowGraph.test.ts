@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { buildTemplate } from "@/lib/workflows/templates";
-import { autoLayout, checkGraph, connectionError, emptyGraph, LAYOUT_DX, LAYOUT_DY, LOOP_MESSAGE, idFromLabel, newCard, parseGraph, topoOrder, validateStructure, type FlowNode, type WorkflowGraph } from "@/lib/workflows/graph";
+import { autoLayout, checkGraph, connectionError, connectNew, emptyGraph, LAYOUT_DX, LAYOUT_DY, LOOP_MESSAGE, idFromLabel, newCard, parseGraph, topoOrder, validateStructure, type FlowNode, type WorkflowGraph } from "@/lib/workflows/graph";
 
 const node = (id: string, fromIds: string[], x = 0, y = 0, type: FlowNode["type"] = "agent", config: Record<string, unknown> = {}): FlowNode => ({
   id,
@@ -193,5 +193,39 @@ describe("connectionError", () => {
 
   it("shows the chat-leak rule's message", () => {
     expect(connectionError(g, "reader", "web")).toMatch(/reads your chats and a later card reaches the web/);
+  });
+});
+
+describe("connectNew", () => {
+  const g = graphOf(node("reader", ["trigger"], 0, 0, "agent", { tools: ["readChat"] }), node("a", ["trigger"]));
+  const web = (fromIds: string[]) => node("web", fromIds, 0, 0, "webSearch", { queries: "x" });
+
+  it("keeps connections that pass the rules", () => {
+    expect(connectNew(g, web(["a"]))).toMatchObject({ error: null, node: { fromIds: ["a"] } });
+  });
+
+  it("leaves a refused connection out, with the rule's message, and keeps the card", () => {
+    const r = connectNew(g, web(["reader"]));
+    expect(r.node.fromIds).toEqual([]);
+    expect(r.error).toMatch(/reads your chats and a later card reaches the web/);
+  });
+
+  it("keeps the good connections and reports the first bad one", () => {
+    const r = connectNew(g, web(["a", "reader"]));
+    expect(r.node.fromIds).toEqual(["a"]);
+    expect(r.error).not.toBeNull();
+  });
+});
+
+describe("layout constants", () => {
+  it("newCard steps by the layout column width", () => {
+    const g = buildTemplate("news", "m").graph;
+    expect(newCard(g, "agent").ui.position.x - g.nodes.at(-1)!.ui.position.x).toBe(LAYOUT_DX);
+  });
+
+  it("centres two cards in a level symmetrically", () => {
+    const g = autoLayout(graphOf(node("a", ["trigger"]), node("b", ["trigger"], 0, 50)));
+    const [a, b] = ["a", "b"].map((id) => g.nodes.find((n) => n.id === id)!.ui.position.y);
+    expect(a).toBe(-b);
   });
 });

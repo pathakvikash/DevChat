@@ -1,7 +1,7 @@
 import { test, expect, type APIRequestContext, type Page } from "./fixtures";
 import { deleteAllChats } from "./helpers";
 
-type Graph = { nodes: Array<{ id: string; fromIds: string[]; config: Record<string, unknown>; ui: { label: string; position: { x: number; y: number } } }> };
+type Graph = { nodes: Array<{ id: string; type?: string; fromIds: string[]; config: Record<string, unknown>; ui: { label: string; position: { x: number; y: number } } }> };
 
 async function reset(request: APIRequestContext) {
   for (const w of (await (await request.get("/api/workflows")).json()) as Array<{ id: string }>) await request.delete(`/api/workflows/${w.id}`);
@@ -52,7 +52,79 @@ async function twoCards(request: APIRequestContext): Promise<string> {
   return id;
 }
 
+/** trigger → reader (reads chats), and web (reaches the web) on its own: connecting reader → web is refused. */
+async function leakCards(request: APIRequestContext): Promise<string> {
+  const id = await create(request, "blank");
+  const graph = await saved(request, id);
+  graph.nodes.push(
+    { id: "reader", type: "agent", fromIds: ["trigger"], config: { instructions: "read", tools: ["readChat"] }, ui: { label: "Reader", position: { x: 340, y: 0 } } },
+    { id: "web", type: "webSearch", fromIds: ["trigger"], config: { queries: "x" }, ui: { label: "Web", position: { x: 340, y: 200 } } },
+  );
+  expect((await request.patch(`/api/workflows/${id}`, { data: { graph } })).ok()).toBe(true);
+  return id;
+}
+
 test.beforeEach(async ({ request }) => reset(request));
+
+test("adding a card keeps the save rules: a refused connection leaves the new card unconnected", async ({ page, request }) => {
+  const id = await leakCards(request);
+  await openCanvas(page, id);
+  await card(page, "Reader", "Agent", "Not run").click();
+  await page.getByRole("button", { name: "Add card" }).click();
+  await page.getByRole("dialog", { name: "Add card" }).getByRole("button", { name: /Web search/ }).click();
+  await expect(toast(page, "reads your chats")).toBeVisible();
+  await expect(card(page, "Web search", "Web search", "Not run")).toBeVisible();
+  await expect.poll(async () => (await saved(request, id)).nodes.find((n) => n.id === "web_search")?.fromIds).toEqual([]);
+});
+
+test("Runs after refuses a connection that breaks a save rule", async ({ page, request }) => {
+  const id = await leakCards(request);
+  await openCanvas(page, id);
+  await card(page, "Web", "Web search", "Not run").click();
+  await page.getByRole("button", { name: "Advanced" }).click();
+  const box = page.getByRole("checkbox", { name: "Reader" });
+  await box.click();
+  await expect(toast(page, "reads your chats")).toBeVisible();
+  await expect(box).not.toBeChecked();
+  expect((await saved(request, id)).nodes.find((n) => n.id === "web")!.fromIds).toEqual(["trigger"]);
+  await page.getByRole("checkbox", { name: "Run manually" }).click(); // unticking is always allowed
+  await expect.poll(async () => (await saved(request, id)).nodes.find((n) => n.id === "web")!.fromIds).toEqual([]);
+});
+
+test("clicking a connector and pressing Delete removes it", async ({ page, request }) => {
+  const id = await twoCards(request);
+  await openCanvas(page, id);
+  await page.locator('.react-flow__edge[data-id="trigger->a"] .react-flow__edge-interaction').click();
+  await page.keyboard.press("Delete");
+  await expect.poll(async () => (await saved(request, id)).nodes.find((n) => n.id === "a")!.fromIds).toEqual([]);
+});
+
+test("the Add card button toggles its menu, and Esc returns the focus to it", async ({ page, request }) => {
+  const id = await create(request, "blank");
+  await openCanvas(page, id);
+  const button = page.getByRole("button", { name: "Add card" });
+  await button.click();
+  await expect(page.getByRole("dialog", { name: "Add card" })).toBeVisible();
+  await button.click();
+  await expect(page.getByRole("dialog", { name: "Add card" })).toHaveCount(0);
+  await button.click();
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("dialog", { name: "Add card" })).toHaveCount(0);
+  await expect(button).toBeFocused();
+});
+
+test("at 900px dragging a card does not open its settings", async ({ page, request }) => {
+  const id = await twoCards(request);
+  await page.setViewportSize({ width: 900, height: 800 });
+  await openCanvas(page, id);
+  const box = (await card(page, "B", "Agent", "Not run").boundingBox())!;
+  await page.mouse.move(box.x + 40, box.y + 12);
+  await page.mouse.down();
+  await page.mouse.move(box.x + 40, box.y + 80, { steps: 6 });
+  await page.mouse.up();
+  await expect.poll(async () => (await saved(request, id)).nodes.find((n) => n.id === "b")!.ui.position.y).toBeGreaterThan(200);
+  await expect(page.getByRole("complementary", { name: "B settings" })).toHaveCount(0);
+});
 
 test("+ adds a card after the selected one, and settings save", async ({ page, request }) => {
   const id = await create(request, "blank");
@@ -121,6 +193,7 @@ test("Delete removes a card after a confirm, and the first card can't be deleted
   page.once("dialog", (d) => void d.accept());
   await page.keyboard.press("Delete");
   await expect(card(page, "B", "Agent", "Not run")).toHaveCount(0);
+  await expect(page.locator(".react-flow__node:focus")).toHaveCount(1); // the focus went to a card, not the page
   await expect.poll(async () => (await saved(request, id)).nodes.map((n) => n.id)).toEqual(["trigger", "a"]);
 });
 
@@ -139,6 +212,16 @@ test("typing {{ opens the field picker and inserts the reference", async ({ page
   await page.getByLabel("Filter fields").press("Escape");
   await expect(page.getByRole("dialog", { name: "Insert field" })).toHaveCount(0);
   await expect(input).toHaveValue("{{news.items}} and {{");
+
+  // An outside click closes the picker; Insert field after that adds at the caret and removes nothing.
+  await input.fill("");
+  await input.pressSequentially("ab{{");
+  await expect(page.getByRole("dialog", { name: "Insert field" })).toBeVisible();
+  await page.getByLabel("Card name").click();
+  await expect(page.getByRole("dialog", { name: "Insert field" })).toHaveCount(0);
+  await page.getByRole("button", { name: "Insert field" }).nth(1).click();
+  await page.getByRole("option", { name: /news\.count/ }).click();
+  await expect(input).toHaveValue("ab{{{{news.count}}");
 });
 
 test("a run shows each card's status on the canvas, the Runs drawer lists it, and ?run= is read-only", async ({ page, request }) => {
@@ -192,7 +275,7 @@ test("moving a card saves its position, and Tidy up arranges the cards in column
   await page.getByRole("button", { name: "Tidy up" }).click();
   // b has no input, so it joins the first column with the trigger; a is one column on (340px).
   await expect.poll(async () => (await saved(request, id)).nodes.map((n) => n.ui.position)).toEqual([
-    { x: 0, y: -60 },
+    { x: 0, y: -80 },
     { x: 340, y: 0 },
     { x: 0, y: 80 },
   ]);

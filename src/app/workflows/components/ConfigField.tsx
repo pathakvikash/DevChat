@@ -1,6 +1,6 @@
 "use client";
 
-import { useId, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { Plus, Trash2, Wrench, XCircle } from "lucide-react";
 import ModelSelector from "@/app/components/conversation/ModelSelector";
 import type { ModelInfo } from "@/app/components/conversation/types";
@@ -30,10 +30,26 @@ function TemplateField({ spec, value, onChange, error, env, id }: { spec: FieldS
   // Typing `{{` opens the picker; picking then replaces those two characters.
   const braces = useRef(false);
   const preview = value.includes("{{") ? env.preview(value) : null;
+  const insertButton = useRef<HTMLButtonElement>(null);
+  const close = () => {
+    braces.current = false;
+    setPicking(false);
+  };
+  // A click outside the picker closes it (the Insert field button toggles it itself).
+  useEffect(() => {
+    if (!picking) return;
+    const outside = (e: MouseEvent) => {
+      const t = e.target as Node;
+      if (!(t as Element).closest?.('[role="dialog"][aria-label="Insert field"]') && !insertButton.current?.contains(t)) close();
+    };
+    document.addEventListener("mousedown", outside);
+    return () => document.removeEventListener("mousedown", outside);
+  }, [picking]);
 
   function insert(path: string) {
     const at = caret.current ?? value.length;
-    const from = braces.current ? at - 2 : at;
+    // Only swallow the `{{` that opened the picker if it is still right before the caret.
+    const from = braces.current && at >= 2 && value.slice(at - 2, at) === "{{" ? at - 2 : at;
     onChange(`${value.slice(0, from)}{{${path}}}${value.slice(at)}`);
     braces.current = false;
     setPicking(false);
@@ -62,7 +78,7 @@ function TemplateField({ spec, value, onChange, error, env, id }: { spec: FieldS
         className={`${inputClass} resize-y`}
       />
       {!env.readOnly && (
-        <button type="button" onClick={() => {
+        <button type="button" ref={insertButton} onClick={() => {
           braces.current = false;
           setPicking((p) => !p);
         }} className="focus-ring glass-button mt-1 h-7 rounded-[var(--glass-radius-sm)] px-2 text-xs">
@@ -74,8 +90,7 @@ function TemplateField({ spec, value, onChange, error, env, id }: { spec: FieldS
           rows={env.rows}
           onPick={insert}
           onClose={() => {
-            braces.current = false;
-            setPicking(false);
+            close();
             requestAnimationFrame(() => area.current?.focus());
           }}
         />

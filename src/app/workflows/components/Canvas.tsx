@@ -64,6 +64,7 @@ function Flow(props: CanvasProps) {
   const { toast } = useToast();
   const { screenToFlowPosition, fitView } = useReactFlow();
   const root = useRef<HTMLDivElement>(null);
+  const addButton = useRef<HTMLButtonElement>(null);
   const [drag, setDrag] = useState<Record<string, Point>>({});
   // React Flow measures each card; a controlled flow has to hand the sizes back or every update un-measures (and hides) its cards.
   const [sizes, setSizes] = useState<Record<string, { width: number; height: number }>>({});
@@ -73,7 +74,8 @@ function Flow(props: CanvasProps) {
   const canAdd = graph.nodes.length < MAX_NODES;
 
   const rfNodes = useMemo(() => {
-    const ordered = [...topoOrder(graph), ...graph.nodes.filter((n) => !topoOrder(graph).includes(n))];
+    const order = topoOrder(graph);
+    const ordered = [...order, ...graph.nodes.filter((n) => !order.includes(n))];
     return ordered.map(
       (node): CardFlowNode => ({
         id: node.id,
@@ -149,7 +151,10 @@ function Flow(props: CanvasProps) {
       const p = "changedTouches" in event ? event.changedTouches[0] : event;
       const box = root.current?.getBoundingClientRect();
       if (!box) return;
-      setMenu({ fromId: state.fromNode.id, at: { x: p.clientX - box.left, y: p.clientY - box.top, flow: screenToFlowPosition({ x: p.clientX, y: p.clientY }) } });
+      // Keep the popover (18rem wide, about 22rem tall) inside the canvas.
+      const x = Math.max(8, Math.min(p.clientX - box.left, box.width - 296));
+      const y = Math.max(8, Math.min(p.clientY - box.top, box.height - 360));
+      setMenu({ fromId: state.fromNode.id, at: { x, y, flow: screenToFlowPosition({ x: p.clientX, y: p.clientY }) } });
     },
     [canAdd, readOnly, screenToFlowPosition, toast],
   );
@@ -162,12 +167,23 @@ function Flow(props: CanvasProps) {
     requestAnimationFrame(() => void fitView({ ...FIT, duration: 200 }));
   }, [graph.nodes.length, fitView]);
 
+  const closeMenu = useCallback(() => {
+    setMenu(null);
+    requestAnimationFrame(() => (addButton.current ?? root.current)?.focus());
+  }, []);
+
   function add(type: CardType) {
     refit.current = true;
     if (menu?.at) onAdd(type, { fromId: menu.fromId, position: { x: Math.round(menu.at.flow.x / 20) * 20, y: Math.round(menu.at.flow.y / 20) * 20 } });
     else if (selectedId) onAdd(type, { fromId: selectedId, position: spotRightOf(graph, selectedId) });
     else onAdd(type);
     setMenu(null);
+  }
+
+  // After a delete (or a dismissed confirm) the focus goes back to a card, not to the page.
+  function remove(id: string) {
+    onDelete(id);
+    requestAnimationFrame(() => (root.current?.querySelector<HTMLElement>(`.react-flow__node[data-id="${id}"]`) ?? root.current?.querySelector<HTMLElement>(".react-flow__node"))?.focus());
   }
 
   // Delete or Backspace on a card (or a picked connector) removes it, unless the focus is in a field.
@@ -177,16 +193,16 @@ function Flow(props: CanvasProps) {
     if (el.closest("input, textarea, select, [contenteditable=true], .react-flow__panel, [role=dialog]")) return;
     e.preventDefault();
     const focused = el.closest(".react-flow__node")?.getAttribute("data-id");
-    if (focused) onDelete(focused);
+    if (focused) remove(focused);
     else if (edgeSel) {
       const [from, to] = edgeSel.split("->");
       setEdgeSel(null);
       onDisconnect(from, to);
-    } else if (selectedId) onDelete(selectedId);
+    } else if (selectedId) remove(selectedId);
   }
 
   return (
-    <div ref={root} role="region" aria-label="Workflow canvas" onKeyDown={onKeyDown} className="absolute inset-0">
+    <div ref={root} role="region" aria-label="Workflow canvas" tabIndex={-1} onKeyDown={onKeyDown} className="absolute inset-0 outline-none">
       <ReactFlow
         className="devchat-flow"
         nodes={rfNodes}
@@ -196,6 +212,7 @@ function Flow(props: CanvasProps) {
         onConnect={connect}
         onConnectEnd={onConnectEnd}
         onEdgeClick={(_, e) => {
+          root.current?.focus(); // so Delete reaches the canvas
           setEdgeSel(e.id);
           onSelect(null);
         }}
@@ -203,6 +220,7 @@ function Flow(props: CanvasProps) {
           setEdgeSel(null);
           onSelect(null);
         }}
+        selectNodesOnDrag={false}
         nodesDraggable={!readOnly}
         nodesConnectable={!readOnly}
         edgesFocusable={false}
@@ -220,12 +238,13 @@ function Flow(props: CanvasProps) {
           <Panel position="top-left" className="flex gap-2">
             <button
               type="button"
-              onClick={() => setMenu(menu && !menu.at ? null : {})}
-              disabled={!canAdd}
+              ref={addButton}
+              onClick={() => (!canAdd ? undefined : menu && !menu.at ? closeMenu() : setMenu({}))}
+              aria-disabled={!canAdd || undefined}
               title={canAdd ? "Add card" : `A workflow can have at most ${MAX_NODES} cards`}
               aria-haspopup="dialog"
               aria-expanded={!!menu && !menu.at}
-              className="focus-ring glass-button inline-flex h-8 items-center gap-1.5 rounded-[var(--glass-radius-md)] px-3 text-sm font-medium disabled:opacity-60"
+              className="focus-ring glass-button inline-flex h-8 items-center gap-1.5 rounded-[var(--glass-radius-md)] px-3 text-sm font-medium aria-disabled:opacity-60"
             >
               <Plus size={14} aria-hidden="true" /> Add card
             </button>
@@ -233,10 +252,9 @@ function Flow(props: CanvasProps) {
               type="button"
               onClick={() => {
                 onTidy();
-                refit.current = true;
                 requestAnimationFrame(() => void fitView({ ...FIT, duration: 200 }));
               }}
-              title="Arrange the cards in columns"
+              title="Lays cards out by run order. Cards run left to right."
               className="focus-ring glass-button inline-flex h-8 items-center gap-1.5 rounded-[var(--glass-radius-md)] px-3 text-sm"
             >
               <LayoutGrid size={14} aria-hidden="true" /> Tidy up
@@ -246,7 +264,7 @@ function Flow(props: CanvasProps) {
       </ReactFlow>
       {menu && (
         <div className="absolute z-50" style={menu.at ? { left: Math.max(8, menu.at.x), top: Math.max(8, menu.at.y) } : { left: 16, top: 56 }}>
-          <AddCardMenu onPick={add} onClose={() => setMenu(null)} />
+          <AddCardMenu onPick={add} onClose={closeMenu} anchor={addButton} />
         </div>
       )}
     </div>
