@@ -6,7 +6,10 @@ import ModelSelector from "@/app/components/conversation/ModelSelector";
 import WorkingFolderPicker from "@/app/components/conversation/WorkingFolderPicker";
 import type { ModelInfo } from "@/app/components/conversation/types";
 import { AGENT_TOOL_CHOICES, hasToolConflict, isCliModelId, isCodexModelId, MCP_WARNING, MCP_WEB_WARNING, OUTPUT_FIELD_TYPES, type FieldSpec, type OutputField } from "@/lib/workflows/catalog";
+import { FILTER_OP_LABELS, FILTER_OPS, type FilterOp, type FilterRule } from "@/lib/workflows/filterRules";
 import FieldPicker, { typedBraces, type PickerRow } from "./FieldPicker";
+
+const NEW_TABLE = "__new__";
 
 export const NEEDS_TOOLS = "Needs a model that can use tools. Pick one with the wrench icon.";
 
@@ -17,6 +20,9 @@ export interface FieldEnv {
   models: ModelInfo[];
   defaultModel: string;
   chats: { id: string; title: string }[];
+  tables: { id: string; name: string }[];
+  /** Makes a table with this name and returns its id, or null when it could not be made. */
+  createTable: (name: string) => Promise<string | null>;
   readOnly: boolean;
   /** Why it is read-only: a narrow screen, or a past run's snapshot. */
   readOnlyReason?: "narrow" | "past";
@@ -33,6 +39,8 @@ function TemplateField({ spec, value, onChange, error, env, id }: { spec: FieldS
   // Typing `{{` opens the picker; picking then replaces those two characters.
   const braces = useRef(false);
   const preview = value.includes("{{") ? env.preview(value) : null;
+  // `{{item}}` is an error in a list field (it is where the items come from), so the picker does not offer it there.
+  const listRows = spec.key === "list" || spec.key === "items" ? env.rows.filter((r) => r.group !== "This item") : env.rows;
   const insertButton = useRef<HTMLButtonElement>(null);
   const close = () => {
     braces.current = false;
@@ -90,7 +98,7 @@ function TemplateField({ spec, value, onChange, error, env, id }: { spec: FieldS
       )}
       {picking && (
         <FieldPicker
-          rows={env.rows}
+          rows={listRows}
           onPick={insert}
           onClose={() => {
             close();
@@ -101,6 +109,64 @@ function TemplateField({ spec, value, onChange, error, env, id }: { spec: FieldS
       {value.includes("{{") && (
         <p className="mt-1 text-[11px] text-zinc-400">{preview === null ? "Run once to see a preview" : `Preview: ${preview}`}</p>
       )}
+    </div>
+  );
+}
+
+/** A one-line template box with its own Insert field button, for a value inside a list (a rule, a column). */
+function InlineTemplate({ label, placeholder, value, onChange, env, mono }: { label: string; placeholder: string; value: string; onChange: (v: string) => void; env: FieldEnv; mono?: boolean }) {
+  const [picking, setPicking] = useState(false);
+  const box = useRef<HTMLInputElement>(null);
+  const insertButton = useRef<HTMLButtonElement>(null);
+  const caret = useRef<number | null>(null);
+  // Typing `{{` opens the picker; picking then replaces those two characters.
+  const braces = useRef(false);
+  const close = () => {
+    braces.current = false;
+    setPicking(false);
+  };
+  useEffect(() => {
+    if (!picking) return;
+    const outside = (e: MouseEvent) => {
+      const t = e.target as Node;
+      if (!(t as Element).closest?.('[role="dialog"][aria-label="Insert field"]') && !insertButton.current?.contains(t)) close();
+    };
+    document.addEventListener("mousedown", outside);
+    return () => document.removeEventListener("mousedown", outside);
+  }, [picking]);
+  function insert(path: string) {
+    const at = caret.current ?? value.length;
+    const from = braces.current && at >= 2 && value.slice(at - 2, at) === "{{" ? at - 2 : at;
+    onChange(`${value.slice(0, from)}{{${path}}}${value.slice(at)}`);
+    close();
+    requestAnimationFrame(() => box.current?.focus());
+  }
+  return (
+    <div className="relative flex gap-1.5">
+      <input
+        ref={box}
+        aria-label={label}
+        placeholder={placeholder}
+        value={value}
+        disabled={env.readOnly}
+        onChange={(e) => {
+          onChange(e.target.value);
+          caret.current = e.target.selectionStart;
+          if (String((e.nativeEvent as InputEvent).inputType).startsWith("insert") && typedBraces(e.target.value, e.target.selectionStart)) {
+            braces.current = true;
+            setPicking(true);
+          }
+        }}
+        onSelect={(e) => (caret.current = e.currentTarget.selectionStart)}
+        onBlur={(e) => (caret.current = e.currentTarget.selectionStart)}
+        className={`${inputClass} min-w-0 flex-1 !px-2 !py-1 ${mono ? "font-mono" : ""}`}
+      />
+      {!env.readOnly && (
+        <button type="button" ref={insertButton} aria-label={`Insert field into ${label.toLowerCase()}`} onClick={() => { braces.current = false; setPicking((x) => !x); }} className="focus-ring glass-button h-8 shrink-0 rounded-[var(--glass-radius-sm)] px-2 text-xs">
+          Insert field
+        </button>
+      )}
+      {picking && <FieldPicker rows={env.rows} onPick={insert} onClose={() => { close(); requestAnimationFrame(() => box.current?.focus()); }} />}
     </div>
   );
 }
@@ -300,6 +366,29 @@ function ArgsField({ labelledBy, value, onChange, readOnly }: { labelledBy: stri
   );
 }
 
+/** Rows of two text boxes (and for rules a choice between): the shared shape of the Filter rules and Save to table columns. */
+function RowsEditor<T extends object>({ rows, onChange, blank, readOnly, addLabel, render }: { rows: T[]; onChange: (v: T[]) => void; blank: T; readOnly: boolean; addLabel: string; render: (row: T, set: (patch: Partial<T>) => void) => React.ReactNode }) {
+  return (
+    <div className="space-y-2">
+      {rows.map((row, i) => (
+        <div key={i} className="glass-card space-y-1.5 rounded-[var(--glass-radius-md)] p-2">
+          {render(row, (patch) => onChange(rows.map((r, j) => (j === i ? { ...r, ...patch } : r))))}
+          {!readOnly && (
+            <button type="button" aria-label={`Remove row ${i + 1}`} title="Remove" onClick={() => onChange(rows.filter((_, j) => j !== i))} className="focus-ring inline-flex h-8 items-center gap-1 rounded-[var(--glass-radius-sm)] px-2 text-xs text-zinc-400 hover:bg-[var(--glass-bg-hover)] hover:text-[var(--foreground)]">
+              <Trash2 size={12} aria-hidden="true" /> Remove
+            </button>
+          )}
+        </div>
+      ))}
+      {!readOnly && (
+        <button type="button" onClick={() => onChange([...rows, blank])} className="focus-ring glass-button inline-flex h-8 items-center gap-1 rounded-[var(--glass-radius-md)] px-3 text-sm">
+          <Plus size={14} aria-hidden="true" /> {addLabel}
+        </button>
+      )}
+    </div>
+  );
+}
+
 /** One settings field of a card, built from the catalog's field spec. */
 export default function ConfigField({ spec, config, onChange, error, env }: { spec: FieldSpec; config: Record<string, unknown>; onChange: (key: string, value: unknown) => void; error?: string; env: FieldEnv }) {
   const id = useId();
@@ -415,6 +504,79 @@ export default function ConfigField({ spec, config, onChange, error, env }: { sp
     case "outputFields":
       control = <OutputFields value={(value as OutputField[]) ?? []} onChange={set} readOnly={env.readOnly} />;
       break;
+    case "toggle":
+      control = (
+        <label className="flex items-center gap-2 text-sm text-zinc-300">
+          <input type="checkbox" checked={value !== false} disabled={env.readOnly} onChange={(e) => set(e.target.checked)} className="h-4 w-4" />
+          {spec.label}
+        </label>
+      );
+      break;
+    case "table":
+      control = (
+        <select
+          id={id}
+          value={String(value ?? "")}
+          disabled={env.readOnly}
+          onChange={async (e) => {
+            if (e.target.value !== NEW_TABLE) return set(e.target.value);
+            const name = window.prompt("Name for the new table");
+            if (!name?.trim()) return;
+            const made = await env.createTable(name.trim());
+            if (made) set(made);
+          }}
+          className={inputClass}
+        >
+          <option value="">Pick a table…</option>
+          {!!value && !env.tables.some((t) => t.id === value) && <option value={String(value)}>Table not found</option>}
+          {env.tables.map((t) => (
+            <option key={t.id} value={t.id}>{t.name}</option>
+          ))}
+          {!env.readOnly && <option value={NEW_TABLE}>New table…</option>}
+        </select>
+      );
+      break;
+    case "rules":
+      control = (
+        <RowsEditor<FilterRule>
+          rows={(value as FilterRule[]) ?? []}
+          onChange={set}
+          blank={{ field: "", op: "eq", value: "" }}
+          readOnly={env.readOnly}
+          addLabel="Add rule"
+          render={(r, patch) => (
+            <>
+              <InlineTemplate label="Rule field" placeholder="{{item.score}}" value={r.field} onChange={(v) => patch({ field: v })} env={env} mono />
+              <select aria-label="Rule test" value={r.op} disabled={env.readOnly} onChange={(e) => patch({ op: e.target.value as FilterOp })} className={`${inputClass} !px-2 !py-1`}>
+                {FILTER_OPS.map((o) => (
+                  <option key={o} value={o}>{FILTER_OP_LABELS[o]}</option>
+                ))}
+              </select>
+              {r.op !== "empty" && r.op !== "notEmpty" && (
+                <InlineTemplate label="Rule value" placeholder="value" value={r.value} onChange={(v) => patch({ value: v })} env={env} />
+              )}
+            </>
+          )}
+        />
+      );
+      break;
+    case "columnMap":
+      control = (
+        <RowsEditor<{ column: string; value: string }>
+          rows={(value as { column: string; value: string }[]) ?? []}
+          onChange={set}
+          blank={{ column: "", value: "" }}
+          readOnly={env.readOnly}
+          addLabel="Add column"
+          render={(r, patch) => (
+            <>
+              <input aria-label="Column name" placeholder="column" value={r.column} disabled={env.readOnly} onChange={(e) => patch({ column: e.target.value })} className={`${inputClass} !px-2 !py-1`} />
+              <InlineTemplate label="Column value" placeholder="{{item.title}}" value={r.value} onChange={(v) => patch({ value: v })} env={env} mono />
+            </>
+          )}
+        />
+      );
+      break;
     case "chat":
       control = (
         <select id={id} value={String(value || "new")} disabled={env.readOnly} onChange={(e) => set(e.target.value)} className={inputClass}>
@@ -427,7 +589,7 @@ export default function ConfigField({ spec, config, onChange, error, env }: { sp
       break;
   }
 
-  const labelled = spec.kind !== "perItem" && spec.kind !== "allowEdits";
+  const labelled = spec.kind !== "perItem" && spec.kind !== "allowEdits" && spec.kind !== "toggle";
   // Groups name themselves from this text; a <label for> needs one control to point at.
   const grouped = spec.kind === "mcpTools" || spec.kind === "args" || spec.kind === "folder";
   return (

@@ -8,6 +8,9 @@ const DIGEST = "Mock digest (deterministic): 3 items"; // the fixture search ret
 async function deleteAllWorkflows(request: APIRequestContext) {
   const list: Array<{ id: string }> = await (await request.get("/api/workflows")).json();
   for (const w of list) await request.delete(`/api/workflows/${w.id}`);
+  // The News template saves into the "News" table; a fresh table makes every run see its articles as new.
+  const tables: Array<{ id: string }> = await (await request.get("/api/tables")).json();
+  for (const t of tables) await request.delete(`/api/tables/${t.id}`);
 }
 
 /** A News digest flow whose agent cards use `model`. */
@@ -63,7 +66,7 @@ test("the News template runs card by card and posts the digest to a new chat", a
   await page.getByRole("button", { name: "Run", exact: true }).click();
   await expect(toast(page, "Run started")).toBeVisible();
   await expect(card(page, "Write the digest", "Agent", "Running")).toBeVisible();
-  for (const [label, type] of [["Run manually", "Run manually"], ["Search the news", "Web search"], ["Write the digest", "Agent"], ["Post to a chat", "Send to chat"]]) {
+  for (const [label, type] of [["Run manually", "Run manually"], ["Search the news", "Web search"], ["Save to the News table", "Save to table"], ["New articles", "Filter"], ["Write the digest", "Agent"], ["Post to a chat", "Send to chat"], ["Mark as read", "Save to table"]]) {
     await expect(card(page, label, type, "Done")).toBeVisible({ timeout: 30_000 });
   }
 
@@ -93,6 +96,8 @@ test("a run keeps going with the editor closed and still posts its digest", asyn
 test("Cancel run ends the run as Cancelled and creates no chat", async ({ page, request }) => {
   const id = await createNews(request, "mock/slow"); // the digest card streams for about 7 s
   await openEditor(page, id);
+  // The first request to the cancel route compiles it in dev, which can take seconds of the digest's 7: warm it up before the run starts.
+  await request.post("/api/workflow-runs/warmup/cancel");
   await page.getByRole("button", { name: "Run", exact: true }).click();
   await expect(card(page, "Write the digest", "Agent", "Running")).toBeVisible({ timeout: 30_000 });
 
@@ -148,6 +153,8 @@ test("a stale running run becomes Interrupted, and Resume continues from the car
           nodes: JSON.stringify({
             trigger: { status: "succeeded", startedAt: at, endedAt: at, output: { startedAt: at, date: at.slice(0, 10) } },
             news: { status: "succeeded", output: { items, count: 3 } },
+            save: { status: "succeeded", output: { inserted: items, updated: [], items, missing: [] } },
+            fresh: { status: "succeeded", output: { items, count: 3, removed: 0 } },
             digest: { status: "running", startedAt: at },
           }),
         },
@@ -166,6 +173,7 @@ test("a stale running run becomes Interrupted, and Resume continues from the car
   await resume.click();
   await expect(card(page, "Post to a chat", "Send to chat", "Done")).toBeVisible({ timeout: 30_000 });
   await expect(card(page, "Write the digest", "Agent", "Done")).toBeVisible();
+  await expect(card(page, "Mark as read", "Save to table", "Done")).toBeVisible({ timeout: 30_000 });
   expect(await runState(request, runId)).toBe("succeeded");
   // The cards that had already succeeded were not run again: the seeded "news" card never got a start time.
   expect((await (await request.get(`/api/workflow-runs/${runId}?node=news`)).json()).startedAt).toBeUndefined();
@@ -178,7 +186,7 @@ test("the list shows each workflow with its last run, and New workflow starts fr
 
   await page.goto("/workflows");
   const row = page.getByRole("listitem").filter({ hasText: "News digest" });
-  await expect(row).toContainText("4 cards");
+  await expect(row).toContainText("7 cards");
   await expect(row).toContainText("Done");
 
   await page.getByRole("button", { name: /New workflow/ }).click();
@@ -222,7 +230,9 @@ test("at 400px the list view shows the cards read-only, and Run still works", as
 
   await page.getByRole("button", { name: "Run", exact: true }).click();
   await expect(toast(page, "Run started")).toBeVisible();
-  await expect(card(page, "Post to a chat", "Send to chat", "Done")).toBeVisible({ timeout: 30_000 });
+  // The same articles are no longer new, so the Filter stops the second run and the cards after it are skipped.
+  await expect(card(page, "New articles", "Filter", "Done")).toBeVisible({ timeout: 30_000 });
+  await expect(card(page, "Post to a chat", "Send to chat", "Skipped")).toBeVisible({ timeout: 30_000 });
 });
 
 test("a card that reads chats and reaches the web is refused at save and at Run", async ({ request }) => {

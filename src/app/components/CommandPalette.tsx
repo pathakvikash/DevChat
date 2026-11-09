@@ -4,7 +4,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import * as Dialog from "@radix-ui/react-dialog";
 import { Command } from "cmdk";
 import { useRouter } from "next/navigation";
-import { FilePlus, MessageSquareDashed, Settings, Workflow } from "lucide-react";
+import { FilePlus, MessageSquareDashed, Settings, Table2, Workflow } from "lucide-react";
 import { useToast } from "./Toast";
 import { createConversation } from "@/app/hooks/useConversationsApi";
 
@@ -118,6 +118,13 @@ export default function CommandPaletteProvider({ children }: { children: React.R
             >
               <Workflow size={16} />
               Workflows
+            </Command.Item>
+            <Command.Item
+              value="tables-page"
+              onSelect={() => { router.push("/tables"); setOpen(false); }}
+            >
+              <Table2 size={16} />
+              Tables
             </Command.Item>
           </Command.Group>
 

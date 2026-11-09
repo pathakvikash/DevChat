@@ -2,6 +2,7 @@ import { generateText, type ModelMessage } from "ai";
 import { z } from "zod";
 import { contextWindowFor } from "@/lib/chat/contextBudget";
 import type { ModelConfig } from "@/lib/models";
+import { FILTER_OPS } from "./filterRules";
 import { AGENT_TOOL_IDS, CATALOG, CODEX_BLOCKED, isCardType, isCodexModelId, parseConfig, type CardDef, type FieldSpec } from "./catalog";
 import { autoLayout, MAX_NODES, parseGraph, TRIGGER_ID, validateStructure, checkGraph, type WorkflowGraph } from "./graph";
 import { buildTemplate, TEMPLATE_OPTIONS } from "./templates";
@@ -28,10 +29,10 @@ export class GenerateError extends Error {}
 
 const isSensitiveKey = (k: string) => SENSITIVE_KEYS.includes(k) || /^mcp/i.test(k);
 /** Never sent to the model, and carried over from the current flow on a change. */
-const isUserOnlyKey = (k: string) => k === "model" || isSensitiveKey(k);
+const isUserOnlyKey = (k: string) => k === "model" || k === "tableId" || isSensitiveKey(k);
 
 function fieldLine(f: FieldSpec, def: Record<string, unknown>): string {
-  const kind = f.options ? `one of ${f.options.map((o) => JSON.stringify(o.value)).join(", ")}` : f.kind === "tools" ? `list of ${AGENT_TOOL_IDS.join(", ")}` : f.kind;
+  const kind = f.kind === "rules" ? `list of { "field": "{{item.score}}", "op": one of ${FILTER_OPS.map((o) => JSON.stringify(o)).join(", ")}, "value": "text" }` : f.kind === "columnMap" ? `list of { "column": "column name", "value": "{{item.title}}" }` : f.options ? `one of ${f.options.map((o) => JSON.stringify(o.value)).join(", ")}` : f.kind === "tools" ? `list of ${AGENT_TOOL_IDS.join(", ")}` : f.kind;
   const dflt = JSON.stringify(def[f.key]);
   // The model picks nothing: an empty model uses the workflow's.
   return `    - ${f.key}: ${kind}, default ${dflt}${f.help ? `. ${f.help}` : ""}`;
@@ -40,7 +41,7 @@ function fieldLine(f: FieldSpec, def: Record<string, unknown>): string {
 function cardBlock(def: CardDef): string {
   const d = def.defaults();
   const outs = def.outputs(d).join(", ");
-  return [`- ${def.type} ("${def.label}", ${def.category}): ${def.description}`, ...(def.fields.length ? ["  config:", ...def.fields.filter((f) => !isSensitiveKey(f.key)).map((f) => fieldLine(f, d))] : ["  config: none"]), `  outputs: ${outs}${def.type === "agent" ? " (with outputFields, one output per field)" : ""}`].join("\n");
+  return [`- ${def.type} ("${def.label}", ${def.category}): ${def.description}`, ...(def.fields.length ? ["  config:", ...def.fields.filter((f) => !isSensitiveKey(f.key) && f.key !== "tableId").map((f) => fieldLine(f, d))] : ["  config: none"]), `  outputs: ${outs}${def.type === "agent" ? " (with outputFields, one output per field)" : ""}`].join("\n");
 }
 
 /** Every card in the catalog registry, as text for the system prompt. Cards added later appear on their own. */
@@ -109,7 +110,7 @@ export function extractJson(reply: string): unknown {
       // not JSON
     }
   };
-  for (const m of [...text.matchAll(/```(?:json)?([\s\S]*?)```/gi)].reverse()) tryParse(m[1]);
+  for (const m of [...text.matchAll(/```(?:json)?((?:(?!```)[\s\S])*?)```/gi)].reverse()) tryParse(m[1]);
   const flow = parsed.find((v) => Array.isArray(v.nodes));
   if (flow) return flow;
   tryParse(text.slice(text.indexOf("{"), text.lastIndexOf("}") + 1));
@@ -169,16 +170,17 @@ function sanitize(raw: Rec, current: WorkflowGraph | undefined, warnings: string
       for (const k of Object.keys(config)) {
         if (!isUserOnlyKey(k)) continue;
         delete config[k];
-        if (k !== "model" && !(before && k in before.config)) warnings.push(`Removed "${k}" from "${label}": it can only be set by hand.`);
+        if (k !== "model" && k !== "tableId" && !(before && k in before.config)) warnings.push(`Removed "${k}" from "${label}": it can only be set by hand.`);
       }
       if (before) {
         const hand = Object.entries(before.config).filter(([k]) => isUserOnlyKey(k));
-        for (const [k, v] of hand) if (k === "model") config[k] = v;
+        // The model and the table are the user's choices: they stay on the same card, and the model cannot make up a table id.
+        for (const [k, v] of hand) if (k === "model" || k === "tableId") config[k] = v;
         // Folder, edit and MCP settings stay only while the card does the same job: same settings, same inputs.
         const same =
           JSON.stringify(editable(String(n.type), config)) === JSON.stringify(editable(String(n.type), before.config)) &&
           JSON.stringify([...fromIds].sort()) === JSON.stringify([...before.fromIds].sort());
-        const risky = hand.filter(([k]) => k !== "model");
+        const risky = hand.filter(([k]) => k !== "model" && k !== "tableId");
         if (same) for (const [k, v] of risky) config[k] = v;
         else if (risky.length) warnings.push(`"${label}" changed, so its folder, edit and MCP settings were removed. Set them again by hand.`);
       }

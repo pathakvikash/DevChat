@@ -11,7 +11,7 @@ import ModelSelector from "@/app/components/conversation/ModelSelector";
 import type { ModelInfo } from "@/app/components/conversation/types";
 import SidePanel from "@/app/components/ui/SidePanel";
 import { fetchModels } from "@/app/hooks/useModelsApi";
-import { CATALOG, isCodexModelId, type CardType } from "@/lib/workflows/catalog";
+import { CATALOG, isCodexModelId, itemListOf, type CardType } from "@/lib/workflows/catalog";
 import { ancestorsOf, autoLayout, checkGraph, connectNew, MAX_NODES, newCard, TRIGGER_ID, validateStructure, type CardRun, type FlowNode, type WorkflowGraph } from "@/lib/workflows/graph";
 import { renderText, renderTemplate, templateRefs, refRoot, type TemplateContext } from "@/lib/workflows/template";
 import Canvas, { type AddOptions } from "./Canvas";
@@ -76,6 +76,7 @@ export default function WorkflowEditor({ id }: { id: string }) {
   const [runs, setRuns] = useState<RunRow[] | null>(null);
   const [models, setModels] = useState<ModelInfo[]>([]);
   const [chats, setChats] = useState<{ id: string; title: string }[]>([]);
+  const [tables, setTables] = useState<{ id: string; name: string }[]>([]);
   const [outputs, setOutputs] = useState<Record<string, unknown>>({});
   const [announce, setAnnounce] = useState("");
   // A proposed flow from "Describe your flow": shown in place of the saved one, and saved only by Apply.
@@ -116,10 +117,22 @@ export default function WorkflowEditor({ id }: { id: string }) {
     })();
     fetchModels().then((m) => !stop && setModels(m)).catch(() => {});
     fetch("/api/conversations").then((r) => (r.ok ? r.json() : [])).then((list: { id: string; title: string }[]) => !stop && setChats(list.slice(0, 25))).catch(() => {});
+    fetch("/api/tables").then((r) => (r.ok ? r.json() : [])).then((list: { id: string; name: string }[]) => !stop && setTables(list)).catch(() => {});
     return () => {
       stop = true;
     };
   }, [id]);
+
+  async function createTable(name: string): Promise<string | null> {
+    const res = await fetch("/api/tables", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name }) });
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      toast(`Couldn't make the table. ${body.error ?? "Try again."}`, "error");
+      return null;
+    }
+    setTables((t) => [...t, { id: body.id, name: body.name }]);
+    return body.id as string;
+  }
 
   // ─── Saving: a PATCH 800 ms after the last change ───────────────────────
   const wfRef = useRef<Wf | null>(null);
@@ -393,7 +406,8 @@ export default function WorkflowEditor({ id }: { id: string }) {
     if (!graph || !selected) return null;
     const byId: Record<string, unknown> = {};
     if (run) for (const a of ancestorsOf(graph, selected.id)) if (outputs[`${run.id}:${a}`] !== undefined) byId[a] = outputs[`${run.id}:${a}`];
-    const perItem = CATALOG[selected.type].perItem && selected.config.perItem === true;
+    const itemList = itemListOf(selected.type, selected.config);
+    const perItem = itemList !== undefined;
     const ctx = (item?: unknown): TemplateContext => ({
       nodes: byId,
       vars: Object.fromEntries(graph.vars.map((v) => [v.key, v.value])),
@@ -402,7 +416,7 @@ export default function WorkflowEditor({ id }: { id: string }) {
       run: { id: run?.id ?? "", date: (run?.startedAt ?? new Date().toISOString()).slice(0, 10), startedAt: run?.startedAt ?? "" },
       workflow: { name: wf?.name ?? "" },
     });
-    const list = perItem ? renderTemplate(String(selected.config.items ?? ""), ctx()).value : undefined;
+    const list = itemList !== undefined ? renderTemplate(itemList, ctx()).value : undefined;
     const sampleItem = Array.isArray(list) ? list[0] : undefined;
     const cardIds = new Set(graph.nodes.map((n) => n.id));
     return {
@@ -418,10 +432,13 @@ export default function WorkflowEditor({ id }: { id: string }) {
       models,
       defaultModel: graph.defaultModel,
       chats,
+      tables,
+      createTable,
       readOnly,
       readOnlyReason: narrow ? "narrow" : "past",
     };
-  }, [graph, selected, run, outputs, models, chats, readOnly, narrow, wf?.name]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- createTable only uses toast and setTables, which are stable
+  }, [graph, selected, run, outputs, models, chats, tables, readOnly, narrow, wf?.name]);
 
   if (missing) {
     return (

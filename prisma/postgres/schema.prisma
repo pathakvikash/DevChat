@@ -27,6 +27,7 @@ model User {
   traces         Trace[]
   workflows      Workflow[]
   workflowRuns   WorkflowRun[]
+  dataTables     DataTable[]
 }
 
 model Account {
@@ -370,4 +371,35 @@ model WorkflowRun {
 
   @@index([workflowId, startedAt])
   @@index([userId, state])
+}
+
+// ─── Data tables (phase 2): a DevChat table that a workflow's Save to table card writes to. ───
+// Named "DataTable" so it is not confused with the generative-UI Table component.
+model DataTable {
+  id        String         @id @default(cuid())
+  userId    String
+  name      String
+  columns   String         @default("[]") // JSON [{ key, label, type: text|longtext|url|number|date }]
+  statuses  String         @default("[\"new\"]") // JSON status options, in order
+  privateFrom String @default("") // kinds of private data it was filled from, comma separated (chats, later mcp and folder); empty = public
+  createdAt DateTime       @default(now())
+  updatedAt DateTime       @updatedAt
+  user      User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  rows      DataTableRow[]
+
+  @@unique([userId, name])
+}
+
+model DataTableRow {
+  id        String    @id @default(cuid())
+  tableId   String
+  key       String? // dedupe key (a normalised URL for jobs and news)
+  status    String    @default("new")
+  data      String // JSON object: column key → value
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  table     DataTable @relation(fields: [tableId], references: [id], onDelete: Cascade)
+
+  @@unique([tableId, key])
+  @@index([tableId, status])
 }

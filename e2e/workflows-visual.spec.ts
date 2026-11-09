@@ -6,10 +6,15 @@ const THEMES = ["dark", "light"] as const;
 
 async function seed(request: APIRequestContext, run: boolean): Promise<string> {
   for (const w of (await (await request.get("/api/workflows")).json()) as Array<{ id: string }>) await request.delete(`/api/workflows/${w.id}`);
+  for (const t of (await (await request.get("/api/tables")).json()) as Array<{ id: string }>) await request.delete(`/api/tables/${t.id}`);
   await deleteAllChats(request);
-  const id = (await (await request.post("/api/workflows", { data: { template: "news", model: "mock/workflow" } })).json()).id;
+  const made = await request.post("/api/workflows", { data: { template: "news", model: "mock/workflow" } });
+  expect(made.ok(), `creating the workflow: ${made.status()} ${await made.text()}`).toBe(true);
+  const id = (await made.json()).id;
   if (run) {
-    const { runId } = await (await request.post(`/api/workflows/${id}/runs`)).json();
+    const started = await request.post(`/api/workflows/${id}/runs`);
+    expect(started.ok(), `starting the run: ${started.status()} ${await started.text()}`).toBe(true);
+    const { runId } = await started.json();
     await expect.poll(async () => (await (await request.get(`/api/workflow-runs/${runId}`)).json()).state, { timeout: 30_000 }).toBe("succeeded");
   }
   return id;

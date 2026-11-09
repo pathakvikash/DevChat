@@ -97,7 +97,7 @@ Design decisions (made in this doc):
 ### 2.2 News digest
 
 1. Click **New workflow → News digest** and fill in the **Topics** variable, one topic per line.
-2. Click **Run**. Web search runs one query per line. **Save to table** adds the results to "News", deduped by URL. **Filter** stops the run if nothing is new; the later cards show "Skipped: nothing new". **Digest** writes a short digest grouped by topic, with links. **Send to chat** posts it to a new chat called "News digest — 9 Nov". The chat appears in the sidebar, and the message is labelled From "News digest".
+2. Click **Run**. Web search runs one query per line. **Save to table** adds the results to "News", deduped by URL. **New articles** (a Filter on rows still marked `new`) stops the run if nothing is new; the later cards show "Skipped: Nothing left after New articles". **Digest** writes a short digest grouped by topic, with links. **Send to chat** posts it to a new chat called "News digest — 9 Nov". The chat appears in the sidebar, and the message is labelled From "News digest". **Mark as read** then sets those rows to `read`, so the next run digests only what is new again.
 3. Ask follow-ups in that chat as usual. To use RSS, replace Web search with **Fetch URL** in feed mode, once per feed URL.
 
 ---
@@ -354,7 +354,7 @@ Boards are fetched 5 at a time, each with a 15 s timeout. Each job comes out as 
 **Templates** (`src/lib/workflows/templates.ts`):
 
 - **Jobs:** `trigger` → `jobs` (jobBoards) → `save` (table upsert into "Job leads", key `url`) → `score` (agent, per item over `{{save.inserted}}`) → `scored` (table update: score, fit, status `{{item.status}}`) → `pick` (pickRows: shortlist, sorted by score) → `draft` (agent, per item over `{{pick.items}}`) → `drafts` (table update, status `drafted`).
-- **News:** `trigger` → `news` (webSearch, queries `{{vars.topics}}`) → `save` (table upsert into "News") → `fresh` (filter over `{{save.inserted}}`) → `digest` (agent) → `post` (chatMessage, new chat, `{{digest.text}}`).
+- **News:** `trigger` → `news` (webSearch, queries `{{vars.topics}}`) → `save` (table upsert into "News") → `fresh` (filter over `{{save.items}}`, keep status `new`) → `digest` (agent) → `post` (chatMessage, new chat, `{{digest.text}}`) → `mark` (table update, status `read`, over `{{fresh.items}}`).
 - **Phase-1 News:** `trigger` → `news` → `digest` (input `{{news.items}}`) → `post`.
 
 ---
@@ -790,6 +790,7 @@ Section 6.10 lists it. There is no shell, no file writes without the folder opt-
 - One card cannot be both. Save and Run refuse chat reading with a web tool, MCP or a folder ("This card can read your chats and reach the web. Pick one, so a web page can't make it send your chats out."), and MCP with a web tool, a folder with a web tool, or a folder with MCP ("<card> reads private data (chats, MCP or a folder) and a later card reaches the web. Split them into two workflows, so a web page can't make it send your data out."). MCP alone, a folder alone and an MCP tool card alone are fine. The editor disables the clashing boxes and says why.
 - Across the flow, no web reacher may come after a private reader; Save and Run refuse it with the same message. One exception: MCP followed by MCP is allowed with a warning, because both are servers the user set up (read issues, then post to Slack). The warning shows on the later card, as does the "A page could try to steer it" warning on an MCP card that follows a card reaching the open web.
 - The folder and `allowEdits` are cleared when the card's model is not a CLI model, and `allowEdits` is cleared with the folder.
+- A table that a Save to table card fills after a private reader (as defined above: chats, MCP or a CLI folder) is marked **private**, for good, and records which kinds it took in (`DataTable.privateFrom`: `chats`, `mcp`, `folder`). A Save card on a private table is itself a private reader of those kinds, so a copy into a second table inherits them. At Run, and again just before each Save card runs (which also covers Resume), a card on a private table with a web reacher after it is refused: "<table> holds private data (it was filled from chats), and <card> reaches the web …". The MCP-to-MCP exception holds for a table filled only from MCP: an MCP card may follow it, Fetch and Web search may not. The table list and view show a Private badge naming the sources.
 - The worst outcome left is a bad draft, which the user reads before using.
 
 ### 10.6 Output safety
@@ -869,7 +870,7 @@ Sanity mode uses no network and no real model, following the precedent at `src/l
 - `feed.test.ts`: RSS 2.0, Atom, CDATA.
 
 **e2e** `tables.spec.ts`:
-- Run News twice. The table has no duplicates, and the second run shows Filter Done, then "Skipped: nothing new".
+- Run News twice. The table has no duplicates, and the second run shows Filter Done, then "Skipped: Nothing left after New articles".
 - The CSV download has the header and the rows.
 - Bulk status change.
 

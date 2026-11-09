@@ -15,11 +15,24 @@ const matches = (r: any, where: Record<string, any>) =>
 let failProgressSave = false;
 let workflowRow: any = null;
 const chats = new Set<string>();
+const dataTables = new Map<string, { id: string; userId: string; name: string; privateFrom: string }>();
 vi.mock("@/lib/db", () => ({
   prisma: {
     mcpServer: { findFirst: vi.fn(async () => ({ id: "s1", name: "gh" })) },
     workflow: { findFirst: vi.fn(async ({ where }: any) => (workflowRow && workflowRow.id === where.id && workflowRow.userId === where.userId ? workflowRow : null)) },
     conversation: { findFirst: vi.fn(async ({ where }: any) => (chats.has(where.id) ? { id: where.id } : null)) },
+    dataTable: {
+      findFirst: vi.fn(async ({ where }: any) => {
+        const t = dataTables.get(where.id);
+        return t && t.userId === where.userId ? t : null;
+      }),
+      updateMany: vi.fn(async ({ where, data }: any) => {
+        const t = dataTables.get(where.id);
+        if (!t || t.userId !== where.userId || (where.privateFrom !== undefined && t.privateFrom !== where.privateFrom)) return { count: 0 };
+        Object.assign(t, data);
+        return { count: 1 };
+      }),
+    },
     workflowRun: {
       findUnique: vi.fn(async ({ where }: any) => (runs.has(where.id) ? { ...runs.get(where.id), workflow: { name: "WF" } } : null)),
       findFirst: vi.fn(async ({ where }: any) => [...runs.values()].find((r) => matches(r, where)) ?? null),
@@ -56,7 +69,7 @@ vi.mock("@/lib/mcp/client", () => ({ listServerTools: vi.fn(async () => [{ name:
 vi.mock("@/lib/hostAccess", () => ({ canUseHostTools: vi.fn(async () => true), HOST_TOOLS_REFUSED: "This is only available to the server's owner." }));
 vi.mock("@/lib/workflows/cards/agent", async (orig) => ({ ...(await orig<object>()), resolveAgentModel: vi.fn() }));
 
-import { advanceRun, cancelRun, capOutput, resetShutdownForTests, resumeRun, startRun, stopAllRuns, sweepOrphans, type RunnerDeps } from "@/lib/workflows/runner";
+import { advanceRun, cancelRun, capOutput, markPrivateTables, preflight, resetShutdownForTests, resumeRun, startRun, stopAllRuns, sweepOrphans, type RunnerDeps } from "@/lib/workflows/runner";
 import { resolveAgentModel } from "@/lib/workflows/cards/agent";
 import { mcpToolCard } from "@/lib/workflows/cards/mcpTool";
 import { emptyGraph, type CardRun, type FlowNode, type WorkflowGraph } from "@/lib/workflows/graph";
@@ -114,6 +127,7 @@ beforeEach(() => {
   resetShutdownForTests();
   workflowRow = null;
   chats.clear();
+  dataTables.clear();
 });
 
 /** A card that waits until released (or aborted, if `onAbort`). */
@@ -712,5 +726,182 @@ describe("follow-ups", () => {
     await advanceRun("run1", d.deps);
     expect(d.ran).toHaveLength(3); // 500, 1000, 1500 > 1000
     expect(runs.get("run1")).toMatchObject({ state: "failed", inputTokens: 1200, outputTokens: 300 });
+  });
+});
+
+describe("a card that stops the flow (Filter with nothing left)", () => {
+  const filterNode = (id: string, fromIds: string[], x: number): FlowNode => ({ id, type: "filter", fromIds, config: { list: "{{trigger.items}}" }, ui: { label: "Fresh", position: { x, y: 0 } } });
+
+  it("is Done, and the cards after it are Skipped with its reason while a sibling still runs", async () => {
+    const { deps: d, ran } = deps(() => ({ output: { text: "x" } }));
+    const stopper: CardImpl = { run: async () => ({ output: { items: [], count: 0, removed: 0 }, stop: "Nothing left after Fresh" }) };
+    d.cards.filter = stopper;
+    seedRun(graphOf(filterNode("fresh", ["trigger"], 1), agentNode("digest", ["fresh"], 2), agentNode("post", ["digest"], 3), agentNode("sibling", ["trigger"], 4)));
+    await advanceRun("run1", d);
+    const n = nodesOf();
+    expect(n.fresh).toMatchObject({ status: "succeeded", stopReason: "Nothing left after Fresh" });
+    expect(n.digest).toMatchObject({ status: "skipped", skippedReason: "Nothing left after Fresh" });
+    expect(n.post).toMatchObject({ status: "skipped", skippedReason: "Nothing left after Fresh" });
+    expect(ran).toEqual(["sibling"]);
+    expect(runs.get("run1")).toMatchObject({ state: "succeeded", error: null });
+  });
+
+  it("lets the cards after it run when it passes items on", async () => {
+    const { deps: d, ran } = deps(() => ({ output: { text: "x" } }));
+    d.cards.filter = { run: async () => ({ output: { items: [1], count: 1, removed: 0 }}) };
+    seedRun(graphOf(filterNode("fresh", ["trigger"], 1), agentNode("digest", ["fresh"], 2)));
+    await advanceRun("run1", d);
+    expect(ran).toEqual(["digest"]);
+    expect(nodesOf().fresh.stopReason).toBeUndefined();
+  });
+});
+
+describe("private tables", () => {
+  const reader = agentNode("read", ["trigger"], 1, { tools: ["readChat"] });
+  const save = (id: string, from: string[], x: number, tableId = "t1"): FlowNode => ({ id, type: "table", fromIds: from, config: { tableId, list: "{{trigger.items}}" }, ui: { label: id.toUpperCase(), position: { x, y: 0 } } });
+  const fetchNode = (id: string, from: string[], x: number): FlowNode => ({ id, type: "fetch", fromIds: from, config: { url: "https://a.test" }, ui: { label: id.toUpperCase(), position: { x, y: 0 } } });
+  const table = (id: string, privateFrom = "", userId = "u1") => dataTables.set(id, { id, userId, name: id === "t1" ? "Notes" : id === "t2" ? "Queue" : id, privateFrom });
+  const leak = (name: string, from: string, card: string) => `“${name}” holds private data (it was filled from ${from}), and ${card} reaches the web after a card that reads it. Split them into two workflows, so a web page can't make it send that data out.`;
+
+  it("a table saved to after a chat reader becomes private with the kind chats, and one saved to before it does not", async () => {
+    table("t1");
+    table("t3");
+    await markPrivateTables("u1", graphOf(reader, save("keep", ["read"], 2), save("before", ["trigger"], 3, "t3")));
+    expect(dataTables.get("t1")!.privateFrom).toBe("chats");
+    expect(dataTables.get("t3")!.privateFrom).toBe("");
+  });
+
+  it("leaves a table alone when nothing before the Save reads private data, or the table is someone else's", async () => {
+    table("t1", "", "u2");
+    await markPrivateTables("u1", graphOf(reader, save("keep", ["read"], 2)));
+    expect(dataTables.get("t1")!.privateFrom).toBe("");
+    table("t1");
+    await markPrivateTables("u1", graphOf(agentNode("a", ["trigger"], 1, { tools: ["calculator"] }), save("keep", ["a"], 2)));
+    expect(dataTables.get("t1")!.privateFrom).toBe("");
+  });
+
+  it("copying through a second table keeps the flag: a Save card on a private table makes the next table private too", async () => {
+    table("t1", "chats");
+    table("t2");
+    table("t3");
+    // web search -> Save News (private) -> Save Queue -> Save Archive
+    await markPrivateTables("u1", graphOf(save("a", ["trigger"], 1, "t1"), save("b", ["a"], 2, "t2"), save("c", ["b"], 3, "t3")));
+    expect(dataTables.get("t2")!.privateFrom).toBe("chats");
+    expect(dataTables.get("t3")!.privateFrom).toBe("chats");
+  });
+
+  it("refuses a card that reaches the web after a card that reads a private table, and names the kinds", async () => {
+    table("t1", "chats");
+    expect(await preflight("u1", graphOf(save("keep", ["trigger"], 1), fetchNode("page", ["keep"], 2)))).toEqual([{ nodeId: "page", message: leak("Notes", "chats", "PAGE") }]);
+    table("t1", "chats,mcp");
+    expect((await preflight("u1", graphOf(save("keep", ["trigger"], 1), fetchNode("page", ["keep"], 2))))[0].message).toContain("filled from chats and MCP");
+  });
+
+  it("counts the tables this graph is about to mark: a chat reader feeding Save T in one branch, Save T feeding the web in another", async () => {
+    table("t1");
+    table("t2");
+    const g = graphOf(reader, save("one", ["read"], 2), save("two", ["trigger"], 3), fetchNode("page", ["two"], 4));
+    g.nodes[3].config.tableId = "t1"; // Save "two" writes the same table as Save "one"
+    expect((await preflight("u1", g)).map((e) => e.message)).toContain(leak("Notes", "chats", "PAGE"));
+    // a copy into a second table inside one graph
+    const copy = graphOf(reader, save("one", ["read"], 2), save("two", ["one"], 3, "t2"), fetchNode("page", ["two"], 4));
+    expect((await preflight("u1", copy)).map((e) => e.message)).toContain(leak("Queue", "chats", "PAGE"));
+  });
+
+  it("allows the web before the private table, a branch beside it, and a public table", async () => {
+    table("t1", "chats");
+    expect(await preflight("u1", graphOf(fetchNode("page", ["trigger"], 1), save("keep", ["page"], 2)))).toEqual([]);
+    expect(await preflight("u1", graphOf(save("keep", ["trigger"], 1), fetchNode("page", ["trigger"], 2)))).toEqual([]);
+    table("t1");
+    expect(await preflight("u1", graphOf(save("keep", ["trigger"], 1), fetchNode("page", ["keep"], 2)))).toEqual([]);
+  });
+
+  it("marks mcp and folder tables too, and keeps what the table already held", async () => {
+    table("t1", "chats");
+    table("t2");
+    table("t3");
+    const mcp: FlowNode = { id: "m", type: "mcpTool", fromIds: ["trigger"], config: { serverId: "s1", tool: "post" }, ui: { label: "M", position: { x: 1, y: 0 } } };
+    const cli = agentNode("cli", ["trigger"], 1, { folder: "/p", model: "claude-code/default" });
+    await markPrivateTables("u1", graphOf(mcp, save("a", ["m"], 2, "t1"), cli, save("b", ["cli"], 3, "t2"), save("c", ["trigger"], 4, "t3")));
+    expect(dataTables.get("t1")!.privateFrom).toBe("chats,mcp");
+    expect(dataTables.get("t2")!.privateFrom).toBe("folder");
+    expect(dataTables.get("t3")!.privateFrom).toBe("");
+  });
+
+  it("marking is compare-and-set: a write by another run in between is re-read, not overwritten", async () => {
+    table("t1");
+    const { prisma } = await import("@/lib/db");
+    const real = vi.mocked(prisma.dataTable.updateMany).getMockImplementation()!;
+    vi.mocked(prisma.dataTable.updateMany).mockImplementationOnce((async (args: any) => {
+      dataTables.get("t1")!.privateFrom = "mcp"; // the other run lands first
+      return real(args);
+    }) as never);
+    await markPrivateTables("u1", graphOf(reader, save("keep", ["read"], 2)));
+    expect(dataTables.get("t1")!.privateFrom).toBe("chats,mcp");
+  });
+
+  it("fails the start, not the table, when the mark keeps losing the race", async () => {
+    table("t1");
+    workflowRow = { id: "wf1", userId: "u1", name: "WF", graph: JSON.stringify(graphOf(reader, save("keep", ["read"], 2))) };
+    vi.mocked(resolveAgentModel).mockResolvedValue({ name: "M", supportsTools: true } as never);
+    const { prisma } = await import("@/lib/db");
+    const real = vi.mocked(prisma.dataTable.updateMany).getMockImplementation()!;
+    vi.mocked(prisma.dataTable.updateMany).mockResolvedValue({ count: 0 } as never);
+    try {
+      const r = await startRun("u1", "wf1");
+      expect(r).toMatchObject({ ok: false, status: 409 });
+      expect(runs.size).toBe(0);
+    } finally {
+      vi.mocked(prisma.dataTable.updateMany).mockImplementation(real);
+    }
+  });
+
+  it("the per-card check fails closed when it cannot read the table", async () => {
+    table("t1");
+    seedRun(graphOf(save("keep", ["trigger"], 1)));
+    const { prisma } = await import("@/lib/db");
+    vi.mocked(prisma.dataTable.findFirst).mockRejectedValueOnce(new Error("db down"));
+    const { deps: d } = deps(() => ({ output: {} }));
+    const ran: string[] = [];
+    d.cards.table = { run: async () => (ran.push("table"), { output: { items: [] } }) };
+    await advanceRun("run1", d);
+    expect(ran).toEqual([]);
+    expect(nodesOf().keep).toMatchObject({ status: "failed", error: "Couldn't check whether this table holds private data. Run it again." });
+  });
+
+  it("startRun marks the table, but only after the caps: a refused Run marks nothing", async () => {
+    table("t1");
+    workflowRow = { id: "wf1", userId: "u1", name: "WF", graph: JSON.stringify(graphOf(reader, save("keep", ["read"], 2))) };
+    vi.mocked(resolveAgentModel).mockResolvedValue({ name: "M", supportsTools: true } as never);
+    seedRun(graphOf(), { workflowId: "wf1" }, "busy"); // this workflow already has a run in progress
+    const refused = await startRun("u1", "wf1");
+    expect(refused).toMatchObject({ ok: false, status: 409 });
+    expect(dataTables.get("t1")!.privateFrom).toBe("");
+    runs.delete("busy");
+    expect((await startRun("u1", "wf1")).ok).toBe(true);
+    expect(dataTables.get("t1")!.privateFrom).toBe("chats");
+  });
+
+  it("checks again right before a Save card runs: a table marked after Start fails that card, and Resume gets the same check", async () => {
+    table("t1"); // public when the run started
+    const g = graphOf(save("keep", ["trigger"], 1), fetchNode("page", ["keep"], 2));
+    seedRun(g);
+    const { deps: d } = deps(() => ({ output: {} }));
+    const ran: string[] = [];
+    d.cards.table = { run: async () => (ran.push("table"), { output: { items: [] } }) };
+    d.cards.fetch = { run: async () => (ran.push("fetch"), { output: {} }) };
+    table("t1", "chats"); // another run marked it in the meantime
+    await advanceRun("run1", d);
+    const n = nodesOf();
+    expect(ran).toEqual([]);
+    expect(n.keep).toMatchObject({ status: "failed", error: leak("Notes", "chats", "PAGE") });
+    expect(n.page).toMatchObject({ status: "skipped" });
+    expect(runs.get("run1").state).toBe("failed");
+
+    // Resume goes through the same per-card check
+    expect((await resumeRun("u1", "run1")).ok).toBe(true);
+    await advanceRun("run1", d);
+    expect(ran).toEqual([]);
+    expect(nodesOf().keep.status).toBe("failed");
   });
 });
