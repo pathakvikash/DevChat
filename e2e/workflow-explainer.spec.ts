@@ -40,11 +40,11 @@ test("the New workflow menu lists the two explainers after the others, the folde
   await page.goto("/workflows");
   await page.getByRole("button", { name: "New workflow" }).click();
   const items = page.getByRole("menuitem");
-  await expect(items).toHaveCount(4);
-  await expect(items.nth(2)).toContainText("Explain a GitHub repo");
-  await expect(items.nth(3)).toContainText("Explain a project folder");
-  await expect(items.nth(3)).toContainText("Local");
-  await expect(items.nth(3)).toBeEnabled();
+  await expect(items).toHaveCount(5);
+  await expect(items.nth(3)).toContainText("Explain a GitHub repo");
+  await expect(items.nth(4)).toContainText("Explain a project folder");
+  await expect(items.nth(4)).toContainText("Local");
+  await expect(items.nth(4)).toBeEnabled();
   await page.mouse.move(2, 2);
   await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
   await expect(page.getByRole("menu")).toHaveScreenshot("new-workflow-menu-dark.png");
