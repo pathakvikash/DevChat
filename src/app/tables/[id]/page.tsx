@@ -1,0 +1,307 @@
+"use client";
+
+import { use, useCallback, useEffect, useMemo, useState } from "react";
+import Link from "next/link";
+import { Download, Search, Table2, Trash2 } from "lucide-react";
+import AppShell, { SidebarToggleButton } from "@/app/components/AppShell";
+import { useToast } from "@/app/components/Toast";
+import type { Column } from "@/lib/workflows/tables";
+import RowDrawer, { cellText, isHttpUrl, type TableRow } from "../components/RowDrawer";
+
+interface Table {
+  id: string;
+  name: string;
+  columns: Column[];
+  statuses: string[];
+  rowCount: number;
+}
+
+const inputClass = "focus-ring glass-input rounded-[var(--glass-radius-md)] px-3 py-2 text-sm";
+const LONG_PREVIEW = 80;
+// Sticky cells sit over the cells that scroll under them, so they need a solid background.
+const stickyCell = "sticky z-[1] bg-[var(--background)]";
+
+export default function TablePage({ params }: { params: Promise<{ id: string }> }) {
+  const { id } = use(params);
+  const { toast } = useToast();
+  const [table, setTable] = useState<Table | null>(null);
+  const [missing, setMissing] = useState(false);
+  const [rows, setRows] = useState<TableRow[] | null>(null);
+  const [cursor, setCursor] = useState<string | null>(null);
+  const [typed, setTyped] = useState("");
+  const [q, setQ] = useState("");
+  const [status, setStatus] = useState("");
+  const [picked, setPicked] = useState<Set<string>>(new Set());
+  const [open, setOpen] = useState<TableRow | null>(null);
+
+  useEffect(() => {
+    const t = setTimeout(() => setQ(typed.trim()), 250);
+    return () => clearTimeout(t);
+  }, [typed]);
+
+  useEffect(() => {
+    let stop = false;
+    fetch(`/api/tables/${id}`)
+      .then(async (res) => {
+        if (stop) return;
+        if (res.ok) setTable(await res.json());
+        else setMissing(true);
+      })
+      .catch(() => !stop && setMissing(true));
+    return () => {
+      stop = true;
+    };
+  }, [id]);
+
+  /** One page of rows for the current search and status: the first, or the one after `after`. Null when the request failed. */
+  const fetchPage = useCallback(
+    async (after?: string): Promise<{ rows: TableRow[]; nextCursor: string | null } | null> => {
+      const url = new URLSearchParams();
+      if (q) url.set("q", q);
+      if (status) url.set("status", status);
+      if (after) url.set("cursor", after);
+      const res = await fetch(`/api/tables/${id}/rows?${url}`).catch(() => null);
+      return res?.ok ? res.json() : null;
+    },
+    [id, q, status],
+  );
+  useEffect(() => {
+    let stop = false; // a newer search is on its way: this answer is dropped
+    void fetchPage().then((page) => {
+      if (stop) return;
+      if (!page) {
+        setRows((r) => r ?? []);
+        return toast("Couldn't load the rows. Try again.", "error");
+      }
+      setRows(page.rows);
+      setCursor(page.nextCursor);
+      setPicked(new Set()); // a new search or filter starts with nothing ticked
+    });
+    return () => {
+      stop = true;
+    };
+  }, [fetchPage, toast]);
+
+  async function loadMore() {
+    const page = cursor ? await fetchPage(cursor) : null;
+    if (!page) return toast("Couldn't load more rows. Try again.", "error");
+    setRows((r) => [...(r ?? []), ...page.rows]);
+    setCursor(page.nextCursor);
+  }
+
+  const columns = table?.columns ?? [];
+  // The status sits right after the first column, so it stays on screen when the rest scroll sideways.
+  const layout: { col?: Column; first?: boolean }[] = [...columns.slice(0, 1).map((col) => ({ col, first: true })), {}, ...columns.slice(1).map((col) => ({ col }))];
+  const first = columns[0]?.key;
+  const titleOf = (r: TableRow) => (first ? cellText(r.data[first]) : "").slice(0, 60) || "row";
+  const visible = rows ?? [];
+  const allPicked = visible.length > 0 && visible.every((r) => picked.has(r.id));
+
+  async function setStatusOf(ids: string[], next: string) {
+    const res = await fetch(`/api/tables/${id}/rows`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ids, status: next }) });
+    if (!res.ok) return toast(`Couldn't change the status. ${(await res.json().catch(() => ({}))).error ?? "Try again."}`, "error");
+    const set = new Set(ids);
+    // With a status filter on, a row that no longer matches leaves the grid.
+    setRows((r) => (r ?? []).flatMap((x) => (set.has(x.id) ? (status && status !== next ? [] : [{ ...x, status: next }]) : [x])));
+    toast(ids.length === 1 ? `Status set to ${next}` : `${ids.length} rows set to ${next}`, "success");
+  }
+
+  async function deletePicked() {
+    const ids = [...picked];
+    if (!window.confirm(`Delete ${ids.length} ${ids.length === 1 ? "row" : "rows"}? This can't be undone.`)) return;
+    const res = await fetch(`/api/tables/${id}/rows`, { method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ids }) });
+    if (!res.ok) return toast("Couldn't delete the rows. Try again.", "error");
+    setRows((r) => (r ?? []).filter((x) => !picked.has(x.id)));
+    setPicked(new Set());
+    setTable((t) => (t ? { ...t, rowCount: Math.max(0, t.rowCount - ids.length) } : t));
+    toast(`${ids.length} ${ids.length === 1 ? "row" : "rows"} deleted`, "success");
+  }
+
+  const statuses = useMemo(() => (table ? [...new Set([...table.statuses, ...visible.map((r) => r.status)])] : []), [table, visible]);
+
+  if (missing) {
+    return (
+      <AppShell>
+        <main className="p-8 text-[var(--foreground)]">
+          <p className="text-sm text-zinc-400">That table was not found.</p>
+          <Link href="/tables" className="focus-ring mt-2 inline-block text-sm underline">Back to tables</Link>
+        </main>
+      </AppShell>
+    );
+  }
+  if (!table) {
+    return (
+      <AppShell>
+        <main className="p-8 text-sm text-zinc-400">Loading…</main>
+      </AppShell>
+    );
+  }
+
+  return (
+    <AppShell>
+      <main className="min-h-full p-4 text-[var(--foreground)] sm:p-8">
+        <div className="mx-auto max-w-6xl">
+          <div className="mb-4 flex flex-wrap items-center gap-x-3 gap-y-2">
+            <SidebarToggleButton />
+            <Table2 size={28} className="shrink-0 text-emerald-400" aria-hidden="true" />
+            <div className="min-w-0 flex-1 basis-40">
+              <h1 className="truncate text-xl font-bold sm:text-2xl">{table.name}</h1>
+              <p className="text-xs text-zinc-400">
+                {table.rowCount.toLocaleString("en-US")} {table.rowCount === 1 ? "row" : "rows"}
+              </p>
+            </div>
+            <a href={`/api/tables/${id}/export`} download className="focus-ring glass-button inline-flex h-9 items-center gap-1.5 rounded-[var(--glass-radius-md)] px-3 text-sm font-medium">
+              <Download size={14} aria-hidden="true" /> Export CSV
+            </a>
+          </div>
+
+          <div className="mb-3 flex flex-wrap items-center gap-2">
+            <div className="relative min-w-0 flex-1 basis-48">
+              <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" aria-hidden="true" />
+              <input type="search" aria-label="Search rows" placeholder="Search rows…" value={typed} onChange={(e) => setTyped(e.target.value)} className={`${inputClass} w-full pl-9`} />
+            </div>
+            <select aria-label="Filter by status" value={status} onChange={(e) => setStatus(e.target.value)} className={inputClass}>
+              <option value="">All statuses</option>
+              {statuses.map((s) => (
+                <option key={s} value={s}>{s}</option>
+              ))}
+            </select>
+            {picked.size > 0 && (
+              <>
+                <select
+                  aria-label={`Set status of ${picked.size} selected`}
+                  value=""
+                  onChange={(e) => e.target.value && void setStatusOf([...picked], e.target.value)}
+                  className={inputClass}
+                >
+                  <option value="">Set status ▾</option>
+                  {statuses.map((s) => (
+                    <option key={s} value={s}>{s}</option>
+                  ))}
+                </select>
+                <button type="button" onClick={() => void deletePicked()} className="focus-ring glass-button-danger inline-flex h-9 items-center gap-1.5 rounded-[var(--glass-radius-md)] px-3 text-sm font-medium">
+                  <Trash2 size={14} aria-hidden="true" /> Delete
+                </button>
+              </>
+            )}
+          </div>
+
+          {rows === null ? (
+            <p className="text-sm text-zinc-400">Loading…</p>
+          ) : visible.length === 0 ? (
+            <div className="glass-card rounded-[var(--glass-radius-xl)] border-dashed p-12 text-center">
+              <Table2 size={32} className="mx-auto mb-3 text-zinc-500" aria-hidden="true" />
+              <p className="text-sm text-zinc-400">{q || status ? "No rows match." : "No rows yet. Run a workflow that saves here."}</p>
+            </div>
+          ) : (
+            <div className="glass-card max-h-[70vh] overflow-auto rounded-[var(--glass-radius-lg)]">
+              <table className="w-full min-w-max border-collapse text-left text-sm">
+                <thead className="sticky top-0 z-[2] bg-[var(--background)] text-xs text-zinc-300">
+                  <tr className="border-b border-[var(--glass-border)]">
+                    <th scope="col" className={`${stickyCell} left-0 w-10 px-3 py-2`}>
+                      <input
+                        type="checkbox"
+                        aria-label="Select all rows"
+                        checked={allPicked}
+                        onChange={(e) => setPicked(e.target.checked ? new Set(visible.map((r) => r.id)) : new Set())}
+                        className="h-4 w-4"
+                      />
+                    </th>
+                    {layout.map((l) =>
+                      l.col ? (
+                        <th key={l.col.key} scope="col" className={`px-3 py-2 font-medium ${l.first ? `${stickyCell} left-10` : ""}`}>
+                          {l.col.label || l.col.key}
+                        </th>
+                      ) : (
+                        <th key="status" scope="col" className="px-3 py-2 font-medium">Status</th>
+                      ),
+                    )}
+                  </tr>
+                </thead>
+                <tbody>
+                  {visible.map((r) => (
+                    <tr key={r.id} className="border-b border-[var(--glass-border)] last:border-b-0">
+                      <td className={`${stickyCell} left-0 px-3 py-2`}>
+                        <input
+                          type="checkbox"
+                          aria-label={`Select ${titleOf(r)}`}
+                          checked={picked.has(r.id)}
+                          onChange={(e) =>
+                            setPicked((p) => {
+                              const n = new Set(p);
+                              if (e.target.checked) n.add(r.id);
+                              else n.delete(r.id);
+                              return n;
+                            })
+                          }
+                          className="h-4 w-4"
+                        />
+                      </td>
+                      {layout.map((l) => {
+                        if (!l.col) {
+                          return (
+                            <td key="status" className="px-3 py-2">
+                              <select
+                                aria-label={`Status of ${titleOf(r)}`}
+                                value={r.status}
+                                onChange={(e) => void setStatusOf([r.id], e.target.value)}
+                                className="focus-ring glass-input rounded-[var(--glass-radius-sm)] px-2 py-1 text-xs"
+                              >
+                                {statuses.map((s) => (
+                                  <option key={s} value={s}>{s}</option>
+                                ))}
+                              </select>
+                            </td>
+                          );
+                        }
+                        const c = l.col;
+                        const text = cellText(r.data[c.key]);
+                        const sticky = l.first ? `${stickyCell} left-10` : "";
+                        let body: React.ReactNode = text;
+                        if (c.type === "url" && isHttpUrl(text)) {
+                          body = (
+                            <a href={text} target="_blank" rel="noopener noreferrer" title={text} className="focus-ring text-blue-400 underline">
+                              {text}
+                            </a>
+                          );
+                        } else if (c.type === "longtext" && text.length > LONG_PREVIEW) {
+                          body = (
+                            <>
+                              {text.slice(0, LONG_PREVIEW)}…{" "}
+                              <button type="button" onClick={() => setOpen(r)} aria-label={`Open ${titleOf(r)}`} className="focus-ring text-blue-400 underline">
+                                Open
+                              </button>
+                            </>
+                          );
+                        } else if (l.first && text) {
+                          body = (
+                            <button type="button" onClick={() => setOpen(r)} title={text} className="focus-ring max-w-full truncate text-left hover:underline">
+                              {text}
+                            </button>
+                          );
+                        }
+                        return (
+                          <td key={c.key} title={text} className={`max-w-xs truncate px-3 py-2 text-zinc-200 ${sticky}`}>
+                            {body}
+                          </td>
+                        );
+                      })}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+          {cursor && (
+            <div className="mt-3 flex justify-center">
+              <button type="button" onClick={() => void loadMore()} className="focus-ring glass-button h-9 rounded-[var(--glass-radius-md)] px-4 text-sm">
+                Load more
+              </button>
+            </div>
+          )}
+        </div>
+      </main>
+      <RowDrawer row={open} columns={columns} title={open ? titleOf(open) : ""} onClose={() => setOpen(null)} />
+    </AppShell>
+  );
+}

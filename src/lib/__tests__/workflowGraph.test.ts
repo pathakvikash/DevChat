@@ -14,7 +14,7 @@ const graphOf = (...nodes: FlowNode[]): WorkflowGraph => ({ ...emptyGraph("m"), 
 describe("validateStructure", () => {
   it("accepts the starter templates", () => {
     expect(validateStructure(emptyGraph())).toEqual([]);
-    expect(validateStructure(buildTemplate("news", "m").graph)).toEqual([]);
+    expect(validateStructure(buildTemplate("news", "m", "t1").graph)).toEqual([]);
   });
 
   it("needs exactly one trigger, with id trigger", () => {
@@ -59,7 +59,7 @@ describe("topoOrder", () => {
 
 describe("checkGraph", () => {
   it("passes the News template", () => {
-    expect(checkGraph(buildTemplate("news", "m").graph)).toEqual([]);
+    expect(checkGraph(buildTemplate("news", "m", "t1").graph)).toEqual([]);
   });
 
   it("warns about a reference to a card that does not run before this one", () => {
@@ -134,7 +134,7 @@ describe("helpers", () => {
   });
 
   it("adds a card after the last one", () => {
-    const g = buildTemplate("news", "m").graph;
+    const g = buildTemplate("news", "m", "t1").graph;
     const c = newCard(g, "agent");
     expect(c.fromIds).toEqual(["post"]);
     expect(c.ui.position.x).toBeGreaterThan(g.nodes.at(-1)!.ui.position.x);

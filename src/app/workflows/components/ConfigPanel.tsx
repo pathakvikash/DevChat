@@ -1,14 +1,14 @@
 "use client";
 
 import { useState } from "react";
-import { Bot, Copy, Check, MessageSquare, Play, Search, Trash2, X, ChevronDown, ChevronRight } from "lucide-react";
+import { Bot, Copy, Check, Funnel, Globe, MessageSquare, Play, Search, Table2, Trash2, X, ChevronDown, ChevronRight } from "lucide-react";
 import { CATALOG, type FieldSpec } from "@/lib/workflows/catalog";
 import { ancestorsOf, TRIGGER_ID, type CardRun, type FlowNode, type GraphIssue, type RunState, type WorkflowGraph } from "@/lib/workflows/graph";
 import ConfigField, { type FieldEnv } from "./ConfigField";
 import { cardStatus, formatDuration, formatTokens, StatusBadge } from "./RunStatus";
 import { fetchNodeRun } from "./useWorkflowRun";
 
-const CARD_ICONS = { Play, Search, Bot, MessageSquare } as const;
+const CARD_ICONS = { Play, Search, Bot, MessageSquare, Globe, Funnel, Table2 } as const;
 
 /** A card type's icon, by the catalog's icon name. */
 export function CardIcon({ name, size = 14, className }: { name: string; size?: number; className?: string }) {
@@ -34,6 +34,7 @@ function LastRun({ nodeId, card, runId, runState }: { nodeId: string; card: Card
       </div>
       {card.error && <p className="text-xs text-zinc-300">{card.error}</p>}
       {card.skippedReason && <p className="text-xs text-zinc-300">Skipped: {card.skippedReason}</p>}
+      {card.stopReason && <p className="text-xs text-zinc-300">The cards after this one were skipped: {card.stopReason}</p>}
       {!!card.warnings?.length && (
         <ul className="list-disc space-y-0.5 pl-4 text-xs text-zinc-300">
           {card.warnings.map((w, i) => (

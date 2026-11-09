@@ -689,3 +689,30 @@ describe("follow-ups", () => {
     expect(runs.get("run1")).toMatchObject({ state: "failed", inputTokens: 1200, outputTokens: 300 });
   });
 });
+
+describe("a card that stops the flow (Filter with nothing left)", () => {
+  const filterNode = (id: string, fromIds: string[], x: number): FlowNode => ({ id, type: "filter", fromIds, config: { list: "{{trigger.items}}" }, ui: { label: "Fresh", position: { x, y: 0 } } });
+
+  it("is Done, and the cards after it are Skipped with its reason while a sibling still runs", async () => {
+    const { deps: d, ran } = deps(() => ({ output: { text: "x" } }));
+    const stopper: CardImpl = { run: async () => ({ output: { items: [], count: 0, removed: 0 }, stop: "Nothing left after Fresh" }) };
+    d.cards.filter = stopper;
+    seedRun(graphOf(filterNode("fresh", ["trigger"], 1), agentNode("digest", ["fresh"], 2), agentNode("post", ["digest"], 3), agentNode("sibling", ["trigger"], 4)));
+    await advanceRun("run1", d);
+    const n = nodesOf();
+    expect(n.fresh).toMatchObject({ status: "succeeded", stopReason: "Nothing left after Fresh" });
+    expect(n.digest).toMatchObject({ status: "skipped", skippedReason: "Nothing left after Fresh" });
+    expect(n.post).toMatchObject({ status: "skipped", skippedReason: "Nothing left after Fresh" });
+    expect(ran).toEqual(["sibling"]);
+    expect(runs.get("run1")).toMatchObject({ state: "succeeded", error: null });
+  });
+
+  it("lets the cards after it run when it passes items on", async () => {
+    const { deps: d, ran } = deps(() => ({ output: { text: "x" } }));
+    d.cards.filter = { run: async () => ({ output: { items: [1], count: 1, removed: 0 }}) };
+    seedRun(graphOf(filterNode("fresh", ["trigger"], 1), agentNode("digest", ["fresh"], 2)));
+    await advanceRun("run1", d);
+    expect(ran).toEqual(["digest"]);
+    expect(nodesOf().fresh.stopReason).toBeUndefined();
+  });
+});

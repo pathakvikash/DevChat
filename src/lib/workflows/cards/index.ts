@@ -5,6 +5,9 @@ import { trigger } from "./trigger";
 import { webSearchCard } from "./webSearch";
 import { agentCard } from "./agent";
 import { chatMessageCard } from "./chatMessage";
+import { fetchCard } from "./fetch";
+import { filterCard } from "./filter";
+import { tableCard } from "./table";
 
 /** What a card gets when it runs. For a per-item card the runner calls `run` once per item, with `tctx.item` set. */
 export interface CardCtx {
@@ -29,6 +32,8 @@ export interface CardOutcome {
   itemErrors?: CardRun["itemErrors"];
   /** The card is done but has nothing to hand on: it is Skipped with this reason. */
   skip?: string;
+  /** The card is Done but the cards after it have nothing to work on: they are Skipped with this reason. */
+  stop?: string;
 }
 
 export interface CardImpl {
@@ -42,4 +47,7 @@ export const CARDS: Record<CardType, CardImpl> = {
   webSearch: webSearchCard,
   agent: agentCard,
   chatMessage: chatMessageCard,
+  fetch: fetchCard,
+  filter: filterCard,
+  table: tableCard,
 };

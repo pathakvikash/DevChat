@@ -5,6 +5,7 @@ import { embed, scoreDocumentChunks, type ScoredChunk } from "@/lib/rag";
 import { parseDataArtifact } from "@/lib/generativeUi/data";
 import { evaluate } from "mathjs";
 import { safeFetch } from "@/lib/net/safeFetch";
+import { htmlToText } from "@/lib/net/htmlText";
 
 /**
  * ─────────────────────────────────────────────────────────────────────────
@@ -175,17 +176,7 @@ export const TOOL_REGISTRY: Record<string, ToolDefinition> = {
           return raw.slice(0, 8000);
         }
         // strip script/style + tags → readable text
-        const text = raw
-          .replace(/<script[\s\S]*?<\/script>/gi, "")
-          .replace(/<style[\s\S]*?<\/style>/gi, "")
-          .replace(/<!--[\s\S]*?-->/g, "")
-          .replace(/<[^>]+>/g, " ")
-          .replace(/&nbsp;/g, " ")
-          .replace(/&amp;/g, "&")
-          .replace(/&lt;/g, "<")
-          .replace(/&gt;/g, ">")
-          .replace(/\s+/g, " ")
-          .trim();
+        const text = htmlToText(raw);
         const truncated = text.length > 8000;
         return (
           (truncated ? text.slice(0, 8000) + "\n…[truncated]" : text) ||

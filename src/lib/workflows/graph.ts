@@ -153,12 +153,15 @@ export function checkGraph(graph: WorkflowGraph): GraphIssue[] {
     if (n.type === "webSearch" && !String(config.queries ?? "").trim()) issues.push({ nodeId: n.id, field: "queries", message: `${label}: add at least one query` });
     if (n.type === "agent" && !String(config.instructions ?? "").trim()) issues.push({ nodeId: n.id, field: "instructions", message: `${label}: add instructions` });
     if (n.type === "chatMessage" && !String(config.message ?? "").trim()) issues.push({ nodeId: n.id, field: "message", message: `${label}: add a message` });
+    if (n.type === "fetch" && !String(config.url ?? "").trim()) issues.push({ nodeId: n.id, field: "url", message: `${label}: add a URL` });
+    if ((n.type === "filter" || n.type === "table") && !String(config.list ?? "").trim()) issues.push({ nodeId: n.id, field: "list", message: `${label}: add the list to work on, like {{news.items}}` });
+    if (n.type === "table" && !String(config.tableId ?? "").trim()) issues.push({ nodeId: n.id, field: "tableId", message: `${label}: pick a table` });
     const ancestors = ancestorsOf(graph, n.id);
     for (const { field, value } of templateValues(n.type, config)) {
       for (const path of templateRefs(value)) {
         const root = refRoot(path);
         if (root === "item" || root === "index") {
-          if (!isPerItem || field === "items") issues.push({ nodeId: n.id, field, message: `${label}: {{${path}}} needs "Run once per item" turned on` });
+          if (!(isPerItem || CATALOG[n.type].itemFields?.includes(field)) || field === "items") issues.push({ nodeId: n.id, field, message: `${label}: {{${path}}} needs "Run once per item" turned on` });
         } else if (root === "vars") {
           const key = path.match(/^vars\.([\w-]+)/)?.[1];
           if (key && !varKeys.has(key)) issues.push({ nodeId: n.id, field, message: `${label}: variable "${key}" is not defined` });
@@ -230,6 +233,8 @@ export interface CardRun {
   error?: string;
   skippedReason?: string;
   warnings?: string[];
+  /** The card is Done but hands nothing on: the cards after it are Skipped with this reason (Filter with nothing left). */
+  stopReason?: string;
   items?: { done: number; failed: number; total: number };
   itemErrors?: { index: number; error: string }[];
   usage?: { inputTokens: number; outputTokens: number };

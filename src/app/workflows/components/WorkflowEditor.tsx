@@ -60,6 +60,7 @@ export default function WorkflowEditor({ id }: { id: string }) {
   const [runs, setRuns] = useState<RunRow[] | null>(null);
   const [models, setModels] = useState<ModelInfo[]>([]);
   const [chats, setChats] = useState<{ id: string; title: string }[]>([]);
+  const [tables, setTables] = useState<{ id: string; name: string }[]>([]);
   const [outputs, setOutputs] = useState<Record<string, unknown>>({});
   const [announce, setAnnounce] = useState("");
   const moreRef = useRef<HTMLDivElement>(null);
@@ -85,10 +86,22 @@ export default function WorkflowEditor({ id }: { id: string }) {
     })();
     fetchModels().then((m) => !stop && setModels(m)).catch(() => {});
     fetch("/api/conversations").then((r) => (r.ok ? r.json() : [])).then((list: { id: string; title: string }[]) => !stop && setChats(list.slice(0, 25))).catch(() => {});
+    fetch("/api/tables").then((r) => (r.ok ? r.json() : [])).then((list: { id: string; name: string }[]) => !stop && setTables(list)).catch(() => {});
     return () => {
       stop = true;
     };
   }, [id]);
+
+  async function createTable(name: string): Promise<string | null> {
+    const res = await fetch("/api/tables", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name }) });
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      toast(`Couldn't make the table. ${body.error ?? "Try again."}`, "error");
+      return null;
+    }
+    setTables((t) => [...t, { id: body.id, name: body.name }]);
+    return body.id as string;
+  }
 
   // ─── Saving: a PATCH 800 ms after the last change ───────────────────────
   const wfRef = useRef<Wf | null>(null);
@@ -337,10 +350,13 @@ export default function WorkflowEditor({ id }: { id: string }) {
       models,
       defaultModel: graph.defaultModel,
       chats,
+      tables,
+      createTable,
       readOnly,
       readOnlyReason: narrow ? "narrow" : "past",
     };
-  }, [graph, selected, run, outputs, models, chats, readOnly, narrow, wf?.name]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- createTable only uses toast and setTables, which are stable
+  }, [graph, selected, run, outputs, models, chats, tables, readOnly, narrow, wf?.name]);
 
   if (missing) {
     return (

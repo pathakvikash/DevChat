@@ -5,7 +5,10 @@ import { Plus, Trash2, Wrench, XCircle } from "lucide-react";
 import ModelSelector from "@/app/components/conversation/ModelSelector";
 import type { ModelInfo } from "@/app/components/conversation/types";
 import { AGENT_TOOL_CHOICES, hasToolConflict, OUTPUT_FIELD_TYPES, type FieldSpec, type OutputField } from "@/lib/workflows/catalog";
+import { FILTER_OP_LABELS, FILTER_OPS, type FilterOp, type FilterRule } from "@/lib/workflows/filterRules";
 import FieldPicker, { type PickerRow } from "./FieldPicker";
+
+const NEW_TABLE = "__new__";
 
 export const NEEDS_TOOLS = "Needs a model that can use tools. Pick one with the wrench icon.";
 
@@ -16,6 +19,9 @@ export interface FieldEnv {
   models: ModelInfo[];
   defaultModel: string;
   chats: { id: string; title: string }[];
+  tables: { id: string; name: string }[];
+  /** Makes a table with this name and returns its id, or null when it could not be made. */
+  createTable: (name: string) => Promise<string | null>;
   readOnly: boolean;
   /** Why it is read-only: a narrow screen, or a past run's snapshot. */
   readOnlyReason?: "narrow" | "past";
@@ -97,6 +103,29 @@ function OutputFields({ value, onChange, readOnly }: { value: OutputField[]; onC
   );
 }
 
+/** Rows of two text boxes (and for rules a choice between): the shared shape of the Filter rules and Save to table columns. */
+function RowsEditor<T extends object>({ rows, onChange, blank, readOnly, addLabel, render }: { rows: T[]; onChange: (v: T[]) => void; blank: T; readOnly: boolean; addLabel: string; render: (row: T, set: (patch: Partial<T>) => void) => React.ReactNode }) {
+  return (
+    <div className="space-y-2">
+      {rows.map((row, i) => (
+        <div key={i} className="glass-card space-y-1.5 rounded-[var(--glass-radius-md)] p-2">
+          {render(row, (patch) => onChange(rows.map((r, j) => (j === i ? { ...r, ...patch } : r))))}
+          {!readOnly && (
+            <button type="button" aria-label={`Remove row ${i + 1}`} title="Remove" onClick={() => onChange(rows.filter((_, j) => j !== i))} className="focus-ring inline-flex h-7 items-center gap-1 rounded-[var(--glass-radius-sm)] px-2 text-xs text-zinc-400 hover:bg-[var(--glass-bg-hover)] hover:text-[var(--foreground)]">
+              <Trash2 size={12} aria-hidden="true" /> Remove
+            </button>
+          )}
+        </div>
+      ))}
+      {!readOnly && (
+        <button type="button" onClick={() => onChange([...rows, blank])} className="focus-ring glass-button inline-flex h-8 items-center gap-1 rounded-[var(--glass-radius-md)] px-3 text-sm">
+          <Plus size={14} aria-hidden="true" /> {addLabel}
+        </button>
+      )}
+    </div>
+  );
+}
+
 /** One settings field of a card, built from the catalog's field spec. */
 export default function ConfigField({ spec, config, onChange, error, env }: { spec: FieldSpec; config: Record<string, unknown>; onChange: (key: string, value: unknown) => void; error?: string; env: FieldEnv }) {
   const id = useId();
@@ -172,6 +201,79 @@ export default function ConfigField({ spec, config, onChange, error, env }: { sp
     case "outputFields":
       control = <OutputFields value={(value as OutputField[]) ?? []} onChange={set} readOnly={env.readOnly} />;
       break;
+    case "toggle":
+      control = (
+        <label className="flex items-center gap-2 text-sm text-zinc-300">
+          <input type="checkbox" checked={value !== false} disabled={env.readOnly} onChange={(e) => set(e.target.checked)} className="h-4 w-4" />
+          {spec.label}
+        </label>
+      );
+      break;
+    case "table":
+      control = (
+        <select
+          id={id}
+          value={String(value ?? "")}
+          disabled={env.readOnly}
+          onChange={async (e) => {
+            if (e.target.value !== NEW_TABLE) return set(e.target.value);
+            const name = window.prompt("Name for the new table");
+            if (!name?.trim()) return;
+            const made = await env.createTable(name.trim());
+            if (made) set(made);
+          }}
+          className={inputClass}
+        >
+          <option value="">Pick a table…</option>
+          {!!value && !env.tables.some((t) => t.id === value) && <option value={String(value)}>Table not found</option>}
+          {env.tables.map((t) => (
+            <option key={t.id} value={t.id}>{t.name}</option>
+          ))}
+          {!env.readOnly && <option value={NEW_TABLE}>New table…</option>}
+        </select>
+      );
+      break;
+    case "rules":
+      control = (
+        <RowsEditor<FilterRule>
+          rows={(value as FilterRule[]) ?? []}
+          onChange={set}
+          blank={{ field: "", op: "eq", value: "" }}
+          readOnly={env.readOnly}
+          addLabel="Add rule"
+          render={(r, patch) => (
+            <>
+              <input aria-label="Rule field" placeholder="{{item.score}}" value={r.field} disabled={env.readOnly} onChange={(e) => patch({ field: e.target.value })} className={`${inputClass} !px-2 !py-1 font-mono`} />
+              <select aria-label="Rule test" value={r.op} disabled={env.readOnly} onChange={(e) => patch({ op: e.target.value as FilterOp })} className={`${inputClass} !px-2 !py-1`}>
+                {FILTER_OPS.map((o) => (
+                  <option key={o} value={o}>{FILTER_OP_LABELS[o]}</option>
+                ))}
+              </select>
+              {r.op !== "empty" && r.op !== "notEmpty" && (
+                <input aria-label="Rule value" placeholder="value" value={r.value} disabled={env.readOnly} onChange={(e) => patch({ value: e.target.value })} className={`${inputClass} !px-2 !py-1`} />
+              )}
+            </>
+          )}
+        />
+      );
+      break;
+    case "columnMap":
+      control = (
+        <RowsEditor<{ column: string; value: string }>
+          rows={(value as { column: string; value: string }[]) ?? []}
+          onChange={set}
+          blank={{ column: "", value: "" }}
+          readOnly={env.readOnly}
+          addLabel="Add column"
+          render={(r, patch) => (
+            <>
+              <input aria-label="Column name" placeholder="column" value={r.column} disabled={env.readOnly} onChange={(e) => patch({ column: e.target.value })} className={`${inputClass} !px-2 !py-1`} />
+              <input aria-label="Column value" placeholder="{{item.title}}" value={r.value} disabled={env.readOnly} onChange={(e) => patch({ value: e.target.value })} className={`${inputClass} !px-2 !py-1 font-mono`} />
+            </>
+          )}
+        />
+      );
+      break;
     case "chat":
       control = (
         <select id={id} value={String(value || "new")} disabled={env.readOnly} onChange={(e) => set(e.target.value)} className={inputClass}>
@@ -184,7 +286,7 @@ export default function ConfigField({ spec, config, onChange, error, env }: { sp
       break;
   }
 
-  const labelled = spec.kind !== "perItem";
+  const labelled = spec.kind !== "perItem" && spec.kind !== "toggle";
   return (
     <div className="space-y-1">
       {labelled && (

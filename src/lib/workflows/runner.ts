@@ -106,6 +106,7 @@ export async function sweepOrphans(userId: string, now = Date.now()): Promise<nu
 function skipReason(graph: WorkflowGraph, nodes: Record<string, CardRun>, blockerId: string): string {
   const blocker = nodes[blockerId];
   const label = graph.nodes.find((n) => n.id === blockerId)?.ui.label ?? blockerId;
+  if (blocker?.status === "succeeded" && blocker.stopReason) return blocker.stopReason;
   if (blocker?.status === "skipped") return blocker.skippedReason ?? `${label} was skipped`;
   if (blocker?.status === "failed") return `${label} failed`;
   return `${label} did not run`;
@@ -213,6 +214,7 @@ async function execCard(
       endedAt: new Date().toISOString(),
       output: capOutput(o.output),
       ...(o.skip ? { skippedReason: o.skip } : {}),
+      ...(o.stop ? { stopReason: o.stop } : {}),
       ...(o.warnings?.length ? { warnings: o.warnings.slice(0, 10) } : {}),
       ...(o.usage ? { usage: o.usage } : {}),
       ...(o.log ? { log: o.log.slice(-20) } : {}),
@@ -293,7 +295,7 @@ export async function advanceRun(runId: string, deps: RunnerDeps = defaultDeps):
     for (const node of topoOrder(graph)) {
       const have = nodes[node.id];
       if (have && (have.status === "succeeded" || have.status === "skipped" || have.status === "failed")) continue;
-      const blocker = node.fromIds.find((id) => nodes[id]?.status !== "succeeded");
+      const blocker = node.fromIds.find((id) => nodes[id]?.status !== "succeeded" || nodes[id].stopReason);
       if (blocker) {
         nodes[node.id] = { status: "skipped", skippedReason: skipReason(graph, nodes, blocker) };
         if (!(await save())) return;
@@ -395,6 +397,10 @@ export async function preflight(userId: string, graph: WorkflowGraph): Promise<{
       } catch (e) {
         add(n.id, `${label}: ${message(e)}`);
       }
+    }
+    if (n.type === "table" && n.config.tableId) {
+      const table = await prisma.dataTable.findFirst({ where: { id: String(n.config.tableId), userId }, select: { id: true } });
+      if (!table) add(n.id, `${label}: that table no longer exists`);
     }
     if (n.type === "chatMessage" && n.config.chat && n.config.chat !== "new") {
       const chat = await prisma.conversation.findFirst({ where: { id: String(n.config.chat), userId }, select: { id: true } });
