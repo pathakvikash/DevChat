@@ -19,19 +19,20 @@ const decode = (s: string) =>
 
 /** Text of an element: CDATA is kept as written, anything else has its entities decoded. */
 function text(raw: string): string {
-  const parts = raw.split(/(<!\[CDATA\[[\s\S]*?\]\]>)/);
+  const parts = raw.split(/(<!\[CDATA\[(?:(?!<!\[CDATA\[)[\s\S])*?\]\]>)/);
   return parts.map((p) => (p.startsWith("<![CDATA[") ? p.slice(9, -3) : decode(p))).join("").trim();
 }
 
 function tag(block: string, name: string): string | undefined {
-  // `[^/>]` before the `>` keeps a self-closing `<link href=… />` from matching.
-  const m = new RegExp(`<${name}(?:\\s[^>]*[^/>])?>([\\s\\S]*?)</${name}>`, "i").exec(block);
+  // Patterns stop at the next opening tag, so unclosed markup cannot make a scan run to the end again and again.
+  // `[^/<>\s]` before the `>` keeps a self-closing `<link href=… />` from matching.
+  const m = new RegExp(`<${name}(?:\\s[^<>]*?[^/<>\\s])?\\s*>((?:(?!<${name}\\b)[\\s\\S])*?)</${name}\\s*>`, "i").exec(block);
   return m ? text(m[1]) : undefined;
 }
 
 /** An Atom entry's link: the alternate one, else the first with an href. */
 function atomLink(block: string): string | undefined {
-  const links = [...block.matchAll(/<link\b([^>]*?)\/?>/gi)].map((m) => m[1]);
+  const links = [...block.matchAll(/<link\b([^<>]*?)\/?>/gi)].map((m) => m[1]);
   const pick = links.find((a) => /rel\s*=\s*["']alternate["']/i.test(a)) ?? links.find((a) => !/rel\s*=/i.test(a)) ?? links[0];
   const href = pick && /href\s*=\s*["']([^"']*)["']/i.exec(pick);
   return href ? decode(href[1]) : undefined;
@@ -51,7 +52,7 @@ const plain = (html: string | undefined) => (html ? htmlToText(html) : "");
  */
 export function parseFeed(xml: string): { title: string; items: FeedItem[] } {
   if (!/<(rss|feed|rdf:RDF)\b/i.test(xml) && !/<channel\b/i.test(xml)) throw new Error("Couldn't read this as an RSS or Atom feed");
-  const blocks = [...xml.matchAll(/<(item|entry)\b[^>]*>([\s\S]*?)<\/\1>/gi)];
+  const blocks = [...xml.matchAll(/<(item|entry)\b[^<>]*>((?:(?!<\1\b)[\s\S])*?)<\/\1>/gi)];
   const head = blocks.length ? xml.slice(0, blocks[0].index) : xml;
   const items = blocks.map((m): FeedItem => {
     const b = m[2];

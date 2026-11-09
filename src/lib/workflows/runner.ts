@@ -2,8 +2,9 @@ import { prisma } from "@/lib/db";
 import { CARDS, type CardImpl, type CardOutcome } from "./cards";
 import { cliProviderForModel } from "@/lib/cliProviders";
 import { resolveAgentModel } from "./cards/agent";
-import { CATALOG, DEFAULT_MAX_ITEMS, MAX_ITEMS_LIMIT, OUTPUT_CAP_BYTES, parseConfig } from "./catalog";
+import { CATALOG, DEFAULT_MAX_ITEMS, MAX_ITEMS_LIMIT, OUTPUT_CAP_BYTES, parseConfig, reachesWeb, readsPrivate } from "./catalog";
 import {
+  ancestorsOf,
   checkGraph,
   parseGraph,
   topoOrder,
@@ -399,8 +400,16 @@ export async function preflight(userId: string, graph: WorkflowGraph): Promise<{
       }
     }
     if (n.type === "table" && n.config.tableId) {
-      const table = await prisma.dataTable.findFirst({ where: { id: String(n.config.tableId), userId }, select: { id: true } });
+      const table = await prisma.dataTable.findFirst({ where: { id: String(n.config.tableId), userId }, select: { id: true, name: true, private: true } });
       if (!table) add(n.id, `${label}: that table no longer exists`);
+      // A card that reads a private table is a private-data reader: no card that reaches the web may come after it.
+      else if (table.private) {
+        for (const m of graph.nodes) {
+          if (m.id !== n.id && reachesWeb(m.type, m.config) && ancestorsOf(graph, m.id).has(n.id)) {
+            add(m.id, `“${table.name}” holds private data (it was filled from chats, MCP or a folder), and ${m.ui.label || m.id} reaches the web after a card that reads it. Split them into two workflows, so a web page can't make it send that data out.`);
+          }
+        }
+      }
     }
     if (n.type === "chatMessage" && n.config.chat && n.config.chat !== "new") {
       const chat = await prisma.conversation.findFirst({ where: { id: String(n.config.chat), userId }, select: { id: true } });
@@ -408,6 +417,16 @@ export async function preflight(userId: string, graph: WorkflowGraph): Promise<{
     }
   }
   return errors;
+}
+
+/** A table that a card after a private-data reader saves to becomes private, for good: later flows that read it are held to the same rule. */
+export async function markPrivateTables(userId: string, graph: WorkflowGraph): Promise<void> {
+  const readsAny = (id: string) => [...ancestorsOf(graph, id)].some((a) => { const m = graph.nodes.find((x) => x.id === a); return !!m && readsPrivate(m.type, m.config); });
+  for (const n of graph.nodes) {
+    if (n.type === "table" && n.config.tableId && readsAny(n.id)) {
+      await prisma.dataTable.updateMany({ where: { id: String(n.config.tableId), userId, private: false }, data: { private: true } });
+    }
+  }
 }
 
 /** Start (6.1). The caller then runs `after(() => advanceRun(runId))`. */
@@ -422,6 +441,7 @@ export async function startRun(userId: string, workflowId: string): Promise<Star
   }
   const errors = await preflight(userId, graph);
   if (errors.length > 0) return { ok: false, status: 400, error: errors[0].message, errors };
+  await markPrivateTables(userId, graph);
   await sweepOrphans(userId);
   // ponytail: check-then-create, so two starts in the same instant could both pass; a unique partial index would close it.
   const capped = await checkCaps(userId, workflowId);

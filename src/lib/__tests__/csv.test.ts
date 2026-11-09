@@ -11,7 +11,7 @@ describe("csvCell", () => {
   });
 
   it("puts a ' in front of text a spreadsheet would run as a formula", () => {
-    for (const s of ["=SUM(A1)", "+1", "-1+2", "@cmd"]) expect(csvCell(s)).toBe(`'${s}`);
+    for (const s of ["=SUM(A1)", "+1", "-1+2", "@cmd", "\tcmd", "\rcmd"]) expect(csvCell(s)).toBe(/[\r]/.test(s) ? `"'${s}"` : `'${s}`);
     expect(csvCell("=1,2")).toBe(`"'=1,2"`);
   });
 
@@ -36,10 +36,14 @@ describe("toCsv", () => {
       { status: "new", data: { title: "A, B", url: "https://a.test" } },
       { status: "read", data: { title: "=evil()" } },
     ]);
-    expect(csv).toBe(`Title,URL,Status\r\n"A, B",https://a.test,new\r\n'=evil(),,read\r\n`);
+    expect(csv).toBe(`\uFEFFTitle,URL,Status\r\n"A, B",https://a.test,new\r\n'=evil(),,read\r\n`);
+  });
+
+  it("starts with a UTF-8 byte order mark so Excel reads it as UTF-8", () => {
+    expect(toCsv(columns, []).charCodeAt(0)).toBe(0xfeff);
   });
 
   it("is just the header for a table with no rows", () => {
-    expect(toCsv(columns, [])).toBe("Title,URL,Status\r\n");
+    expect(toCsv(columns, [])).toBe("\uFEFFTitle,URL,Status\r\n");
   });
 });

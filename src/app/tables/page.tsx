@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { Table2 } from "lucide-react";
+import { Lock, Table2 } from "lucide-react";
 import AppShell, { SidebarToggleButton } from "@/app/components/AppShell";
 import { getRelativeTime } from "@/app/components/MessageActions";
 
@@ -10,6 +10,7 @@ interface Row {
   id: string;
   name: string;
   rowCount: number;
+  private: boolean;
   updatedAt: string;
 }
 
@@ -49,9 +50,19 @@ export default function TablesPage() {
             <ul className="space-y-3">
               {rows.map((r) => (
                 <li key={r.id} className="glass-card flex flex-wrap items-center gap-x-4 gap-y-1 rounded-[var(--glass-radius-lg)] p-4">
-                  <Link href={`/tables/${r.id}`} className="focus-ring min-w-0 flex-1 basis-48 truncate rounded-sm text-sm font-medium text-zinc-200 hover:underline">
-                    {r.name}
-                  </Link>
+                  <div className="min-w-0 flex-1 basis-48">
+                    <Link href={`/tables/${r.id}`} className="focus-ring block truncate rounded-sm text-sm font-medium text-zinc-200 hover:underline">
+                      {r.name}
+                    </Link>
+                    {r.private && (
+                      <p className="mt-1 flex items-start gap-1.5 text-xs text-zinc-300">
+                        <span className="glass inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 font-medium">
+                          <Lock size={11} aria-hidden="true" /> Private
+                        </span>
+                        <span>Filled from chats, MCP or a folder. Workflows can&apos;t send what is in it to the web.</span>
+                      </p>
+                    )}
+                  </div>
                   <span className="text-xs text-zinc-400">
                     {r.rowCount.toLocaleString("en-US")} {r.rowCount === 1 ? "row" : "rows"}
                   </span>

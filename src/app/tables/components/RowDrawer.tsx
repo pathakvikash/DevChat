@@ -42,7 +42,7 @@ function CopyButton({ text, label }: { text: string; label: string }) {
         clearTimeout(timer.current);
         timer.current = setTimeout(() => setDone(false), 1500);
       }}
-      className="focus-ring glass-button inline-flex h-7 items-center gap-1 rounded-[var(--glass-radius-sm)] px-2 text-xs"
+      className="focus-ring glass-button inline-flex h-8 items-center gap-1 rounded-[var(--glass-radius-sm)] px-2 text-xs"
     >
       {done ? <Check size={12} aria-hidden="true" /> : <Copy size={12} aria-hidden="true" />}
       {done ? "Copied" : "Copy"}

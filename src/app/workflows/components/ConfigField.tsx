@@ -69,6 +69,40 @@ function TemplateField({ spec, value, onChange, error, env, id }: { spec: FieldS
   );
 }
 
+/** A one-line template box with its own Insert field button, for a value inside a list (a rule, a column). */
+function InlineTemplate({ label, placeholder, value, onChange, env, mono }: { label: string; placeholder: string; value: string; onChange: (v: string) => void; env: FieldEnv; mono?: boolean }) {
+  const [picking, setPicking] = useState(false);
+  const box = useRef<HTMLInputElement>(null);
+  const caret = useRef<number | null>(null);
+  function insert(path: string) {
+    const at = caret.current ?? value.length;
+    onChange(`${value.slice(0, at)}{{${path}}}${value.slice(at)}`);
+    setPicking(false);
+    requestAnimationFrame(() => box.current?.focus());
+  }
+  return (
+    <div className="relative flex gap-1.5">
+      <input
+        ref={box}
+        aria-label={label}
+        placeholder={placeholder}
+        value={value}
+        disabled={env.readOnly}
+        onChange={(e) => onChange(e.target.value)}
+        onSelect={(e) => (caret.current = e.currentTarget.selectionStart)}
+        onBlur={(e) => (caret.current = e.currentTarget.selectionStart)}
+        className={`${inputClass} min-w-0 flex-1 !px-2 !py-1 ${mono ? "font-mono" : ""}`}
+      />
+      {!env.readOnly && (
+        <button type="button" aria-label={`Insert field into ${label.toLowerCase()}`} onClick={() => setPicking((x) => !x)} className="focus-ring glass-button h-8 shrink-0 rounded-[var(--glass-radius-sm)] px-2 text-xs">
+          Insert field
+        </button>
+      )}
+      {picking && <FieldPicker rows={env.rows} onPick={insert} onClose={() => setPicking(false)} />}
+    </div>
+  );
+}
+
 function OutputFields({ value, onChange, readOnly }: { value: OutputField[]; onChange: (v: OutputField[]) => void; readOnly: boolean }) {
   const set = (i: number, patch: Partial<OutputField>) => onChange(value.map((f, j) => (j === i ? { ...f, ...patch } : f)));
   return (
@@ -111,7 +145,7 @@ function RowsEditor<T extends object>({ rows, onChange, blank, readOnly, addLabe
         <div key={i} className="glass-card space-y-1.5 rounded-[var(--glass-radius-md)] p-2">
           {render(row, (patch) => onChange(rows.map((r, j) => (j === i ? { ...r, ...patch } : r))))}
           {!readOnly && (
-            <button type="button" aria-label={`Remove row ${i + 1}`} title="Remove" onClick={() => onChange(rows.filter((_, j) => j !== i))} className="focus-ring inline-flex h-7 items-center gap-1 rounded-[var(--glass-radius-sm)] px-2 text-xs text-zinc-400 hover:bg-[var(--glass-bg-hover)] hover:text-[var(--foreground)]">
+            <button type="button" aria-label={`Remove row ${i + 1}`} title="Remove" onClick={() => onChange(rows.filter((_, j) => j !== i))} className="focus-ring inline-flex h-8 items-center gap-1 rounded-[var(--glass-radius-sm)] px-2 text-xs text-zinc-400 hover:bg-[var(--glass-bg-hover)] hover:text-[var(--foreground)]">
               <Trash2 size={12} aria-hidden="true" /> Remove
             </button>
           )}
@@ -243,14 +277,14 @@ export default function ConfigField({ spec, config, onChange, error, env }: { sp
           addLabel="Add rule"
           render={(r, patch) => (
             <>
-              <input aria-label="Rule field" placeholder="{{item.score}}" value={r.field} disabled={env.readOnly} onChange={(e) => patch({ field: e.target.value })} className={`${inputClass} !px-2 !py-1 font-mono`} />
+              <InlineTemplate label="Rule field" placeholder="{{item.score}}" value={r.field} onChange={(v) => patch({ field: v })} env={env} mono />
               <select aria-label="Rule test" value={r.op} disabled={env.readOnly} onChange={(e) => patch({ op: e.target.value as FilterOp })} className={`${inputClass} !px-2 !py-1`}>
                 {FILTER_OPS.map((o) => (
                   <option key={o} value={o}>{FILTER_OP_LABELS[o]}</option>
                 ))}
               </select>
               {r.op !== "empty" && r.op !== "notEmpty" && (
-                <input aria-label="Rule value" placeholder="value" value={r.value} disabled={env.readOnly} onChange={(e) => patch({ value: e.target.value })} className={`${inputClass} !px-2 !py-1`} />
+                <InlineTemplate label="Rule value" placeholder="value" value={r.value} onChange={(v) => patch({ value: v })} env={env} />
               )}
             </>
           )}
@@ -268,7 +302,7 @@ export default function ConfigField({ spec, config, onChange, error, env }: { sp
           render={(r, patch) => (
             <>
               <input aria-label="Column name" placeholder="column" value={r.column} disabled={env.readOnly} onChange={(e) => patch({ column: e.target.value })} className={`${inputClass} !px-2 !py-1`} />
-              <input aria-label="Column value" placeholder="{{item.title}}" value={r.value} disabled={env.readOnly} onChange={(e) => patch({ value: e.target.value })} className={`${inputClass} !px-2 !py-1 font-mono`} />
+              <InlineTemplate label="Column value" placeholder="{{item.title}}" value={r.value} onChange={(v) => patch({ value: v })} env={env} mono />
             </>
           )}
         />

@@ -18,6 +18,22 @@ describe("normalizeKey", () => {
     expect(normalizeKey("https://jobs.example.com/role/1?utm_source=newsletter")).toBe(a);
   });
 
+  it("rebuilds the query, so %20 and + are one key, with or without utm_ parameters", () => {
+    expect(normalizeKey("https://a.test/p?q=a%20b")).toBe(normalizeKey("https://a.test/p?q=a+b"));
+    expect(normalizeKey("https://a.test/p?q=a%20b&utm_source=x")).toBe(normalizeKey("https://a.test/p?q=a%20b"));
+    expect(normalizeKey("https://a.test/p?utm_source=x&q=a%20b")).toBe("https://a.test/p?q=a+b");
+  });
+
+  it("stores the sha256 of a key over 1,000 characters, and a short key as it is", () => {
+    const long = `https://a.test/${"x".repeat(1200)}`;
+    const k = normalizeKey(long);
+    expect(k).toMatch(/^sha256:[0-9a-f]{64}$/);
+    expect(normalizeKey(long)).toBe(k);
+    expect(normalizeKey(`${long}/?utm_source=a`)).toBe(k);
+    expect(normalizeKey(`${long}y`)).not.toBe(k);
+    expect(normalizeKey(`https://a.test/${"x".repeat(900)}`).length).toBeLessThanOrEqual(1000);
+  });
+
   it("only trims anything that is not a URL", () => {
     expect(normalizeKey("  ABC-1  ")).toBe("ABC-1");
     expect(normalizeKey(42)).toBe("42");

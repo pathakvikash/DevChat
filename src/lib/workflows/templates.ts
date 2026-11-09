@@ -7,7 +7,7 @@ export const TEMPLATE_OPTIONS: { kind: TemplateKind; label: string; description:
   { kind: "news", label: "News digest", description: "Search the web for your topics, have a model write a digest, post it to a new chat." },
 ];
 
-/** The News digest: web search → save to the News table → keep only what is new → digest → a new chat. */
+/** The News digest: web search → save to the News table → keep the rows still marked new → digest → a new chat → mark those rows read. */
 function news(defaultModel: string, tableId: string): WorkflowGraph {
   const g = emptyGraph(defaultModel);
   g.vars = [{ key: "topics", label: "Topics to search, one per line", value: "AI developer tools news\nopen source LLM releases" }];
@@ -30,7 +30,8 @@ function news(defaultModel: string, tableId: string): WorkflowGraph {
       id: "fresh",
       type: "filter",
       fromIds: ["save"],
-      config: { list: "{{save.inserted}}", rules: [], match: "all", stopIfEmpty: true },
+      // Every saved row still marked new, not only the ones this run added: articles from a run that never posted are digested too.
+      config: { list: "{{save.items}}", rules: [{ field: "{{item.status}}", op: "eq", value: "new" }], match: "all", stopIfEmpty: true },
       ui: { label: "New articles", position: { x: 840, y: 0 } },
     },
     {
@@ -56,6 +57,13 @@ function news(defaultModel: string, tableId: string): WorkflowGraph {
       fromIds: ["digest"],
       config: { chat: "new", title: "{{workflow.name}} — {{run.date}}", message: "{{digest.text}}" },
       ui: { label: "Post to a chat", position: { x: 1400, y: 0 } },
+    },
+    {
+      id: "mark",
+      type: "table",
+      fromIds: ["post"],
+      config: { tableId, action: "update", list: "{{fresh.items}}", keyField: "url", fields: [{ column: "url", value: "{{item.url}}" }], status: "read" },
+      ui: { label: "Mark as read", position: { x: 1680, y: 0 } },
     },
   );
   return g;

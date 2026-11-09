@@ -66,7 +66,7 @@ test("the News template runs card by card and posts the digest to a new chat", a
   await page.getByRole("button", { name: "Run", exact: true }).click();
   await expect(toast(page, "Run started")).toBeVisible();
   await expect(card(page, "Write the digest", "Agent", "Running")).toBeVisible();
-  for (const [label, type] of [["Run manually", "Run manually"], ["Search the news", "Web search"], ["Save to the News table", "Save to table"], ["New articles", "Filter"], ["Write the digest", "Agent"], ["Post to a chat", "Send to chat"]]) {
+  for (const [label, type] of [["Run manually", "Run manually"], ["Search the news", "Web search"], ["Save to the News table", "Save to table"], ["New articles", "Filter"], ["Write the digest", "Agent"], ["Post to a chat", "Send to chat"], ["Mark as read", "Save to table"]]) {
     await expect(card(page, label, type, "Done")).toBeVisible({ timeout: 30_000 });
   }
 
@@ -169,6 +169,7 @@ test("a stale running run becomes Interrupted, and Resume continues from the car
   await resume.click();
   await expect(card(page, "Post to a chat", "Send to chat", "Done")).toBeVisible({ timeout: 30_000 });
   await expect(card(page, "Write the digest", "Agent", "Done")).toBeVisible();
+  await expect(card(page, "Mark as read", "Save to table", "Done")).toBeVisible({ timeout: 30_000 });
   expect(await runState(request, runId)).toBe("succeeded");
   // The cards that had already succeeded were not run again: the seeded "news" card never got a start time.
   expect((await (await request.get(`/api/workflow-runs/${runId}?node=news`)).json()).startedAt).toBeUndefined();
@@ -181,7 +182,7 @@ test("the list shows each workflow with its last run, and New workflow starts fr
 
   await page.goto("/workflows");
   const row = page.getByRole("listitem").filter({ hasText: "News digest" });
-  await expect(row).toContainText("6 cards");
+  await expect(row).toContainText("7 cards");
   await expect(row).toContainText("Done");
 
   await page.getByRole("button", { name: /New workflow/ }).click();

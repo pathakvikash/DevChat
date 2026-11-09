@@ -138,6 +138,10 @@ export const TOOL_CONFLICT_MESSAGE = "This card can read your chats and reach th
 export const readsChats = (type: string, config: Record<string, unknown>): boolean =>
   type === "agent" && Array.isArray(config.tools) && config.tools.some((t) => CHAT_READ_TOOLS.includes(t));
 
+/** Whether the card reads data that must not leave DevChat. Today that is chats; MCP tools and a CLI folder join when phase 6 lands.
+ *  A table written by a card that follows one of these becomes private (see markPrivateTables). */
+export const readsPrivate = (type: string, config: Record<string, unknown>): boolean => readsChats(type, config);
+
 /** Whether the card can send data to the web: an agent with an outbound tool, or a web search / fetch card. */
 export const reachesWeb = (type: string, config: Record<string, unknown>): boolean =>
   type === "webSearch" || type === "fetch" || (type === "agent" && Array.isArray(config.tools) && config.tools.some((t) => OUTBOUND_TOOLS.includes(t)));

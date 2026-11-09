@@ -15,10 +15,23 @@ const matches = (r: any, where: Record<string, any>) =>
 let failProgressSave = false;
 let workflowRow: any = null;
 const chats = new Set<string>();
+const dataTables = new Map<string, { id: string; userId: string; name: string; private: boolean }>();
 vi.mock("@/lib/db", () => ({
   prisma: {
     workflow: { findFirst: vi.fn(async ({ where }: any) => (workflowRow && workflowRow.id === where.id && workflowRow.userId === where.userId ? workflowRow : null)) },
     conversation: { findFirst: vi.fn(async ({ where }: any) => (chats.has(where.id) ? { id: where.id } : null)) },
+    dataTable: {
+      findFirst: vi.fn(async ({ where }: any) => {
+        const t = dataTables.get(where.id);
+        return t && t.userId === where.userId ? t : null;
+      }),
+      updateMany: vi.fn(async ({ where, data }: any) => {
+        const t = dataTables.get(where.id);
+        if (!t || t.userId !== where.userId || t.private !== where.private) return { count: 0 };
+        Object.assign(t, data);
+        return { count: 1 };
+      }),
+    },
     workflowRun: {
       findUnique: vi.fn(async ({ where }: any) => (runs.has(where.id) ? { ...runs.get(where.id), workflow: { name: "WF" } } : null)),
       findFirst: vi.fn(async ({ where }: any) => [...runs.values()].find((r) => matches(r, where)) ?? null),
@@ -52,7 +65,7 @@ vi.mock("@/lib/db", () => ({
 }));
 vi.mock("@/lib/workflows/cards/agent", async (orig) => ({ ...(await orig<object>()), resolveAgentModel: vi.fn() }));
 
-import { advanceRun, cancelRun, capOutput, resetShutdownForTests, resumeRun, startRun, stopAllRuns, sweepOrphans, type RunnerDeps } from "@/lib/workflows/runner";
+import { advanceRun, cancelRun, capOutput, markPrivateTables, preflight, resetShutdownForTests, resumeRun, startRun, stopAllRuns, sweepOrphans, type RunnerDeps } from "@/lib/workflows/runner";
 import { resolveAgentModel } from "@/lib/workflows/cards/agent";
 import { emptyGraph, type CardRun, type FlowNode, type WorkflowGraph } from "@/lib/workflows/graph";
 import type { CardCtx, CardImpl } from "@/lib/workflows/cards";
@@ -109,6 +122,7 @@ beforeEach(() => {
   resetShutdownForTests();
   workflowRow = null;
   chats.clear();
+  dataTables.clear();
 });
 
 /** A card that waits until released (or aborted, if `onAbort`). */
@@ -714,5 +728,52 @@ describe("a card that stops the flow (Filter with nothing left)", () => {
     await advanceRun("run1", d);
     expect(ran).toEqual(["digest"]);
     expect(nodesOf().fresh.stopReason).toBeUndefined();
+  });
+});
+
+describe("private tables", () => {
+  const reader = agentNode("read", ["trigger"], 1, { tools: ["readChat"] });
+  const save = (id: string, from: string[], x: number, tableId = "t1"): FlowNode => ({ id, type: "table", fromIds: from, config: { tableId, list: "{{trigger.items}}" }, ui: { label: id.toUpperCase(), position: { x, y: 0 } } });
+  const fetchNode = (id: string, from: string[], x: number): FlowNode => ({ id, type: "fetch", fromIds: from, config: { url: "https://a.test" }, ui: { label: id.toUpperCase(), position: { x, y: 0 } } });
+  const seedTable = (over: Partial<{ private: boolean; userId: string }> = {}) => dataTables.set("t1", { id: "t1", userId: "u1", name: "Notes", private: false, ...over });
+
+  it("a table saved to after a chat reader becomes private, and one saved to before it does not", async () => {
+    seedTable();
+    dataTables.set("t2", { id: "t2", userId: "u1", name: "Other", private: false });
+    await markPrivateTables("u1", graphOf(reader, save("keep", ["read"], 2), save("before", ["trigger"], 3, "t2")));
+    expect(dataTables.get("t1")!.private).toBe(true);
+    expect(dataTables.get("t2")!.private).toBe(false);
+  });
+
+  it("leaves a table alone when no card before the Save reads private data, or the table is someone else's", async () => {
+    seedTable({ userId: "u2" });
+    await markPrivateTables("u1", graphOf(reader, save("keep", ["read"], 2)));
+    expect(dataTables.get("t1")!.private).toBe(false);
+    seedTable();
+    await markPrivateTables("u1", graphOf(agentNode("a", ["trigger"], 1, { tools: ["calculator"] }), save("keep", ["a"], 2)));
+    expect(dataTables.get("t1")!.private).toBe(false);
+  });
+
+  it("refuses a card that reaches the web after a card that reads a private table", async () => {
+    seedTable({ private: true });
+    const errors = await preflight("u1", graphOf(save("keep", ["trigger"], 1), fetchNode("page", ["keep"], 2)));
+    expect(errors).toEqual([{ nodeId: "page", message: "“Notes” holds private data (it was filled from chats, MCP or a folder), and PAGE reaches the web after a card that reads it. Split them into two workflows, so a web page can't make it send that data out." }]);
+  });
+
+  it("allows the web before the private table, a branch beside it, and a public table", async () => {
+    seedTable({ private: true });
+    expect(await preflight("u1", graphOf(fetchNode("page", ["trigger"], 1), save("keep", ["page"], 2)))).toEqual([]);
+    expect(await preflight("u1", graphOf(save("keep", ["trigger"], 1), fetchNode("page", ["trigger"], 2)))).toEqual([]);
+    seedTable({ private: false });
+    expect(await preflight("u1", graphOf(save("keep", ["trigger"], 1), fetchNode("page", ["keep"], 2)))).toEqual([]);
+  });
+
+  it("startRun marks the table before the run begins", async () => {
+    seedTable();
+    workflowRow = { id: "wf1", userId: "u1", name: "WF", graph: JSON.stringify(graphOf(reader, save("keep", ["read"], 2))) };
+    vi.mocked(resolveAgentModel).mockResolvedValue({ name: "M", supportsTools: true } as never);
+    const r = await startRun("u1", "wf1");
+    expect(r.ok).toBe(true);
+    expect(dataTables.get("t1")!.private).toBe(true);
   });
 });

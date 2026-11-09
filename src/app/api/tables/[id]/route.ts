@@ -10,7 +10,7 @@ export async function GET(_req: NextRequest, { params }: Ctx) {
   return withUser(async (userId) => {
     const row = await prisma.dataTable.findFirst({ where: { id, userId }, include: { _count: { select: { rows: true } } } });
     if (!row) return NextResponse.json({ error: "Table not found" }, { status: 404 });
-    return NextResponse.json({ ...toTableInfo(row), rowCount: row._count.rows, updatedAt: row.updatedAt });
+    return NextResponse.json({ ...toTableInfo(row), private: row.private, rowCount: row._count.rows, updatedAt: row.updatedAt });
   });
 }
 

@@ -32,7 +32,7 @@ for (const theme of THEMES) {
     await page.addInitScript((t) => localStorage.setItem("vas:theme", t), theme);
     await seed(request);
     await page.goto("/tables");
-    await expect(page.getByRole("link", { name: "News" })).toBeVisible();
+    await expect(page.getByRole("link", { name: "News", exact: true })).toBeVisible();
     await settle(page, theme);
     await expect(page).toHaveScreenshot(`tables-list-${theme}.png`, { mask: relativeTimes(page) });
   });

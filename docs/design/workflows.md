@@ -788,6 +788,7 @@ Section 6.10 lists it. There is no shell, no file writes without the folder opt-
 - Generated flows are previewed and cleaned of risky settings (7).
 - An agent card cannot tick a chat-reading tool (`searchChats`, `readChat`) together with an outbound one (`fetchUrl`, `webSearch`). Save and Run both refuse it: "This card can read your chats and reach the web. Pick one, so a web page can't make it send your chats out."
 - The same holds across the flow: no card with an outbound tool, and no Web search or Fetch card, may come after a card that reads chats. Save and Run refuse it: "<card> reads your chats and a later card reaches the web. Split them into two workflows, so a web page can't make it send your chats out."
+- A table that a Save to table card fills after a card that reads private data (chats today; MCP and a CLI folder later) is marked **private**, for good. At Run, a card that reads a private table counts as one of those readers, so any later card that reaches the web is refused: "<table> holds private data …, and a later card reaches the web." The table list and view show a Private badge.
 - The worst outcome left is a bad draft, which the user reads before using.
 
 ### 10.6 Output safety

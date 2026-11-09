@@ -2,8 +2,12 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 
 // An in-memory DataTable / DataTableRow: just the calls writeRows and the table card make.
 let table: any;
+const lazy = <T,>(run: () => T) => ({ then: (ok: (v: T) => unknown, bad: (e: unknown) => unknown) => Promise.resolve().then(run).then(ok, bad) });
 const rows = new Map<string, any>();
 let seq = 0;
+// What happens inside the next transactions: a hook that can add the rows another run saved at the same moment, then clash.
+let clashHook: (() => void) | null = null;
+let clashes = 0;
 vi.mock("@/lib/db", () => ({
   prisma: {
     dataTable: {
@@ -13,14 +17,22 @@ vi.mock("@/lib/db", () => ({
     dataTableRow: {
       findMany: vi.fn(async ({ where }: any) => [...rows.values()].filter((r) => r.tableId === where.tableId && where.key.in.includes(r.key))),
       count: vi.fn(async ({ where }: any) => [...rows.values()].filter((r) => r.tableId === where.tableId).length),
-      create: vi.fn(async ({ data }: any) => {
+      // Like Prisma's, these promises are lazy: nothing is written until the transaction awaits them.
+      create: vi.fn(({ data }: any) => lazy(() => {
         const row = { id: `row${++seq}`, ...data };
         rows.set(row.id, row);
         return row;
-      }),
-      update: vi.fn(async ({ where, data }: any) => Object.assign(rows.get(where.id), data)),
+      })),
+      update: vi.fn(({ where, data }: any) => lazy(() => Object.assign(rows.get(where.id), data))),
     },
-    $transaction: vi.fn(async (ops: Promise<unknown>[]) => Promise.all(ops)),
+    $transaction: vi.fn(async (ops: Promise<unknown>[]) => {
+      if (clashes > 0) {
+        clashes--;
+        clashHook?.();
+        throw Object.assign(new Error("Unique constraint failed on the fields: (`tableId`,`key`)"), { code: "P2002" });
+      }
+      return Promise.all(ops);
+    }),
   },
 }));
 
@@ -32,6 +44,8 @@ const info = (): TableInfo => ({ id: "t1", name: "Jobs", columns: [], statuses: 
 const stored = (key: string) => [...rows.values()].find((r) => r.key === key);
 
 beforeEach(() => {
+  clashes = 0;
+  clashHook = null;
   rows.clear();
   seq = 0;
   table = { id: "t1", userId: "u1", name: "Jobs", columns: "[]", statuses: '["new"]' };
@@ -116,6 +130,37 @@ describe("writeRows", () => {
   });
 });
 
+describe("two runs saving at once", () => {
+  const other = () => rows.set("other1", { id: "other1", tableId: "t1", key: "k1", status: "new", data: JSON.stringify({ title: "from the other run" }) });
+
+  it("reads again after a unique-key clash, so the clashing rows become updates", async () => {
+    clashes = 1;
+    clashHook = other; // the other run's row lands between our read and our write
+    const r = await writeRows(info(), "upsert", [
+      { key: "k1", data: { note: "mine" }, status: "new" },
+      { key: "k2", data: { note: "mine" }, status: "new" },
+    ]);
+    expect(r.updated.map((x) => x._rowId)).toEqual(["other1"]);
+    expect(r.inserted).toHaveLength(1);
+    expect(JSON.parse(rows.get("other1").data)).toEqual({ title: "from the other run", note: "mine" });
+    expect(rows.size).toBe(2);
+  });
+
+  it("says so in plain words when it clashes twice, without any database text", async () => {
+    clashes = 2;
+    const err = await writeRows(info(), "upsert", [{ key: "k1", data: {}, status: "new" }]).catch((e) => e as Error);
+    expect(err).toBeInstanceOf(Error);
+    expect((err as Error).message).toBe("Another run is saving to “Jobs” at the same time. Run this one again.");
+    expect((err as Error).message).not.toMatch(/Unique|P2002|prisma/i);
+  });
+
+  it("does not retry any other error", async () => {
+    const { prisma } = await import("@/lib/db");
+    vi.mocked(prisma.$transaction).mockRejectedValueOnce(new Error("disk full"));
+    await expect(writeRows(info(), "upsert", [{ key: "k1", data: {}, status: "new" }])).rejects.toThrow("disk full");
+  });
+});
+
 describe("loadTable", () => {
   it("is null for someone else's table", async () => {
     expect(await loadTable("u2", "t1")).toBeNull();
@@ -146,6 +191,12 @@ describe("the table card", () => {
     expect(again.inserted).toEqual([]);
     expect(again.updated).toHaveLength(2);
     expect(rows.size).toBe(2);
+  });
+
+  it("saves rows that came from a table without their row id or status as data", async () => {
+    const fromRows = { items: [{ _rowId: "x", status: "new", url: "https://a.test/1", title: "T" }] };
+    await tableCard.run(ctx({ tableId: "t1", list: "{{r.items}}" }, { r: fromRows }));
+    expect(JSON.parse(stored("https://a.test/1").data)).toEqual({ url: "https://a.test/1", title: "T" });
   });
 
   it("maps columns with {{item}} and sets the status per item", async () => {

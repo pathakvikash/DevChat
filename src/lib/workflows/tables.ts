@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { prisma } from "@/lib/db";
 
 // DevChat tables (3.2): what a workflow's "Save to table" card writes to, and what /tables shows.
@@ -20,6 +21,8 @@ export type RowItem = Record<string, unknown> & { _rowId: string; status: string
 
 export const MAX_TABLE_ROWS = 10_000;
 export const MAX_WRITE_ROWS = 1_000;
+/** A key longer than this is stored as its sha256: Postgres cannot index a very long value in the unique key. */
+export const MAX_KEY_CHARS = 1000;
 export const DEFAULT_STATUS = "new";
 /** What the News template's table starts with: the fields a web search result has. */
 export const NEWS_COLUMNS: Column[] = [
@@ -62,6 +65,10 @@ export function parseRowData(data: string): Record<string, unknown> {
  */
 export function normalizeKey(raw: unknown): string {
   const s = String(raw ?? "").trim();
+  return s.length > MAX_KEY_CHARS ? `sha256:${createHash("sha256").update(normalizeUrl(s)).digest("hex")}` : normalizeUrl(s);
+}
+
+function normalizeUrl(s: string): string {
   if (!/^https?:\/\//i.test(s)) return s;
   let u: URL;
   try {
@@ -69,8 +76,11 @@ export function normalizeKey(raw: unknown): string {
   } catch {
     return s;
   }
-  for (const k of [...u.searchParams.keys()]) if (k.toLowerCase().startsWith("utm_")) u.searchParams.delete(k);
-  return `${u.origin}${u.pathname.replace(/\/+$/, "")}${u.search}${u.hash}`;
+  // The query is always rebuilt, so a page linked with %20 or + in one place and the other way in another is one key.
+  const params = new URLSearchParams();
+  for (const [k, v] of u.searchParams) if (!k.toLowerCase().startsWith("utm_")) params.append(k, v);
+  const query = params.toString();
+  return `${u.origin}${u.pathname.replace(/\/+$/, "")}${query ? `?${query}` : ""}${u.hash}`;
 }
 
 /** The type a new column gets from the first value written to it. */
@@ -83,17 +93,18 @@ export function guessType(value: unknown): ColumnType {
   return "text";
 }
 
-/** One CSV cell (RFC 4180). A text cell that starts with = + - or @ gets a leading ' so a spreadsheet won't run it. */
+/** One CSV cell (RFC 4180). A text cell that starts with = + - @ or a tab or return gets a leading ' so a spreadsheet won't run it. */
 export function csvCell(value: unknown): string {
   let s = value === null || value === undefined ? "" : typeof value === "object" ? JSON.stringify(value) : String(value);
-  if (typeof value === "string" && /^[=+\-@]/.test(s)) s = `'${s}`;
+  if (typeof value === "string" && /^[=+\-@\t\r]/.test(s)) s = `'${s}`;
   return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 }
 
 export function toCsv(columns: Column[], rows: { status: string; data: Record<string, unknown> }[]): string {
   const head = [...columns.map((c) => c.label || c.key), "Status"].map(csvCell).join(",");
   const lines = rows.map((r) => [...columns.map((c) => r.data[c.key]), r.status].map(csvCell).join(","));
-  return `${[head, ...lines].join("\r\n")}\r\n`;
+  // The BOM makes Excel read the file as UTF-8.
+  return `\uFEFF${[head, ...lines].join("\r\n")}\r\n`;
 }
 
 export interface RowInput {
@@ -111,7 +122,7 @@ const item = (row: { id: string; status: string }, data: Record<string, unknown>
  * given by `update`); `update` touches matches only and lists the keys it did not find. Columns and statuses the data
  * brings are added to the table. Throws when a cap would be passed.
  */
-export async function writeRows(
+async function writeRowsOnce(
   table: TableInfo,
   action: "upsert" | "update",
   inputs: RowInput[],
@@ -167,4 +178,25 @@ export async function writeRows(
     missing,
     addedColumns,
   };
+}
+
+const isClash = (e: unknown) => (e as { code?: string } | null)?.code === "P2002";
+
+/**
+ * Two runs saving to one table at once can both see a key as new, and the second insert hits the unique key. The write
+ * is one transaction, so nothing was saved: it is read again, and the clashes are updates this time. A second clash is
+ * reported in plain words, never as database text.
+ */
+export async function writeRows(table: TableInfo, action: "upsert" | "update", inputs: RowInput[]): ReturnType<typeof writeRowsOnce> {
+  try {
+    return await writeRowsOnce(table, action, inputs);
+  } catch (e) {
+    if (!isClash(e)) throw e;
+  }
+  try {
+    return await writeRowsOnce(table, action, inputs);
+  } catch (e) {
+    if (isClash(e)) throw new Error(`Another run is saving to “${table.name}” at the same time. Run this one again.`);
+    throw e;
+  }
 }

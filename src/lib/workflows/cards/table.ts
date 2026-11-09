@@ -30,7 +30,9 @@ export const tableCard: CardImpl = {
           data[f.column.trim()] = r.value;
         }
       } else {
-        data = Object.fromEntries(Object.entries(item).filter(([, v]) => isScalar(v)));
+        // An item that is itself a row of a table carries its row id and status; those are not data to save back.
+        const fromRow = "_rowId" in item;
+        data = Object.fromEntries(Object.entries(item).filter(([k, v]) => isScalar(v) && k !== "_rowId" && !(fromRow && k === "status")));
       }
       const rawKey = item[keyField] ?? data[keyField];
       const key = rawKey === undefined || rawKey === null ? "" : normalizeKey(rawKey);

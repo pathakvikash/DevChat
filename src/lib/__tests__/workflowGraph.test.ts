@@ -136,7 +136,7 @@ describe("helpers", () => {
   it("adds a card after the last one", () => {
     const g = buildTemplate("news", "m", "t1").graph;
     const c = newCard(g, "agent");
-    expect(c.fromIds).toEqual(["post"]);
+    expect(c.fromIds).toEqual(["mark"]);
     expect(c.ui.position.x).toBeGreaterThan(g.nodes.at(-1)!.ui.position.x);
   });
 });

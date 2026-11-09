@@ -10,14 +10,14 @@ export async function GET() {
     const rows = await prisma.dataTable.findMany({
       where: { userId },
       orderBy: { updatedAt: "desc" },
-      select: { id: true, name: true, updatedAt: true, _count: { select: { rows: true } } },
+      select: { id: true, name: true, private: true, updatedAt: true, _count: { select: { rows: true } } },
     });
     // A table's own updatedAt only moves when its columns do, so the newest row counts too.
     const list = await Promise.all(
       rows.map(async (t) => {
         const last = await prisma.dataTableRow.findFirst({ where: { tableId: t.id }, orderBy: { updatedAt: "desc" }, select: { updatedAt: true } });
         const updatedAt = last && last.updatedAt > t.updatedAt ? last.updatedAt : t.updatedAt;
-        return { id: t.id, name: t.name, rowCount: t._count.rows, updatedAt };
+        return { id: t.id, name: t.name, private: t.private, rowCount: t._count.rows, updatedAt };
       }),
     );
     list.sort((a, b) => b.updatedAt.getTime() - a.updatedAt.getTime());

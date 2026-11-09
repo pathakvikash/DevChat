@@ -1,8 +1,8 @@
 "use client";
 
-import { use, useCallback, useEffect, useMemo, useState } from "react";
+import { use, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { Download, Search, Table2, Trash2 } from "lucide-react";
+import { Download, Lock, Search, Table2, Trash2 } from "lucide-react";
 import AppShell, { SidebarToggleButton } from "@/app/components/AppShell";
 import { useToast } from "@/app/components/Toast";
 import type { Column } from "@/lib/workflows/tables";
@@ -14,12 +14,62 @@ interface Table {
   columns: Column[];
   statuses: string[];
   rowCount: number;
+  private: boolean;
 }
 
 const inputClass = "focus-ring glass-input rounded-[var(--glass-radius-md)] px-3 py-2 text-sm";
 const LONG_PREVIEW = 80;
 // Sticky cells sit over the cells that scroll under them, so they need a solid background.
 const stickyCell = "sticky z-[1] bg-[var(--background)]";
+// The sticky first column stays narrow on a phone, so the columns after it stay in reach.
+const firstCol = "max-w-[10rem] sm:max-w-xs";
+/** The most rows one bulk action takes (the API's limit). */
+const MAX_PICK = 1000;
+const TOO_MANY = "You can change up to 1,000 rows at a time.";
+
+/** A checkbox with a 32px hit area around the 16px box. */
+function Tick({ label, checked, onChange }: { label: string; checked: boolean; onChange: (on: boolean) => void }) {
+  return (
+    <label className="flex h-8 w-8 cursor-pointer items-center justify-center">
+      <input type="checkbox" aria-label={label} checked={checked} onChange={(e) => onChange(e.target.checked)} className="h-4 w-4" />
+    </label>
+  );
+}
+
+/** A row's status. A mouse pick commits at once; arrow keys only move the choice, which commits on Enter or when focus leaves. */
+function StatusSelect({ label, value, options, onCommit }: { label: string; value: string; options: string[]; onCommit: (v: string) => void }) {
+  const [draft, setDraft] = useState(value);
+  const [seen, setSeen] = useState(value);
+  if (seen !== value) {
+    setSeen(value);
+    setDraft(value);
+  }
+  const keyed = useRef(false);
+  const commit = (v: string) => {
+    keyed.current = false;
+    if (v !== value) onCommit(v);
+  };
+  return (
+    <select
+      aria-label={label}
+      value={draft}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") commit(draft);
+        else if (e.key.startsWith("Arrow")) keyed.current = true;
+      }}
+      onChange={(e) => {
+        setDraft(e.target.value);
+        if (!keyed.current) commit(e.target.value);
+      }}
+      onBlur={() => commit(draft)}
+      className="focus-ring glass-input h-8 rounded-[var(--glass-radius-sm)] px-2 text-xs"
+    >
+      {options.map((o) => (
+        <option key={o} value={o}>{o}</option>
+      ))}
+    </select>
+  );
+}
 
 export default function TablePage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
@@ -83,7 +133,9 @@ export default function TablePage({ params }: { params: Promise<{ id: string }> 
   }, [fetchPage, toast]);
 
   async function loadMore() {
-    const page = cursor ? await fetchPage(cursor) : null;
+    // After the cursor row is deleted the server could not find it, so the cursor is the last row still on screen.
+    const last = rows?.at(-1)?.id;
+    const page = last ? await fetchPage(last) : null;
     if (!page) return toast("Couldn't load more rows. Try again.", "error");
     setRows((r) => [...(r ?? []), ...page.rows]);
     setCursor(page.nextCursor);
@@ -96,6 +148,15 @@ export default function TablePage({ params }: { params: Promise<{ id: string }> 
   const titleOf = (r: TableRow) => (first ? cellText(r.data[first]) : "").slice(0, 60) || "row";
   const visible = rows ?? [];
   const allPicked = visible.length > 0 && visible.every((r) => picked.has(r.id));
+  const tick = (id: string, on: boolean) => {
+    if (on && picked.size >= MAX_PICK && !picked.has(id)) return toast(TOO_MANY, "info");
+    setPicked((p) => {
+      const n = new Set(p);
+      if (on) n.add(id);
+      else n.delete(id);
+      return n;
+    });
+  };
 
   async function setStatusOf(ids: string[], next: string) {
     const res = await fetch(`/api/tables/${id}/rows`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ids, status: next }) });
@@ -149,6 +210,14 @@ export default function TablePage({ params }: { params: Promise<{ id: string }> 
               <p className="text-xs text-zinc-400">
                 {table.rowCount.toLocaleString("en-US")} {table.rowCount === 1 ? "row" : "rows"}
               </p>
+              {table.private && (
+                <p className="mt-1 flex items-start gap-1.5 text-xs text-zinc-300">
+                  <span className="glass inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 font-medium">
+                    <Lock size={11} aria-hidden="true" /> Private
+                  </span>
+                  <span>Filled from chats, MCP or a folder. Workflows can&apos;t send what is in it to the web.</span>
+                </p>
+              )}
             </div>
             <a href={`/api/tables/${id}/export`} download className="focus-ring glass-button inline-flex h-9 items-center gap-1.5 rounded-[var(--glass-radius-md)] px-3 text-sm font-medium">
               <Download size={14} aria-hidden="true" /> Export CSV
@@ -199,17 +268,18 @@ export default function TablePage({ params }: { params: Promise<{ id: string }> 
                 <thead className="sticky top-0 z-[2] bg-[var(--background)] text-xs text-zinc-300">
                   <tr className="border-b border-[var(--glass-border)]">
                     <th scope="col" className={`${stickyCell} left-0 w-10 px-3 py-2`}>
-                      <input
-                        type="checkbox"
-                        aria-label="Select all rows"
+                      <Tick
+                        label="Select all rows"
                         checked={allPicked}
-                        onChange={(e) => setPicked(e.target.checked ? new Set(visible.map((r) => r.id)) : new Set())}
-                        className="h-4 w-4"
+                        onChange={(on) => {
+                          if (on && visible.length > MAX_PICK) toast(TOO_MANY, "info");
+                          setPicked(on ? new Set(visible.slice(0, MAX_PICK).map((r) => r.id)) : new Set());
+                        }}
                       />
                     </th>
                     {layout.map((l) =>
                       l.col ? (
-                        <th key={l.col.key} scope="col" className={`px-3 py-2 font-medium ${l.first ? `${stickyCell} left-10` : ""}`}>
+                        <th key={l.col.key} scope="col" className={`px-3 py-2 font-medium ${l.first ? `${stickyCell} left-10 ${firstCol}` : ""}`}>
                           {l.col.label || l.col.key}
                         </th>
                       ) : (
@@ -222,41 +292,19 @@ export default function TablePage({ params }: { params: Promise<{ id: string }> 
                   {visible.map((r) => (
                     <tr key={r.id} className="border-b border-[var(--glass-border)] last:border-b-0">
                       <td className={`${stickyCell} left-0 px-3 py-2`}>
-                        <input
-                          type="checkbox"
-                          aria-label={`Select ${titleOf(r)}`}
-                          checked={picked.has(r.id)}
-                          onChange={(e) =>
-                            setPicked((p) => {
-                              const n = new Set(p);
-                              if (e.target.checked) n.add(r.id);
-                              else n.delete(r.id);
-                              return n;
-                            })
-                          }
-                          className="h-4 w-4"
-                        />
+                        <Tick label={`Select ${titleOf(r)}`} checked={picked.has(r.id)} onChange={(on) => tick(r.id, on)} />
                       </td>
                       {layout.map((l) => {
                         if (!l.col) {
                           return (
                             <td key="status" className="px-3 py-2">
-                              <select
-                                aria-label={`Status of ${titleOf(r)}`}
-                                value={r.status}
-                                onChange={(e) => void setStatusOf([r.id], e.target.value)}
-                                className="focus-ring glass-input rounded-[var(--glass-radius-sm)] px-2 py-1 text-xs"
-                              >
-                                {statuses.map((s) => (
-                                  <option key={s} value={s}>{s}</option>
-                                ))}
-                              </select>
+                              <StatusSelect label={`Status of ${titleOf(r)}`} value={r.status} options={statuses} onCommit={(v) => void setStatusOf([r.id], v)} />
                             </td>
                           );
                         }
                         const c = l.col;
                         const text = cellText(r.data[c.key]);
-                        const sticky = l.first ? `${stickyCell} left-10` : "";
+                        const sticky = l.first ? `${stickyCell} left-10 ${firstCol}` : "max-w-xs";
                         let body: React.ReactNode = text;
                         if (c.type === "url" && isHttpUrl(text)) {
                           body = (
@@ -281,7 +329,7 @@ export default function TablePage({ params }: { params: Promise<{ id: string }> 
                           );
                         }
                         return (
-                          <td key={c.key} title={text} className={`max-w-xs truncate px-3 py-2 text-zinc-200 ${sticky}`}>
+                          <td key={c.key} title={text} className={`truncate px-3 py-2 text-zinc-200 ${sticky}`}>
                             {body}
                           </td>
                         );
