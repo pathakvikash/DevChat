@@ -23,7 +23,8 @@ export const runStatus = (state: RunState): DisplayStatus => (state === "succeed
 export function cardStatus(card: CardRun | undefined, runState?: RunState): DisplayStatus {
   if (!card) return "notrun";
   if (card.status === "succeeded") return "done";
-  if (card.status === "running" && runState && runState !== "running" && runState !== "waiting") return runState === "cancelled" ? "cancelled" : "interrupted";
+  // A card still running, or still waiting for the user, in a run that ended was stopped with it.
+  if ((card.status === "running" || card.status === "waiting") && runState && runState !== "running" && runState !== "waiting") return runState === "cancelled" ? "cancelled" : "interrupted";
   return card.status;
 }
 

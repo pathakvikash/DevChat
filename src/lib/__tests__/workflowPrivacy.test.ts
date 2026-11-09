@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { emptyGraph, type FlowNode, type WorkflowGraph } from "@/lib/workflows/graph";
-import { privateKindsOf, PRIVATE_KINDS, joinKinds, kindsText, parseKinds, planKinds, webAfter } from "@/lib/workflows/privacy";
+import { privateKindsOf, PRIVATE_KINDS, joinKinds, kindsText, parseKinds, planKinds, readsTable, webAfter } from "@/lib/workflows/privacy";
 
 const node = (id: string, type: FlowNode["type"], fromIds: string[], x: number, config: Record<string, unknown> = {}): FlowNode => ({ id, type, fromIds, config, ui: { label: id, position: { x, y: 0 } } });
 const graphOf = (...nodes: FlowNode[]): WorkflowGraph => ({ ...emptyGraph("m"), nodes: [emptyGraph().nodes[0], ...nodes] });
@@ -46,6 +46,47 @@ describe("planKinds", () => {
   it("webAfter lists the web cards downstream", () => {
     const g = graphOf(save("a", ["trigger"], 1, "t1"), node("page", "fetch", ["a"], 2, { url: "https://a.test" }), node("side", "fetch", ["trigger"], 3, { url: "https://a.test" }));
     expect(webAfter(g, "a", ["chats"]).map((n) => n.id)).toEqual(["page"]);
+  });
+});
+
+const pick = (id: string, from: string[], x: number, tableId: string) => node(id, "pickRows", from, x, { tableId });
+
+describe("Pick rows on a private table (phase 3)", () => {
+  const known = new Map([["t1", ["chats"]], ["t2", [] as string[]]]);
+
+  it("a Pick rows card on a private table is a reader: a Save after it takes its kinds, as after a Save card", () => {
+    const p = planKinds(graphOf(pick("p", ["trigger"], 1, "t1"), save("copy", ["p"], 2, "t2")), known);
+    expect(p.get("t2")).toEqual(["chats"]);
+    // the same as a Save card on that table
+    expect(planKinds(graphOf(save("s", ["trigger"], 1, "t1"), save("copy", ["s"], 2, "t2")), known).get("t2")).toEqual(["chats"]);
+  });
+
+  it("through a chain: a table filled from a picked private table passes its kinds on again", () => {
+    const p = planKinds(graphOf(pick("p", ["trigger"], 1, "t1"), save("a", ["p"], 2, "t2"), save("b", ["a"], 3, "t3")), new Map([...known, ["t3", [] as string[]]]));
+    expect(p.get("t3")).toEqual(["chats"]);
+  });
+
+  it("a Pick rows card only reads: it never marks its own table, nor a table beside it", () => {
+    const p = planKinds(graphOf(reader, pick("p", ["read"], 2, "t2"), save("side", ["trigger"], 3, "t1")), new Map([["t1", [] as string[]], ["t2", [] as string[]]]));
+    expect(p.get("t2")).toEqual([]); // the chat reader came before the Pick card, but only a Save card fills a table
+    expect(p.get("t1")).toEqual([]);
+  });
+
+  it("a Pick rows card on a table with no kinds adds nothing", () => {
+    expect(planKinds(graphOf(pick("p", ["trigger"], 1, "t2"), save("copy", ["p"], 2, "t1")), new Map([["t1", [] as string[]], ["t2", [] as string[]]])).get("t1")).toEqual([]);
+  });
+
+  it("webAfter counts the cards that reach the web after a Pick rows card, Job boards included", () => {
+    const g = graphOf(pick("p", ["trigger"], 1, "t1"), node("jobs", "jobBoards", ["p"], 2, { boards: "jobs.lever.co/x" }), page("page", ["p"], 3), node("elsewhere", "jobBoards", ["trigger"], 4, { boards: "jobs.lever.co/x" }));
+    expect(webAfter(g, "p", ["chats"]).map((n) => n.id).sort()).toEqual(["jobs", "page"]);
+    // MCP-only data is not to reach the open web either, and Job boards is the open web
+    expect(webAfter(g, "p", ["mcp"]).map((n) => n.id).sort()).toEqual(["jobs", "page"]);
+  });
+
+  it("readsTable names the table of a Save or Pick rows card, and nothing else", () => {
+    expect(readsTable(pick("p", [], 1, "t9"))).toBe("t9");
+    expect(readsTable(save("s", [], 1, "t8"))).toBe("t8");
+    expect(readsTable(page("f", [], 1))).toBe("");
   });
 });
 

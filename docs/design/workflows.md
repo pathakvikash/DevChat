@@ -878,6 +878,13 @@ Sanity mode uses no network and no real model, following the precedent at `src/l
 
 ### Phase 3: Pause, Jobs
 
+**Status: built (2026-11-10).** `jobBoards.test.ts`, the extended `workflowRunner.test.ts` and `workflowPrivacy.test.ts`, `e2e/workflow-jobs.spec.ts` and the pick-mode baselines (`e2e/workflow-jobs-visual.spec.ts`) pass. Not yet done: the "real boards with a real model" run in Done when below. Decisions made while building it:
+- **The Jobs template** is `trigger → Job boards → Save to Job leads → Pick jobs → Draft application → Save drafts` (no score card). Pick jobs offers the rows still `new`, so an earlier run's leads can be picked again. The profile is the variable `profile` ("Your profile (paste your CV or a short summary)"), read by the Draft card.
+- **Pick rows `statuses`** is one comma-separated text field (`"new"`), not a list, so the config panel needs no new control. `sortBy` sorts the pick-mode grid; `maxPick` and `setStatus` are as in section 4.
+- **Private tables.** A Pick rows card on a table with `privateFrom` is a private reader, like a Save card on it: `planKinds` counts it as a reader of the table's kinds, `webAfter` refuses any card that reaches the web after it (Job boards included, which counts as the open web), and `advanceRun` checks again right before it runs and again at Continue. It never marks its own table.
+- **The resume route** (`POST /api/workflow-runs/[id]/resume`) takes `{ nodeId, rowIds }` for a waiting run and no body for a failed or interrupted one. Continue is owner-gated like the other run routes, needs the waiting card, at most `maxPick` unique rows that belong to the card's table and still have an offered status (else 400, nothing changes), and wins one race: the run, the card and the rows change in one transaction, so a second request gets a 409.
+- **Spike results** (recorded in `e2e/fixtures/workflows/`, trimmed to four jobs each). Greenhouse `?content=true` has `content` as HTML escaped once more (`&lt;div&gt;`) and `company_name`; Ashby has `descriptionPlain` and no company name, and lists jobs with `isListed: false`, which are dropped; Lever has `descriptionPlain`, `lists[]` (requirements as HTML) and `additionalPlain`, and no company name. Board responses can pass 2 MB with `content=true`, so the Job boards card reads up to 8 MB (the hosts are fixed; `safeFetch` still checks every address).
+
 **Files**
 - `cards/{pickRows,jobBoards}.ts`, the `resume` route, the waiting banner, table pick mode, the Jobs template and presets, `e2e/fixtures/workflows/{greenhouse,ashby,lever}-*.json`.
 - Spike first: record one real response from each board API into the fixtures and confirm the description fields.

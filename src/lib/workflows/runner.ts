@@ -5,7 +5,7 @@ import { resolveAgentModel, resolveMcpTools } from "./cards/agent";
 import { ownedEnabledServer } from "./cards/mcpTool";
 import { canUseHostTools, HOST_TOOLS_REFUSED } from "@/lib/hostAccess";
 import { CATALOG, DEFAULT_MAX_ITEMS, MAX_ITEMS_LIMIT, OUTPUT_CAP_BYTES, parseConfig } from "./catalog";
-import { kindsText, parseKinds, joinKinds, planKinds, privateTableMessage, webAfter, type PrivateKind } from "./privacy";
+import { parseKinds, joinKinds, planKinds, privateTableMessage, readsTable, webAfter, type PrivateKind } from "./privacy";
 import {
   checkGraph,
   parseGraph,
@@ -17,6 +17,7 @@ import {
   type WorkflowGraph,
 } from "./graph";
 import { renderTemplate, type TemplateContext } from "./template";
+import { loadTable, offeredRows } from "./tables";
 
 export const RUN_LIMIT_MS = 30 * 60_000;
 export const HEARTBEAT_MS = 15_000;
@@ -211,6 +212,8 @@ async function execCard(
     if (!impl) throw new Error(`Unknown card type "${node.type}"`);
     const base = { ...baseCtx, node, config };
     const o = CATALOG[node.type].perItem && config.perItem === true ? await runItems({ impl, base, onProgress, resume: extra.resume, tokens: extra.tokens }) : await impl.run(base);
+    // Pick rows: paused until the user hands it rows (continueRun).
+    if (o.wait) return { status: "waiting", startedAt, waiting: o.wait, ...(o.warnings?.length ? { warnings: o.warnings.slice(0, 10) } : {}) };
     return {
       status: o.skip ? "skipped" : "succeeded",
       startedAt,
@@ -304,9 +307,9 @@ export async function advanceRun(runId: string, deps: RunnerDeps = defaultDeps):
         if (!(await save())) return;
         continue;
       }
-      // Private tables are checked again right before the Save card runs: another run may have marked the table since
-      // Start, and a Resume never went through the Start checks.
-      if (node.type === "table") {
+      // Private tables are checked again right before a Save or Pick rows card runs: another run may have marked the table
+      // since Start, and a Resume never went through the Start checks.
+      if (node.type === "table" || node.type === "pickRows") {
         // If the check itself fails, the card does not run: it cannot be shown that the table is safe to read.
         const blocked = await privateBlock(run.userId, graph, node).catch(() => "Couldn't check whether this table holds private data. Run it again.");
         if (blocked) {
@@ -344,6 +347,11 @@ export async function advanceRun(runId: string, deps: RunnerDeps = defaultDeps):
       // the run turns Interrupted, and Resume picks it up.
       if (entry.stopping) return;
       nodes[node.id] = result;
+      // Waiting for the user: the run stops here, saved as Waiting. It has no time limit; continueRun picks it up.
+      if (result.status === "waiting") {
+        await save({ state: "waiting" });
+        return;
+      }
       inputTokens += result.usage?.inputTokens ?? 0;
       outputTokens += result.usage?.outputTokens ?? 0;
       if (timedOut) {
@@ -415,11 +423,11 @@ export async function preflight(userId: string, graph: WorkflowGraph): Promise<{
         add(n.id, `${label}: ${message(e)}`);
       }
     }
-    if (n.type === "table" && n.config.tableId) {
+    if ((n.type === "table" || n.type === "pickRows") && n.config.tableId) {
       const table = tables.get(String(n.config.tableId));
       if (!table) add(n.id, `${label}: that table no longer exists`);
-      // A card on a private table (counting what this very graph is about to put in it) is a private-data reader:
-      // no card that reaches the web may come after it.
+      // A Save or Pick rows card on a private table (counting what this very graph is about to put in it) is a
+      // private-data reader: no card that reaches the web may come after it.
       else {
         const kinds = plan.get(String(n.config.tableId)) ?? [];
         if (kinds.length > 0) for (const m of webAfter(graph, n.id, kinds)) add(m.id, privateTableMessage(table.name, kinds, m));
@@ -445,7 +453,7 @@ export async function preflight(userId: string, graph: WorkflowGraph): Promise<{
 /** The user's tables that the graph's Save cards point at: name and the kinds of private data each holds now. */
 async function tableKinds(userId: string, graph: WorkflowGraph): Promise<Map<string, { name: string; kinds: PrivateKind[] }>> {
   const out = new Map<string, { name: string; kinds: PrivateKind[] }>();
-  for (const id of new Set(graph.nodes.map((n) => (n.type === "table" ? String(n.config.tableId ?? "") : "")).filter(Boolean))) {
+  for (const id of new Set(graph.nodes.map(readsTable).filter(Boolean))) {
     const t = await prisma.dataTable.findFirst({ where: { id, userId }, select: { id: true, name: true, privateFrom: true } });
     if (t) out.set(id, { name: t.name, kinds: parseKinds(t.privateFrom) });
   }
@@ -533,6 +541,73 @@ export async function resumeRun(userId: string, runId: string): Promise<StartRes
     data: { state: "running", error: null, endedAt: null, heartbeatAt: new Date(), nodes: JSON.stringify(nodes), attempt: { increment: 1 } },
   });
   if (r.count === 0) return { ok: false, status: 409, error: "Another request already resumed this run." };
+  return { ok: true, runId };
+}
+
+/**
+ * Continue (6.4): the user ticked rows for the waiting Pick rows card. The ids are checked again here: they must be rows
+ * of the card's table that still have one of the offered statuses, and no more than `maxPick`. Zero rows is allowed
+ * (the cards after it are skipped with "Nothing picked"). The run, the card and the rows change in one transaction, and
+ * only the first request wins: a second one finds the run no longer waiting and gets a 409.
+ * The caller then runs `after(() => advanceRun(runId))`.
+ */
+export async function continueRun(userId: string, runId: string, nodeId: string, rowIds: unknown): Promise<StartResult> {
+  const run = await prisma.workflowRun.findFirst({ where: { id: runId, userId } });
+  if (!run) return { ok: false, status: 404, error: "Run not found" };
+  if (run.state !== "waiting") return { ok: false, status: 409, error: "This run is not waiting for you." };
+  const capped = await checkCaps(userId, run.workflowId, runId);
+  if (capped) return capped;
+  const nodes: Record<string, CardRun> = JSON.parse(run.nodes || "{}");
+  const waiting = nodes[nodeId];
+  if (waiting?.status !== "waiting" || !waiting.waiting) return { ok: false, status: 409, error: "That card is not the one waiting." };
+  const w = waiting.waiting;
+  if (!Array.isArray(rowIds) || !rowIds.every((x) => typeof x === "string")) return { ok: false, status: 400, error: "Send rowIds: a list of row ids." };
+  const ids = [...new Set(rowIds as string[])];
+  if (ids.length > w.maxPick) return { ok: false, status: 400, error: `Pick at most ${w.maxPick} ${w.maxPick === 1 ? "row" : "rows"}.` };
+
+  const table = await loadTable(userId, w.tableId);
+  if (!table) return { ok: false, status: 400, error: "The table no longer exists." };
+  const picked = ids.length > 0 ? await offeredRows(table.id, w.statuses, ids) : [];
+  if (picked.length !== ids.length) {
+    return { ok: false, status: 400, error: "Some of those rows are not in this table or no longer have a status that is on offer. Reload the table and pick again." };
+  }
+
+  const graph = parseGraph(run.graph);
+  const node = graph.nodes.find((n) => n.id === nodeId);
+  // The table may have turned private since the card started waiting: the run fails here, as it would at the card.
+  const blocked = node ? await privateBlock(userId, graph, node).catch(() => "Couldn't check whether this table holds private data. Try again.") : null;
+  const now = new Date().toISOString();
+  if (blocked) {
+    nodes[nodeId] = { status: "failed", startedAt: waiting.startedAt, endedAt: now, error: blocked };
+    const r = await prisma.workflowRun.updateMany({
+      where: { id: runId, userId, state: "waiting" },
+      data: { nodes: JSON.stringify(nodes), state: "failed", error: `${node?.ui.label ?? nodeId} failed: ${blocked}`, endedAt: new Date() },
+    });
+    return { ok: false, status: 409, error: r.count > 0 ? blocked : "Another request already continued this run." };
+  }
+
+  const items = picked.map((r) => ({ ...r, ...(w.setStatus ? { status: w.setStatus } : {}) }));
+  nodes[nodeId] = {
+    status: "succeeded",
+    startedAt: waiting.startedAt,
+    endedAt: now,
+    output: { items, count: items.length },
+    ...(items.length === 0 ? { stopReason: "Nothing picked" } : {}),
+  };
+  const won = await prisma.$transaction(async (tx) => {
+    const r = await tx.workflowRun.updateMany({
+      where: { id: runId, userId, state: "waiting" },
+      // attempt + 1: a loop that is somehow still winding down can no longer save over this one.
+      data: { nodes: JSON.stringify(nodes), state: "running", error: null, heartbeatAt: new Date(), attempt: { increment: 1 } },
+    });
+    if (r.count === 0) return false;
+    if (items.length > 0 && w.setStatus) {
+      await tx.dataTableRow.updateMany({ where: { tableId: table.id, id: { in: ids } }, data: { status: w.setStatus } });
+      if (!table.statuses.includes(w.setStatus)) await tx.dataTable.update({ where: { id: table.id }, data: { statuses: JSON.stringify([...table.statuses, w.setStatus]) } });
+    }
+    return true;
+  });
+  if (!won) return { ok: false, status: 409, error: "Another request already continued this run." };
   return { ok: true, runId };
 }
 
