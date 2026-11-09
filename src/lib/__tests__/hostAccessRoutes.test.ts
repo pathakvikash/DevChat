@@ -25,7 +25,7 @@ vi.mock("@/lib/settings", () => ({
   deleteSettingsKey: vi.fn(),
   maskKey: vi.fn(),
 }));
-vi.mock("@/lib/cliProviders", () => ({ dropParkedRuns: vi.fn() }));
+vi.mock("@/lib/cliProviders", () => ({ dropParkedRuns: vi.fn(), findCliBins: vi.fn(async () => new Set()) }));
 
 import { prisma } from "@/lib/db";
 import { resetHostAccessCache } from "@/lib/hostAccess";

@@ -4,7 +4,6 @@ import { deleteAllChats, openChat } from "./helpers";
 
 // The "Explain a project or feature" sample flows. The GitHub API is answered from e2e/fixtures/workflows (sanity mode),
 // and the mock model replies with a small explainer that has a mermaid flowchart.
-const SHOTS = "/private/tmp/claude-501/-Users-vikash-personal-vp-github-DevChat/f0f6fa07-8377-4b2a-8301-ddbb2a25e105/scratchpad/wf-explainer";
 type Graph = { defaultModel: string; vars: { key: string; value: string }[]; nodes: { id: string; config: Record<string, unknown> }[] };
 const FOLDER = path.join(__dirname, "fixtures/project");
 
@@ -66,13 +65,13 @@ test("Explain a GitHub repo runs on the stubbed GitHub API and posts a chat with
   expect(info.output.url).toBe("https://api.github.com/repos/acme/widgets");
   expect(info.output.data.full_name).toBe("acme/widgets");
   const tree = await (await request.get(`/api/workflow-runs/${runId}?node=tree`)).json();
-  expect(tree.output.url).toBe("https://api.github.com/repos/acme/widgets/git/trees/HEAD?recursive=1");
+  expect(tree.output.url).toBe("https://api.github.com/repos/acme/widgets/git/trees/HEAD");
 
   const post = await (await request.get(`/api/workflow-runs/${runId}?node=post`)).json();
   await openChat(page, post.output.conversationId);
   await expect(page.getByRole("img", { name: "Flowchart diagram" }).locator("svg")).toBeVisible();
   await expect(page.getByText("Mock explainer (deterministic)")).toBeVisible();
-  await page.screenshot({ path: path.join(SHOTS, "explainer-reply-in-chat.png") });
+  await page.screenshot({ path: test.info().outputPath("explainer-reply-in-chat.png") });
 });
 
 test("Explain a project folder asks for a model and a folder until both are picked", async ({ page, request }) => {

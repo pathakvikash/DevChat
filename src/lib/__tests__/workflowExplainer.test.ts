@@ -1,6 +1,10 @@
 import { describe, it, expect } from "vitest";
 import { checkGraph, validateStructure } from "@/lib/workflows/graph";
-import { buildTemplate, isTemplateKind, normalizeRepo, TEMPLATE_OPTIONS } from "@/lib/workflows/templates";
+import { buildTemplate, isTemplateKind, TEMPLATE_OPTIONS } from "@/lib/workflows/templates";
+import { normalizeRepo, varValues } from "@/lib/workflows/vars";
+import { parseGraph } from "@/lib/workflows/graph";
+import { linkTarget, tooDeeplyNested } from "@/lib/markdownGuard";
+import { readableText } from "@/lib/net/htmlText";
 
 const errors = (g: ReturnType<typeof buildTemplate>["graph"]) => checkGraph(g).filter((i) => !i.warning);
 
@@ -85,5 +89,55 @@ describe("the New workflow menu entries", () => {
     expect(local).toMatchObject({ label: "Explain a project folder", local: true });
     expect(local.description).toMatch(/^Local only/);
     expect(isTemplateKind("explain-folder") && isTemplateKind("explain-repo") && !isTemplateKind("nope")).toBe(true);
+  });
+});
+
+describe("the repo variable format", () => {
+  it("the template marks its variable, reads a URL as owner/name, and keeps the mark through parseGraph", () => {
+    const g = parseGraph(JSON.stringify(buildTemplate("explain-repo", "m").graph));
+    expect(g.vars.find((v) => v.key === "repo")).toMatchObject({ format: "githubRepo", value: "octocat/Hello-World" });
+    expect(varValues([{ key: "repo", label: "", value: "https://github.com/a/b/", format: "githubRepo" }])).toEqual({ repo: "a/b" });
+  });
+
+  it("a plain variable named repo is untouched, and the focus variable is not shared between graphs", () => {
+    expect(varValues([{ key: "repo", label: "", value: "https://github.com/a/b/" }])).toEqual({ repo: "https://github.com/a/b/" });
+    const a = buildTemplate("explain-repo").graph;
+    const b = buildTemplate("explain-repo").graph;
+    expect(a.vars[1]).not.toBe(b.vars[1]);
+  });
+
+  it("lists only the top level of the tree and points the agent at /contents/ for folders", () => {
+    const g = buildTemplate("explain-repo").graph;
+    expect(String(g.nodes.find((n) => n.id === "tree")!.config.url)).toBe("https://api.github.com/repos/{{vars.repo}}/git/trees/HEAD");
+    expect(String(g.nodes.find((n) => n.id === "explain")!.config.instructions)).toContain("/contents/<folder>");
+  });
+});
+
+describe("tooDeeplyNested", () => {
+  it("catches the attack strings and leaves ordinary markdown alone", () => {
+    expect(tooDeeplyNested("- ".repeat(2000))).toBe(true);
+    expect(tooDeeplyNested(">".repeat(4000))).toBe(true);
+    expect(tooDeeplyNested("1. ".repeat(40))).toBe(true);
+    expect(tooDeeplyNested("- a\n  - b\n    - c\n> quote\n> > nested\n1. one\n2. two\n\n# Title\ntext")).toBe(false);
+    const big = "- item\n".repeat(3000);
+    const t = performance.now();
+    expect(tooDeeplyNested(big)).toBe(false);
+    expect(performance.now() - t).toBeLessThan(50);
+  });
+});
+
+describe("linkTarget", () => {
+  it("shows the host, or the whole address when there is none", () => {
+    expect(linkTarget("https://evil.example/x?d=secret")).toBe("evil.example");
+    expect(linkTarget("/relative/path")).toBe("/relative/path");
+  });
+});
+
+describe("readableText", () => {
+  const tsx = "const A = <T,>(p: Props<T>) => {\n  return <div className=\"x\">{p.a}</div>;\n};\n";
+  it("keeps plain text, newlines and <Tags> as they are, and strips markup only from HTML or XML", () => {
+    expect(readableText(tsx, "text/plain; charset=utf-8")).toBe(tsx);
+    expect(readableText("<p>Hi <b>there</b></p>", "text/html")).toBe("Hi there");
+    expect(readableText("<a>x</a>", "application/xml")).toBe("x");
   });
 });

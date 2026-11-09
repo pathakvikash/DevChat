@@ -103,7 +103,7 @@ export default function MessageContent({
                 ))}
                 </>
               ) : (
-                <MarkdownMessage content={(p as any).text} streaming={isStreaming} />
+                <MarkdownMessage content={(p as any).text} streaming={isStreaming} fromWorkflow={isUser && markdown} />
               )}
             </div>
           );

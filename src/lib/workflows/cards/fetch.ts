@@ -2,7 +2,7 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { isSanityMode } from "@/lib/sanityMode";
 import { safeFetch, type SafeFetchResult } from "@/lib/net/safeFetch";
-import { htmlToText } from "@/lib/net/htmlText";
+import { readableText } from "@/lib/net/htmlText";
 import { parseFeed } from "../feed";
 import { renderText } from "../template";
 import { sleep } from "./webSearch";
@@ -27,7 +27,17 @@ async function get(url: string, signal: AbortSignal): Promise<SafeFetchResult> {
     if (signal.aborted) throw new Error("Cancelled");
     res = await safeFetch(url, { headers: HEADERS, signal });
   }
-  if (!res.ok) throw new Error(`HTTP ${res.status} for ${url}`);
+  if (!res.ok) {
+    // GitHub explains itself in a JSON "message" (a rate limit, a missing repo).
+    let why = "";
+    try {
+      const m = JSON.parse(res.text)?.message;
+      if (typeof m === "string") why = `: ${m.slice(0, 200)}`;
+    } catch {
+      // not JSON: the status alone
+    }
+    throw new Error(`HTTP ${res.status}${why} for ${url}`);
+  }
   return res;
 }
 
@@ -54,7 +64,7 @@ export const fetchCard: CardImpl = {
       }
       return { output: { url: res.url, data }, warnings };
     }
-    const text = res.contentType.includes("json") ? res.text : htmlToText(res.text);
+    const text = readableText(res.text, res.contentType);
     if (text.length > PAGE_CHARS) warnings.push(`The page text was cut to ${PAGE_CHARS.toLocaleString("en-US")} characters`);
     return { output: { url: res.url, text: text.slice(0, PAGE_CHARS) }, warnings };
   },

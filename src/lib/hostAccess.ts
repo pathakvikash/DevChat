@@ -1,4 +1,6 @@
 import { prisma } from "@/lib/db";
+import { findCliBins } from "@/lib/cliProviders";
+import { isSanityMode } from "@/lib/sanityMode";
 
 /** Tools that run on the server's own machine (Claude Code and the other CLIs, its folders, its home
  *  directory) belong to the server's owner. OWNER_EMAILS (comma-separated) lists who that is; unset means
@@ -31,10 +33,16 @@ export async function canUseHostTools(userId: string): Promise<boolean> {
   return ok;
 }
 
-/** Whether this user can use a command-line model with a folder here: the server's owner, on a machine that has them (not Vercel). */
+/** Whether this user can use a Claude Code or OpenCode model with a folder here: the server's owner, on a machine where one is installed.
+ *  Sanity mode counts as installed (the tests have none). */
 export async function hostToolsHere(userId: string): Promise<boolean> {
-  return !process.env.VERCEL && (await canUseHostTools(userId));
+  if (!(await canUseHostTools(userId))) return false;
+  if (isSanityMode()) return true;
+  const bins = await findCliBins();
+  return bins.has("claude-code") || bins.has("opencode");
 }
+
+export const FOLDER_TEMPLATE_REFUSED = "Explaining a folder needs Claude Code or OpenCode on this server.";
 
 /** For tests: forget cached answers and the one-time warning. */
 export function resetHostAccessCache() {

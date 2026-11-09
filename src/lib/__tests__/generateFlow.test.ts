@@ -325,6 +325,23 @@ describe("generateFlow hardening", () => {
     expect(validateStructure(graph)).toEqual([]);
   });
 
+  it("a model can't give a variable a format; the same variable of the current flow keeps its own", async () => {
+    const current = {
+      version: 1 as const, defaultModel: "mock/gen", maxRunTokens: 500_000,
+      vars: [{ key: "repo", label: "Repo", value: "a/b", format: "githubRepo" as const }],
+      nodes: [
+        { id: "trigger", type: "trigger" as const, fromIds: [], config: {}, ui: { label: "Run", position: { x: 0, y: 0 } } },
+        { id: "a", type: "agent" as const, fromIds: ["trigger"], config: { instructions: "old" }, ui: { label: "A", position: { x: 0, y: 0 } } },
+      ],
+    };
+    const reply = { vars: [{ key: "repo", label: "Repo", value: "", format: "githubRepo" }, { key: "other", label: "Other", value: "", format: "githubRepo" }], nodes: [node("trigger", "trigger", []), node("a", "agent", ["trigger"], { instructions: "new" })] };
+    const { graph } = await generateFlow({ description: "change", model: scripted([fence(reply)]).model, current });
+    expect(graph.vars.find((v) => v.key === "repo")!.format).toBe("githubRepo");
+    expect(graph.vars.find((v) => v.key === "other")!.format).toBeUndefined();
+    const fresh = await generateFlow({ description: "new", model: scripted([fence(reply)]).model });
+    expect(fresh.graph.vars.every((v) => v.format === undefined)).toBe(true);
+  });
+
   describe("with phase 6 in the catalog", () => {
     const ui = { label: "x", position: { x: 0, y: 0 } };
     const current = {

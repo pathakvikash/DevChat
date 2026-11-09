@@ -406,17 +406,17 @@ Two platform-provided templates at the end of **New workflow**, built on the `fl
 
 | | Explain a GitHub repo | Explain a project folder (Local) |
 |---|---|---|
-| Cards | Run manually → Fetch the repo info → Fetch the file tree → Agent "Explain it" → Post to a chat | Run manually → Agent "Explain it" → Post to a chat |
-| Variables | `repo` (owner/name or a full URL, read as owner/name by the runner), `focus` | `focus` |
+| Cards | Run manually → Fetch the repo info → Fetch the top-level files → Agent "Explain it" → Post to a chat | Run manually → Agent "Explain it" → Post to a chat |
+| Variables | `repo` (owner/name or a full URL, the variable has `format: "githubRepo"`, which the runner and the editor preview read as owner/name; only the template sets it, a model can't, and a plain variable named `repo` is left alone), `focus` | `focus` |
 | Model | Any API model | Claude Code or OpenCode, picked by the user (Codex is blocked) |
-| Where | Local and Vercel | Local only: the owner, on a machine with the CLI (`hostToolsHere`); on Vercel the menu entry is disabled with a reason and the create call returns 403 |
+| Where | Local and Vercel. Public repos only; on Vercel it may be rate-limited (60 requests an hour per IP) | Local only: the owner, on a machine where Claude Code or OpenCode is installed (`hostToolsHere`). Otherwise the menu entry is disabled with a reason and the create call returns 403 "Explaining a folder needs Claude Code or OpenCode on this server." |
 | Agent tools | Fetch URL only | None. Read-only folder (`allowEdits` off) |
 
 The folder card carries `preset: "explain-folder"`, so `checkGraph` says "Pick a Claude Code or OpenCode model" and "Pick the project folder" until both are set; Run refuses with the same messages.
 
 **Leak rules.** The GitHub flow reads only the public web and nothing private, so there is no private reader and the rules in 5.3 pass with no warning. The folder flow has one private reader (a CLI model with a folder, run with its own web tools off) and nothing after it reaches the web: the only later card is Post to a chat. The card has no tools, so it is not also a web reader. Adding a Fetch, Web search or web tool after it is refused as for any folder card.
 
-**Limits.** GitHub's unauthenticated API allows about 60 requests an hour, so the flow makes two fetches and the agent is told to fetch at most 8 more URLs (the README, then a few files). The Fetch URL tool has no allowlist, so "only raw.githubusercontent.com and api.github.com" is an instruction, not a lock; fetched text is data and the agent is told to ignore any instructions in it. The tree is cut to the model's input budget, and a fetched file is cut at 8,000 characters, so line references from the GitHub flow are only given for lines the agent saw. In tests (sanity mode) the GitHub API answers come from `e2e/fixtures/workflows/repo-*.json` and the `mock/workflow` model replies with a small flowchart.
+**Limits.** GitHub's unauthenticated API allows about 60 requests an hour, so the flow makes two fetches (the repo info and the top-level files only: a recursive tree is about 240 bytes an entry and would break big repos) and the agent is told to fetch at most 8 more URLs, folder listings included (`/contents/<folder>`, then the README and a few files). The Fetch URL tool has no allowlist, so "only raw.githubusercontent.com and api.github.com" is an instruction, not a lock; fetched text is data and the agent is told to ignore any instructions in it (10.5). A fetched file is cut at 8,000 characters, so line references from the GitHub flow are only given for lines the agent saw. An HTTP error carries GitHub's own message (for example the rate limit). A folder card on a CLI model may work for 15 minutes and is told to read about 30 files at most. In tests (sanity mode) the GitHub API answers come from `e2e/fixtures/workflows/repo-*.json` and the `mock/workflow` model replies with a small flowchart. See 10.5 for how the posted message is drawn.
 
 ---
 
@@ -809,6 +809,7 @@ Section 6.10 lists it. There is no shell, no file writes without the folder opt-
 - Across the flow, no web reacher may come after a private reader; Save and Run refuse it with the same message. One exception: MCP followed by MCP is allowed with a warning, because both are servers the user set up (read issues, then post to Slack). The warning shows on the later card, as does the "A page could try to steer it" warning on an MCP card that follows a card reaching the open web.
 - The folder and `allowEdits` are cleared when the card's model is not a CLI model, and `allowEdits` is cleared with the folder.
 - A table that a Save to table card fills after a private reader (as defined above: chats, MCP or a CLI folder) is marked **private**, for good, and records which kinds it took in (`DataTable.privateFrom`: `chats`, `mcp`, `folder`). A Save card on a private table is itself a private reader of those kinds, so a copy into a second table inherits them. At Run, and again just before each Save card runs (which also covers Resume), a card on a private table with a web reacher after it is refused: "<table> holds private data (it was filled from chats), and <card> reaches the web …". The MCP-to-MCP exception holds for a table filled only from MCP: an MCP card may follow it, Fetch and Web search may not. The table list and view show a Private badge naming the sources.
+- A message a workflow posts to a chat is drawn as markdown, and every link in it shows its host after the text ("View diagram (evil.example)"), so link text can't hide an address that carries data. Text with 32 or more nested quote or list markers in a row is shown as plain text, in every chat, so it can't crash the markdown parser.
 - The worst outcome left is a bad draft, which the user reads before using.
 
 ### 10.6 Output safety

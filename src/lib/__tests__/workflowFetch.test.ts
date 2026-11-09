@@ -42,6 +42,13 @@ describe("the fetch card", () => {
     await expect(run({ as: "json" })).rejects.toThrow("not valid JSON");
   });
 
+  it("page: plain text keeps its newlines and <Tags>; the HTTP error carries GitHub's own message", async () => {
+    safeFetch.mockResolvedValue(res({ contentType: "text/plain", text: "a\nconst x = <T,>() => <div/>;" }));
+    expect((await run({})).output).toEqual({ url: "https://a.test/final", text: "a\nconst x = <T,>() => <div/>;" });
+    safeFetch.mockResolvedValue(res({ status: 403, ok: false, contentType: "application/json", text: '{"message":"API rate limit exceeded for 1.2.3.4."}' }));
+    await expect(run({})).rejects.toThrow("HTTP 403: API rate limit exceeded for 1.2.3.4. for https://a.test/x");
+  });
+
   it("fails on a feed it cannot read, an HTTP error and an empty URL", async () => {
     safeFetch.mockResolvedValue(res({ text: "<html>nope</html>" }));
     await expect(run({ as: "feed" })).rejects.toThrow(/RSS or Atom/);

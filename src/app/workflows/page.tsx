@@ -26,11 +26,11 @@ export default function WorkflowsPage() {
   const [menu, setMenu] = useState(false);
   const wrap = useRef<HTMLDivElement>(null);
   // Whether command-line models and folders can be used here; the local templates are disabled when not.
-  const [hostTools, setHostTools] = useState(true);
+  const [hostTools, setHostTools] = useState(false);
   useEffect(() => {
     fetch("/api/settings/keys")
       .then((res) => (res.ok ? res.json() : null))
-      .then((k) => k && setHostTools(k.hostTools !== false))
+      .then((k) => k && setHostTools(k.hostTools === true))
       .catch(() => {});
   }, []);
 
@@ -70,7 +70,10 @@ export default function WorkflowsPage() {
   async function create(template: TemplateKind) {
     setMenu(false);
     const res = await fetch("/api/workflows", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ template }) });
-    if (!res.ok) return toast("Couldn't create the workflow. Try again.", "error");
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      return toast(res.status === 403 && body.error ? body.error : "Couldn't create the workflow. Try again.", "error");
+    }
     router.push(`/workflows/${(await res.json()).id}`);
   }
 

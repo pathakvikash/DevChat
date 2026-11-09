@@ -4,12 +4,15 @@ import { createContext, useContext } from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
 import CodeBlock from "./CodeBlock";
 import MermaidBlock from "./MermaidBlock";
+import { linkTarget, tooDeeplyNested } from "@/lib/markdownGuard";
 import { openFenceBody, sameFence } from "@/lib/mermaidRender";
 
 interface MarkdownMessageProps {
   content: string;
   /** The reply is still arriving: a fence left open is shown as code, not drawn. */
   streaming?: boolean;
+  /** A workflow posted it: every link shows where it goes. */
+  fromWorkflow?: boolean;
 }
 
 // The body of the still-open fence while streaming (the components map below is module scope, so it reads this).
@@ -93,11 +96,29 @@ const components: Components = {
   hr: () => <hr className="my-4 border-[var(--glass-border)]" />,
 };
 
-export default function MarkdownMessage({ content, streaming = false }: MarkdownMessageProps) {
+// For a workflow's message: a link's text can't hide an address that carries data, so the host follows the text.
+const workflowComponents: Components = {
+  ...components,
+  a: ({ href, children }) => {
+    if (!href || /^(javascript|data|vbscript):/i.test(href)) return <span className="text-zinc-500">{children}</span>;
+    return (
+      <>
+        <a href={href} target="_blank" rel="noopener noreferrer" className="text-blue-500 hover:underline break-all">
+          {children}
+        </a>
+        <span className="ml-1 break-all text-xs text-zinc-400">({linkTarget(href)})</span>
+      </>
+    );
+  },
+};
+
+export default function MarkdownMessage({ content, streaming = false, fromWorkflow = false }: MarkdownMessageProps) {
+  // Absurdly nested quotes or lists would crash the parser: show them as they are.
+  if (tooDeeplyNested(content)) return <div className="whitespace-pre-wrap break-words">{content}</div>;
   return (
     <div className="prose prose-invert max-w-none min-w-0 overflow-hidden">
       <OpenFence.Provider value={streaming ? openFenceBody(content) : null}>
-        <ReactMarkdown components={components}>{content}</ReactMarkdown>
+        <ReactMarkdown components={fromWorkflow ? workflowComponents : components}>{content}</ReactMarkdown>
       </OpenFence.Provider>
     </div>
   );

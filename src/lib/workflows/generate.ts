@@ -204,13 +204,15 @@ const MAX_VARS = 20;
 const MAX_VAR_VALUE = 2000;
 
 /** `{ key, label, value }` for each usable variable: a valid, unique key; an empty value gets the current flow's. */
-function cleanVars(raw: unknown, current: WorkflowGraph | undefined): { key: string; label: string; value: string }[] {
-  const out = new Map<string, { key: string; label: string; value: string }>();
+function cleanVars(raw: unknown, current: WorkflowGraph | undefined): WorkflowGraph["vars"] {
+  const out = new Map<string, WorkflowGraph["vars"][number]>();
   for (const v of Array.isArray(raw) ? raw.filter(isRec) : []) {
     const key = typeof v.key === "string" ? v.key : "";
     if (!/^[\w-]+$/.test(key) || out.has(key)) continue;
     const value = (typeof v.value === "string" ? v.value : "") || current?.vars.find((c) => c.key === key)?.value || "";
-    out.set(key, { key, label: typeof v.label === "string" && v.label ? v.label.slice(0, 200) : key, value: value.slice(0, MAX_VAR_VALUE) });
+    // `format` is the user's (a template sets it): a model can't add it, and it stays on the same variable.
+    const format = current?.vars.find((c) => c.key === key)?.format;
+    out.set(key, { key, label: typeof v.label === "string" && v.label ? v.label.slice(0, 200) : key, value: value.slice(0, MAX_VAR_VALUE), ...(format ? { format } : {}) });
   }
   return [...out.values()].slice(0, MAX_VARS);
 }

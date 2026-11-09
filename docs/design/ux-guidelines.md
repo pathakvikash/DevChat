@@ -736,7 +736,7 @@ An inline card (2.3), one per helper. Up to 3 stack with the normal `my-2` gap. 
 - "Explain a GitHub repo" and "Explain a project folder" come last, after the other entries, in that order. Same row style as the others: label, then one description line in `text-zinc-400`.
 - The folder entry shows a small "Local" pill (`border-[var(--glass-border)]`, `text-zinc-400`) beside its label and starts its description "Local only." Where command-line models can't be used (Vercel, or not the server's owner) it is a disabled menu item at 60% opacity whose description says why ("Not available here: it needs Claude Code or OpenCode on the server's own machine."). A disabled item shows no hover and no pointer.
 - The two checks on that template read "Pick a Claude Code or OpenCode model" and "Pick the project folder" (the folder one appears once a command-line model is picked, because the folder field only exists for those models).
-- A chat message posted by a workflow is drawn as markdown (headings, lists, code, mermaid diagrams with the Show code and Copy toolbar), inside the same neutral "From <workflow>" card.
+- A chat message posted by a workflow is drawn as markdown (headings, lists, code, mermaid diagrams with the Show code and Copy toolbar), inside the same neutral "From <workflow>" card. Each link in it shows its host after the text, in `text-xs text-zinc-400` ("View diagram (evil.example)"; see workflows.md 10.5). The menu item stays disabled until the server has said command-line models are available.
 
 **Describe your flow** (`DescribeBox.tsx`, workflows 7):
 
