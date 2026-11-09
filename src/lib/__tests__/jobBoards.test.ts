@@ -301,6 +301,12 @@ describe("Job boards in the catalog", () => {
     expect(checkGraph(graph).filter((i) => i.nodeId === "draft")).toEqual([]);
   });
 
+  it("checkGraph does not crash on an unknown card type next to a Pick rows card", () => {
+    const { graph } = buildTemplate("jobs", "m", "t");
+    graph.nodes.push({ id: "odd", type: "nope" as never, fromIds: ["pick"], config: { perItem: true, items: "{{pick.items}}" }, ui: { label: "Odd", position: { x: 9, y: 0 } } });
+    expect(() => checkGraph(graph)).not.toThrow();
+  });
+
   it("a Job boards card with no valid address is an error on the card", () => {
     const { graph } = buildTemplate("jobs", "m", "t");
     graph.nodes[1].config.boards = "https://example.com/a";

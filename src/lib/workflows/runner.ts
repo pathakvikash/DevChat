@@ -80,9 +80,13 @@ export function capOutput(output: unknown): unknown {
   const size = (v: unknown) => JSON.stringify(v)?.length ?? 0;
   if (size(output) <= OUTPUT_CAP_BYTES) return output;
   if (isObject(output) && Array.isArray(output.items)) {
-    let items = output.items;
-    while (items.length > 1 && size({ ...output, items, truncated: true }) > OUTPUT_CAP_BYTES) items = items.slice(0, Math.ceil(items.length / 2));
-    return { ...output, items, truncated: true };
+    // Every top-level list is cut together: the Save card carries its rows in `inserted`/`updated` and again in `items`.
+    const lists = Object.keys(output).filter((k) => Array.isArray(output[k]));
+    let cut: Record<string, unknown> = { ...output, truncated: true };
+    while (size(cut) > OUTPUT_CAP_BYTES && lists.some((k) => (cut[k] as unknown[]).length > 1)) {
+      cut = { ...cut, ...Object.fromEntries(lists.map((k) => [k, (cut[k] as unknown[]).slice(0, Math.ceil((cut[k] as unknown[]).length / 2))])) };
+    }
+    return cut;
   }
   if (typeof output === "string") return output.slice(0, OUTPUT_CAP_BYTES);
   if (isObject(output)) {
@@ -219,7 +223,13 @@ async function execCard(
     if (isObject(output) && output.truncated === true) {
       const kept = Array.isArray(output.items) ? output.items.length : undefined;
       const total = isObject(o.output) && Array.isArray(o.output.items) ? o.output.items.length : undefined;
-      warnings.unshift(kept !== undefined && total !== undefined ? `Kept the first ${kept} of ${total} items: output over 200 KB` : "Output over 200 KB was cut");
+      warnings.unshift(
+        kept === undefined || total === undefined
+          ? "Output over 200 KB was cut"
+          : node.type === "table"
+            ? `Later cards get the first ${kept} of ${total} rows; all ${total} were saved.` // the rows are in the table, only this record is cut
+            : `Kept the first ${kept} of ${total} items: output over 200 KB`,
+      );
       // `count` says what was kept, not what was found.
       if (kept !== undefined && "count" in output) output.count = kept;
     }

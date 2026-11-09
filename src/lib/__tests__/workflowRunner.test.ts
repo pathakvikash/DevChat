@@ -1191,6 +1191,23 @@ describe("Pick rows: waiting and continue (phase 3)", () => {
     expect(a.warnings).toEqual([`Kept the first ${out.items.length} of 100 items: output over 200 KB`]);
   });
 
+  it("the Save card carries its rows twice (updated and items): 60 jobs with drafts are cut together under 200 KB, and the warning says all were saved", async () => {
+    const rows = Array.from({ length: 60 }, (_, i) => ({ _rowId: `r${i}`, status: "drafted", title: `Job ${i}`, url: `https://x.test/${i}`, description: "d".repeat(2500), coverLetter: "c".repeat(1500), cvNotes: "n".repeat(500), answers: "a".repeat(500) }));
+    const d = deps(() => ({ output: {} }));
+    d.deps.cards.table = { run: async () => ({ output: { inserted: [], updated: rows, items: [...rows], missing: [] } }) };
+    const save: FlowNode = { id: "keep", type: "table", fromIds: ["trigger"], config: { tableId: "t1", list: "{{trigger.items}}" }, ui: { label: "KEEP", position: { x: 1, y: 0 } } };
+    dataTables.set("t1", { id: "t1", userId: "u1", name: "Jobs", privateFrom: "" });
+    seedRun(graphOf(save));
+    await advanceRun("run1", d.deps);
+    const keep = nodesOf().keep;
+    const out = keep.output as { updated: unknown[]; items: unknown[]; inserted: unknown[]; truncated: boolean };
+    expect(JSON.stringify(out).length).toBeLessThanOrEqual(200_000);
+    expect(out.truncated).toBe(true);
+    expect(out.updated.length).toBe(out.items.length);
+    expect(keep.warnings).toEqual([`Later cards get the first ${out.items.length} of 60 rows; all 60 were saved.`]);
+    expect(JSON.stringify(keep).length).toBeLessThan(250_000);
+  });
+
   it("the real Pick rows card: waits when rows are on offer, stops when none are, and fails on a missing table", async () => {
     seedTable();
     const { deps: d, ran } = withPick();
