@@ -48,6 +48,13 @@ describe("web: false gives a workflow CLI card no network", () => {
     expect(p.read["*"]).toBe("allow");
     expect(Object.keys(p)[0]).toBe("*"); // later rules win, so the catch-all goes first
     expect(p["*"]).toBe("deny");
+    expect(p).toMatchObject({ task: "deny", skill: "deny" }); // named, so no ordering trick can open them
+  });
+
+  it("OpenCode workflow runs ignore the folder's own opencode.json; chat keeps it", () => {
+    expect(oc({ cwd: "/work/app", access: "chat", web: false }).env).toMatchObject({ OPENCODE_DISABLE_PROJECT_CONFIG: "1" });
+    expect(oc({ cwd: "/work/app", access: "chat" }).env).not.toHaveProperty("OPENCODE_DISABLE_PROJECT_CONFIG");
+    expect(oc({ cwd: "/work/app", access: "agent", web: true }).env).not.toHaveProperty("OPENCODE_DISABLE_PROJECT_CONFIG");
   });
 });
 

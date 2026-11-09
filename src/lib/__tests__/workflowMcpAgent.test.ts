@@ -24,7 +24,7 @@ vi.mock("@/lib/chat/buildTools", async (orig) => {
   return { ...real, buildTools: (o: Parameters<typeof real.buildTools>[0]) => (buildToolsSpy(o), real.buildTools(o)) };
 });
 
-import { agentCard } from "@/lib/workflows/cards/agent";
+import { agentCard, resolveAgentModel } from "@/lib/workflows/cards/agent";
 import { parseConfig, TOOL_CONFLICT_MESSAGE, hasToolConflict } from "@/lib/workflows/catalog";
 import { chatLeaks, checkGraph, emptyGraph, validateStructure, type FlowNode, type WorkflowGraph } from "@/lib/workflows/graph";
 import type { CardCtx } from "@/lib/workflows/cards";
@@ -224,6 +224,13 @@ describe("preflight", () => {
     model("Plain", false);
     const ok = graphOf("mock/wf", node("a", ["trigger"], "agent", { instructions: "x", mcpTools: ["mcp_gh_create_issue"] }));
     expect(await run(ok)).toContain("can't use tools");
+  });
+
+  it("a Codex card fails when it runs too, so Resume and Continue of an older run are covered", async () => {
+    await expect(resolveAgentModel("u1", "codex/default")).rejects.toThrow("Codex can't run workflow cards yet");
+    expect(getModel).not.toHaveBeenCalled();
+    const issue = checkGraph(graphOf("codex/default", node("a", ["trigger"], "agent", { instructions: "x" }))).find((i) => i.message.includes("Codex can't"));
+    expect(issue?.field).toBe("model"); // shown under the model field
   });
 
   it("refuses Codex as a workflow card model until a live check is done, with or without a folder", async () => {

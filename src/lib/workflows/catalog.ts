@@ -127,10 +127,10 @@ export const AGENT_TOOL_CHOICES: { id: (typeof AGENT_TOOL_IDS)[number]; label: s
   { id: "readChat", label: "Read chat" },
 ];
 
-/** CLI model ids start with their provider id (cliProviders.ts); kept here because that file is server-only. */
 export const isCodexModelId = (id: string): boolean => id.startsWith("codex/");
 /** Its offline flags are unverified until a live check runs, so a workflow card can't use it yet (lift this in `cardConflict`). */
 export const CODEX_BLOCKED = "Codex can't run workflow cards yet. Pick another model.";
+/** CLI model ids start with their provider id (cliProviders.ts); kept here because that file is server-only. */
 export const isCliModelId = (id: string): boolean => /^(claude-code|codex|opencode)\//.test(id);
 /** What an MCP tool card and an agent card with MCP tools can do outside DevChat (8.5). */
 export const MCP_WARNING = "Can change things outside DevChat";

@@ -17,7 +17,7 @@ import { recordTrace } from "@/lib/observability";
 import { getSettingsKey } from "@/lib/settings";
 import { cutTokens } from "@/lib/tokens";
 import { asText, renderText } from "../template";
-import { AGENT_TOOL_IDS, OUTPUT_CAP_BYTES, OUTPUT_TYPE_HINT, type OutputField } from "../catalog";
+import { AGENT_TOOL_IDS, CODEX_BLOCKED, isCodexModelId, OUTPUT_CAP_BYTES, OUTPUT_TYPE_HINT, type OutputField } from "../catalog";
 import { sleep } from "./webSearch";
 import type { CardImpl } from "./index";
 
@@ -42,6 +42,8 @@ export const BLOCKED_TOOLS = new Set([
  *  which a workflow must never do. Throws with a message fit to show on the card. */
 export async function resolveAgentModel(userId: string, modelId: string): Promise<ModelConfig> {
   if (!modelId) throw new Error("No model is set. Pick one in the card or in the workflow settings");
+  // Also stops a Continue or Resume of a run saved before the block.
+  if (isCodexModelId(modelId)) throw new Error(CODEX_BLOCKED);
   await initializeOllamaModels();
   if (cliProviderForModel(modelId) && !(await canUseHostTools(userId))) throw new Error(HOST_TOOLS_REFUSED);
   return getModel(modelId, await resolveProviderCreds(userId), await canUseHostTools(userId));

@@ -50,5 +50,7 @@ describe("OAuth callback", () => {
     expect((await call("")).headers.get("location")).toContain("reason=server_changed");
     expect(exchangeCode).not.toHaveBeenCalled();
     expect(update).not.toHaveBeenCalled();
+    const cleared = (await call()).headers.getSetCookie().map((c) => c.split("=")[0]);
+    expect(cleared).toEqual(expect.arrayContaining(["mcp_oauth_state", "mcp_oauth_client_secret", "mcp_oauth_token_url", "mcp_oauth_server"]));
   });
 });

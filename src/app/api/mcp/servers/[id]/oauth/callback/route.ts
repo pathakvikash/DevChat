@@ -58,7 +58,11 @@ export async function GET(
     // The server must still be the one the user authorised: same address, still oauth2.
     const urlHash = crypto.createHash("sha256").update(server.url).digest("hex");
     if (server.authType !== "oauth2" || req.cookies.get("mcp_oauth_server")?.value !== urlHash) {
-      return NextResponse.redirect(new URL("/settings/mcp?oauth=error&reason=server_changed", req.url));
+      const refused = NextResponse.redirect(new URL("/settings/mcp?oauth=error&reason=server_changed", req.url));
+      for (const name of ["mcp_oauth_state", "mcp_oauth_client_secret", "mcp_oauth_token_url", "mcp_oauth_server"]) {
+        refused.cookies.set(name, "", { maxAge: 0, path: `/api/mcp/servers/${id}/oauth` });
+      }
+      return refused;
     }
 
     let authConfig: Record<string, string> = {};

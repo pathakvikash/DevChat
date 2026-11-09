@@ -41,7 +41,18 @@ function makeHeaders(
   return headers;
 }
 
-async function connectToServer(serverId: string): Promise<void> {
+/** Cold connects in flight, so two callers at once share one connection instead of the later overwriting the earlier. */
+const connecting = new Map<string, Promise<void>>();
+
+function connectToServer(serverId: string): Promise<void> {
+  const running = connecting.get(serverId);
+  if (running) return running;
+  const p = doConnect(serverId).finally(() => connecting.delete(serverId));
+  connecting.set(serverId, p);
+  return p;
+}
+
+async function doConnect(serverId: string): Promise<void> {
   const existing = clientCache.get(serverId);
   if (existing) {
     try { await existing.client.ping(); return; } catch {
@@ -68,7 +79,8 @@ async function connectToServer(serverId: string): Promise<void> {
   if (genOf(serverId) !== gen) {
     // The server was edited while this connected (its address or credentials may be old): start over from the database.
     try { await transport.close(); } catch {}
-    return connectToServer(serverId);
+    try { await client.close(); } catch {}
+    return doConnect(serverId);
   }
   clientCache.set(serverId, { client, transport });
 }

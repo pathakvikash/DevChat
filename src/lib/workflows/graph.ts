@@ -164,7 +164,7 @@ export function checkGraph(graph: WorkflowGraph): GraphIssue[] {
       issues.push({ nodeId: n.id, field: "items", message: `${label}: Items must be one reference to a list, like {{news.items}}` });
     }
     const sameCard = cardConflict({ ...n, config }, graph.defaultModel);
-    if (sameCard) issues.push({ nodeId: n.id, field: "tools", message: sameCard });
+    if (sameCard) issues.push({ nodeId: n.id, field: sameCard.includes(CODEX_BLOCKED) ? "model" : "tools", message: sameCard });
     if (n.type === "webSearch" && !String(config.queries ?? "").trim()) issues.push({ nodeId: n.id, field: "queries", message: `${label}: add at least one query` });
     if (n.type === "agent" && !String(config.instructions ?? "").trim()) issues.push({ nodeId: n.id, field: "instructions", message: `${label}: add instructions` });
     if (n.type === "chatMessage" && !String(config.message ?? "").trim()) issues.push({ nodeId: n.id, field: "message", message: `${label}: add a message` });

@@ -2,12 +2,13 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 
 const listTools = vi.fn();
 const connect = vi.fn(async () => {});
+const closeClient = vi.fn(async () => {});
 vi.mock("@modelcontextprotocol/sdk/client/index.js", () => ({
   Client: class {
     connect = connect;
     ping = vi.fn(async () => ({}));
     listTools = listTools;
-    close = vi.fn(async () => {});
+    close = closeClient;
     callTool = vi.fn(async () => ({ content: [] }));
   },
 }));
@@ -22,6 +23,7 @@ beforeEach(async () => {
   listTools.mockReset();
   listTools.mockResolvedValue({ tools: [{ name: "a" }] });
   connect.mockClear();
+  closeClient.mockClear();
   connect.mockImplementation(async () => {});
   findUnique.mockClear();
 });
@@ -62,6 +64,22 @@ describe("an edit that lands while connecting", () => {
     expect(connect).toHaveBeenCalledTimes(2);
     await listServerTools("s1");
     expect(connect).toHaveBeenCalledTimes(2); // the second connection is the one that stuck
+  });
+
+  it("closes the client as well as the transport when it starts over", async () => {
+    connect.mockImplementationOnce(async () => {
+      await disconnectFromServer("s1");
+    });
+    await listServerTools("s1");
+    expect(closeClient).toHaveBeenCalledTimes(1);
+  });
+
+  it("two cold connects at once share one connection", async () => {
+    connect.mockImplementation(async () => {
+      await new Promise((r) => setTimeout(r, 5));
+    });
+    await Promise.all([listServerTools("s1", { fresh: true }), listServerTools("s1", { fresh: true })]);
+    expect(connect).toHaveBeenCalledTimes(1);
   });
 
   it("does not cache a tool list that was fetched across an invalidation", async () => {

@@ -370,7 +370,8 @@ export const CLI_PROVIDERS: readonly CliProviderDef[] = [
       const permission = {
         // Workflow cards (web === false): every tool not named below is denied, which covers MCP tools from the user's global
         // config; search tools are named back in. ponytail: unverified against a real OpenCode until a live check runs.
-        ...(web === false ? { "*": "deny", glob: "allow", grep: "allow", list: "allow" } : {}),
+        // task and skill are named so no earlier or later rule can open them by ordering.
+        ...(web === false ? { "*": "deny", glob: "allow", grep: "allow", list: "allow", task: "deny", skill: "deny" } : {}),
         read: { "*": "allow", "*.env": "deny", "*.env.*": "deny", "*.env.example": "allow" },
         bash: "deny",
         edit: cwd && access === "agent" ? "allow" : "deny",
@@ -402,6 +403,9 @@ export const CLI_PROVIDERS: readonly CliProviderDef[] = [
         // allow it and let the step limit below stop a model that never recovers.
         // The same rules sit on the build agent too: an opencode.json in the folder, or the user's own config, can set
         // `agent.build.permission`, which would otherwise win over the top-level rules.
+        // Workflow cards also ignore the folder's own opencode.json (its rules, MCP servers and sub-agent settings);
+        // chat keeps the project's config.
+        ...(web === false ? { OPENCODE_DISABLE_PROJECT_CONFIG: "1" } : {}),
         OPENCODE_CONFIG_CONTENT: JSON.stringify({
           permission,
           // A model that keeps repeating a call stops after this many steps.
