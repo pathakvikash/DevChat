@@ -580,7 +580,7 @@ The user message is the description. When the workflow already has cards, it als
 **Clean-up.** This happens after validation:
 - Fill in config defaults and drop unknown keys.
 - Remove settings that only the user may set by hand: MCP tools in allowlists, `folder`, `allowEdits`, and `mcpTool` cards. Each removal becomes a warning.
-- Lay the cards out automatically: x = level × 280, y = index within the level × 160. Positions from the model are ignored.
+- Lay the cards out with `autoLayout` (graph.ts). Positions from the model are ignored; the model's card order breaks ties within a level.
 - Warnings list the variables that need values ("Fill in: Your profile").
 
 **Preview, then apply.** The proposed cards show with dashed borders in place of the current flow, under a bar: "Preview · 6 cards · **Apply** · Discard". Apply saves through `PATCH` and asks the native `confirm("Replace the current flow?")` first if the canvas has cards. Nothing runs until the user clicks Run.

@@ -17,6 +17,7 @@ import { renderText, renderTemplate, templateRefs, refRoot, type TemplateContext
 import Canvas, { type AddOptions } from "./Canvas";
 import CardList from "./CardList";
 import ConfigPanel from "./ConfigPanel";
+import DescribeBox, { PreviewBar, type Proposal } from "./DescribeBox";
 import type { FieldEnv } from "./ConfigField";
 import { pickerRows } from "./FieldPicker";
 import { fetchNodeRun, useWorkflowRun } from "./useWorkflowRun";
@@ -74,6 +75,10 @@ export default function WorkflowEditor({ id }: { id: string }) {
   const [chats, setChats] = useState<{ id: string; title: string }[]>([]);
   const [outputs, setOutputs] = useState<Record<string, unknown>>({});
   const [announce, setAnnounce] = useState("");
+  // A proposed flow from "Describe your flow": shown in place of the saved one, and saved only by Apply.
+  const [proposal, setProposal] = useState<Proposal | null>(null);
+  const [boxKey, setBoxKey] = useState(0);
+  const mainRef = useRef<HTMLElement>(null);
   const [view, setViewState] = useState<View>(savedView);
   const setView = (v: View) => {
     setViewState(v);
@@ -89,7 +94,7 @@ export default function WorkflowEditor({ id }: { id: string }) {
   const activeRunId = viewRunId ?? liveRunId;
   const { run, restart } = useWorkflowRun(activeRunId);
   const viewingPast = !!viewRunId;
-  const readOnly = viewingPast || narrow;
+  const readOnly = viewingPast || narrow || !!proposal;
 
   // ─── Load ───────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -222,9 +227,34 @@ export default function WorkflowEditor({ id }: { id: string }) {
   const connectCards = (from: string, to: string) => editNode(to, { fromIds: [...(wf?.graph.nodes.find((n) => n.id === to)?.fromIds ?? []), from] });
   const disconnectCards = (from: string, to: string) => editNode(to, { fromIds: (wf?.graph.nodes.find((n) => n.id === to)?.fromIds ?? []).filter((f) => f !== from) });
 
+  // ─── Describe your flow: preview, then Apply or Discard ─────────────────
+  const beforeDescribe = useCallback(async () => {
+    if (dirty.current) await flush();
+  }, [flush]);
+  const showProposal = useCallback((p: Proposal) => {
+    setSelectedId(null);
+    setProposal(p);
+    setAnnounce(`Preview ready: ${p.graph.nodes.length} cards`);
+  }, []);
+  function leavePreview(message: string) {
+    setProposal(null);
+    setSelectedId(null);
+    setAnnounce(message);
+    requestAnimationFrame(() => mainRef.current?.focus());
+  }
+  function applyProposal() {
+    if (!proposal || !wf) return;
+    if (wf.graph.nodes.length > 1 && !window.confirm("Replace the current flow?")) return;
+    // The saved settings that are not part of a description stay as they are.
+    editGraph((g) => ({ ...proposal.graph, defaultModel: g.defaultModel || proposal.graph.defaultModel, maxRunTokens: g.maxRunTokens }));
+    setBoxKey((k) => k + 1);
+    leavePreview("Flow applied");
+  }
+
   // ─── Running ────────────────────────────────────────────────────────────
   async function startRun() {
     if (!wf) return;
+    if (proposal) return toast("Apply or discard the preview first", "info");
     if (dirty.current) await flush();
     const res = await fetch(`/api/workflows/${id}/runs`, { method: "POST" });
     const body = await res.json().catch(() => ({}));
@@ -317,8 +347,9 @@ export default function WorkflowEditor({ id }: { id: string }) {
   }, [moreOpen]);
 
   // ─── What to show ───────────────────────────────────────────────────────
-  const graph = viewingPast && run ? run.graph : wf?.graph;
-  const nodes: Record<string, CardRun> = run?.nodes ?? {};
+  const graph = proposal ? proposal.graph : viewingPast && run ? run.graph : wf?.graph;
+  const nodes: Record<string, CardRun> = (!proposal && run?.nodes) || {};
+  const runState = proposal ? undefined : run?.state;
   const issues = useMemo(() => (graph ? checkGraph(graph) : []), [graph]);
   const invalid = useMemo(() => new Set(issues.map((i) => i.nodeId)), [issues]);
   const selected = graph?.nodes.find((n) => n.id === selectedId) ?? null;
@@ -391,6 +422,7 @@ export default function WorkflowEditor({ id }: { id: string }) {
   }
 
   const showCanvas = !narrow && view === "canvas";
+  const select = proposal ? () => {} : setSelectedId;
   const live = run && (run.state === "running" || run.state === "waiting");
   const canResume = run && (run.state === "failed" || run.state === "interrupted");
   const interruptedAt = run ? graph.nodes.find((n) => run.nodes[n.id]?.status === "running" || run.nodes[n.id]?.status === "failed")?.ui.label : undefined;
@@ -485,7 +517,7 @@ export default function WorkflowEditor({ id }: { id: string }) {
                 <Square size={14} aria-hidden="true" /> Cancel run
               </button>
             )}
-            <button type="button" onClick={() => void startRun()} title="Run (⌘↵)" className="focus-ring glass-button-primary inline-flex h-8 items-center gap-1.5 rounded-[var(--glass-radius-md)] px-3 text-sm font-medium text-white">
+            <button type="button" onClick={() => void startRun()} aria-disabled={!!proposal} title={proposal ? "Apply or discard the preview first" : "Run (⌘↵)"} className="focus-ring glass-button-primary aria-disabled:opacity-50 inline-flex h-8 items-center gap-1.5 rounded-[var(--glass-radius-md)] px-3 text-sm font-medium text-white">
               <Play size={14} aria-hidden="true" /> Run
             </button>
           </div>
@@ -514,12 +546,18 @@ export default function WorkflowEditor({ id }: { id: string }) {
         )}
 
         <div className="flex min-h-0 flex-1">
-          <main className={`min-w-0 flex-1 ${showCanvas ? "relative" : "overflow-y-auto"}`}>
-            {showCanvas ? (
-              <Canvas graph={graph} nodes={nodes} runState={run?.state} selectedId={selectedId} invalid={invalid} readOnly={readOnly} onSelect={setSelectedId} onAdd={addCard} onMove={moveCards} onConnect={connectCards} onDisconnect={disconnectCards} onDelete={deleteCard} onTidy={() => editGraph(autoLayout)} />
-            ) : (
-            <CardList canAdd={graph.nodes.length < MAX_NODES} graph={graph} nodes={nodes} runState={run?.state} selectedId={selectedId} invalid={invalid} readOnly={readOnly} onSelect={setSelectedId} onAdd={addCard} />
+          <main ref={mainRef} tabIndex={-1} className="flex min-w-0 flex-1 flex-col outline-none">
+            {proposal ? <PreviewBar proposal={proposal} onApply={applyProposal} onDiscard={() => leavePreview("Preview discarded")} /> : null}
+            {!narrow && !viewingPast && (
+              <DescribeBox key={boxKey} workflowId={id} hasCards={wf.graph.nodes.length > 1} defaultModel={wf.graph.defaultModel} hidden={!!proposal} beforeSend={beforeDescribe} onProposal={showProposal} />
             )}
+            <div className={`min-h-0 flex-1 ${proposal ? "wf-preview" : ""} ${showCanvas ? "relative" : "overflow-y-auto"}`}>
+              {showCanvas ? (
+                <Canvas key={proposal ? "preview" : "flow"} graph={graph} nodes={nodes} runState={runState} selectedId={selectedId} invalid={invalid} readOnly={readOnly} onSelect={select} onAdd={addCard} onMove={moveCards} onConnect={connectCards} onDisconnect={disconnectCards} onDelete={deleteCard} onTidy={() => editGraph(autoLayout)} />
+              ) : (
+                <CardList canAdd={graph.nodes.length < MAX_NODES} graph={graph} nodes={nodes} runState={runState} selectedId={selectedId} invalid={invalid} readOnly={readOnly} onSelect={select} onAdd={addCard} />
+              )}
+            </div>
           </main>
           {wide && panel}
         </div>

@@ -731,6 +731,15 @@ An inline card (2.3), one per helper. Up to 3 stack with the normal `my-2` gap. 
 - Check the list and the editor at 400px: no horizontal scroll, the editor shows the read-only list view, and Run, Cancel run and Resume still work.
 - Every new control has the focus ring (2.5); icon buttons have `aria-label` and `title`. One `aria-live="polite"` region announces only Run started, done, failed, cancelled and waiting.
 
+**Describe your flow** (`DescribeBox.tsx`, workflows 7):
+
+- The box is a `glass-card` strip above the cards, in the Canvas and List views. It is open on a workflow with only the trigger (the empty state, larger, with the heading "Describe what you want done and DevChat lays out the cards") and a collapsed "Describe your flow" button otherwise. Under 768px it is not shown: the editor is read-only there, so there is nothing to apply.
+- Keyboard: **Enter builds, Shift+Enter adds a line**, Esc cancels a request in progress. Cmd/Ctrl+Enter inside the box is not Run. The hint "Enter builds · Shift+Enter adds a line" sits next to the model picker.
+- While building, the one button turns into **Cancel** (same element, so focus stays), the text becomes read-only, and a `role="status"` line says "Building your flow…" with a spinner. Cancel, Esc, and leaving the page abort the request; the typed text stays.
+- An error shows in a `role="alert"` row under the box: a red icon, the word "Failed." and the server's plain message, with **Retry**. Focus moves to Retry. The 409, 422, 502, 504 and 403 messages come from the route; a dropped connection says "Couldn't reach the server."
+- The preview bar ("Preview · 4 cards · Nothing is saved until you apply it." with **Apply** and **Discard**) replaces the box. Focus goes to Apply; Esc inside the bar discards. Warnings list under "Check before you run" with an amber icon and that heading as the word. Apply asks `confirm("Replace the current flow?")` only when the flow has cards, then saves through the editor's normal autosave. After Apply or Discard, focus goes to the editor area. Run is `aria-disabled` while a preview shows.
+- The proposed cards use dashed borders (`.wf-preview` in `canvas.css`), are not selectable or editable, and show "Not run". The live region announces "Preview ready: n cards", "Flow applied" or "Preview discarded".
+
 ---
 
 ## 4. Compatibility at a glance
