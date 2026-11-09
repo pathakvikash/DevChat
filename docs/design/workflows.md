@@ -36,7 +36,7 @@ A workflow is a flow of connected cards that runs on the server. It can fetch so
 | | API/BYOK | Ollama with tools | Ollama without tools | CLI (claude-code, codex, opencode) |
 |---|---|---|---|---|
 | Agent card without tools | yes | yes | yes | yes |
-| Agent card with tools | yes, 3 items at a time | yes, 1 at a time | Runs without tools. The editor says so (2.6 of the UX doc). | Yes, through the text tool protocol, 1 at a time. Codex needs a folder (phase 6). |
+| Agent card with tools | yes, 3 items at a time | yes, 1 at a time | Refused at Run (the editor warns first): "<model> can't use tools. Untick the tools or pick another model." (2.6 of the UX doc) | Yes, through the text tool protocol, 1 at a time. Codex needs a folder, so it is refused until phase 6. |
 | Output fields (JSON) | parsed text plus one repair call | same | same | same |
 | Describe your flow | yes | Yes. Small models may need the repair call. | yes | yes |
 
@@ -418,7 +418,7 @@ Code lives in `src/lib/workflows/runner.ts`, plus the card files.
 6. Create the run (`running`, with the graph snapshot) and prune runs beyond 50.
 7. Call `after(() => advanceRun(run.id))` and return 202 `{ runId }`.
 
-`after()` is the documented way to keep working after the response, and it is fully supported on `next start` (`node_modules/next/dist/docs/01-app/02-guides/self-hosting.md:295-299`). On serverless hosts it is capped by `maxDuration`, so the start and resume routes set `export const maxDuration = 800`. A run that gets cut off becomes Interrupted (6.8).
+`after()` is the documented way to keep working after the response, and it is fully supported on `next start` (`node_modules/next/dist/docs/01-app/02-guides/self-hosting.md:295-299`). On serverless hosts it is capped by `maxDuration`, so the start and resume routes set `export const maxDuration = 300` (the most Vercel's Hobby plan accepts; Pro allows 800). A run that gets cut off becomes Interrupted (6.8).
 
 ### 6.2 Order and skips
 
@@ -786,6 +786,7 @@ Section 6.10 lists it. There is no shell, no file writes without the folder opt-
 - Card data reaches agents fenced (5.1, 6.10). The system prompt marks fenced blocks, tool results and pages as data.
 - Messages sent to chats are framed as coming from a workflow (decision 18).
 - Generated flows are previewed and cleaned of risky settings (7).
+- An agent card cannot tick a chat-reading tool (`searchChats`, `readChat`) together with an outbound one (`fetchUrl`, `webSearch`). Save and Run both refuse it: "This card can read your chats and reach the web. Pick one, so a web page can't make it send your chats out."
 - The worst outcome left is a bad draft, which the user reads before using.
 
 ### 10.6 Output safety
@@ -942,8 +943,8 @@ Schedules (6.12), an approval card and an ask-the-user tool (both use the waitin
 
 ## 12. Open questions
 
-1. **Where runs must survive.** This design targets a local `next dev` or `next start`, where `after()` has no time cap. On the Vercel build (`vercel-build` in `package.json`), a run is cut at `maxDuration` (up to 800 s, depending on the plan) and shows Interrupted, which Resume handles one card at a time. Is that enough, or do hosted runs need a real queue?
-2. **Google Sheets scope.** The default is `drive.file`: DevChat creates the sheet and can write only to sheets it created, and Google requires no review. The alternative is `spreadsheets`, which can write into any sheet you already have but is a sensitive scope that Google must verify before anyone except test users can use it. Which do you want?
+1. **Where runs must survive.** Answered 9 Nov: locally and on Vercel. Locally `after()` has no time cap. On Vercel a run is cut at `maxDuration` (300 s) and shows Interrupted; Resume continues from that card. A real queue is a later add-on.
+2. **Google Sheets scope.** Answered 9 Nov: `drive.file`. The default is `drive.file`: DevChat creates the sheet and can write only to sheets it created, and Google requires no review. The alternative is `spreadsheets`, which can write into any sheet you already have but is a sensitive scope that Google must verify before anyone except test users can use it. Which do you want?
 
 ---
 

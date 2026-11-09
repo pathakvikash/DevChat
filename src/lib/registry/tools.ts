@@ -4,23 +4,7 @@ import { prisma } from "@/lib/db";
 import { embed, scoreDocumentChunks, type ScoredChunk } from "@/lib/rag";
 import { parseDataArtifact } from "@/lib/generativeUi/data";
 import { evaluate } from "mathjs";
-
-function isPrivateUrl(url: string): boolean {
-  const privatePatterns = [
-    "localhost",
-    "127.0.0.1",
-    "0.0.0.0",
-    "[::1]",
-    "[::]",
-    "10.",
-    "172.16.",
-    "172.17.",
-    "192.168.",
-    "169.254.",
-  ];
-  const hostname = url.split("/")[2]?.split(":")[0]?.toLowerCase() || "";
-  return privatePatterns.some((p) => hostname.startsWith(p));
-}
+import { safeFetch } from "@/lib/net/safeFetch";
 
 /**
  * ─────────────────────────────────────────────────────────────────────────
@@ -175,29 +159,18 @@ export const TOOL_REGISTRY: Record<string, ToolDefinition> = {
     }),
     execute: async ({ url }) => {
       try {
-        const blockedProtocols = ["file:", "ftp:", "dict:", "gopher:"];
-        if (blockedProtocols.some((p) => url.toLowerCase().startsWith(p))) {
-          return `Error: ${url.split(":")[0]}: protocol is not allowed.`;
-        }
-        if (isPrivateUrl(url)) {
-          return `Error: access to private/internal URLs is not allowed.`;
-        }
-        const u = new URL(url);
-        if (!/^https?:$/.test(u.protocol)) {
-          return `Error: only http/https URLs allowed. Got: ${u.protocol}`;
-        }
-        const res = await fetch(u.toString(), {
+        const res = await safeFetch(url, {
           headers: {
             "User-Agent":
               "Mozilla/5.0 (compatible; VAS/1.0; +https://github.com/anthropics/claude-code)",
             Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
           },
-          // 10s server-side timeout via AbortSignal
-          signal: AbortSignal.timeout(10000),
+          timeoutMs: 10_000,
+          truncate: true,
         });
-        if (!res.ok) return `HTTP ${res.status} ${res.statusText} for ${url}`;
-        const ctype = res.headers.get("content-type") || "";
-        const raw = await res.text();
+        if (!res.ok) return `HTTP ${res.status} for ${url}`;
+        const ctype = res.contentType;
+        const raw = res.text;
         if (ctype.includes("application/json")) {
           return raw.slice(0, 8000);
         }

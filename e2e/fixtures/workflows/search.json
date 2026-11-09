@@ -1,0 +1,7 @@
+{
+  "results": [
+    { "title": "Open-source coding agent ships plugin API", "url": "https://news.example.test/coding-agent-plugins", "snippet": "A popular open-source coding agent added a plugin API this week." },
+    { "title": "Local LLM runtime adds speculative decoding", "url": "https://news.example.test/local-llm-speculative", "snippet": "Speculative decoding landed in a widely used local model runtime." },
+    { "title": "New benchmark compares tool-calling models", "url": "https://news.example.test/tool-calling-benchmark", "snippet": "Researchers published a benchmark for tool-calling accuracy." }
+  ]
+}

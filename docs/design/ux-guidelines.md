@@ -722,6 +722,15 @@ An inline card (2.3), one per helper. Up to 3 stack with the normal `my-2` gap. 
 - **Queued while busy**: the receiver's queue shows it as an agent item (3.6), with the prefix **From "<title>":**.
 - A message to a closed side chat opens it (focus doesn't move). Split panes that aren't open can't be messaged.
 
+### 3.13 Workflows [P7]
+
+`docs/design/workflows.md` section 8 owns the screens (list, editor, config panel, runs drawer) and their copy. The rules here apply to them unchanged:
+
+- Glass tokens only (`glass-card`, `glass-input`, `glass-button*`, `glass-panel*`, `glass-nav`), no hex, no new colours. Text is `text-zinc-400` or stronger.
+- Run status always shows the icon **and** its word (Not run, Running, Done, Failed, Skipped, Waiting for you, Cancelled, Interrupted). Colour goes on the 14px icon only.
+- Check the list and the editor at 400px: no horizontal scroll, the editor shows the read-only list view, and Run, Cancel run and Resume still work.
+- Every new control has the focus ring (2.5); icon buttons have `aria-label` and `title`. One `aria-live="polite"` region announces only Run started, done, failed, cancelled and waiting.
+
 ---
 
 ## 4. Compatibility at a glance

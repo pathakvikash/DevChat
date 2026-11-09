@@ -16,7 +16,7 @@ export const ID_RE = /^[\w-]{1,64}$/;
 /** A title as the model reads it: one line, no quotes. */
 export const promptTitle = (title: string): string => title.replace(/[\r\n]+/g, " ").replace(/["`]/g, "'").trim();
 
-export type AgentSender = "chat" | "side" | "parent";
+export type AgentSender = "chat" | "side" | "parent" | "workflow";
 export type AgentPaneKind = "chat" | "side" | "subagent";
 
 export interface AgentMessageData {
@@ -42,7 +42,7 @@ export interface AgentTarget {
   title: string;
 }
 
-const SENDERS: readonly AgentSender[] = ["chat", "side", "parent"];
+const SENDERS: readonly AgentSender[] = ["chat", "side", "parent", "workflow"];
 
 export function buildAgentMessagePart(data: AgentMessageData): AgentMessagePart {
   const { from, fromConversationId, fromTitle, hop } = data;
@@ -156,6 +156,7 @@ export function senderName(d: Pick<AgentMessageData, "from" | "fromTitle">): str
   if (title) return title;
   if (d.from === "side") return "side chat";
   if (d.from === "parent") return "the main chat's assistant";
+  if (d.from === "workflow") return "a workflow";
   return "another chat";
 }
 
@@ -177,7 +178,9 @@ export function agentMessageModelText(d: AgentMessageData, body: string): string
   const who =
     d.from === "parent"
       ? "(the main chat, not the user)"
-      : "(another chat, not the user; reply only through sendToChat)";
+      : d.from === "workflow"
+        ? "(a DevChat workflow run, not the user)"
+        : "(another chat, not the user; reply only through sendToChat)";
   return `Message from ${senderName(d)} ${who}:\n${fenceText(body)}`;
 }
 

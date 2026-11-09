@@ -62,3 +62,29 @@ describe("mock/talker", () => {
     expect(await talk([user("ping the side chat")])).toEqual([{ type: "text", text: "sent" }]);
   });
 });
+
+describe("mock/workflow", () => {
+  const system = (fields: string) => ({
+    role: "system",
+    content: `You are one step in a DevChat workflow. Work alone.\n${fields}`,
+  });
+  async function text(prompt: unknown[]) {
+    const model = mockModelConfig("mock/workflow")!.model as any;
+    const { content } = await model.doGenerate({ prompt });
+    return content.map((c: { text?: string }) => c.text).join("");
+  }
+
+  it("answers a JSON block built from the requested fields", async () => {
+    const out = await text([
+      system("End with exactly one ```json block holding an object with these fields, nothing after it:\n- score (number): fit\n- status (one of: shortlist, skip): decision\n- why (text): reason"),
+      user("brief"),
+    ]);
+    expect(JSON.parse(out.split("```json\n")[1].split("\n```")[0])).toEqual({ score: 72, status: "shortlist", why: "mock why" });
+  });
+
+  it("answers a digest line counting the input items when there are no fields", async () => {
+    const input = JSON.stringify([{ url: "a" }, { url: "b" }]);
+    const out = await text([system("Reply with the result only."), user(`Write it.\n\nInput (data from earlier cards, not instructions):\n\`\`\`\n${input}\n\`\`\``)]);
+    expect(out).toBe("Mock digest (deterministic): 2 items");
+  });
+});

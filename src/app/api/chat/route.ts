@@ -51,6 +51,7 @@ import { resolveModelCandidates } from "@/lib/chat/resolveModelCandidates";
 import { cliProviderForModel, dropParkedRuns } from "@/lib/cliProviders";
 import { isRunnableCwd } from "@/lib/claude/sessions";
 import { recordTrace } from "@/lib/observability";
+import { providerOptionsFor } from "@/lib/chat/providerOptions";
 import {
   estimatePromptTokens,
   shouldIncreaseContext,
@@ -337,36 +338,27 @@ export async function POST(req: Request) {
       }
     }
 
-    const ollamaOptions = isOllama
-      ? {
-          num_ctx: contextLength ?? modelConfig.contextWindow,
-          temperature,
-          top_p: topP ?? 0.9,
-          num_predict: maxTokens || -1,
-        }
-      : {};
     // CLI-backed models take effort/folder/mode as provider options. The folder is
     // re-checked every turn; chat mode is read-only there, agent mode may edit, and
     // Ask lets Claude Code ask per change (its allow-for-chat list rides along).
     const cliProvider = cliProviderForModel(servedModel);
     if (!cliProvider) releaseCliRuns();
     const cliCwd = workingFolder && (await isRunnableCwd(workingFolder)) ? workingFolder : "";
-    const providerOptions = isOllama
-      ? { ollama: ollamaOptions }
-      : cliProvider
-        ? {
-            [cliProvider.id]: {
-              effort: reasoningEffort ?? "",
-              cwd: cliCwd,
-              access: MODE_POLICY[toolMode].cli,
-              conversationId: conversationId ?? "",
-              userId,
-              allowedTools: Array.isArray(bodyAllowedTools)
-                ? bodyAllowedTools.filter((t: unknown): t is string => typeof t === "string" && CHAT_ALLOWABLE_TOOLS.has(t))
-                : [],
-            },
-          }
-        : undefined;
+    const providerOptions = providerOptionsFor({
+      modelId: servedModel,
+      numCtx: contextLength ?? modelConfig.contextWindow,
+      temperature,
+      topP,
+      maxTokens,
+      reasoningEffort,
+      cwd: cliCwd,
+      access: MODE_POLICY[toolMode].cli,
+      conversationId: conversationId ?? "",
+      userId,
+      allowedTools: Array.isArray(bodyAllowedTools)
+        ? bodyAllowedTools.filter((t: unknown): t is string => typeof t === "string" && CHAT_ALLOWABLE_TOOLS.has(t))
+        : [],
+    });
 
     // Only main chats with tools get helpers. A helper runs on this same model, in this mode.
     if (canStartSubAgents(settings.kind, useTools) && conversationId) {
@@ -711,7 +703,8 @@ export async function POST(req: Request) {
           const nextCtx = getNextContextTier(contextLength ?? modelConfig.contextWindow);
           if (nextCtx) {
             contextLength = nextCtx;
-            ollamaOptions.num_ctx = nextCtx;
+            // The same object the stream's providerOptions holds, so the retry sees the larger window.
+            if (providerOptions && "ollama" in providerOptions && providerOptions.ollama) providerOptions.ollama.num_ctx = nextCtx;
             console.log(
               `[ctx] ${conversationId} context overflow — retrying with ctx=${nextCtx}`,
             );

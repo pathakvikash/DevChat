@@ -1,0 +1,625 @@
+import { describe, it, expect, vi, beforeEach } from "vitest";
+
+// An in-memory WorkflowRun table: just the calls the runner makes.
+const runs = new Map<string, any>();
+const saves: Array<Record<string, unknown>> = [];
+const matches = (r: any, where: Record<string, any>) =>
+  Object.entries(where).every(([k, v]) => {
+    if (v && typeof v === "object" && !(v instanceof Date)) {
+      if ("lt" in v) return r[k] < v.lt;
+      if ("in" in v) return v.in.includes(r[k]);
+      if ("not" in v) return r[k] !== v.not;
+    }
+    return r[k] === v;
+  });
+let failProgressSave = false;
+let workflowRow: any = null;
+const chats = new Set<string>();
+vi.mock("@/lib/db", () => ({
+  prisma: {
+    workflow: { findFirst: vi.fn(async ({ where }: any) => (workflowRow && workflowRow.id === where.id && workflowRow.userId === where.userId ? workflowRow : null)) },
+    conversation: { findFirst: vi.fn(async ({ where }: any) => (chats.has(where.id) ? { id: where.id } : null)) },
+    workflowRun: {
+      findUnique: vi.fn(async ({ where }: any) => (runs.has(where.id) ? { ...runs.get(where.id), workflow: { name: "WF" } } : null)),
+      findFirst: vi.fn(async ({ where }: any) => [...runs.values()].find((r) => matches(r, where)) ?? null),
+      findMany: vi.fn(async ({ where, skip = 0 }: any) => [...runs.values()].filter((r) => matches(r, where)).slice(skip)),
+      deleteMany: vi.fn(async ({ where }: any) => {
+        for (const id of where.id.in) runs.delete(id);
+        return { count: where.id.in.length };
+      }),
+      count: vi.fn(async ({ where }: any) => [...runs.values()].filter((r) => matches(r, where)).length),
+      create: vi.fn(async ({ data }: any) => {
+        const row = { id: `run${runs.size + 1}`, attempt: 0, nodes: "{}", error: null, inputTokens: 0, outputTokens: 0, heartbeatAt: new Date(), startedAt: new Date(), endedAt: null, ...data };
+        runs.set(row.id, row);
+        return row;
+      }),
+      updateMany: vi.fn(async ({ where, data }: any) => {
+        if (failProgressSave && "nodes" in data && !("state" in data)) {
+          failProgressSave = false;
+          throw new Error("database is locked");
+        }
+        let count = 0;
+        for (const r of runs.values()) {
+          if (!matches(r, where)) continue;
+          for (const [k, v] of Object.entries(data)) r[k] = v && typeof v === "object" && "increment" in (v as object) ? r[k] + (v as any).increment : v;
+          count++;
+          if ("nodes" in data) saves.push(data);
+        }
+        return { count };
+      }),
+    },
+  },
+}));
+vi.mock("@/lib/workflows/cards/agent", async (orig) => ({ ...(await orig<object>()), resolveAgentModel: vi.fn() }));
+
+import { advanceRun, cancelRun, resumeRun, startRun, stopAllRuns, sweepOrphans, type RunnerDeps } from "@/lib/workflows/runner";
+import { resolveAgentModel } from "@/lib/workflows/cards/agent";
+import { emptyGraph, type CardRun, type FlowNode, type WorkflowGraph } from "@/lib/workflows/graph";
+import type { CardCtx, CardImpl } from "@/lib/workflows/cards";
+
+const agentNode = (id: string, fromIds: string[], x: number, config: Record<string, unknown> = {}): FlowNode => ({
+  id,
+  type: "agent",
+  fromIds,
+  config: { instructions: "do it", ...config },
+  ui: { label: id.toUpperCase(), position: { x, y: 0 } },
+});
+
+function seedRun(graph: WorkflowGraph, over: Record<string, unknown> = {}, id = "run1") {
+  runs.set(id, {
+    id,
+    workflowId: "wf1",
+    userId: "u1",
+    state: "running",
+    attempt: 0,
+    graph: JSON.stringify(graph),
+    nodes: "{}",
+    error: null,
+    inputTokens: 0,
+    outputTokens: 0,
+    heartbeatAt: new Date(),
+    startedAt: new Date("2026-11-09T10:00:00Z"),
+    endedAt: null,
+    ...over,
+  });
+  return id;
+}
+
+const graphOf = (...nodes: FlowNode[]): WorkflowGraph => ({ ...emptyGraph("mock/workflow"), nodes: [emptyGraph().nodes[0], ...nodes] });
+const nodesOf = (id = "run1"): Record<string, CardRun> => JSON.parse(runs.get(id).nodes);
+
+/** Fake cards: `agent` runs `onAgent`; the trigger and the rest just succeed. */
+function deps(onAgent: (c: CardCtx) => Promise<any> | any): { deps: RunnerDeps; ran: string[] } {
+  const ran: string[] = [];
+  const agent: CardImpl = {
+    run: async (c) => {
+      ran.push(c.node.id);
+      return onAgent(c);
+    },
+    concurrency: () => 3,
+  };
+  const plain: CardImpl = { run: async (c) => ({ output: { ok: c.node.id } }) };
+  return { deps: { cards: { trigger: plain, webSearch: plain, chatMessage: plain, agent } }, ran };
+}
+
+beforeEach(() => {
+  runs.clear();
+  saves.length = 0;
+  failProgressSave = false;
+  workflowRow = null;
+  chats.clear();
+});
+
+/** A card that waits until released (or aborted, if `onAbort`). */
+function gate() {
+  let release!: () => void;
+  const open = new Promise<void>((r) => (release = r));
+  return { open, release };
+}
+
+describe("advanceRun", () => {
+  it("runs the cards in order and hands each one the outputs of the cards before it", async () => {
+    const seen: Record<string, unknown>[] = [];
+    const { deps: d, ran } = deps((c) => {
+      seen.push({ ...c.tctx.nodes });
+      return { output: { text: `out-${c.node.id}` } };
+    });
+    seedRun(graphOf(agentNode("a", ["trigger"], 1), agentNode("b", ["a"], 2)));
+    await advanceRun("run1", d);
+    expect(ran).toEqual(["a", "b"]);
+    expect(Object.keys(seen[1])).toEqual(["trigger", "a"]);
+    expect(runs.get("run1")).toMatchObject({ state: "succeeded", error: null });
+    expect(runs.get("run1").endedAt).toBeInstanceOf(Date);
+    expect(Object.values(nodesOf()).map((n) => n.status)).toEqual(["succeeded", "succeeded", "succeeded"]);
+  });
+
+  it("saves once per card status change, plus once to finish", async () => {
+    const { deps: d } = deps(() => ({ output: { text: "x" } }));
+    seedRun(graphOf(agentNode("a", ["trigger"], 1), agentNode("b", ["a"], 2)));
+    await advanceRun("run1", d);
+    // 3 cards x (running, done) + the final state
+    expect(saves).toHaveLength(7);
+  });
+
+  it("fails a card, skips what follows it, and still runs a sibling", async () => {
+    const { deps: d, ran } = deps((c) => {
+      if (c.node.id === "bad") throw new Error("model blew up");
+      return { output: { text: "fine" } };
+    });
+    seedRun(graphOf(agentNode("bad", ["trigger"], 1), agentNode("child", ["bad"], 2), agentNode("sibling", ["trigger"], 3), agentNode("grandchild", ["child"], 4)));
+    await advanceRun("run1", d);
+    const n = nodesOf();
+    expect(ran).toEqual(["bad", "sibling"]);
+    expect(n.bad).toMatchObject({ status: "failed", error: "model blew up" });
+    expect(n.child).toMatchObject({ status: "skipped", skippedReason: "BAD failed" });
+    expect(n.grandchild).toMatchObject({ status: "skipped", skippedReason: "BAD failed" });
+    expect(n.sibling.status).toBe("succeeded");
+    expect(runs.get("run1")).toMatchObject({ state: "failed" });
+    expect(runs.get("run1").error).toContain("BAD failed: model blew up");
+  });
+
+  it("stops quietly when a save changes no row (the run was cancelled)", async () => {
+    const { deps: d, ran } = deps((c) => {
+      runs.get("run1").state = "cancelled"; // another process cancelled it mid-card
+      return { output: { text: c.node.id } };
+    });
+    seedRun(graphOf(agentNode("a", ["trigger"], 1), agentNode("b", ["a"], 2)));
+    await advanceRun("run1", d);
+    expect(ran).toEqual(["a"]);
+    expect(runs.get("run1").state).toBe("cancelled");
+  });
+
+  it("cancelRun aborts a card in this process", async () => {
+    let signal!: AbortSignal;
+    const { deps: d } = deps(
+      (c) =>
+        new Promise((_, reject) => {
+          signal = c.signal;
+          c.signal.addEventListener("abort", () => reject(new Error("Cancelled")));
+        }),
+    );
+    seedRun(graphOf(agentNode("a", ["trigger"], 1)));
+    const done = advanceRun("run1", d);
+    await vi.waitFor(() => expect(signal).toBeDefined());
+    expect(await cancelRun("u1", "run1")).toBe(true);
+    await done;
+    expect(signal.aborted).toBe(true);
+    expect(runs.get("run1").state).toBe("cancelled");
+    expect(await cancelRun("u1", "run1")).toBe(false);
+  });
+
+  it("fails the run when the token limit is passed, before the next card", async () => {
+    const { deps: d, ran } = deps(() => ({ output: { text: "x" }, usage: { inputTokens: 900, outputTokens: 400 } }));
+    seedRun({ ...graphOf(agentNode("a", ["trigger"], 1), agentNode("b", ["a"], 2)), maxRunTokens: 1000 });
+    await advanceRun("run1", d);
+    expect(ran).toEqual(["a"]);
+    expect(runs.get("run1")).toMatchObject({ state: "failed", error: "Token limit for this run reached", inputTokens: 900, outputTokens: 400 });
+  });
+
+  it("does not start a run that is not running", async () => {
+    const { deps: d, ran } = deps(() => ({ output: {} }));
+    seedRun(graphOf(agentNode("a", ["trigger"], 1)), { state: "cancelled" });
+    await advanceRun("run1", d);
+    expect(ran).toEqual([]);
+  });
+
+  it("does not start a second loop for a run that already has one for this attempt", async () => {
+    const g = gate();
+    const { deps: d, ran } = deps(() => g.open.then(() => ({ output: {} })));
+    seedRun(graphOf(agentNode("a", ["trigger"], 1)));
+    const first = advanceRun("run1", d);
+    await vi.waitFor(() => expect(ran).toEqual(["a"]));
+    await advanceRun("run1", d); // returns at once
+    expect(ran).toEqual(["a"]);
+    g.release();
+    await first;
+    expect(runs.get("run1").state).toBe("succeeded");
+  });
+
+  describe("per-item cards", () => {
+    const perItem = (config: Record<string, unknown> = {}) =>
+      graphOf(agentNode("a", ["trigger"], 1, { perItem: true, items: "{{trigger.list}}", ...config }));
+    const triggerWith = (list: unknown[]): RunnerDeps["cards"]["trigger"] => ({ run: async () => ({ output: { list } }) });
+
+    it("runs items 3 at a time, caps at maxItems with a warning, and merges item and result", async () => {
+      let live = 0;
+      let peak = 0;
+      const { deps: d } = deps(async (c) => {
+        live++;
+        peak = Math.max(peak, live);
+        await new Promise((r) => setTimeout(r, 2));
+        live--;
+        return { output: { score: c.tctx.index }, usage: { inputTokens: 1, outputTokens: 1 } };
+      });
+      d.cards.trigger = triggerWith(Array.from({ length: 40 }, (_, i) => ({ url: `u${i}` })));
+      seedRun(perItem());
+      await advanceRun("run1", d);
+      const a = nodesOf().a;
+      expect(peak).toBe(3);
+      expect(a.items).toEqual({ done: 25, failed: 0, total: 25 });
+      expect(a.warnings).toContain("Ran on the first 25 of 40 items");
+      const out = a.output as { items: { url: string; score: number }[]; count: number };
+      expect(out.count).toBe(25);
+      expect(out.items[0]).toEqual({ url: "u0", score: 1 }); // item fields stay, the card's result is added, index is 1-based
+      expect(a.usage).toEqual({ inputTokens: 25, outputTokens: 25 });
+    });
+
+    it("leaves failed items out and lists them; fails the card when every item fails; skips on an empty list", async () => {
+      const { deps: d } = deps((c) => {
+        if (c.tctx.index === 2) throw new Error("bad item");
+        return { output: { ok: true } };
+      });
+      d.cards.trigger = triggerWith([{ n: 1 }, { n: 2 }, { n: 3 }]);
+      seedRun(perItem());
+      await advanceRun("run1", d);
+      let a = nodesOf().a;
+      expect(a.status).toBe("succeeded");
+      expect(a.itemErrors).toEqual([{ index: 2, error: "bad item" }]);
+      expect((a.output as { count: number; failed: number })).toMatchObject({ count: 2, failed: 1 });
+
+      const all = deps(() => {
+        throw new Error("nope");
+      });
+      all.deps.cards.trigger = triggerWith([1, 2]);
+      seedRun(perItem(), {}, "run2");
+      await advanceRun("run2", all.deps);
+      expect(nodesOf("run2").a).toMatchObject({ status: "failed", error: "Every item failed: nope" });
+
+      const none = deps(() => ({ output: {} }));
+      none.deps.cards.trigger = triggerWith([]);
+      seedRun(graphOf(agentNode("a", ["trigger"], 1, { perItem: true, items: "{{trigger.list}}" }), agentNode("b", ["a"], 2)), {}, "run3");
+      await advanceRun("run3", none.deps);
+      a = nodesOf("run3").a;
+      expect(a).toMatchObject({ status: "skipped", skippedReason: "No items" });
+      expect(nodesOf("run3").b).toMatchObject({ status: "skipped", skippedReason: "No items" });
+    });
+
+    it("fails the card when Items is not a list", async () => {
+      const { deps: d } = deps(() => ({ output: {} }));
+      seedRun(graphOf(agentNode("a", ["trigger"], 1, { perItem: true, items: "{{trigger.date}}" })));
+      await advanceRun("run1", d);
+      expect(nodesOf().a).toMatchObject({ status: "failed", error: "Items must be a list" });
+    });
+  });
+});
+
+describe("sweepOrphans", () => {
+  it("marks only running runs whose heartbeat is over 60 s old as interrupted", async () => {
+    const now = Date.parse("2026-11-09T12:00:00Z");
+    const g = graphOf();
+    seedRun(g, { heartbeatAt: new Date(now - 61_000) }, "stale");
+    seedRun(g, { heartbeatAt: new Date(now - 30_000) }, "fresh");
+    seedRun(g, { state: "waiting", heartbeatAt: new Date(now - 600_000) }, "waiting");
+    seedRun(g, { state: "succeeded", heartbeatAt: new Date(now - 600_000) }, "done");
+    seedRun(g, { userId: "someone-else", heartbeatAt: new Date(now - 600_000) }, "theirs");
+    expect(await sweepOrphans("u1", now)).toBe(1);
+    expect(["stale", "fresh", "waiting", "done", "theirs"].map((id) => runs.get(id).state)).toEqual(["interrupted", "running", "waiting", "succeeded", "running"]);
+    expect(runs.get("stale").endedAt).toEqual(new Date(now));
+  });
+});
+
+describe("resume after interruption", () => {
+  it("continues from the interrupted card and keeps the outputs that already succeeded", async () => {
+    const { deps: d, ran } = deps((c) => ({ output: { text: `out-${c.node.id}` } }));
+    const g = graphOf(agentNode("a", ["trigger"], 1), agentNode("b", ["a"], 2), agentNode("c", ["b"], 3));
+    // The server stopped while b was running.
+    seedRun(g, {
+      state: "interrupted",
+      endedAt: new Date(),
+      nodes: JSON.stringify({
+        trigger: { status: "succeeded", output: { date: "2026-11-09" } },
+        a: { status: "succeeded", output: { text: "kept" } },
+        b: { status: "running" },
+      }),
+    });
+    const r = await resumeRun("u1", "run1");
+    expect(r).toEqual({ ok: true, runId: "run1" });
+    expect(runs.get("run1")).toMatchObject({ state: "running", error: null, endedAt: null });
+    expect(nodesOf().b).toBeUndefined();
+
+    await advanceRun("run1", d);
+    expect(ran).toEqual(["b", "c"]); // a was not run again
+    expect(nodesOf().a.output).toEqual({ text: "kept" });
+    expect(runs.get("run1").state).toBe("succeeded");
+  });
+
+  it("also resumes a failed run, and refuses a run that is running or done", async () => {
+    const g = graphOf(agentNode("a", ["trigger"], 1));
+    seedRun(g, { state: "failed", nodes: JSON.stringify({ trigger: { status: "succeeded" }, a: { status: "failed", error: "x" } }) }, "f");
+    expect((await resumeRun("u1", "f")).ok).toBe(true);
+    seedRun(g, { state: "succeeded" }, "s");
+    expect(await resumeRun("u1", "s")).toMatchObject({ ok: false, status: 409 });
+    expect(await resumeRun("u1", "missing")).toMatchObject({ ok: false, status: 404 });
+    expect(await resumeRun("other", "f")).toMatchObject({ ok: false, status: 404 });
+  });
+
+  it("will not resume while another run of the workflow is in progress", async () => {
+    const g = graphOf();
+    seedRun(g, { state: "interrupted" }, "old");
+    seedRun(g, { state: "running" }, "new");
+    expect(await resumeRun("u1", "old")).toMatchObject({ ok: false, status: 409, runId: "new" });
+  });
+});
+
+describe("cancel, heartbeat and shutdown", () => {
+  it("cancelRun does not abort a run that belongs to someone else", async () => {
+    const g = gate();
+    let signal!: AbortSignal;
+    const { deps: d, ran } = deps((c) => {
+      signal = c.signal;
+      return g.open.then(() => ({ output: {} }));
+    });
+    seedRun(graphOf(agentNode("a", ["trigger"], 1)), { userId: "u2" });
+    const loop = advanceRun("run1", d);
+    await vi.waitFor(() => expect(ran).toEqual(["a"]));
+    expect(await cancelRun("u1", "run1")).toBe(false);
+    expect(signal.aborted).toBe(false);
+    expect(runs.get("run1").state).toBe("running");
+    g.release();
+    await loop;
+    expect(runs.get("run1").state).toBe("succeeded");
+  });
+
+  it("the heartbeat aborts the run when another process cancelled it", async () => {
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+    try {
+      let signal!: AbortSignal;
+      const { deps: d, ran } = deps(
+        (c) =>
+          new Promise((_, reject) => {
+            signal = c.signal;
+            c.signal.addEventListener("abort", () => reject(new Error("Cancelled")));
+          }),
+      );
+      seedRun(graphOf(agentNode("a", ["trigger"], 1)));
+      const loop = advanceRun("run1", d);
+      await vi.waitFor(() => expect(ran).toEqual(["a"]));
+      runs.get("run1").state = "cancelled"; // another process did it
+      await vi.advanceTimersByTimeAsync(15_000);
+      await loop;
+      expect(signal.aborted).toBe(true);
+      expect(runs.get("run1").state).toBe("cancelled");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("shutdown aborts the loop and leaves no final save, so the run goes stale and can be resumed", async () => {
+    let signal!: AbortSignal;
+    const { deps: d, ran } = deps(
+      (c) =>
+        new Promise((_, reject) => {
+          signal = c.signal;
+          c.signal.addEventListener("abort", () => reject(new Error("Cancelled")));
+        }),
+    );
+    seedRun(graphOf(agentNode("a", ["trigger"], 1), agentNode("b", ["a"], 2)));
+    const loop = advanceRun("run1", d);
+    await vi.waitFor(() => expect(ran).toEqual(["a"]));
+    stopAllRuns();
+    await loop;
+    expect(signal.aborted).toBe(true);
+    expect(runs.get("run1")).toMatchObject({ state: "running", endedAt: null, error: null });
+    expect(nodesOf().a.status).toBe("running"); // not recorded as failed
+    expect(nodesOf().b).toBeUndefined();
+
+    // Stale, then Interrupted, then Resume finishes it.
+    runs.get("run1").heartbeatAt = new Date(Date.now() - 120_000);
+    expect(await sweepOrphans("u1")).toBe(1);
+    expect(await resumeRun("u1", "run1")).toEqual({ ok: true, runId: "run1" });
+    const next = deps(() => ({ output: { text: "ok" } }));
+    await advanceRun("run1", next.deps);
+    expect(next.ran).toEqual(["a", "b"]);
+    expect(runs.get("run1").state).toBe("succeeded");
+  });
+});
+
+describe("resume races", () => {
+  it("a Resume bumps the attempt, and the older loop's writes then match no row", async () => {
+    const g = gate();
+    const old = deps(() => g.open.then(() => ({ output: { text: "old" } })));
+    seedRun(graphOf(agentNode("a", ["trigger"], 1), agentNode("b", ["a"], 2)));
+    const oldLoop = advanceRun("run1", old.deps);
+    await vi.waitFor(() => expect(old.ran).toEqual(["a"]));
+
+    // The run was thought dead (heartbeat gap) and resumed while the old loop was still alive.
+    runs.get("run1").state = "interrupted";
+    expect(await resumeRun("u1", "run1")).toEqual({ ok: true, runId: "run1" });
+    expect(runs.get("run1").attempt).toBe(1);
+    const fresh = deps((c) => ({ output: { text: `new-${c.node.id}` } }));
+    await advanceRun("run1", fresh.deps);
+    expect(runs.get("run1").state).toBe("succeeded");
+    expect(fresh.ran).toEqual(["a", "b"]);
+
+    g.release(); // the old card finishes late
+    await oldLoop;
+    expect(old.ran).toEqual(["a"]); // it never went on to b
+    expect(nodesOf().a.output).toEqual({ text: "new-a" }); // and its result was not written
+    expect(runs.get("run1")).toMatchObject({ state: "succeeded", attempt: 1 });
+  });
+});
+
+describe("per-item checkpoint and token cap", () => {
+  const items = (n: number) => Array.from({ length: n }, (_, i) => ({ n: i + 1 }));
+  const withItems = (d: RunnerDeps, list: unknown[]) => {
+    d.cards.trigger = { run: async () => ({ output: { list } }) };
+    return d;
+  };
+  const perItemGraph = () => graphOf(agentNode("a", ["trigger"], 1, { perItem: true, items: "{{trigger.list}}" }));
+
+  it("interrupted mid-way, a resume runs only the items that had not finished", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] }); // progress saves are throttled to one per 2 s
+    try {
+      const g = gate();
+      const firstRun: number[] = [];
+      const first = deps(async (c) => {
+        const i = c.tctx.index as number;
+        firstRun.push(i);
+        vi.setSystemTime(Date.now() + 3000);
+        if (i === 3) await g.open; // stuck here: the host cut the run
+        return { output: { done: i } };
+      });
+      first.deps.cards.agent = { ...first.deps.cards.agent, concurrency: () => 1 };
+      seedRun(perItemGraph());
+      const loop = advanceRun("run1", withItems(first.deps, items(5)));
+      await vi.waitFor(() => expect(Object.keys(nodesOf().a.partial?.results ?? {})).toEqual(["0", "1"]));
+      stopAllRuns();
+      g.release();
+      await loop;
+      expect(firstRun).toEqual([1, 2, 3]);
+
+      runs.get("run1").heartbeatAt = new Date(Date.now() - 120_000);
+      await sweepOrphans("u1");
+      expect(await resumeRun("u1", "run1")).toEqual({ ok: true, runId: "run1" });
+      expect(nodesOf().a.partial?.total).toBe(5); // the finished items survived the reset
+
+      const second: number[] = [];
+      const resumed = deps((c) => {
+        second.push(c.tctx.index as number);
+        return { output: { done: c.tctx.index } };
+      });
+      await advanceRun("run1", withItems(resumed.deps, items(5)));
+      expect(second.sort()).toEqual([3, 4, 5]); // items 1 and 2 were not run again
+      const a = nodesOf().a;
+      expect(a.status).toBe("succeeded");
+      expect((a.output as { items: { n: number; done: number }[] }).items.map((x) => x.n)).toEqual([1, 2, 3, 4, 5]);
+      expect(a.partial).toBeUndefined();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("ignores a checkpoint when the list is a different size", async () => {
+    seedRun(perItemGraph(), {
+      state: "running",
+      nodes: JSON.stringify({ trigger: { status: "succeeded", output: { list: items(3) } }, a: { status: "running", partial: { total: 9, results: { 0: { stale: true } }, usage: { inputTokens: 0, outputTokens: 0 } } } }),
+    });
+    const ran: number[] = [];
+    const d = deps((c) => {
+      ran.push(c.tctx.index as number);
+      return { output: {} };
+    });
+    await advanceRun("run1", withItems(d.deps, items(3)));
+    expect(ran.sort()).toEqual([1, 2, 3]);
+  });
+
+  it("checks the run's token cap before each item, and counts the tokens spent", async () => {
+    const d = deps(() => ({ output: {}, usage: { inputTokens: 300, outputTokens: 100 } }));
+    d.deps.cards.agent = { ...d.deps.cards.agent, concurrency: () => 1 };
+    seedRun({ ...perItemGraph(), maxRunTokens: 1000 });
+    await advanceRun("run1", withItems(d.deps, items(10)));
+    expect(d.ran).toEqual(["a", "a", "a"]); // 400, 800, then 1200 > 1000 stops the fourth
+    expect(runs.get("run1")).toMatchObject({ state: "failed", inputTokens: 900, outputTokens: 300 });
+    expect(nodesOf().a).toMatchObject({ status: "failed", error: "Token limit for this run reached" });
+  });
+
+  it("a failing progress save is logged and the run carries on", async () => {
+    const err = vi.spyOn(console, "error").mockImplementation(() => {});
+    const d = deps(() => {
+      failProgressSave = true; // the next save is the item-progress one
+      return { output: {} };
+    });
+    seedRun(perItemGraph());
+    await advanceRun("run1", withItems(d.deps, items(2)));
+    expect(runs.get("run1").state).toBe("succeeded");
+    expect(err).toHaveBeenCalledWith("[workflows] progress save failed:", "database is locked");
+    err.mockRestore();
+  });
+});
+
+describe("startRun", () => {
+  const model = (over: Record<string, unknown> = {}) => ({ id: "gpt-4o", name: "GPT-4o", supportsTools: true, ...over });
+  const agent = (over: Record<string, unknown> = {}) => agentNode("a", ["trigger"], 1, over);
+  const withWorkflow = (g: WorkflowGraph, userId = "u1") => {
+    workflowRow = { id: "wf1", userId, name: "WF", graph: JSON.stringify(g) };
+  };
+  beforeEach(() => {
+    vi.mocked(resolveAgentModel).mockReset();
+    vi.mocked(resolveAgentModel).mockResolvedValue(model() as never);
+  });
+
+  it("creates a running run with a snapshot of the graph", async () => {
+    const g = graphOf(agent());
+    withWorkflow(g);
+    const r = await startRun("u1", "wf1");
+    expect(r).toMatchObject({ ok: true });
+    const row = [...runs.values()][0];
+    expect(row).toMatchObject({ workflowId: "wf1", userId: "u1", state: "running", nodes: "{}" });
+    expect(JSON.parse(row.graph).nodes).toHaveLength(2);
+  });
+
+  it("404 for a workflow that is not the user's", async () => {
+    withWorkflow(graphOf(agent()), "u2");
+    expect(await startRun("u1", "wf1")).toMatchObject({ ok: false, status: 404 });
+  });
+
+  it("refuses a graph with config problems, naming the card", async () => {
+    withWorkflow(graphOf(agent({ instructions: "" })));
+    const r = await startRun("u1", "wf1");
+    expect(r).toMatchObject({ ok: false, status: 400 });
+    expect((r as any).errors[0]).toMatchObject({ nodeId: "a", message: expect.stringContaining("add instructions") });
+    expect(runs.size).toBe(0);
+  });
+
+  it("refuses a missing model, naming the card", async () => {
+    vi.mocked(resolveAgentModel).mockRejectedValue(new Error("OpenAI is not configured"));
+    withWorkflow(graphOf(agent()));
+    expect(await startRun("u1", "wf1")).toMatchObject({ ok: false, status: 400, error: "A: OpenAI is not configured" });
+  });
+
+  it("refuses tools on a model that cannot use them", async () => {
+    vi.mocked(resolveAgentModel).mockResolvedValue(model({ name: "Tiny", supportsTools: false }) as never);
+    withWorkflow(graphOf(agent({ tools: ["calculator"] })));
+    expect(await startRun("u1", "wf1")).toMatchObject({ ok: false, status: 400, error: "A: Tiny can't use tools. Untick the tools or pick another model." });
+    withWorkflow(graphOf(agent({ tools: [] }))); // no tools, so the same model is fine
+    expect(await startRun("u1", "wf1")).toMatchObject({ ok: true });
+  });
+
+  it("refuses Codex until workflow cards can have a folder", async () => {
+    vi.mocked(resolveAgentModel).mockResolvedValue(model({ id: "codex/default", name: "Codex" }) as never);
+    withWorkflow(graphOf(agent({ model: "codex/default" })));
+    const r = await startRun("u1", "wf1");
+    expect(r).toMatchObject({ ok: false, status: 400 });
+    expect((r as any).error).toContain("needs a working folder");
+  });
+
+  it("refuses a card that reads chats and reaches the web", async () => {
+    withWorkflow(graphOf(agent({ tools: ["readChat", "fetchUrl"] })));
+    const r = await startRun("u1", "wf1");
+    expect(r).toMatchObject({ ok: false, status: 400 });
+    expect((r as any).error).toContain("This card can read your chats and reach the web. Pick one");
+    expect((r as any).errors).toEqual([{ nodeId: "a", message: expect.any(String) }]); // listed once, on the card
+  });
+
+  it("refuses a chat card that points at a chat that is gone", async () => {
+    const chat: FlowNode = { id: "post", type: "chatMessage", fromIds: ["trigger"], config: { chat: "gone", message: "hi" }, ui: { label: "Post", position: { x: 1, y: 0 } } };
+    withWorkflow(graphOf(chat));
+    expect(await startRun("u1", "wf1")).toMatchObject({ ok: false, status: 400, error: "Post: that chat no longer exists" });
+    chats.add("gone");
+    expect(await startRun("u1", "wf1")).toMatchObject({ ok: true });
+  });
+
+  it("429 when two runs are already running, 409 with the run id when this workflow has one", async () => {
+    withWorkflow(graphOf(agent()));
+    seedRun(graphOf(), { workflowId: "other1" }, "r1");
+    seedRun(graphOf(), { workflowId: "other2" }, "r2");
+    expect(await startRun("u1", "wf1")).toMatchObject({ ok: false, status: 429, error: "Two runs are already running. Wait or cancel one." });
+    runs.clear();
+    seedRun(graphOf(), { workflowId: "wf1", state: "waiting" }, "mine");
+    expect(await startRun("u1", "wf1")).toMatchObject({ ok: false, status: 409, runId: "mine", error: "This workflow already has a run in progress." });
+  });
+
+  it("marks a stale run of this user Interrupted first, so it does not count against the caps", async () => {
+    withWorkflow(graphOf(agent()));
+    seedRun(graphOf(), { workflowId: "wf1", heartbeatAt: new Date(Date.now() - 120_000) }, "stale");
+    expect(await startRun("u1", "wf1")).toMatchObject({ ok: true });
+    expect(runs.get("stale").state).toBe("interrupted");
+  });
+
+  it("prunes runs beyond the newest 50", async () => {
+    withWorkflow(graphOf(agent()));
+    for (let i = 0; i < 52; i++) seedRun(graphOf(), { workflowId: "wf1", state: "succeeded" }, `old${i}`);
+    await startRun("u1", "wf1");
+    expect(runs.size).toBe(50); // 53 rows, the 3 beyond the newest 50 deleted
+  });
+});

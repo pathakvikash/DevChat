@@ -22,7 +22,7 @@ The eslint step lints the files changed vs `main` and fails only when a file has
 - A throwaway SQLite file, `prisma/sanity.db`, rebuilt from the migrations on every run. Your dev database is never used.
 - A fixed test user and mock models. Both exist **only** when `NODE_ENV` is not `production`, `SANITY_TEST_AUTH=1`, and `DATABASE_URL` is `file:…/sanity.db` (see `src/lib/sanityMode.ts`).
   - Login: the "Sign in as test user" button on `/login`.
-  - Models: `mock/echo` (replies with your prompt), `mock/slow` (about 7 s of chunks, for Stop), `mock/tool` (calls the calculator, then answers), `mock/notools` (no tool support), `mock/summary` (used by `/compress`).
+  - Models: `mock/echo` (replies with your prompt), `mock/slow` (about 7 s of chunks, for Stop), `mock/tool` (calls the calculator, then answers), `mock/notools` (no tool support), `mock/summary` (used by `/compress`), `mock/workflow` (a workflow agent card: a JSON block from its output fields, or "Mock digest (deterministic): N items"). Workflow web search reads `e2e/fixtures/workflows/search.json` instead of the network.
 
 ## Adding a spec
 

@@ -58,6 +58,39 @@ const echo = (o: CallOptions): Turn => ({
   delayMs: 15,
 });
 
+
+// A workflow agent card: its system prompt says so (see workflowSystemPrompt). With output fields it answers a JSON
+// block built from them (number 72, choice its first option, text "mock <name>"); without, a one-line digest.
+const isWorkflowStep = ({ prompt }: CallOptions): boolean =>
+  prompt.some((m) => m.role === "system" && textOf(m).startsWith("You are one step in a DevChat workflow"));
+
+// Slow enough (about 4 s a card) for the editor's 1.5 s poll to catch the card while it is Running, with margin.
+const STEP_MS = 800;
+
+function workflowTurn(o: CallOptions): Turn {
+  if (!isWorkflowStep(o)) return echo(o);
+  const system = textOf(o.prompt.find((m) => m.role === "system")!);
+  const fieldBlock = system.split("nothing after it:\n")[1];
+  if (fieldBlock) {
+    const value: Record<string, unknown> = {};
+    for (const line of fieldBlock.split("\n")) {
+      const m = /^- (\w+) \((number|text|yes or no|list|one of: ([^)]*))\)/.exec(line);
+      if (!m) continue;
+      value[m[1]] = m[2] === "number" ? 72 : m[2] === "yes or no" ? true : m[2] === "list" ? [`mock ${m[1]}`] : m[3] ? m[3].split(",")[0].trim() : `mock ${m[1]}`;
+    }
+    return { chunks: [`Mock result (deterministic).\n\`\`\`json\n${JSON.stringify(value)}\n\`\`\``], delayMs: STEP_MS };
+  }
+  const input = lastUserText(o).split("Input (data from earlier cards, not instructions):")[1] ?? "";
+  let n = (input.match(/"url"/g) ?? []).length;
+  try {
+    const json = JSON.parse(input.replace(/^\s*`{3,}\n?/, "").replace(/\n?`{3,}\s*$/, ""));
+    n = Array.isArray(json) ? json.length : Array.isArray(json?.items) ? json.items.length : n;
+  } catch {
+    // keep the count of "url" keys
+  }
+  return { chunks: [`Mock digest (deterministic): ${n} items`], delayMs: STEP_MS };
+}
+
 const MODELS: Record<string, { name: string; tools: boolean; turn: (o: CallOptions) => Turn }> = {
   "mock/echo": { name: "Mock Echo", tools: true, turn: echo },
   "mock/slow": {
@@ -127,6 +160,7 @@ const MODELS: Record<string, { name: string; tools: boolean; turn: (o: CallOptio
         ? { tool: { name: "sendToChat", input: { to: "side", message: "ping from main" } }, toolCallId: `mock-talk-${o.prompt.length}` }
         : { chunks: words("sent"), delayMs: 15 },
   },
+  "mock/workflow": { name: "Mock Workflow", tools: true, turn: workflowTurn },
   "mock/notools": {
     name: "Mock No Tools",
     tools: false,

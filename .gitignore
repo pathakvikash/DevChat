@@ -42,6 +42,8 @@ next-env.d.ts
 /lib/generated/prisma
 /.prisma/client
 *.db
+*.db-journal
+*.db.bak*
 .agents
 
 # sanity suite (see e2e/README.md)
