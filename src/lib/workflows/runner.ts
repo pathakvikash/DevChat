@@ -5,7 +5,7 @@ import { resolveAgentModel, resolveMcpTools } from "./cards/agent";
 import { ownedEnabledServer } from "./cards/mcpTool";
 import { canUseHostTools, HOST_TOOLS_REFUSED } from "@/lib/hostAccess";
 import { CATALOG, DEFAULT_MAX_ITEMS, MAX_ITEMS_LIMIT, OUTPUT_CAP_BYTES, parseConfig } from "./catalog";
-import { kindsText, parseKinds, joinKinds, planKinds, privateTableMessage, webAfter, type PrivateKind } from "./privacy";
+import { parseKinds, joinKinds, planKinds, privateTableMessage, readsTable, webAfter, type PrivateKind } from "./privacy";
 import {
   checkGraph,
   parseGraph,
@@ -17,6 +17,7 @@ import {
   type WorkflowGraph,
 } from "./graph";
 import { renderTemplate, type TemplateContext } from "./template";
+import { loadTable, offeredRows, toTableInfo } from "./tables";
 
 export const RUN_LIMIT_MS = 30 * 60_000;
 export const HEARTBEAT_MS = 15_000;
@@ -79,9 +80,13 @@ export function capOutput(output: unknown): unknown {
   const size = (v: unknown) => JSON.stringify(v)?.length ?? 0;
   if (size(output) <= OUTPUT_CAP_BYTES) return output;
   if (isObject(output) && Array.isArray(output.items)) {
-    let items = output.items;
-    while (items.length > 1 && size({ ...output, items, truncated: true }) > OUTPUT_CAP_BYTES) items = items.slice(0, Math.ceil(items.length / 2));
-    return { ...output, items, truncated: true };
+    // Every top-level list is cut together: the Save card carries its rows in `inserted`/`updated` and again in `items`.
+    const lists = Object.keys(output).filter((k) => Array.isArray(output[k]));
+    let cut: Record<string, unknown> = { ...output, truncated: true };
+    while (size(cut) > OUTPUT_CAP_BYTES && lists.some((k) => (cut[k] as unknown[]).length > 1)) {
+      cut = { ...cut, ...Object.fromEntries(lists.map((k) => [k, (cut[k] as unknown[]).slice(0, Math.ceil((cut[k] as unknown[]).length / 2))])) };
+    }
+    return cut;
   }
   if (typeof output === "string") return output.slice(0, OUTPUT_CAP_BYTES);
   if (isObject(output)) {
@@ -211,14 +216,31 @@ async function execCard(
     if (!impl) throw new Error(`Unknown card type "${node.type}"`);
     const base = { ...baseCtx, node, config };
     const o = CATALOG[node.type].perItem && config.perItem === true ? await runItems({ impl, base, onProgress, resume: extra.resume, tokens: extra.tokens }) : await impl.run(base);
+    // Pick rows: paused until the user hands it rows (continueRun).
+    if (o.wait) return { status: "waiting", startedAt, waiting: o.wait, ...(o.warnings?.length ? { warnings: o.warnings.slice(0, 10) } : {}) };
+    const output = capOutput(o.output);
+    const warnings = [...(o.warnings ?? [])];
+    if (isObject(output) && output.truncated === true) {
+      const kept = Array.isArray(output.items) ? output.items.length : undefined;
+      const total = isObject(o.output) && Array.isArray(o.output.items) ? o.output.items.length : undefined;
+      warnings.unshift(
+        kept === undefined || total === undefined
+          ? "Output over 200 KB was cut"
+          : node.type === "table"
+            ? `Later cards get the first ${kept} of ${total} rows; all ${total} were saved.` // the rows are in the table, only this record is cut
+            : `Kept the first ${kept} of ${total} items: output over 200 KB`,
+      );
+      // `count` says what was kept, not what was found.
+      if (kept !== undefined && "count" in output) output.count = kept;
+    }
     return {
       status: o.skip ? "skipped" : "succeeded",
       startedAt,
       endedAt: new Date().toISOString(),
-      output: capOutput(o.output),
+      output,
       ...(o.skip ? { skippedReason: o.skip } : {}),
       ...(o.stop ? { stopReason: o.stop } : {}),
-      ...(o.warnings?.length ? { warnings: o.warnings.slice(0, 10) } : {}),
+      ...(warnings.length ? { warnings: warnings.slice(0, 10) } : {}),
       ...(o.usage ? { usage: o.usage } : {}),
       ...(o.log ? { log: o.log.slice(-20) } : {}),
       ...(o.items ? { items: o.items } : {}),
@@ -304,11 +326,15 @@ export async function advanceRun(runId: string, deps: RunnerDeps = defaultDeps):
         if (!(await save())) return;
         continue;
       }
-      // Private tables are checked again right before the Save card runs: another run may have marked the table since
-      // Start, and a Resume never went through the Start checks.
-      if (node.type === "table") {
+      // Private tables are checked again right before a Save or Pick rows card runs: another run may have marked the table
+      // since Start, and a Resume never went through the Start checks.
+      if (node.type === "table" || node.type === "pickRows") {
         // If the check itself fails, the card does not run: it cannot be shown that the table is safe to read.
-        const blocked = await privateBlock(run.userId, graph, node).catch(() => "Couldn't check whether this table holds private data. Run it again.");
+        // A Save card first marks its table with what this graph has put in it (a table that turned private while the run
+        // waited passes its kinds on to later Save targets), then the check reads the marks.
+        const blocked = await (node.type === "table" ? markPrivateTables(run.userId, graph) : Promise.resolve())
+          .then(() => privateBlock(run.userId, graph, node))
+          .catch(() => "Couldn't check whether this table holds private data. Run it again.");
         if (blocked) {
           nodes[node.id] = { status: "failed", startedAt: new Date().toISOString(), endedAt: new Date().toISOString(), error: blocked };
           if (!(await save())) return;
@@ -344,6 +370,11 @@ export async function advanceRun(runId: string, deps: RunnerDeps = defaultDeps):
       // the run turns Interrupted, and Resume picks it up.
       if (entry.stopping) return;
       nodes[node.id] = result;
+      // Waiting for the user: the run stops here, saved as Waiting. It has no time limit; continueRun picks it up.
+      if (result.status === "waiting") {
+        await save({ state: "waiting" });
+        return;
+      }
       inputTokens += result.usage?.inputTokens ?? 0;
       outputTokens += result.usage?.outputTokens ?? 0;
       if (timedOut) {
@@ -373,7 +404,7 @@ export async function advanceRun(runId: string, deps: RunnerDeps = defaultDeps):
 
 export type StartResult =
   | { ok: true; runId: string }
-  | { ok: false; status: 400 | 404 | 409 | 429; error: string; runId?: string; errors?: { nodeId: string; message: string }[] };
+  | { ok: false; status: 400 | 404 | 409 | 429 | 503; error: string; runId?: string; errors?: { nodeId: string; message: string }[] };
 
 /** The two caps (6.9) shared by Start and Resume. */
 async function checkCaps(userId: string, workflowId: string, exceptRunId?: string): Promise<StartResult | null> {
@@ -415,11 +446,11 @@ export async function preflight(userId: string, graph: WorkflowGraph): Promise<{
         add(n.id, `${label}: ${message(e)}`);
       }
     }
-    if (n.type === "table" && n.config.tableId) {
+    if ((n.type === "table" || n.type === "pickRows") && n.config.tableId) {
       const table = tables.get(String(n.config.tableId));
       if (!table) add(n.id, `${label}: that table no longer exists`);
-      // A card on a private table (counting what this very graph is about to put in it) is a private-data reader:
-      // no card that reaches the web may come after it.
+      // A Save or Pick rows card on a private table (counting what this very graph is about to put in it) is a
+      // private-data reader: no card that reaches the web may come after it.
       else {
         const kinds = plan.get(String(n.config.tableId)) ?? [];
         if (kinds.length > 0) for (const m of webAfter(graph, n.id, kinds)) add(m.id, privateTableMessage(table.name, kinds, m));
@@ -445,7 +476,7 @@ export async function preflight(userId: string, graph: WorkflowGraph): Promise<{
 /** The user's tables that the graph's Save cards point at: name and the kinds of private data each holds now. */
 async function tableKinds(userId: string, graph: WorkflowGraph): Promise<Map<string, { name: string; kinds: PrivateKind[] }>> {
   const out = new Map<string, { name: string; kinds: PrivateKind[] }>();
-  for (const id of new Set(graph.nodes.map((n) => (n.type === "table" ? String(n.config.tableId ?? "") : "")).filter(Boolean))) {
+  for (const id of new Set(graph.nodes.map(readsTable).filter(Boolean))) {
     const t = await prisma.dataTable.findFirst({ where: { id, userId }, select: { id: true, name: true, privateFrom: true } });
     if (t) out.set(id, { name: t.name, kinds: parseKinds(t.privateFrom) });
   }
@@ -533,6 +564,94 @@ export async function resumeRun(userId: string, runId: string): Promise<StartRes
     data: { state: "running", error: null, endedAt: null, heartbeatAt: new Date(), nodes: JSON.stringify(nodes), attempt: { increment: 1 } },
   });
   if (r.count === 0) return { ok: false, status: 409, error: "Another request already resumed this run." };
+  return { ok: true, runId };
+}
+
+class RowsChanged extends Error {}
+
+/**
+ * Continue (6.4): the user ticked rows for the waiting Pick rows card. The ids are checked again here: they must be rows
+ * of the card's table that still have one of the offered statuses, and no more than `maxPick`. Zero rows is allowed
+ * (the cards after it are skipped with "Nothing picked"). The run, the card and the rows change in one transaction, and
+ * only the first request wins: a second one finds the run no longer waiting and gets a 409.
+ * The caller then runs `after(() => advanceRun(runId))`.
+ */
+export async function continueRun(userId: string, runId: string, nodeId: string, rowIds: unknown): Promise<StartResult> {
+  const run = await prisma.workflowRun.findFirst({ where: { id: runId, userId } });
+  if (!run) return { ok: false, status: 404, error: "Run not found" };
+  if (run.state !== "waiting") return { ok: false, status: 409, error: "This run is not waiting for you." };
+  const capped = await checkCaps(userId, run.workflowId, runId);
+  if (capped) return capped;
+  const nodes: Record<string, CardRun> = JSON.parse(run.nodes || "{}");
+  const waiting = nodes[nodeId];
+  if (waiting?.status !== "waiting" || !waiting.waiting) return { ok: false, status: 409, error: "That card is not the one waiting." };
+  const w = waiting.waiting;
+  if (!Array.isArray(rowIds) || !rowIds.every((x) => typeof x === "string")) return { ok: false, status: 400, error: "Send rowIds: a list of row ids." };
+  const ids = [...new Set(rowIds as string[])];
+  if (ids.length > w.maxPick) return { ok: false, status: 400, error: `Pick at most ${w.maxPick} ${w.maxPick === 1 ? "row" : "rows"}.` };
+
+  // A table deleted while the run waited can still be continued with none: the cards after the card are skipped.
+  const table = await loadTable(userId, w.tableId);
+  if (!table && ids.length > 0) return { ok: false, status: 400, error: "The table no longer exists." };
+  const picked = table && ids.length > 0 ? await offeredRows(table.id, w.statuses, ids) : [];
+  if (picked.length !== ids.length) {
+    return { ok: false, status: 400, error: "Some of those rows are not in this table or no longer have a status that is on offer. Reload the table and pick again." };
+  }
+
+  const graph = parseGraph(run.graph);
+  const node = graph.nodes.find((n) => n.id === nodeId);
+  // The table may have turned private since the card started waiting: the run fails here, as it would at the card.
+  // A check that itself fails is not a block: the run stays waiting and the user can try again.
+  let blocked: string | null = null;
+  try {
+    if (node) blocked = await privateBlock(userId, graph, node);
+  } catch {
+    return { ok: false, status: 503, error: "Couldn't check whether this table holds private data. Try again." };
+  }
+  const now = new Date().toISOString();
+  if (blocked) {
+    nodes[nodeId] = { status: "failed", startedAt: waiting.startedAt, endedAt: now, error: blocked };
+    const r = await prisma.workflowRun.updateMany({
+      where: { id: runId, userId, state: "waiting" },
+      data: { nodes: JSON.stringify(nodes), state: "failed", error: `${node?.ui.label ?? nodeId} failed: ${blocked}`, endedAt: new Date() },
+    });
+    return { ok: false, status: 409, error: r.count > 0 ? blocked : "Another request already continued this run." };
+  }
+
+  const items = picked.map((r) => ({ ...r, ...(w.setStatus ? { status: w.setStatus } : {}) }));
+  nodes[nodeId] = {
+    status: "succeeded",
+    startedAt: waiting.startedAt,
+    endedAt: now,
+    output: { items, count: items.length },
+    ...(items.length === 0 ? { stopReason: "Nothing picked" } : {}),
+  };
+  const STALE_ROWS = "Some of those rows changed while you were picking. Reload the table and pick again.";
+  let outcome: "won" | "lost" | "rows";
+  try {
+    outcome = await prisma.$transaction(async (tx) => {
+      const r = await tx.workflowRun.updateMany({
+        where: { id: runId, userId, state: "waiting" },
+        // attempt + 1: a loop that is somehow still winding down can no longer save over this one.
+        data: { nodes: JSON.stringify(nodes), state: "running", error: null, heartbeatAt: new Date(), attempt: { increment: 1 } },
+      });
+      if (r.count === 0) return "lost" as const;
+      if (table && items.length > 0 && w.setStatus) {
+        // Only rows that still have an offered status: a row that moved on since the check above rolls the whole thing back.
+        const u = await tx.dataTableRow.updateMany({ where: { tableId: table.id, id: { in: ids }, status: { in: w.statuses } }, data: { status: w.setStatus } });
+        if (u.count !== ids.length) throw new RowsChanged();
+        const fresh = await tx.dataTable.findFirst({ where: { id: table.id, userId } });
+        const have = fresh ? toTableInfo(fresh).statuses : table.statuses;
+        if (!have.includes(w.setStatus)) await tx.dataTable.update({ where: { id: table.id }, data: { statuses: JSON.stringify([...have, w.setStatus]) } });
+      }
+      return "won" as const;
+    });
+  } catch (e) {
+    if (!(e instanceof RowsChanged)) throw e;
+    outcome = "rows";
+  }
+  if (outcome === "lost") return { ok: false, status: 409, error: "Another request already continued this run." };
+  if (outcome === "rows") return { ok: false, status: 409, error: STALE_ROWS };
   return { ok: true, runId };
 }
 

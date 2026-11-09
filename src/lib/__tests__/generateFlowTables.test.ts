@@ -69,6 +69,43 @@ describe("generated flows with table cards", () => {
     expect(warnings.some((w) => w.includes("tableId"))).toBe(false);
   });
 
+  it("a Pick rows card: the model cannot make up its table, and a change keeps the table it had", async () => {
+    const reply = {
+      vars: [],
+      nodes: [
+        node("trigger", "trigger", []),
+        node("news", "webSearch", ["trigger"], { queries: "x" }),
+        node("pick", "pickRows", ["news"], { tableId: "cmFAKEid123", statuses: "new", maxPick: 3 }),
+      ],
+    };
+    const fresh = await generateFlow({ description: "pick some rows", model: scripted(reply).model });
+    expect(fresh.graph.nodes.find((n) => n.id === "pick")!.config).toMatchObject({ tableId: "", statuses: "new", maxPick: 3 });
+    expect(fresh.warnings).toContain("pick: pick a table");
+
+    const current = {
+      version: 1 as const,
+      defaultModel: "mock/gen",
+      maxRunTokens: 500_000,
+      vars: [],
+      nodes: [
+        { id: "trigger", type: "trigger" as const, fromIds: [], config: {}, ui: { label: "Run", position: { x: 0, y: 0 } } },
+        { id: "news", type: "webSearch" as const, fromIds: ["trigger"], config: { queries: "x" }, ui: { label: "News", position: { x: 1, y: 0 } } },
+        { id: "pick", type: "pickRows" as const, fromIds: ["news"], config: { tableId: "my-real-table", statuses: "new" }, ui: { label: "Pick", position: { x: 2, y: 0 } } },
+      ],
+    };
+    const s = scripted({ vars: [], nodes: [node("trigger", "trigger", []), node("news", "webSearch", ["trigger"], { queries: "y" }), node("pick", "pickRows", ["news"], { tableId: "other", maxPick: 5 })] });
+    const changed = await generateFlow({ description: "pick five", model: s.model, current });
+    expect(changed.graph.nodes.find((n) => n.id === "pick")!.config).toMatchObject({ tableId: "my-real-table", maxPick: 5 });
+    expect(JSON.stringify(s.calls[0].prompt)).not.toContain("my-real-table");
+  });
+
+  it("the catalog text lists Job boards and Pick rows", () => {
+    const text = catalogForPrompt();
+    expect(text).toContain("- jobBoards (");
+    expect(text).toContain("- pickRows (");
+    expect(text).toContain("statuses: text");
+  });
+
   it("the catalog text explains the shapes of rules and columns, and leaves out the table picker", () => {
     const text = catalogForPrompt();
     expect(text).toContain('rules: list of { "field": "{{item.score}}", "op": one of "eq"');

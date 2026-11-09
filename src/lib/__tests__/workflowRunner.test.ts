@@ -15,9 +15,33 @@ const matches = (r: any, where: Record<string, any>) =>
 let failProgressSave = false;
 let workflowRow: any = null;
 const chats = new Set<string>();
-const dataTables = new Map<string, { id: string; userId: string; name: string; privateFrom: string }>();
-vi.mock("@/lib/db", () => ({
-  prisma: {
+const dataTables = new Map<string, { id: string; userId: string; name: string; privateFrom: string; statuses?: string }>();
+// Rows of the tables above, for Pick rows (phase 3).
+const tableRows = new Map<string, { id: string; tableId: string; status: string; data: string }>();
+vi.mock("@/lib/db", () => {
+  const prisma: any = {
+    // A transaction that throws puts the runs and the rows back, as a real one does.
+    $transaction: vi.fn(async (fn: (tx: unknown) => unknown) => {
+      const was = [new Map([...runs].map(([k, v]) => [k, { ...v }])), new Map([...tableRows].map(([k, v]) => [k, { ...v }]))] as const;
+      try {
+        return await fn(prisma);
+      } catch (e) {
+        runs.clear();
+        tableRows.clear();
+        for (const [k, v] of was[0]) runs.set(k, v);
+        for (const [k, v] of was[1]) tableRows.set(k, v);
+        throw e;
+      }
+    }),
+    dataTableRow: {
+      count: vi.fn(async ({ where }: any) => [...tableRows.values()].filter((r) => r.tableId === where.tableId && where.status.in.includes(r.status)).length),
+      findMany: vi.fn(async ({ where }: any) => [...tableRows.values()].filter((r) => r.tableId === where.tableId && where.id.in.includes(r.id) && where.status.in.includes(r.status))),
+      updateMany: vi.fn(async ({ where, data }: any) => {
+        let count = 0;
+        for (const r of tableRows.values()) if (r.tableId === where.tableId && where.id.in.includes(r.id) && (!where.status || where.status.in.includes(r.status))) (Object.assign(r, data), count++);
+        return { count };
+      }),
+    },
     mcpServer: { findFirst: vi.fn(async () => ({ id: "s1", name: "gh" })) },
     workflow: { findFirst: vi.fn(async ({ where }: any) => (workflowRow && workflowRow.id === where.id && workflowRow.userId === where.userId ? workflowRow : null)) },
     conversation: { findFirst: vi.fn(async ({ where }: any) => (chats.has(where.id) ? { id: where.id } : null)) },
@@ -62,16 +86,19 @@ vi.mock("@/lib/db", () => ({
         return { count };
       }),
     },
-  },
-}));
+  };
+  prisma.dataTable.update = vi.fn(async ({ where, data }: any) => Object.assign(dataTables.get(where.id)!, data));
+  return { prisma };
+});
 const callServerTool = vi.fn();
 vi.mock("@/lib/mcp/client", () => ({ listServerTools: vi.fn(async () => [{ name: "create_issue" }]), callServerTool: (...a: unknown[]) => callServerTool(...a) }));
 vi.mock("@/lib/hostAccess", () => ({ canUseHostTools: vi.fn(async () => true), HOST_TOOLS_REFUSED: "This is only available to the server's owner." }));
 vi.mock("@/lib/workflows/cards/agent", async (orig) => ({ ...(await orig<object>()), resolveAgentModel: vi.fn() }));
 
-import { advanceRun, cancelRun, capOutput, markPrivateTables, preflight, resetShutdownForTests, resumeRun, startRun, stopAllRuns, sweepOrphans, type RunnerDeps } from "@/lib/workflows/runner";
+import { advanceRun, cancelRun, capOutput, continueRun, markPrivateTables, preflight, resetShutdownForTests, resumeRun, startRun, stopAllRuns, sweepOrphans, type RunnerDeps } from "@/lib/workflows/runner";
 import { resolveAgentModel } from "@/lib/workflows/cards/agent";
 import { mcpToolCard } from "@/lib/workflows/cards/mcpTool";
+import { pickRowsCard } from "@/lib/workflows/cards/pickRows";
 import { emptyGraph, type CardRun, type FlowNode, type WorkflowGraph } from "@/lib/workflows/graph";
 import type { CardCtx, CardImpl } from "@/lib/workflows/cards";
 
@@ -128,6 +155,7 @@ beforeEach(() => {
   workflowRow = null;
   chats.clear();
   dataTables.clear();
+  tableRows.clear();
 });
 
 /** A card that waits until released (or aborted, if `onAbort`). */
@@ -903,5 +931,374 @@ describe("private tables", () => {
     await advanceRun("run1", d);
     expect(ran).toEqual([]);
     expect(nodesOf().keep.status).toBe("failed");
+  });
+});
+
+describe("Pick rows: waiting and continue (phase 3)", () => {
+  const pickNode = (id: string, from: string[], x: number, config: Record<string, unknown> = {}): FlowNode => ({
+    id,
+    type: "pickRows",
+    fromIds: from,
+    config: { tableId: "t1", statuses: "new", maxPick: 2, setStatus: "picked", ...config },
+    ui: { label: id.toUpperCase(), position: { x, y: 0 } },
+  });
+  const fetchNode = (id: string, from: string[], x: number): FlowNode => ({ id, type: "fetch", fromIds: from, config: { url: "https://a.test" }, ui: { label: id.toUpperCase(), position: { x, y: 0 } } });
+  const WAIT = { tableId: "t1", tableName: "Jobs", statuses: ["new"], maxPick: 2, message: "Draft", sortBy: "", setStatus: "picked", offered: 3 };
+  /** The Pick rows card as the real one answers when rows are on offer. */
+  const waiter = (ran: string[]): CardImpl => ({ run: async (c) => (ran.push(c.node.id), { output: undefined, wait: WAIT }) });
+  const withPick = (onAgent: (c: CardCtx) => any = () => ({ output: { text: "ok" } })) => {
+    const d = deps(onAgent);
+    const pickRan: string[] = [];
+    d.deps.cards.pickRows = waiter(pickRan);
+    d.deps.cards.fetch = { run: async () => ({ output: {} }) };
+    return { ...d, pickRan };
+  };
+  const seedTable = (statuses = ["new"], privateFrom = "") => {
+    dataTables.set("t1", { id: "t1", userId: "u1", name: "Jobs", privateFrom, statuses: JSON.stringify(statuses) });
+    for (const [id, status] of [["r1", "new"], ["r2", "new"], ["r3", "new"]]) tableRows.set(id, { id, tableId: "t1", status, data: JSON.stringify({ title: `Job ${id}`, url: `https://x.test/${id}` }) });
+  };
+  const graph = () => graphOf(pickNode("pick", ["trigger"], 1), agentNode("draft", ["pick"], 2));
+  const rowStatus = (id: string) => tableRows.get(id)!.status;
+
+  it("a Pick rows card saves as Waiting and the run stops there, without an end time", async () => {
+    const { deps: d, ran, pickRan } = withPick();
+    seedRun(graph());
+    await advanceRun("run1", d);
+    expect(pickRan).toEqual(["pick"]);
+    expect(ran).toEqual([]);
+    expect(runs.get("run1")).toMatchObject({ state: "waiting", endedAt: null, error: null });
+    expect(nodesOf().pick).toMatchObject({ status: "waiting", waiting: WAIT });
+    expect(nodesOf().draft).toBeUndefined();
+  });
+
+  it("Continue hands the picked rows on, sets their status, and the run goes on from the next card", async () => {
+    seedTable();
+    const seen: unknown[] = [];
+    const { deps: d, ran } = withPick((c) => (seen.push(c.tctx.nodes.pick), { output: { text: "drafted" } }));
+    seedRun(graph());
+    await advanceRun("run1", d);
+    const r = await continueRun("u1", "run1", "pick", ["r2", "r1"]);
+    expect(r).toEqual({ ok: true, runId: "run1" });
+    expect(runs.get("run1")).toMatchObject({ state: "running", attempt: 1 });
+    expect([rowStatus("r1"), rowStatus("r2"), rowStatus("r3")]).toEqual(["picked", "picked", "new"]);
+    expect(JSON.parse(dataTables.get("t1")!.statuses!)).toEqual(["new", "picked"]); // the status is now one of the table's
+    expect(nodesOf().pick).toMatchObject({ status: "succeeded", output: { count: 2 } });
+    expect((nodesOf().pick.output as { items: Record<string, unknown>[] }).items.map((i) => [i._rowId, i.status, i.title])).toEqual([["r2", "picked", "Job r2"], ["r1", "picked", "Job r1"]]);
+
+    await advanceRun("run1", d);
+    expect(ran).toEqual(["draft"]);
+    expect((seen[0] as { count: number }).count).toBe(2);
+    expect(runs.get("run1").state).toBe("succeeded");
+    expect(nodesOf().pick.status).toBe("succeeded");
+  });
+
+  it("rejects a row from another table, and nothing changes", async () => {
+    seedTable();
+    tableRows.set("other", { id: "other", tableId: "t2", status: "new", data: "{}" });
+    const { deps: d } = withPick();
+    seedRun(graph());
+    await advanceRun("run1", d);
+    const r = await continueRun("u1", "run1", "pick", ["r1", "other"]);
+    expect(r).toMatchObject({ ok: false, status: 400 });
+    expect(runs.get("run1").state).toBe("waiting");
+    expect(nodesOf().pick.status).toBe("waiting");
+    expect([rowStatus("r1"), rowStatus("other")]).toEqual(["new", "new"]);
+    // the run can still be continued with good rows
+    expect((await continueRun("u1", "run1", "pick", ["r1"])).ok).toBe(true);
+  });
+
+  it("rejects a row whose status is no longer offered, an id that does not exist, and more than maxPick", async () => {
+    seedTable();
+    const { deps: d } = withPick();
+    seedRun(graph());
+    await advanceRun("run1", d);
+    tableRows.get("r3")!.status = "applied"; // moved on while the run was waiting
+    expect(await continueRun("u1", "run1", "pick", ["r1", "r3"])).toMatchObject({ ok: false, status: 400 });
+    expect(await continueRun("u1", "run1", "pick", ["nope"])).toMatchObject({ ok: false, status: 400 });
+    expect(await continueRun("u1", "run1", "pick", ["r1", "r2", "r3"])).toMatchObject({ ok: false, status: 400, error: "Pick at most 2 rows." });
+    expect(await continueRun("u1", "run1", "pick", "r1")).toMatchObject({ ok: false, status: 400 });
+    expect(await continueRun("u1", "run1", "pick", [1])).toMatchObject({ ok: false, status: 400 });
+    expect(runs.get("run1").state).toBe("waiting");
+    expect([rowStatus("r1"), rowStatus("r3")]).toEqual(["new", "applied"]);
+  });
+
+  it("a second continue gets a 409, also when two arrive at once: only one wins", async () => {
+    seedTable();
+    const { deps: d } = withPick();
+    seedRun(graph());
+    await advanceRun("run1", d);
+    const both = await Promise.all([continueRun("u1", "run1", "pick", ["r1"]), continueRun("u1", "run1", "pick", ["r2"])]);
+    expect(both.filter((r) => r.ok)).toHaveLength(1);
+    expect(both.find((r) => !r.ok)).toMatchObject({ ok: false, status: 409 });
+    expect((await continueRun("u1", "run1", "pick", ["r3"])).ok).toBe(false);
+    expect(rowStatus("r3")).toBe("new");
+    expect([rowStatus("r1"), rowStatus("r2")].filter((s) => s === "picked")).toHaveLength(1);
+  });
+
+  it("zero picks: the card is Done and the cards after it are Skipped with 'Nothing picked'", async () => {
+    seedTable();
+    const { deps: d, ran } = withPick();
+    seedRun(graph());
+    await advanceRun("run1", d);
+    expect((await continueRun("u1", "run1", "pick", [])).ok).toBe(true);
+    await advanceRun("run1", d);
+    expect(ran).toEqual([]);
+    expect(nodesOf().pick).toMatchObject({ status: "succeeded", stopReason: "Nothing picked", output: { items: [], count: 0 } });
+    expect(nodesOf().draft).toMatchObject({ status: "skipped", skippedReason: "Nothing picked" });
+    expect(runs.get("run1").state).toBe("succeeded");
+    expect([rowStatus("r1"), rowStatus("r2"), rowStatus("r3")]).toEqual(["new", "new", "new"]);
+  });
+
+  it("only the owner's waiting run, and only the waiting card, can be continued", async () => {
+    seedTable();
+    const { deps: d } = withPick();
+    seedRun(graph());
+    await advanceRun("run1", d);
+    expect(await continueRun("u2", "run1", "pick", ["r1"])).toMatchObject({ ok: false, status: 404 });
+    expect(await continueRun("u1", "missing", "pick", [])).toMatchObject({ ok: false, status: 404 });
+    expect(await continueRun("u1", "run1", "draft", [])).toMatchObject({ ok: false, status: 409 });
+    expect(runs.get("run1").state).toBe("waiting");
+    // not a waiting run at all
+    seedRun(graph(), { state: "failed" }, "run2");
+    expect(await continueRun("u1", "run2", "pick", [])).toMatchObject({ ok: false, status: 409 });
+  });
+
+  it("Cancel while waiting ends the run as Cancelled, and it can no longer be continued", async () => {
+    seedTable();
+    const { deps: d } = withPick();
+    seedRun(graph());
+    await advanceRun("run1", d);
+    expect(await cancelRun("u1", "run1")).toBe(true);
+    expect(runs.get("run1")).toMatchObject({ state: "cancelled" });
+    expect(await continueRun("u1", "run1", "pick", ["r1"])).toMatchObject({ ok: false, status: 409 });
+    expect(rowStatus("r1")).toBe("new");
+  });
+
+  it("Continue obeys the cap of two running runs", async () => {
+    seedTable();
+    const { deps: d } = withPick();
+    seedRun(graph());
+    await advanceRun("run1", d);
+    seedRun(graphOf(), { workflowId: "wf2" }, "busy1");
+    seedRun(graphOf(), { workflowId: "wf3" }, "busy2");
+    expect(await continueRun("u1", "run1", "pick", ["r1"])).toMatchObject({ ok: false, status: 429 });
+    expect(runs.get("run1").state).toBe("waiting");
+  });
+
+  it("an interrupted run reruns only the interrupted card: finished cards keep their output", async () => {
+    const { deps: d, ran, pickRan } = withPick();
+    // trigger and "a" finished; the server stopped while the Pick rows card was starting
+    const g = graphOf(agentNode("a", ["trigger"], 1), pickNode("pick", ["a"], 2), agentNode("draft", ["pick"], 3));
+    seedRun(g, {
+      state: "interrupted",
+      endedAt: new Date(),
+      nodes: JSON.stringify({ trigger: { status: "succeeded", output: {} }, a: { status: "succeeded", output: { text: "kept" } }, pick: { status: "running", startedAt: "2026-11-09T10:00:00.000Z" } }),
+    });
+    expect((await resumeRun("u1", "run1")).ok).toBe(true);
+    await advanceRun("run1", d);
+    expect(ran).toEqual([]); // "a" was not run again
+    expect(pickRan).toEqual(["pick"]);
+    expect(nodesOf().a.output).toEqual({ text: "kept" });
+    expect(runs.get("run1").state).toBe("waiting");
+  });
+
+  it("a pick that already happened is not asked for again when a later card fails and the run is resumed", async () => {
+    seedTable();
+    let fail = true;
+    const { deps: d, ran, pickRan } = withPick(() => {
+      if (fail) throw new Error("model blew up");
+      return { output: { text: "ok" } };
+    });
+    seedRun(graph());
+    await advanceRun("run1", d);
+    await continueRun("u1", "run1", "pick", ["r1"]);
+    await advanceRun("run1", d);
+    expect(runs.get("run1").state).toBe("failed");
+    fail = false;
+    expect((await resumeRun("u1", "run1")).ok).toBe(true);
+    await advanceRun("run1", d);
+    expect(pickRan).toEqual(["pick"]); // once
+    expect(ran).toEqual(["draft", "draft"]);
+    expect(runs.get("run1").state).toBe("succeeded");
+  });
+
+  it("duplicate row ids count once", async () => {
+    seedTable();
+    const { deps: d } = withPick();
+    seedRun(graph());
+    await advanceRun("run1", d);
+    expect((await continueRun("u1", "run1", "pick", ["r1", "r1", "r2"])).ok).toBe(true); // maxPick is 2: three ids, two rows
+    expect((nodesOf().pick.output as { count: number }).count).toBe(2);
+  });
+
+  it("a row that moved on between the check and the write rolls the whole Continue back with a 409", async () => {
+    seedTable();
+    const { deps: d } = withPick();
+    seedRun(graph());
+    await advanceRun("run1", d);
+    const { prisma } = await import("@/lib/db");
+    vi.mocked(prisma.dataTableRow.findMany).mockImplementationOnce((async () => {
+      const rows = [...tableRows.values()].filter((r) => ["r1", "r2"].includes(r.id));
+      tableRows.get("r2")!.status = "applied"; // lands after the read, before the write
+      return rows;
+    }) as never);
+    const r = await continueRun("u1", "run1", "pick", ["r1", "r2"]);
+    expect(r).toMatchObject({ ok: false, status: 409 });
+    expect(runs.get("run1").state).toBe("waiting");
+    expect(nodesOf().pick.status).toBe("waiting");
+    expect([rowStatus("r1"), rowStatus("r2")]).toEqual(["new", "applied"]); // r1 was not changed either
+  });
+
+  it("a failed privacy check at Continue is a 503 and the run stays waiting; only a real block fails it", async () => {
+    seedTable();
+    const { deps: d } = withPick();
+    seedRun(graph());
+    await advanceRun("run1", d);
+    const { prisma } = await import("@/lib/db");
+    // loadTable reads the table first; the privacy check reads it again
+    vi.mocked(prisma.dataTable.findFirst).mockImplementationOnce((async ({ where }: any) => dataTables.get(where.id)) as never).mockRejectedValueOnce(new Error("db down"));
+    const r = await continueRun("u1", "run1", "pick", ["r1"]);
+    expect(r).toMatchObject({ ok: false, status: 503 });
+    expect(runs.get("run1").state).toBe("waiting");
+    expect(rowStatus("r1")).toBe("new");
+    expect((await continueRun("u1", "run1", "pick", ["r1"])).ok).toBe(true); // try again
+  });
+
+  it("a table deleted while waiting: Continue with none still works and skips the cards after it; with rows it is a 400", async () => {
+    seedTable();
+    const { deps: d, ran } = withPick();
+    seedRun(graph());
+    await advanceRun("run1", d);
+    dataTables.clear();
+    expect(await continueRun("u1", "run1", "pick", ["r1"])).toMatchObject({ ok: false, status: 400 });
+    expect((await continueRun("u1", "run1", "pick", [])).ok).toBe(true);
+    await advanceRun("run1", d);
+    expect(ran).toEqual([]);
+    expect(nodesOf().draft).toMatchObject({ status: "skipped", skippedReason: "Nothing picked" });
+    expect(runs.get("run1").state).toBe("succeeded");
+  });
+
+  it("a card whose list is cut by the 200 KB cap says so, and count is what was kept", async () => {
+    const items = Array.from({ length: 100 }, (_, i) => ({ i, text: "x".repeat(5000) }));
+    const { deps: d } = deps(() => ({ output: { items, count: items.length } }));
+    seedRun(graphOf(agentNode("a", ["trigger"], 1)));
+    await advanceRun("run1", d);
+    const a = nodesOf().a;
+    const out = a.output as { items: unknown[]; count: number; truncated: boolean };
+    expect(out.truncated).toBe(true);
+    expect(out.count).toBe(out.items.length);
+    expect(out.items.length).toBeLessThan(100);
+    expect(a.warnings).toEqual([`Kept the first ${out.items.length} of 100 items: output over 200 KB`]);
+  });
+
+  it("the Save card carries its rows twice (updated and items): 60 jobs with drafts are cut together under 200 KB, and the warning says all were saved", async () => {
+    const rows = Array.from({ length: 60 }, (_, i) => ({ _rowId: `r${i}`, status: "drafted", title: `Job ${i}`, url: `https://x.test/${i}`, description: "d".repeat(2500), coverLetter: "c".repeat(1500), cvNotes: "n".repeat(500), answers: "a".repeat(500) }));
+    const d = deps(() => ({ output: {} }));
+    d.deps.cards.table = { run: async () => ({ output: { inserted: [], updated: rows, items: [...rows], missing: [] } }) };
+    const save: FlowNode = { id: "keep", type: "table", fromIds: ["trigger"], config: { tableId: "t1", list: "{{trigger.items}}" }, ui: { label: "KEEP", position: { x: 1, y: 0 } } };
+    dataTables.set("t1", { id: "t1", userId: "u1", name: "Jobs", privateFrom: "" });
+    seedRun(graphOf(save));
+    await advanceRun("run1", d.deps);
+    const keep = nodesOf().keep;
+    const out = keep.output as { updated: unknown[]; items: unknown[]; inserted: unknown[]; truncated: boolean };
+    expect(JSON.stringify(out).length).toBeLessThanOrEqual(200_000);
+    expect(out.truncated).toBe(true);
+    expect(out.updated.length).toBe(out.items.length);
+    expect(keep.warnings).toEqual([`Later cards get the first ${out.items.length} of 60 rows; all 60 were saved.`]);
+    expect(JSON.stringify(keep).length).toBeLessThan(250_000);
+  });
+
+  it("the real Pick rows card: waits when rows are on offer, stops when none are, and fails on a missing table", async () => {
+    seedTable();
+    const { deps: d, ran } = withPick();
+    d.cards.pickRows = pickRowsCard;
+    seedRun(graph());
+    await advanceRun("run1", d);
+    expect(runs.get("run1").state).toBe("waiting");
+    expect(nodesOf().pick.waiting).toEqual({ tableId: "t1", tableName: "Jobs", statuses: ["new"], maxPick: 2, message: "", sortBy: "", setStatus: "picked", offered: 3 });
+
+    for (const r of tableRows.values()) r.status = "applied";
+    seedRun(graph(), {}, "run2");
+    await advanceRun("run2", d);
+    expect(nodesOf("run2").pick).toMatchObject({ status: "succeeded", stopReason: "No rows to pick in “Jobs”" });
+    expect(nodesOf("run2").draft.status).toBe("skipped");
+    expect(runs.get("run2").state).toBe("succeeded");
+
+    dataTables.clear();
+    seedRun(graph(), {}, "run3");
+    await advanceRun("run3", d);
+    expect(nodesOf("run3").pick).toMatchObject({ status: "failed", error: "Table not found" });
+    expect(ran).toEqual([]);
+  });
+
+  describe("on a private table", () => {
+    const leak = (from: string, card: string) => `“Jobs” holds private data (it was filled from ${from}), and ${card} reaches the web after a card that reads it. Split them into two workflows, so a web page can't make it send that data out.`;
+
+    it("Run refuses a web card after a Pick rows card on a private table, as after a Save card, and names the kinds", async () => {
+      seedTable(["new"], "chats");
+      const g = graphOf(pickNode("pick", ["trigger"], 1), fetchNode("page", ["pick"], 2));
+      expect(await preflight("u1", g)).toEqual([{ nodeId: "page", message: leak("chats", "PAGE") }]);
+      // Job boards is the open web too
+      const jobs: FlowNode = { id: "jobs", type: "jobBoards", fromIds: ["pick"], config: { boards: "jobs.lever.co/x" }, ui: { label: "JOBS", position: { x: 3, y: 0 } } };
+      expect((await preflight("u1", graphOf(pickNode("pick", ["trigger"], 1), jobs))).map((e) => e.message)).toEqual([leak("chats", "JOBS")]);
+      // a branch beside it, or a public table, is fine
+      expect(await preflight("u1", graphOf(pickNode("pick", ["trigger"], 1), fetchNode("page", ["trigger"], 2)))).toEqual([]);
+      seedTable(["new"], "");
+      expect(await preflight("u1", g)).toEqual([]);
+    });
+
+    it("Run counts what this graph puts in the table: a chat reader feeding Save, then Pick rows, then the web", async () => {
+      seedTable();
+      const reader = agentNode("read", ["trigger"], 1, { tools: ["readChat"] });
+      const save: FlowNode = { id: "keep", type: "table", fromIds: ["read"], config: { tableId: "t1", list: "{{read.items}}" }, ui: { label: "KEEP", position: { x: 2, y: 0 } } };
+      const g = graphOf(reader, save, pickNode("pick", ["keep"], 3), fetchNode("page", ["pick"], 4));
+      expect((await preflight("u1", g)).map((e) => e.message)).toContain(leak("chats", "PAGE"));
+    });
+
+    it("a table that is private after Run started fails the card before it waits, and no web card runs", async () => {
+      seedTable(["new"], "");
+      const { deps: d, pickRan } = withPick();
+      const web: string[] = [];
+      d.cards.fetch = { run: async () => (web.push("fetch"), { output: {} }) };
+      seedRun(graphOf(pickNode("pick", ["trigger"], 1), fetchNode("page", ["pick"], 2)));
+      dataTables.get("t1")!.privateFrom = "chats"; // another run marked it in the meantime
+      await advanceRun("run1", d);
+      expect(pickRan).toEqual([]);
+      expect(web).toEqual([]);
+      expect(nodesOf().pick).toMatchObject({ status: "failed", error: leak("chats", "PAGE") });
+      expect(nodesOf().page.status).toBe("skipped");
+      expect(runs.get("run1").state).toBe("failed");
+    });
+
+    it("a table that turns private while the run waits passes its kinds to the Save target that follows (the marking gap)", async () => {
+      seedTable(["new"], ""); // Job leads, public when the run starts
+      dataTables.set("t2", { id: "t2", userId: "u1", name: "Shortlist", privateFrom: "" });
+      const { deps: d } = withPick();
+      const save: FlowNode = { id: "keep", type: "table", fromIds: ["pick"], config: { tableId: "t2", list: "{{pick.items}}" }, ui: { label: "KEEP", position: { x: 2, y: 0 } } };
+      d.cards.table = { run: async () => ({ output: { items: [] } }) };
+      seedRun(graphOf(pickNode("pick", ["trigger"], 1), save));
+      await advanceRun("run1", d);
+      expect(runs.get("run1").state).toBe("waiting");
+      dataTables.get("t1")!.privateFrom = "chats"; // another run marked Job leads while this one waited
+      expect((await continueRun("u1", "run1", "pick", ["r1"])).ok).toBe(true);
+      await advanceRun("run1", d);
+      expect(nodesOf().keep.status).toBe("succeeded");
+      expect(dataTables.get("t2")!.privateFrom).toBe("chats");
+      expect(dataTables.get("t1")!.privateFrom).toBe("chats");
+    });
+
+    it("Continue checks again: a table marked while the run waited fails the run, and no row changes", async () => {
+      seedTable(["new"], "");
+      const { deps: d } = withPick();
+      seedRun(graphOf(pickNode("pick", ["trigger"], 1), fetchNode("page", ["pick"], 2)));
+      await advanceRun("run1", d);
+      expect(runs.get("run1").state).toBe("waiting");
+      dataTables.get("t1")!.privateFrom = "chats";
+      const r = await continueRun("u1", "run1", "pick", ["r1"]);
+      expect(r).toMatchObject({ ok: false, status: 409, error: leak("chats", "PAGE") });
+      expect(runs.get("run1")).toMatchObject({ state: "failed" });
+      expect(nodesOf().pick).toMatchObject({ status: "failed", error: leak("chats", "PAGE") });
+      expect(rowStatus("r1")).toBe("new");
+    });
   });
 });

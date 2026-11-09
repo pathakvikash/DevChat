@@ -16,9 +16,11 @@ export interface RunView {
   nodes: Record<string, CardRun>;
 }
 
+const WAITING_POLL_MS = 10_000;
+
 /**
- * One run's state, polled every 1.5 s while it runs (5 s in a hidden tab). Polling stops when the run ends or
- * waits; `restart` starts it again (after Resume). The run itself lives on the server, so closing the tab loses nothing.
+ * One run's state, polled every 1.5 s while it runs (5 s in a hidden tab) and every 10 s while it waits for the user.
+ * Polling stops when the run ends; `restart` starts it again (after Resume). The run itself lives on the server, so closing the tab loses nothing.
  */
 export function useWorkflowRun(runId: string | null) {
   // Tagged with its id, so a run from before a switch is never shown for the new one.
@@ -37,7 +39,12 @@ export function useWorkflowRun(runId: string | null) {
         if (res.ok) {
           const next = (await res.json()) as RunView;
           setState({ id: runId!, run: next });
-          if (next.state !== "running") return;
+          if (next.state !== "running" && next.state !== "waiting") return;
+          // A waiting run is checked slowly: another tab may have continued or cancelled it, and a stale banner must not offer a Cancel for a run that moved on.
+          if (next.state === "waiting") {
+            if (!stop) timer = setTimeout(tick, WAITING_POLL_MS);
+            return;
+          }
         } else if (res.status === 404) {
           setState({ id: runId!, run: null });
           return;
