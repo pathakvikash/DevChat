@@ -1,0 +1,229 @@
+import { generateText, type ModelMessage } from "ai";
+import { z } from "zod";
+import { contextWindowFor } from "@/lib/chat/contextBudget";
+import type { ModelConfig } from "@/lib/models";
+import { AGENT_TOOL_IDS, CATALOG, isCardType, parseConfig, type CardDef, type FieldSpec } from "./catalog";
+import { MAX_NODES, parseGraph, TRIGGER_ID, validateStructure, checkGraph, type FlowNode, type WorkflowGraph } from "./graph";
+import { buildTemplate } from "./templates";
+
+/** The graph format sent to the model: the same as 3.3, minus positions. */
+const FORMAT = `{
+  "vars": [{ "key": "topics", "label": "Topics, one per line", "value": "" }],
+  "nodes": [
+    { "id": "trigger", "type": "trigger", "fromIds": [], "config": {}, "label": "Run manually" },
+    { "id": "news", "type": "webSearch", "fromIds": ["trigger"], "config": { "queries": "{{vars.topics}}" }, "label": "Search" }
+  ]
+}`;
+
+const SMALL_WINDOW = 16_000;
+export const MAX_GENERATED_CARDS = 12;
+
+/** Settings only the user may set by hand (10): a generated flow never carries them. */
+const SENSITIVE_KEYS = ["folder", "allowEdits"];
+const SENSITIVE_TYPES = ["mcpTool"];
+const isMcpName = (s: unknown) => typeof s === "string" && /^mcp[_:./-]|__/i.test(s);
+
+export class GenerateError extends Error {}
+
+function fieldLine(f: FieldSpec, def: Record<string, unknown>): string {
+  const kind = f.options ? `one of ${f.options.map((o) => JSON.stringify(o.value)).join(", ")}` : f.kind === "tools" ? `list of ${AGENT_TOOL_IDS.join(", ")}` : f.kind;
+  const dflt = JSON.stringify(def[f.key]);
+  // The model picks nothing: an empty model uses the workflow's.
+  return `    - ${f.key}: ${kind}, default ${dflt}${f.help ? `. ${f.help}` : ""}`;
+}
+
+function cardBlock(def: CardDef): string {
+  const d = def.defaults();
+  const outs = def.outputs(d).join(", ");
+  return [`- ${def.type} ("${def.label}", ${def.category}): ${def.description}`, ...(def.fields.length ? ["  config:", ...def.fields.map((f) => fieldLine(f, d))] : ["  config: none"]), `  outputs: ${outs}${def.type === "agent" ? " (with outputFields, one output per field)" : ""}`].join("\n");
+}
+
+/** Every card in the catalog registry, as text for the system prompt. Cards added later appear on their own. */
+export function catalogForPrompt(): string {
+  return Object.values(CATALOG).map(cardBlock).join("\n");
+}
+
+const stripPositions = (g: WorkflowGraph) => ({
+  vars: g.vars,
+  nodes: g.nodes.map((n) => ({ id: n.id, type: n.type, fromIds: n.fromIds, config: n.config, label: n.ui.label })),
+});
+
+export function buildSystemPrompt(window: number): string {
+  const parts = [
+    "You design DevChat workflows. Reply with one ```json block holding the workflow and nothing else.",
+    `Format (no positions):\n${FORMAT}`,
+    `Cards you can use:\n${catalogForPrompt()}`,
+    [
+      "Templates: {{cardId.output}} reads an earlier card's output, {{vars.key}} reads a variable, {{run.date}} and {{workflow.name}} are always available.",
+      'To run a card once per list item set "perItem": true and "items" to one reference such as "{{news.items}}", then use {{item}} and {{index}} in that card.',
+      "A card may only reference cards that run before it (its fromIds, directly or further back).",
+    ].join("\n"),
+    [
+      "Rules:",
+      `- The one trigger card has id "trigger" and no fromIds.`,
+      `- At most ${MAX_GENERATED_CARDS} cards. Ids are short snake_case.`,
+      "- Keep anything worth keeping in a Table, when a Table card exists.",
+      "- Use Filter to stop when nothing is new, when a Filter card exists.",
+      "- Use Pick rows when the user must choose, when that card exists.",
+      "- Never submit, apply or send outside DevChat.",
+      "- Never add MCP tools, folders or edit permissions.",
+      '- Things the user must paste become "vars" with an empty "value".',
+      "- Leave agent \"model\" empty.",
+    ].join("\n"),
+  ];
+  if (window >= SMALL_WINDOW) {
+    const ex = (["news"] as const).map((k) => JSON.stringify(stripPositions(buildTemplate(k).graph)));
+    parts.push(`Example workflows:\n${ex.join("\n")}`);
+  }
+  return parts.join("\n\n");
+}
+
+/** The JSON object in a model reply: the first ```json fence, else the outermost braces. */
+export function extractJson(text: string): unknown {
+  const fence = /```(?:json)?\s*([\s\S]*?)```/i.exec(text)?.[1];
+  const braces = text.slice(text.indexOf("{"), text.lastIndexOf("}") + 1);
+  for (const c of [fence, braces]) {
+    if (!c) continue;
+    try {
+      const v = JSON.parse(c);
+      if (v && typeof v === "object" && !Array.isArray(v)) return v;
+    } catch {
+      // try the next candidate
+    }
+  }
+  return undefined;
+}
+
+type Rec = Record<string, unknown>;
+const isRec = (v: unknown): v is Rec => !!v && typeof v === "object" && !Array.isArray(v);
+
+/** Removes what only the user may set by hand, and gives each card the shape the graph schema wants. Each removal is a warning. */
+function sanitize(raw: Rec, warnings: string[]): Rec {
+  const nodes = (Array.isArray(raw.nodes) ? raw.nodes : []).filter(isRec);
+  // A removed card's children connect to its parents, so the flow stays in one piece.
+  const dropped = new Map<string, string[]>();
+  for (const n of nodes) {
+    if (SENSITIVE_TYPES.includes(String(n.type))) {
+      dropped.set(String(n.id), Array.isArray(n.fromIds) ? n.fromIds.map(String) : []);
+      warnings.push(`Removed the "${n.id}" card: MCP tools can only be added by hand.`);
+    }
+  }
+  const through = (ids: string[]): string[] => ids.flatMap((i) => (dropped.has(i) ? through(dropped.get(i)!) : [i]));
+  const out = nodes
+    .filter((n) => !dropped.has(String(n.id)))
+    .map((n) => {
+      const config: Rec = isRec(n.config) ? { ...n.config } : {};
+      const label = String(n.id);
+      for (const k of Object.keys(config)) {
+        if (SENSITIVE_KEYS.includes(k) || /^mcp/i.test(k)) {
+          delete config[k];
+          warnings.push(`Removed "${k}" from "${label}": it can only be set by hand.`);
+        }
+      }
+      if (Array.isArray(config.tools)) {
+        const kept = config.tools.filter((t) => !isMcpName(t));
+        if (kept.length !== config.tools.length) warnings.push(`Removed MCP tools from "${label}": they can only be ticked by hand.`);
+        config.tools = kept;
+      }
+      const ui = isRec(n.ui) ? n.ui : {};
+      const def = isCardType(n.type) ? CATALOG[n.type] : undefined;
+      return {
+        id: n.id,
+        type: n.type,
+        fromIds: through(Array.isArray(n.fromIds) ? n.fromIds.map(String) : []),
+        config,
+        ui: { label: String(ui.label ?? n.label ?? def?.label ?? n.id), position: { x: 0, y: 0 } },
+      };
+    });
+  return { version: 1, vars: Array.isArray(raw.vars) ? raw.vars : [], nodes: out };
+}
+
+/** x = level × 280, y = place in the level × 160. A card's level is its longest path from the start. */
+export function layoutGraph(graph: WorkflowGraph): WorkflowGraph {
+  const byId = new Map(graph.nodes.map((n) => [n.id, n]));
+  const level = new Map<string, number>();
+  const levelOf = (n: FlowNode): number => {
+    const hit = level.get(n.id);
+    if (hit !== undefined) return hit;
+    level.set(n.id, 0); // a cycle can't reach here (validated), but never recurse forever
+    const l = n.fromIds.reduce((m, f) => (byId.has(f) ? Math.max(m, levelOf(byId.get(f)!) + 1) : m), 0);
+    level.set(n.id, l);
+    return l;
+  };
+  const seen = new Map<number, number>();
+  return {
+    ...graph,
+    nodes: graph.nodes.map((n) => {
+      const l = levelOf(n);
+      const i = seen.get(l) ?? 0;
+      seen.set(l, i + 1);
+      return { ...n, ui: { ...n.ui, position: { x: l * 280, y: i * 160 } } };
+    }),
+  };
+}
+
+type Checked = { ok: true; graph: WorkflowGraph } | { ok: false; errors: string[] };
+
+/** Shape, structure and each card's config. Reference problems are not errors here: they come back as warnings. */
+function validate(raw: unknown, warnings: string[], defaultModel: string): Checked {
+  if (!isRec(raw)) return { ok: false, errors: ["The reply had no JSON object"] };
+  const cleaned = sanitize(raw, warnings);
+  let graph: WorkflowGraph;
+  try {
+    graph = parseGraph({ ...cleaned, defaultModel });
+  } catch (e) {
+    return { ok: false, errors: [e instanceof Error ? e.message : "Invalid workflow graph"] };
+  }
+  const errors = validateStructure(graph);
+  if (graph.nodes.length > MAX_GENERATED_CARDS && graph.nodes.length <= MAX_NODES) errors.push(`Use at most ${MAX_GENERATED_CARDS} cards`);
+  for (const n of graph.nodes) {
+    if (!isCardType(n.type)) continue;
+    for (const e of parseConfig(n.type, n.config).errors) errors.push(`${n.id}: ${e.field} ${e.message}`);
+  }
+  if (errors.length) return { ok: false, errors };
+  // Defaults filled and unknown keys dropped, by each card's own schema.
+  graph = { ...graph, nodes: graph.nodes.map((n) => ({ ...n, config: parseConfig(n.type, n.config).config })) };
+  graph.nodes = graph.nodes.map((n) => (n.id === TRIGGER_ID ? { ...n, config: CATALOG.trigger.defaults() } : n));
+  return { ok: true, graph };
+}
+
+export interface GenerateOptions {
+  description: string;
+  model: ModelConfig;
+  /** The flow being changed, when it has cards beyond the trigger. */
+  current?: WorkflowGraph;
+  defaultModel?: string;
+  signal?: AbortSignal;
+}
+
+/** A proposed flow for the description. Saves nothing. One repair call when the first reply is not a valid flow. */
+export async function generateFlow(o: GenerateOptions): Promise<{ graph: WorkflowGraph; warnings: string[] }> {
+  const system = buildSystemPrompt(contextWindowFor(o.model.id, o.model));
+  const user = o.current && o.current.nodes.length > 1 ? `${o.description}\n\nChange this flow:\n\`\`\`json\n${JSON.stringify(stripPositions(o.current))}\n\`\`\`` : o.description;
+  const messages: ModelMessage[] = [{ role: "user", content: user }];
+  const defaultModel = o.defaultModel ?? o.current?.defaultModel ?? o.model.id;
+  const ask = async () => (await generateText({ model: o.model.model, system, messages, abortSignal: o.signal })).text;
+
+  const warnings: string[] = [];
+  let reply = await ask();
+  let checked = validate(extractJson(reply), warnings, defaultModel);
+  if (!checked.ok) {
+    warnings.length = 0;
+    messages.push({ role: "assistant", content: reply }, { role: "user", content: `That flow has problems:\n${checked.errors.slice(0, 15).map((e) => `- ${e}`).join("\n")}\nReply with the corrected JSON only.` });
+    reply = await ask();
+    checked = validate(extractJson(reply), warnings, defaultModel);
+  }
+  if (!checked.ok) throw new GenerateError("Couldn't build a flow from that. Rephrase it or pick a stronger model.");
+
+  const graph = layoutGraph(checked.graph);
+  const fill = graph.vars.filter((v) => !v.value.trim()).map((v) => v.label || v.key);
+  if (fill.length) warnings.push(`Fill in: ${fill.join(", ")}`);
+  for (const i of checkGraph(graph)) warnings.push(i.message);
+  return { graph, warnings: [...new Set(warnings)] };
+}
+
+export const generateBody = z.object({
+  description: z.string().trim().min(1).max(4000),
+  workflowId: z.string().optional(),
+  model: z.string().optional(),
+});
