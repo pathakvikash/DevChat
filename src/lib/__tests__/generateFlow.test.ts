@@ -15,8 +15,8 @@ vi.mock("@/lib/hostAccess", () => ({ canUseHostTools: h.canUseHostTools, HOST_TO
 vi.mock("@/lib/settings", () => ({ getSettingsKey: vi.fn(async () => "") }));
 vi.mock("@/lib/db", () => ({ prisma: { workflow: { findFirst: h.findFirst } } }));
 
-import { buildSystemPrompt, catalogForPrompt, extractJson, generateFlow, GenerateError, layoutGraph } from "@/lib/workflows/generate";
-import { validateStructure } from "@/lib/workflows/graph";
+import { buildSystemPrompt, catalogForPrompt, extractJson, generateFlow, GenerateError } from "@/lib/workflows/generate";
+import { autoLayout, validateStructure } from "@/lib/workflows/graph";
 import { CATALOG } from "@/lib/workflows/catalog";
 const { POST } = await import("@/app/api/workflows/generate/route");
 
@@ -68,7 +68,7 @@ describe("generateFlow", () => {
     const search = graph.nodes.find((n) => n.id === "news")!;
     expect(search.config).toMatchObject({ provider: "", perItem: false, maxItems: 25 });
     expect(search.config).not.toHaveProperty("junk");
-    expect(graph.nodes.map((n) => n.ui.position)).toEqual([0, 1, 2, 3].map((l) => ({ x: l * 280, y: 0 })));
+    expect(graph.nodes.map((n) => n.ui.position)).toEqual([0, 1, 2, 3].map((l) => ({ x: l * 340, y: 0 })));
     expect(warnings).toContain("Fill in: Your topics");
     expect(validateStructure(graph)).toEqual([]);
     expect(graph.defaultModel).toBe("mock/gen");
@@ -122,15 +122,15 @@ describe("generateFlow", () => {
     expect(calls).toHaveLength(2);
   });
 
-  it("lays out by level and row", () => {
-    const g = layoutGraph({
+  it("lays out by level, siblings centred in the model's order", () => {
+    const g = autoLayout({
       version: 1,
       defaultModel: "",
       maxRunTokens: 1000,
       vars: [],
       nodes: [node("trigger", "trigger", []), node("a", "webSearch", ["trigger"]), node("b", "webSearch", ["trigger"]), node("c", "agent", ["a", "b"])].map((n) => ({ ...n, type: n.type as any, ui: { label: n.id, position: { x: 9, y: 9 } } })),
     });
-    expect(g.nodes.map((n) => [n.id, n.ui.position.x, n.ui.position.y])).toEqual([["trigger", 0, 0], ["a", 280, 0], ["b", 280, 160], ["c", 560, 0]]);
+    expect(g.nodes.map((n) => [n.id, n.ui.position.x, n.ui.position.y])).toEqual([["trigger", 0, 0], ["a", 340, -80], ["b", 340, 80], ["c", 680, 0]]);
   });
 
   it("builds the catalog text from the registry and leaves examples out for small windows", () => {

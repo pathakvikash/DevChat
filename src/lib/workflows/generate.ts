@@ -3,7 +3,7 @@ import { z } from "zod";
 import { contextWindowFor } from "@/lib/chat/contextBudget";
 import type { ModelConfig } from "@/lib/models";
 import { AGENT_TOOL_IDS, CATALOG, isCardType, parseConfig, type CardDef, type FieldSpec } from "./catalog";
-import { MAX_NODES, parseGraph, TRIGGER_ID, validateStructure, checkGraph, type FlowNode, type WorkflowGraph } from "./graph";
+import { autoLayout, MAX_NODES, parseGraph, TRIGGER_ID, validateStructure, checkGraph, type WorkflowGraph } from "./graph";
 import { buildTemplate, TEMPLATE_OPTIONS } from "./templates";
 import { providerOptionsFor } from "@/lib/chat/providerOptions";
 
@@ -151,14 +151,14 @@ function sanitize(raw: Rec, current: WorkflowGraph | undefined, warnings: string
   };
   const out = all
     .filter((n) => !isDropped(n))
-    .map((n) => {
+    .map((n, index) => {
       const config: Rec = isRec(n.config) ? { ...n.config } : {};
       const label = String(n.id);
       const before = was(n);
       const fromIds = through(Array.isArray(n.fromIds) ? n.fromIds.map(String) : []);
       const ui = isRec(n.ui) ? n.ui : {};
       const def = isCardType(n.type) ? CATALOG[n.type] : undefined;
-      const card = { id: n.id, type: n.type, fromIds, ui: { label: String(ui.label ?? n.label ?? def?.label ?? n.id), position: { x: 0, y: 0 } } };
+      const card = { id: n.id, type: n.type, fromIds, ui: { label: String(ui.label ?? n.label ?? def?.label ?? n.id), position: { x: 0, y: index } } }; // provisional: the model's order breaks ties in autoLayout
       // A by-hand card that is still the same card is the user's, whatever the reply says about it: its settings, and its
       // inputs while they still exist (if the reply removed them all, it keeps the reply's wiring, shown in the preview).
       if (before && SENSITIVE_TYPES.includes(String(n.type))) {
@@ -211,30 +211,6 @@ function cleanVars(raw: unknown, current: WorkflowGraph | undefined): { key: str
     out.set(key, { key, label: typeof v.label === "string" && v.label ? v.label.slice(0, 200) : key, value: value.slice(0, MAX_VAR_VALUE) });
   }
   return [...out.values()].slice(0, MAX_VARS);
-}
-
-/** x = level × 280, y = place in the level × 160. A card's level is its longest path from the start. */
-export function layoutGraph(graph: WorkflowGraph): WorkflowGraph {
-  const byId = new Map(graph.nodes.map((n) => [n.id, n]));
-  const level = new Map<string, number>();
-  const levelOf = (n: FlowNode): number => {
-    const hit = level.get(n.id);
-    if (hit !== undefined) return hit;
-    level.set(n.id, 0); // a cycle can't reach here (validated), but never recurse forever
-    const l = n.fromIds.reduce((m, f) => (byId.has(f) ? Math.max(m, levelOf(byId.get(f)!) + 1) : m), 0);
-    level.set(n.id, l);
-    return l;
-  };
-  const seen = new Map<number, number>();
-  return {
-    ...graph,
-    nodes: graph.nodes.map((n) => {
-      const l = levelOf(n);
-      const i = seen.get(l) ?? 0;
-      seen.set(l, i + 1);
-      return { ...n, ui: { ...n.ui, position: { x: l * 280, y: i * 160 } } };
-    }),
-  };
 }
 
 type Checked = { ok: true; graph: WorkflowGraph } | { ok: false; errors: string[] };
@@ -302,7 +278,7 @@ export async function generateFlow(o: GenerateOptions): Promise<{ graph: Workflo
   }
   if (!checked.ok) throw new GenerateError("Couldn't build a flow from that. Rephrase it or pick a stronger model.");
 
-  const graph = layoutGraph(checked.graph);
+  const graph = autoLayout(checked.graph);
   const fill = graph.vars.filter((v) => !v.value.trim()).map((v) => v.label || v.key);
   if (fill.length) warnings.push(`Fill in: ${fill.join(", ")}`);
   for (const i of checkGraph(graph)) warnings.push(i.message);
@@ -311,6 +287,6 @@ export async function generateFlow(o: GenerateOptions): Promise<{ graph: Workflo
 
 export const generateBody = z.object({
   description: z.string().trim().min(1).max(4000),
-  workflowId: z.string().optional(),
-  model: z.string().optional(),
+  workflowId: z.string().max(64).optional(),
+  model: z.string().max(200).optional(),
 });
