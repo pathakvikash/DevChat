@@ -219,18 +219,33 @@ async function createSheet(userId: string, tableId: string, title: string, expec
 
 interface Tab {
   sheetId: number;
+  title: string;
   rows: number;
   cols: number;
+  frozenRows: number;
+  frozenCols: number;
 }
 
-/** The first tab's id and grid size. A new sheet's grid is 1,000 rows by 26 columns, and a write outside the grid is refused. */
-async function firstTab(userId: string, id: string): Promise<Tab | Response> {
-  const res = await call(userId, `${SHEETS_URL}/${encodeURIComponent(id)}?fields=sheets.properties(sheetId,gridProperties)`);
+/**
+ * DevChat's own tab: the one with sheetId 0, which `spreadsheets.create` makes. The user may have added tabs, even dragged
+ * one first, so "the first tab" is not safe. A new sheet's grid is 1,000 rows by 26 columns, and a write outside the grid
+ * is refused. A missing tab (deleted by the user) answers like a missing sheet, so the caller starts a new one.
+ */
+async function ownTab(userId: string, id: string): Promise<Tab | Response> {
+  const res = await call(userId, `${SHEETS_URL}/${encodeURIComponent(id)}?fields=sheets.properties(sheetId,title,hidden,gridProperties)`);
   if (!res.ok) return res;
-  const p = ((await res.json().catch(() => ({}))) as { sheets?: { properties?: { sheetId?: number; gridProperties?: { rowCount?: number; columnCount?: number } } }[] }).sheets?.[0]?.properties;
-  if (typeof p?.sheetId !== "number") throw new SyncError("Google couldn't update the sheet. Try again.");
-  return { sheetId: p.sheetId, rows: p.gridProperties?.rowCount ?? 1000, cols: p.gridProperties?.columnCount ?? 26 };
+  type Props = { sheetId?: number; title?: string; gridProperties?: { rowCount?: number; columnCount?: number; frozenRowCount?: number; frozenColumnCount?: number } };
+  const tabs = ((await res.json().catch(() => ({}))) as { sheets?: { properties?: Props }[] }).sheets ?? [];
+  const p = tabs.map((t) => t.properties).find((t) => t?.sheetId === 0);
+  if (!p || typeof p.title !== "string") return new Response(null, { status: 404 });
+  const g = p.gridProperties ?? {};
+  return { sheetId: 0, title: p.title, rows: g.rowCount ?? 1000, cols: g.columnCount ?? 26, frozenRows: g.frozenRowCount ?? 0, frozenCols: g.frozenColumnCount ?? 0 };
 }
+
+/** A1 range on a named tab. The name is quoted, with ' doubled. */
+const rangeOn = (tab: Tab, a1: string) => `'${tab.title.replace(/'/g, "''")}'!${a1}`;
+/** For the unit test of the quoting. */
+export const rangeOnForTest = (title: string, a1: string) => rangeOn({ title } as Tab, a1);
 
 async function resizeGrid(userId: string, id: string, tab: Tab, rows: number, cols: number): Promise<Response> {
   return call(userId, `${SHEETS_URL}/${encodeURIComponent(id)}:batchUpdate`, {
@@ -242,21 +257,23 @@ async function resizeGrid(userId: string, id: string, tab: Tab, rows: number, co
 /**
  * Puts the rows into sheet `id`. Returns the first refused response, or null when all went through. The grid is grown first
  * (writes outside it are refused), the chunks are written, then the grid is cut to exactly the content, which also deletes
- * the rows and columns an older, bigger table left behind.
+ * the rows and columns an older, bigger table left behind. Only DevChat's own tab is touched.
  */
 async function writeSheet(userId: string, id: string, values: string[][], chunks: { start: number; rows: string[][] }[]): Promise<Response | null> {
-  const tab = await firstTab(userId, id);
+  const tab = await ownTab(userId, id);
   if (tab instanceof Response) return tab;
-  const rows = Math.max(values.length, 1);
-  const cols = Math.max(values[0]?.length ?? 1, 1);
+  // A grid cannot be cut to or below its frozen rows and columns: one non-frozen row and column must stay.
+  const rows = Math.max(values.length, tab.frozenRows + 1);
+  const cols = Math.max(values[0]?.length ?? 1, tab.frozenCols + 1);
   if (rows > tab.rows || cols > tab.cols) {
     const grown = await resizeGrid(userId, id, tab, Math.max(rows, tab.rows), Math.max(cols, tab.cols));
     if (!grown.ok) return grown;
   }
   for (const c of chunks) {
-    const res = await call(userId, `${SHEETS_URL}/${encodeURIComponent(id)}/values/A${c.start}?valueInputOption=RAW`, {
+    const range = rangeOn(tab, `A${c.start}`);
+    const res = await call(userId, `${SHEETS_URL}/${encodeURIComponent(id)}/values/${encodeURIComponent(range)}?valueInputOption=RAW`, {
       method: "PUT",
-      body: JSON.stringify({ range: `A${c.start}`, majorDimension: "ROWS", values: c.rows }),
+      body: JSON.stringify({ range, majorDimension: "ROWS", values: c.rows }),
     });
     if (!res.ok) return res;
   }

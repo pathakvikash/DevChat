@@ -327,7 +327,7 @@ export async function advanceRun(runId: string, deps: RunnerDeps = defaultDeps):
         if (!(await save())) return;
         continue;
       }
-      // Private tables are checked again right before a Save or Pick rows card runs: another run may have marked the table
+      // Private tables are checked again right before a Save, Pick rows or Sync card runs: another run may have marked the table
       // since Start, and a Resume never went through the Start checks.
       if (TABLE_READERS.includes(node.type)) {
         // If the check itself fails, the card does not run: it cannot be shown that the table is safe to read.
