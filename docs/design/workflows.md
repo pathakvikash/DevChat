@@ -24,7 +24,7 @@ A workflow is a flow of connected cards that runs on the server. It can fetch so
 | Later or never | Note |
 |---|---|
 | Schedules | Later. The trigger card is shaped for it (6.12). No migration needed. |
-| Google Sheets sync | Phase 7 |
+| Google Sheets sync | Built in phase 7 (section 11) |
 | Submitting applications | Never (decision 2) |
 | Parallel branches, loop containers, code cards, expressions in templates | The per-item toggle and the sequential runner cover both templates |
 | Approval card, an ask-the-user tool for agents | Later. Same waiting mechanism as Pick rows. |
@@ -939,6 +939,17 @@ Sanity mode uses no network and no real model, following the precedent at `src/l
 
 **Done when** a table syncs to a new sheet and re-syncs by overwriting.
 
+**Status: built (10 Nov 2026).** What was decided and built:
+
+- **Scope `drive.file` only**, so DevChat can touch only sheets it created. Connect is incremental (`access_type=offline`, `include_granted_scopes=true`, `prompt=consent`). A state cookie (httpOnly, sameSite lax, secure in production, 10 minutes, path `/api/integrations/google`) is checked in the callback, which refuses a missing or different state with a 400 before anything is exchanged. The cookie also carries a same-site `returnTo` path.
+- **Tokens** are one JSON value under the AppSetting key `googleSheetsTokens`, through `setSettingsKey` (AES-GCM). They never go in a cookie or to the browser, and the settings keys route does not list them. A 401 refreshes once with the refresh token and retries; a refused refresh (Google's own 4xx) replaces the tokens with `{ needsReconnect: true }`, and the UI shows **Reconnect Google**, not the raw error. A network error keeps the tokens.
+- **The destination is pinned.** The `sheetSync` card's config is `tableId` only (zod drops anything else). The sheet is `DataTable.sheetId` of a table the user owns, created on the first sync (title = the table name); `POST /api/tables/[id]/sheet-sync` ignores its body. A sheet deleted in Drive is replaced on the next sync. In `generate.ts` the table is user-only like Save's `tableId`.
+- **Sync is overwrite:** clear `A:ZZ`, then `values.update` with `valueInputOption=RAW` (header row of column labels plus Status, every cell a string), so a cell that starts with `=` stays text.
+- **Privacy:** `sheetSync` is not in `reachesWeb` or `reachesOpenWeb` (it writes only to the user's own sheet). It is a *reader* of its table (`TABLE_READERS` in `privacy.ts`): a private table's kinds apply to any web card after it, at Start and again when the card runs, and a Save after it inherits them. It is not a writer, so it never marks a table private.
+- **Routes added beyond section 9:** `GET` and `DELETE /api/integrations/google` (state, and Disconnect, which deletes the tokens and asks Google to revoke them), and a sanity-only `POST /api/integrations/google/test` (404 outside sanity mode).
+- **Sanity suite:** `src/lib/google/fake.ts` answers the token and Sheets calls in-process, and the "consent screen" is the callback itself, so nothing reaches Google.
+- **Start:** a run with a `sheetSync` card is refused when Google is not connected ("Connect Google in Settings first").
+
 ### Later
 
 Schedules (6.12), an approval card and an ask-the-user tool (both use the waiting mechanism), parallel branches, per-item checkpoints on resume, `Output.object` for JSON-mode models, and "Open in chat" on a row to refine a draft by talking it through.
@@ -948,7 +959,7 @@ Schedules (6.12), an approval card and an ask-the-user tool (both use the waitin
 ## 12. Open questions
 
 1. **Where runs must survive.** Answered 9 Nov: locally and on Vercel. Locally `after()` has no time cap. On Vercel a run is cut at `maxDuration` (300 s) and shows Interrupted; Resume continues from that card. A real queue is a later add-on.
-2. **Google Sheets scope.** Answered 9 Nov: `drive.file`. The default is `drive.file`: DevChat creates the sheet and can write only to sheets it created, and Google requires no review. The alternative is `spreadsheets`, which can write into any sheet you already have but is a sensitive scope that Google must verify before anyone except test users can use it. Which do you want?
+2. **Google Sheets scope.** Answered 9 Nov: `drive.file`, built in phase 7. DevChat creates the sheet and can write only to sheets it created, and Google requires no review. The alternative, `spreadsheets`, would write into any sheet you already have but is a sensitive scope that Google must verify first.
 
 ---
 

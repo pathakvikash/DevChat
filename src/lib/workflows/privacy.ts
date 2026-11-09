@@ -27,7 +27,10 @@ export function privateKindsOf(type: string, config: Record<string, unknown>, de
   return out;
 }
 
-const tableIdOf = (n: FlowNode): string => (n.type === "table" ? String(n.config.tableId ?? "") : "");
+/** Cards that read a table: they are readers of its private kinds. Only Save to table writes to one. */
+export const TABLE_READERS = ["table", "sheetSync"];
+const tableIdOf = (n: FlowNode): string => (TABLE_READERS.includes(n.type) ? String(n.config.tableId ?? "") : "");
+const savedTableOf = (n: FlowNode): string => (n.type === "table" ? String(n.config.tableId ?? "") : "");
 
 /**
  * The kinds each table would hold once this graph has run its Save cards: what the tables hold now, plus the kinds of
@@ -49,7 +52,7 @@ export function planKinds(graph: WorkflowGraph, current: Map<string, PrivateKind
   for (let changed = true; changed; ) {
     changed = false;
     for (const n of graph.nodes) {
-      const t = tableIdOf(n);
+      const t = savedTableOf(n);
       if (!t || !kinds.has(t)) continue;
       const mine = kinds.get(t)!;
       for (const k of readsOf(n.id)) if (!mine.has(k)) (mine.add(k), (changed = true));

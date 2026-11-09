@@ -1,5 +1,6 @@
 "use client";
 
+import GoogleConnection from "@/app/components/GoogleConnection";
 import { useEffect, useState, useMemo, useRef } from "react";
 import { useSearchParams } from "next/navigation";
 import { Trash2, Save, RotateCcw, Loader2, Cable, Database, ExternalLink, Search, Terminal, Copy, Check } from "lucide-react";
@@ -568,6 +569,15 @@ export default function SettingsPage() {
                   Manage
                 </Link>
               </div>
+            </div>
+
+            {/* Google Sheets */}
+            <div className="glass-card rounded-[var(--glass-radius-xl)] p-6">
+              <h2 className="text-xl font-bold mb-1">Google Sheets</h2>
+              <p className="text-sm text-zinc-400 mb-3">
+                Sync a table to a Google Sheet from its page or a workflow. Disconnecting deletes the saved access from DevChat.
+              </p>
+              <GoogleConnection />
             </div>
 
             {/* Dataset Export */}

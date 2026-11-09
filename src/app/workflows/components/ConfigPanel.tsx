@@ -1,7 +1,8 @@
 "use client";
 
+import GoogleConnection from "@/app/components/GoogleConnection";
 import { useState } from "react";
-import { AlertTriangle, Bot, Copy, Check, MessageSquare, Funnel, Globe, Plug, Play, Search, Table2, Trash2, X, ChevronDown, ChevronRight } from "lucide-react";
+import { AlertTriangle, Bot, Copy, Check, MessageSquare, Funnel, Globe, Plug, Play, Search, Table2, Sheet, Trash2, X, ChevronDown, ChevronRight } from "lucide-react";
 import { CATALOG, isCliModelId, MCP_WEB_WARNING, reachesOpenWeb, type FieldSpec } from "@/lib/workflows/catalog";
 import { useToast } from "@/app/components/Toast";
 import { ancestorsOf, connectionError, TRIGGER_ID, type CardRun, type FlowNode, type GraphIssue, type RunState, type WorkflowGraph } from "@/lib/workflows/graph";
@@ -9,7 +10,7 @@ import ConfigField, { type FieldEnv } from "./ConfigField";
 import { cardStatus, formatDuration, formatTokens, StatusBadge } from "./RunStatus";
 import { fetchNodeRun } from "./useWorkflowRun";
 
-const CARD_ICONS = { Play, Search, Bot, MessageSquare, Plug, Globe, Funnel, Table2 } as const;
+const CARD_ICONS = { Play, Search, Bot, MessageSquare, Plug, Globe, Funnel, Table2, Sheet } as const;
 
 /** A card type's icon, by the catalog's icon name. */
 export function CardIcon({ name, size = 14, className }: { name: string; size?: number; className?: string }) {
@@ -206,6 +207,7 @@ export default function ConfigPanel({
             {def.fields.filter(visible).map((spec) => (
               <ConfigField key={spec.key} spec={spec} config={node.config} onChange={setConfig} env={fieldEnv} error={mine.find((i) => i.field === spec.key)?.message.replace(/^[^:]*: /, "")} />
             ))}
+            {node.type === "sheetSync" && <GoogleConnection compact />}
             {node.type === "mcpTool" && upstreamWeb && (
               <p className="flex items-start gap-1.5 text-xs text-zinc-300">
                 <AlertTriangle size={14} className="mt-px shrink-0 text-amber-400" aria-hidden="true" />

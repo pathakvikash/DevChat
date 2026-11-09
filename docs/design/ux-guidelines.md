@@ -740,6 +740,12 @@ An inline card (2.3), one per helper. Up to 3 stack with the normal `my-2` gap. 
 - The preview bar ("Preview · 4 cards · Nothing is saved until you apply it." with **Apply** and **Discard**) replaces the box. Focus goes to Apply; Esc inside the bar discards. Warnings list under "Check before you run" with an amber icon and that heading as the word. Apply keeps the current variable values and the variables the proposal lacks, checks the flow against the save rules (a refusal is a toast and the preview stays), asks `confirm("Replace the current flow?")` only when the flow has cards, then saves through the editor's normal autosave. After Apply or Discard, focus goes to the editor area. Run is `aria-disabled` while a preview shows. A past run (`?run=`) never shows a preview.
 - The proposed cards use dashed borders (`.wf-preview` in `canvas.css`), are not selectable or editable (in the List view they are plain, not buttons), and show "Not run". There is no extra live region: "Building your flow…" (cleared when the build ends), "Preview ready: n cards", "Flow applied" and "Preview discarded" go through the editor's one polite region.
 
+**Google Sheets sync** (workflows phase 7):
+
+- The table header reads, left to right, **Open sheet** (only once a sheet exists, opens in a new tab with `rel="noopener noreferrer"`), **Sync to Google Sheets** and **Export CSV**, all 36px `glass-button`s that wrap on a narrow screen. Pressing Sync when Google is not connected goes to Google and returns to the table, where the sync finishes by itself; the `?google=` and `?sync=` flags are removed from the address afterwards. While it runs the button says "Syncing…" and is disabled. Done is a toast, "Synced 3 rows to Google Sheets".
+- When Google refuses the saved access, the Sync button is replaced by a primary **Reconnect Google** link (also on later visits) and the toast says "Google access ended. Reconnect Google, then try again." No raw Google error, stack or token is ever shown.
+- Settings has a "Google Sheets" card with one line of state ("Google isn't connected.", "Google is connected. DevChat can only open the sheets it creates.", "Google access ended.") and one button: **Connect Google**, **Reconnect Google** or **Disconnect**. The card's own settings show the same state in one line, with a link to Settings, so connecting never leaves unsaved card edits behind.
+
 ---
 
 ## 4. Compatibility at a glance
