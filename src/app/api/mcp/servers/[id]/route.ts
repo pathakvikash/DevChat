@@ -56,6 +56,8 @@ export async function PATCH(
     if (body.enabled !== undefined) data.enabled = body.enabled;
     if (body.token !== undefined) data.authToken = JSON.stringify(body.token);
 
+    // The stored OAuth token goes when the server stops using oauth2 or moves to another address.
+    if (body.token === undefined && ((body.authType !== undefined && body.authType !== "oauth2") || (body.url !== undefined && body.url !== result.server.url))) data.authToken = null;
     const server = await getPrismaMcp().update({ where: { id }, data });
     // A changed address or credentials make the cached connection and tool list stale.
     if (["url", "authType", "authConfig", "authToken"].some((k) => k in data)) await disconnectFromServer(id).catch(() => {});

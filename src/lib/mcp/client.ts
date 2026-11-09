@@ -30,7 +30,8 @@ function makeHeaders(
     } catch {}
   }
 
-  if (authToken) {
+  // A leftover token from an earlier oauth2 setup must not go to a server that no longer uses oauth2.
+  if (authToken && authType === "oauth2") {
     try {
       const token = JSON.parse(authToken);
       if (token.access_token) headers.Authorization = `Bearer ${token.access_token}`;

@@ -297,6 +297,9 @@ export const CLI_PROVIDERS: readonly CliProviderDef[] = [
     invoke: ({ model, system, user, effort, cwd, access, web }) => {
       // Ask with a folder: every edit or command is a permission request on stdin/stdout (see `runCli`).
       const bridged = !!cwd && access === "ask";
+      // Workflow cards (web === false): no network at all. Web tools and Bash are denied, and --strict-mcp-config keeps
+      // the user's own MCP servers and claude.ai connectors from loading (the no-folder branch already does).
+      const offline = web === false ? ["--disallowedTools", "WebFetch", "WebSearch", "Bash", "--strict-mcp-config"] : [];
       return {
         args: [
           "-p",
@@ -309,10 +312,10 @@ export const CLI_PROVIDERS: readonly CliProviderDef[] = [
           ...(!cwd
             ? ["--tools", "", "--strict-mcp-config"] // no --mcp-config given: none of the user's MCP servers start
             : access === "agent"
-              ? ["--tools", "default", "--permission-mode", "acceptEdits", ...(web === false ? ["--disallowedTools", "WebFetch", "WebSearch"] : [])]
+              ? ["--tools", "default", "--permission-mode", "acceptEdits", ...offline]
               : bridged
-                ? ["--tools", "default", "--permission-mode", "default", "--permission-prompt-tool", "stdio", ...(web === false ? ["--disallowedTools", "WebFetch", "WebSearch"] : [])]
-                : ["--tools", "Read", "Glob", "Grep", ...(web === false ? [] : ["WebSearch", "WebFetch"])]),
+                ? ["--tools", "default", "--permission-mode", "default", "--permission-prompt-tool", "stdio", ...offline]
+                : ["--tools", "Read", "Glob", "Grep", ...(web === false ? ["--strict-mcp-config"] : ["WebSearch", "WebFetch"])]),
           ...(access === "plan" ? ["--permission-mode", "plan"] : []),
           ...(system ? ["--system-prompt", system] : []),
           ...(model !== "default" ? ["--model", model] : []),
@@ -342,7 +345,8 @@ export const CLI_PROVIDERS: readonly CliProviderDef[] = [
         ...(cwd ? ["-C", cwd] : []),
         ...(model !== "default" ? ["--model", model] : []),
         ...(effort ? ["-c", `model_reasoning_effort="${effort === "max" ? "high" : effort}"`] : []),
-        ...(web === false ? ["-c", "tools.web_search=false"] : []),
+        // Workflow cards (web === false): no network. ponytail: these two Codex flags are unverified until the @live Codex check runs.
+        ...(web === false ? ["-c", "tools.web_search=false", "-c", "sandbox_workspace_write.network_access=false"] : []),
         "-",
       ],
       stdin: withSystem(system, user),
@@ -380,6 +384,9 @@ export const CLI_PROVIDERS: readonly CliProviderDef[] = [
         // allow it and let the step limit below stop a model that never recovers.
         OPENCODE_CONFIG_CONTENT: JSON.stringify({
           permission: {
+            // Workflow cards (web === false): every tool not named below is denied, which covers MCP tools from the user's global
+            // config. ponytail: unverified against a real OpenCode until a live check runs.
+            ...(web === false ? { "*": "deny" } : {}),
             // Later rules win. Reading a .env file defaults to "ask", which ends the run, so say deny.
             read: { "*": "allow", "*.env": "deny", "*.env.*": "deny", "*.env.example": "allow" },
             bash: "deny",

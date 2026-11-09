@@ -123,7 +123,7 @@ export function ancestorsOf(graph: WorkflowGraph, id: string): Set<string> {
 function cardConflict(n: FlowNode, defaultModel: string): string | null {
   const label = n.ui.label || n.id;
   if (n.type === "agent" && hasToolConflict(n.config.tools, n.config.mcpTools)) return `${label}: ${TOOL_CONFLICT_MESSAGE}`;
-  if (leaksTo(n, n, defaultModel)) return PRIVATE_LEAK_MESSAGE(label);
+  if (leaksTo(n, n, defaultModel)) return `${label} reads private data (chats, MCP or a folder) and reaches the web itself. Untick one, so a web page can't make it send your data out.`;
   return null;
 }
 
