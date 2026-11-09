@@ -39,6 +39,8 @@ function TemplateField({ spec, value, onChange, error, env, id }: { spec: FieldS
   // Typing `{{` opens the picker; picking then replaces those two characters.
   const braces = useRef(false);
   const preview = value.includes("{{") ? env.preview(value) : null;
+  // `{{item}}` is an error in a list field (it is where the items come from), so the picker does not offer it there.
+  const listRows = spec.key === "list" || spec.key === "items" ? env.rows.filter((r) => r.group !== "This item") : env.rows;
   const insertButton = useRef<HTMLButtonElement>(null);
   const close = () => {
     braces.current = false;
@@ -96,7 +98,7 @@ function TemplateField({ spec, value, onChange, error, env, id }: { spec: FieldS
       )}
       {picking && (
         <FieldPicker
-          rows={env.rows}
+          rows={listRows}
           onPick={insert}
           onClose={() => {
             close();
@@ -115,11 +117,28 @@ function TemplateField({ spec, value, onChange, error, env, id }: { spec: FieldS
 function InlineTemplate({ label, placeholder, value, onChange, env, mono }: { label: string; placeholder: string; value: string; onChange: (v: string) => void; env: FieldEnv; mono?: boolean }) {
   const [picking, setPicking] = useState(false);
   const box = useRef<HTMLInputElement>(null);
+  const insertButton = useRef<HTMLButtonElement>(null);
   const caret = useRef<number | null>(null);
+  // Typing `{{` opens the picker; picking then replaces those two characters.
+  const braces = useRef(false);
+  const close = () => {
+    braces.current = false;
+    setPicking(false);
+  };
+  useEffect(() => {
+    if (!picking) return;
+    const outside = (e: MouseEvent) => {
+      const t = e.target as Node;
+      if (!(t as Element).closest?.('[role="dialog"][aria-label="Insert field"]') && !insertButton.current?.contains(t)) close();
+    };
+    document.addEventListener("mousedown", outside);
+    return () => document.removeEventListener("mousedown", outside);
+  }, [picking]);
   function insert(path: string) {
     const at = caret.current ?? value.length;
-    onChange(`${value.slice(0, at)}{{${path}}}${value.slice(at)}`);
-    setPicking(false);
+    const from = braces.current && at >= 2 && value.slice(at - 2, at) === "{{" ? at - 2 : at;
+    onChange(`${value.slice(0, from)}{{${path}}}${value.slice(at)}`);
+    close();
     requestAnimationFrame(() => box.current?.focus());
   }
   return (
@@ -130,17 +149,24 @@ function InlineTemplate({ label, placeholder, value, onChange, env, mono }: { la
         placeholder={placeholder}
         value={value}
         disabled={env.readOnly}
-        onChange={(e) => onChange(e.target.value)}
+        onChange={(e) => {
+          onChange(e.target.value);
+          caret.current = e.target.selectionStart;
+          if (String((e.nativeEvent as InputEvent).inputType).startsWith("insert") && typedBraces(e.target.value, e.target.selectionStart)) {
+            braces.current = true;
+            setPicking(true);
+          }
+        }}
         onSelect={(e) => (caret.current = e.currentTarget.selectionStart)}
         onBlur={(e) => (caret.current = e.currentTarget.selectionStart)}
         className={`${inputClass} min-w-0 flex-1 !px-2 !py-1 ${mono ? "font-mono" : ""}`}
       />
       {!env.readOnly && (
-        <button type="button" aria-label={`Insert field into ${label.toLowerCase()}`} onClick={() => setPicking((x) => !x)} className="focus-ring glass-button h-8 shrink-0 rounded-[var(--glass-radius-sm)] px-2 text-xs">
+        <button type="button" ref={insertButton} aria-label={`Insert field into ${label.toLowerCase()}`} onClick={() => { braces.current = false; setPicking((x) => !x); }} className="focus-ring glass-button h-8 shrink-0 rounded-[var(--glass-radius-sm)] px-2 text-xs">
           Insert field
         </button>
       )}
-      {picking && <FieldPicker rows={env.rows} onPick={insert} onClose={() => setPicking(false)} />}
+      {picking && <FieldPicker rows={env.rows} onPick={insert} onClose={() => { close(); requestAnimationFrame(() => box.current?.focus()); }} />}
     </div>
   );
 }

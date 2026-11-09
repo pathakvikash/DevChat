@@ -96,11 +96,11 @@ test("a run keeps going with the editor closed and still posts its digest", asyn
 test("Cancel run ends the run as Cancelled and creates no chat", async ({ page, request }) => {
   const id = await createNews(request, "mock/slow"); // the digest card streams for about 7 s
   await openEditor(page, id);
+  // The first request to the cancel route compiles it in dev, which can take seconds of the digest's 7: warm it up before the run starts.
+  await request.post("/api/workflow-runs/warmup/cancel");
   await page.getByRole("button", { name: "Run", exact: true }).click();
   await expect(card(page, "Write the digest", "Agent", "Running")).toBeVisible({ timeout: 30_000 });
 
-  // The first request to the cancel route compiles it in dev, which can take seconds of the digest's 7: warm it up now.
-  await request.post("/api/workflow-runs/warmup/cancel");
   // The "Run started" toast sits over the Cancel run button; a click that waits for it to fade can land after the run is over.
   await page.getByRole("button", { name: "Dismiss" }).click({ timeout: 1000 }).catch(() => {});
   await page.getByRole("button", { name: "Cancel run" }).click();

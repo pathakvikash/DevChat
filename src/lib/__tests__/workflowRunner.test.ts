@@ -28,7 +28,7 @@ vi.mock("@/lib/db", () => ({
       }),
       updateMany: vi.fn(async ({ where, data }: any) => {
         const t = dataTables.get(where.id);
-        if (!t || t.userId !== where.userId) return { count: 0 };
+        if (!t || t.userId !== where.userId || (where.privateFrom !== undefined && t.privateFrom !== where.privateFrom)) return { count: 0 };
         Object.assign(t, data);
         return { count: 1 };
       }),
@@ -814,6 +814,59 @@ describe("private tables", () => {
     expect(await preflight("u1", graphOf(save("keep", ["trigger"], 1), fetchNode("page", ["trigger"], 2)))).toEqual([]);
     table("t1");
     expect(await preflight("u1", graphOf(save("keep", ["trigger"], 1), fetchNode("page", ["keep"], 2)))).toEqual([]);
+  });
+
+  it("marks mcp and folder tables too, and keeps what the table already held", async () => {
+    table("t1", "chats");
+    table("t2");
+    table("t3");
+    const mcp: FlowNode = { id: "m", type: "mcpTool", fromIds: ["trigger"], config: { serverId: "s1", tool: "post" }, ui: { label: "M", position: { x: 1, y: 0 } } };
+    const cli = agentNode("cli", ["trigger"], 1, { folder: "/p", model: "claude-code/default" });
+    await markPrivateTables("u1", graphOf(mcp, save("a", ["m"], 2, "t1"), cli, save("b", ["cli"], 3, "t2"), save("c", ["trigger"], 4, "t3")));
+    expect(dataTables.get("t1")!.privateFrom).toBe("chats,mcp");
+    expect(dataTables.get("t2")!.privateFrom).toBe("folder");
+    expect(dataTables.get("t3")!.privateFrom).toBe("");
+  });
+
+  it("marking is compare-and-set: a write by another run in between is re-read, not overwritten", async () => {
+    table("t1");
+    const { prisma } = await import("@/lib/db");
+    const real = vi.mocked(prisma.dataTable.updateMany).getMockImplementation()!;
+    vi.mocked(prisma.dataTable.updateMany).mockImplementationOnce((async (args: any) => {
+      dataTables.get("t1")!.privateFrom = "mcp"; // the other run lands first
+      return real(args);
+    }) as never);
+    await markPrivateTables("u1", graphOf(reader, save("keep", ["read"], 2)));
+    expect(dataTables.get("t1")!.privateFrom).toBe("chats,mcp");
+  });
+
+  it("fails the start, not the table, when the mark keeps losing the race", async () => {
+    table("t1");
+    workflowRow = { id: "wf1", userId: "u1", name: "WF", graph: JSON.stringify(graphOf(reader, save("keep", ["read"], 2))) };
+    vi.mocked(resolveAgentModel).mockResolvedValue({ name: "M", supportsTools: true } as never);
+    const { prisma } = await import("@/lib/db");
+    const real = vi.mocked(prisma.dataTable.updateMany).getMockImplementation()!;
+    vi.mocked(prisma.dataTable.updateMany).mockResolvedValue({ count: 0 } as never);
+    try {
+      const r = await startRun("u1", "wf1");
+      expect(r).toMatchObject({ ok: false, status: 409 });
+      expect(runs.size).toBe(0);
+    } finally {
+      vi.mocked(prisma.dataTable.updateMany).mockImplementation(real);
+    }
+  });
+
+  it("the per-card check fails closed when it cannot read the table", async () => {
+    table("t1");
+    seedRun(graphOf(save("keep", ["trigger"], 1)));
+    const { prisma } = await import("@/lib/db");
+    vi.mocked(prisma.dataTable.findFirst).mockRejectedValueOnce(new Error("db down"));
+    const { deps: d } = deps(() => ({ output: {} }));
+    const ran: string[] = [];
+    d.cards.table = { run: async () => (ran.push("table"), { output: { items: [] } }) };
+    await advanceRun("run1", d);
+    expect(ran).toEqual([]);
+    expect(nodesOf().keep).toMatchObject({ status: "failed", error: "Couldn't check whether this table holds private data. Run it again." });
   });
 
   it("startRun marks the table, but only after the caps: a refused Run marks nothing", async () => {

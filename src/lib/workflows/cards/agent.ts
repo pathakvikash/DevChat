@@ -109,7 +109,8 @@ export function workflowSystemPrompt(fields: OutputField[], hasMcp = false): str
 type Parsed = { ok: true; value: Record<string, unknown> } | { ok: false; error: string };
 
 function lastJsonObject(text: string): unknown {
-  const fences = [...text.matchAll(/```json\s*([\s\S]*?)```/gi)];
+  // The pattern stops at the next fence, so many openers with no closer stay linear.
+  const fences = [...text.matchAll(/```json\s*((?:(?!```)[\s\S])*?)```/gi)];
   const candidates: string[] = [];
   if (fences.length) candidates.push(fences[fences.length - 1][1]);
   const end = text.lastIndexOf("}");

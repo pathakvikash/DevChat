@@ -1,10 +1,11 @@
-import { readsChats, reachesWeb } from "./catalog";
+import { hasCliFolder, reachesOpenWeb, reachesWeb, readsChats, usesMcp } from "./catalog";
 import { ancestorsOf, type FlowNode, type WorkflowGraph } from "./graph";
 
 // Which private data a table holds, and who may not send it to the web. All of the kind logic lives here.
-// A table's `privateFrom` is a comma-separated set of kinds; empty means public. Phase 6 adds "mcp" and "folder".
+// A table's `privateFrom` is a comma-separated set of kinds; empty means public. The classifiers stay in catalog.ts
+// (importing this file from there would be a cycle); this file only turns them into kinds.
 
-export const PRIVATE_KINDS = ["chats"] as const;
+export const PRIVATE_KINDS = ["chats", "mcp", "folder"] as const;
 export type PrivateKind = string;
 
 const KIND_LABEL: Record<string, string> = { chats: "chats", mcp: "MCP", folder: "a folder" };
@@ -17,9 +18,13 @@ export function kindsText(kinds: PrivateKind[]): string {
   return names.length <= 1 ? (names[0] ?? "") : `${names.slice(0, -1).join(", ")} and ${names.at(-1)}`;
 }
 
-/** The kinds of private data a card reads by itself (not through a table). Phase 6 adds MCP and a CLI folder here. */
-export function privateKindsOf(type: string, config: Record<string, unknown>): PrivateKind[] {
-  return readsChats(type, config) ? ["chats"] : [];
+/** The kinds of private data a card reads by itself (not through a table). */
+export function privateKindsOf(type: string, config: Record<string, unknown>, defaultModel = ""): PrivateKind[] {
+  const out: PrivateKind[] = [];
+  if (readsChats(type, config)) out.push("chats");
+  if (usesMcp(type, config)) out.push("mcp");
+  if (hasCliFolder(type, config, defaultModel)) out.push("folder");
+  return out;
 }
 
 const tableIdOf = (n: FlowNode): string => (n.type === "table" ? String(n.config.tableId ?? "") : "");
@@ -36,7 +41,7 @@ export function planKinds(graph: WorkflowGraph, current: Map<string, PrivateKind
     for (const a of ancestorsOf(graph, id)) {
       const m = graph.nodes.find((x) => x.id === a);
       if (!m) continue;
-      for (const k of privateKindsOf(m.type, m.config)) out.add(k);
+      for (const k of privateKindsOf(m.type, m.config, graph.defaultModel)) out.add(k);
       for (const k of kinds.get(tableIdOf(m)) ?? []) out.add(k);
     }
     return out;
@@ -53,9 +58,16 @@ export function planKinds(graph: WorkflowGraph, current: Map<string, PrivateKind
   return new Map([...kinds].map(([id, k]) => [id, [...k].sort()]));
 }
 
-/** The cards that reach the web somewhere after this one. */
-export const webAfter = (graph: WorkflowGraph, id: string): FlowNode[] =>
-  graph.nodes.filter((m) => m.id !== id && reachesWeb(m.type, m.config) && ancestorsOf(graph, m.id).has(id));
+/**
+ * The cards that may not come after a card on a table holding `kinds`. Like a card-level reader, data that came only
+ * from MCP may go on to another MCP card (both are servers the user set up) but not to the open web; any other kind may
+ * go to neither.
+ */
+export const webAfter = (graph: WorkflowGraph, id: string, kinds: PrivateKind[]): FlowNode[] => {
+  const mcpOnly = kinds.length === 1 && kinds[0] === "mcp";
+  const reaches = mcpOnly ? reachesOpenWeb : reachesWeb;
+  return graph.nodes.filter((m) => m.id !== id && reaches(m.type, m.config, graph.defaultModel) && ancestorsOf(graph, m.id).has(id));
+};
 
 /** The refusal for a card that reads a private table with a web card after it. */
 export const privateTableMessage = (table: string, kinds: PrivateKind[], web: FlowNode): string =>

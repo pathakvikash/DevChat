@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { CATALOG, reachesWeb } from "@/lib/workflows/catalog";
+import { CATALOG, PRIVATE_LEAK_MESSAGE, reachesWeb } from "@/lib/workflows/catalog";
 import { chatLeaks, checkGraph, emptyGraph, validateStructure, type FlowNode, type WorkflowGraph } from "@/lib/workflows/graph";
 
 const node = (id: string, fromIds: string[], x: number, type: FlowNode["type"], config: Record<string, unknown> = {}): FlowNode => ({
@@ -13,7 +13,7 @@ const graphOf = (...nodes: FlowNode[]): WorkflowGraph => ({ ...emptyGraph("m"), 
 
 describe("phase 2 cards in the graph checks", () => {
   const reader = node("read", ["trigger"], 1, "agent", { instructions: "x", tools: ["readChat"] });
-  const leak = "read reads your chats and a later card reaches the web. Split them into two workflows, so a web page can't make it send your chats out.";
+  const leak = PRIVATE_LEAK_MESSAGE("read");
 
   it("a Fetch card counts as reaching the web", () => {
     expect(reachesWeb("fetch", {})).toBe(true);

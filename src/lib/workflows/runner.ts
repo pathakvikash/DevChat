@@ -307,7 +307,8 @@ export async function advanceRun(runId: string, deps: RunnerDeps = defaultDeps):
       // Private tables are checked again right before the Save card runs: another run may have marked the table since
       // Start, and a Resume never went through the Start checks.
       if (node.type === "table") {
-        const blocked = await privateBlock(run.userId, graph, node).catch(() => null);
+        // If the check itself fails, the card does not run: it cannot be shown that the table is safe to read.
+        const blocked = await privateBlock(run.userId, graph, node).catch(() => "Couldn't check whether this table holds private data. Run it again.");
         if (blocked) {
           nodes[node.id] = { status: "failed", startedAt: new Date().toISOString(), endedAt: new Date().toISOString(), error: blocked };
           if (!(await save())) return;
@@ -421,7 +422,7 @@ export async function preflight(userId: string, graph: WorkflowGraph): Promise<{
       // no card that reaches the web may come after it.
       else {
         const kinds = plan.get(String(n.config.tableId)) ?? [];
-        if (kinds.length > 0) for (const m of webAfter(graph, n.id)) add(m.id, privateTableMessage(table.name, kinds, m));
+        if (kinds.length > 0) for (const m of webAfter(graph, n.id, kinds)) add(m.id, privateTableMessage(table.name, kinds, m));
       }
     }
     const usesMcp = n.type === "mcpTool" || (n.type === "agent" && Array.isArray(n.config.mcpTools) && n.config.mcpTools.length > 0);
@@ -459,7 +460,16 @@ export async function markPrivateTables(userId: string, graph: WorkflowGraph): P
   const tables = await tableKinds(userId, graph);
   const plan = planKinds(graph, new Map([...tables].map(([id, t]) => [id, t.kinds])));
   for (const [id, kinds] of plan) {
-    if (kinds.length > (tables.get(id)?.kinds.length ?? 0)) await prisma.dataTable.updateMany({ where: { id, userId }, data: { privateFrom: joinKinds(kinds) } });
+    // Compare-and-set on the value that was read, so two runs adding different kinds never overwrite each other.
+    for (let attempt = 0; ; attempt++) {
+      const row = await prisma.dataTable.findFirst({ where: { id, userId }, select: { privateFrom: true } });
+      if (!row) break;
+      const merged = joinKinds([...parseKinds(row.privateFrom), ...kinds]);
+      if (merged === joinKinds(parseKinds(row.privateFrom))) break;
+      const r = await prisma.dataTable.updateMany({ where: { id, userId, privateFrom: row.privateFrom }, data: { privateFrom: merged } });
+      if (r.count > 0) break;
+      if (attempt >= 4) throw new Error("A table is being changed by another run");
+    }
   }
 }
 
@@ -469,7 +479,7 @@ async function privateBlock(userId: string, graph: WorkflowGraph, node: FlowNode
   const plan = planKinds(graph, new Map([...tables].map(([id, t]) => [id, t.kinds])));
   const id = String(node.config.tableId ?? "");
   const kinds = plan.get(id) ?? [];
-  const web = kinds.length > 0 ? webAfter(graph, node.id)[0] : undefined;
+  const web = kinds.length > 0 ? webAfter(graph, node.id, kinds)[0] : undefined;
   return web ? privateTableMessage(tables.get(id)!.name, kinds, web) : null;
 }
 
@@ -490,7 +500,11 @@ export async function startRun(userId: string, workflowId: string): Promise<Star
   const capped = await checkCaps(userId, workflowId);
   if (capped) return capped;
   // After the caps: a Run that is refused marks nothing.
-  await markPrivateTables(userId, graph);
+  try {
+    await markPrivateTables(userId, graph);
+  } catch (e) {
+    return { ok: false, status: 409, error: `Couldn't mark the tables private (${message(e)}). Try again.` };
+  }
 
   const run = await prisma.workflowRun.create({ data: { workflowId, userId, state: "running", graph: JSON.stringify(graph), nodes: "{}" } });
   const old = await prisma.workflowRun.findMany({ where: { workflowId }, orderBy: { startedAt: "desc" }, skip: MAX_RUNS_KEPT, select: { id: true } });

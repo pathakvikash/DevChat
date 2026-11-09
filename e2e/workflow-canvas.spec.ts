@@ -5,6 +5,8 @@ type Graph = { nodes: Array<{ id: string; type?: string; fromIds: string[]; conf
 
 async function reset(request: APIRequestContext) {
   for (const w of (await (await request.get("/api/workflows")).json()) as Array<{ id: string }>) await request.delete(`/api/workflows/${w.id}`);
+  // The News template saves into the "News" table: a fresh one, so a run's articles are new.
+  for (const t of (await (await request.get("/api/tables")).json()) as Array<{ id: string }>) await request.delete(`/api/tables/${t.id}`);
   await deleteAllChats(request);
 }
 
