@@ -1,5 +1,13 @@
 import type { WorkflowGraph } from "./graph";
 
+type Var = WorkflowGraph["vars"][number];
+
+/** Variables after Apply: the proposal's, each keeping the current non-empty value; the current ones it lacks come after. */
+export function mergeVars(current: Var[], proposed: Var[]): Var[] {
+  const now = new Map(current.map((v) => [v.key, v.value]));
+  return [...proposed.map((v) => ({ ...v, value: now.get(v.key) || v.value })), ...current.filter((v) => !proposed.some((p) => p.key === v.key))];
+}
+
 const BY_STATUS: Record<number, string> = {
   400: "Describe the flow you want.",
   403: "This model can't be used for flows here. Pick another model.",

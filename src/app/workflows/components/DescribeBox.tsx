@@ -62,11 +62,8 @@ export default function DescribeBox({
 
   useEffect(() => () => ctl.current?.abort(), []);
   useEffect(() => {
-    if (error) {
-      retry.current?.focus();
-      onAnnounce(`Failed. ${error}`);
-    }
-  }, [error, onAnnounce]);
+    if (error) retry.current?.focus(); // Retry's aria-describedby reads the message
+  }, [error]);
 
   const send = useCallback(async () => {
     const description = text.trim();

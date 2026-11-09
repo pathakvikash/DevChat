@@ -17,6 +17,7 @@ import { renderText, renderTemplate, templateRefs, refRoot, type TemplateContext
 import Canvas, { type AddOptions } from "./Canvas";
 import CardList from "./CardList";
 import ConfigPanel from "./ConfigPanel";
+import { mergeVars } from "@/lib/workflows/describe";
 import DescribeBox, { PreviewBar, type Proposal } from "./DescribeBox";
 import type { FieldEnv } from "./ConfigField";
 import { pickerRows } from "./FieldPicker";
@@ -54,6 +55,7 @@ const savedView = (): View => {
 };
 
 const NOOP = () => {};
+const BUILDING = "Building your flow…";
 const inputClass = "focus-ring glass-input w-full rounded-[var(--glass-radius-md)] px-3 py-2 text-sm";
 
 export default function WorkflowEditor({ id }: { id: string }) {
@@ -234,12 +236,18 @@ export default function WorkflowEditor({ id }: { id: string }) {
 
   // ─── Describe your flow: preview, then Apply or Discard ─────────────────
   const beforeDescribe = useCallback(async () => {
+    setSelectedId(null); // an open card panel would say "past run" once the cards turn read-only
     if (dirty.current) await flush();
   }, [flush]);
   const showProposal = useCallback((p: Proposal) => {
     setSelectedId(null);
     setProposal(p);
     setAnnounce(`Preview ready: ${p.graph.nodes.length} cards`);
+  }, []);
+  const onBusyChange = useCallback((busy: boolean) => {
+    setDescribing(busy);
+    // Cleared when the build ends, so a rebuild is announced again (a "Preview ready" that came with the answer stays).
+    if (!busy) setAnnounce((a) => (a === BUILDING ? "" : a));
   }, []);
   function leavePreview(message: string) {
     setProposal(null);
@@ -251,8 +259,7 @@ export default function WorkflowEditor({ id }: { id: string }) {
     if (!proposal || !wf) return;
     // The saved settings that are not part of a description stay as they are: model, token limit, and variable values.
     const g = wf.graph;
-    const kept = new Map(g.vars.map((v) => [v.key, v]));
-    const vars = [...proposal.graph.vars.map((v) => ({ ...v, value: kept.get(v.key)?.value || v.value })), ...g.vars.filter((v) => !proposal.graph.vars.some((p) => p.key === v.key))];
+    const vars = mergeVars(g.vars, proposal.graph.vars);
     const next = { ...proposal.graph, vars, defaultModel: g.defaultModel || proposal.graph.defaultModel, maxRunTokens: g.maxRunTokens };
     // The same rules as a save, so a flow the server would refuse stays a preview.
     const refused = validateStructure(next)[0];
@@ -435,7 +442,7 @@ export default function WorkflowEditor({ id }: { id: string }) {
   }
 
   const showCanvas = !narrow && view === "canvas";
-  const select = previewing ? undefined : setSelectedId;
+  const select = previewing || describing ? undefined : setSelectedId;
   const live = run && (run.state === "running" || run.state === "waiting");
   const canResume = run && (run.state === "failed" || run.state === "interrupted");
   const interruptedAt = run ? graph.nodes.find((n) => run.nodes[n.id]?.status === "running" || run.nodes[n.id]?.status === "failed")?.ui.label : undefined;
@@ -562,7 +569,7 @@ export default function WorkflowEditor({ id }: { id: string }) {
           <main ref={mainRef} tabIndex={-1} className="flex min-w-0 flex-1 flex-col outline-none">
             {previewing ? <PreviewBar proposal={proposal} onApply={applyProposal} onDiscard={() => leavePreview("Preview discarded")} /> : null}
             {!narrow && !viewingPast && (
-              <DescribeBox key={boxKey} workflowId={id} hasCards={wf.graph.nodes.length > 1} defaultModel={wf.graph.defaultModel} hidden={previewing} beforeSend={beforeDescribe} onProposal={showProposal} onBusyChange={setDescribing} onAnnounce={setAnnounce} />
+              <DescribeBox key={boxKey} workflowId={id} hasCards={wf.graph.nodes.length > 1} defaultModel={wf.graph.defaultModel} hidden={previewing} beforeSend={beforeDescribe} onProposal={showProposal} onBusyChange={onBusyChange} onAnnounce={setAnnounce} />
             )}
             <div className={`min-h-0 flex-1 ${previewing ? "wf-preview" : ""} ${showCanvas ? "relative" : "overflow-y-auto"}`}>
               {showCanvas ? (
