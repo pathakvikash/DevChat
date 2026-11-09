@@ -91,6 +91,7 @@ export default function TablePage({ params }: { params: Promise<{ id: string }> 
   // True after Google refused a refresh: the button turns into Reconnect Google.
   const [reconnect, setReconnect] = useState(false);
   const resumed = useRef(false);
+  const syncingRef = useRef(false);
 
   useEffect(() => {
     const t = setTimeout(() => setQ(typed.trim()), 250);
@@ -113,9 +114,12 @@ export default function TablePage({ params }: { params: Promise<{ id: string }> 
 
   /** Overwrites the table's Google sheet. Not connected yet: goes to Google first and comes back here to finish. */
   const sync = useCallback(async () => {
+    if (syncingRef.current) return;
+    syncingRef.current = true;
     setSyncing(true);
     const res = await fetch(`/api/tables/${id}/sheet-sync`, { method: "POST" }).catch(() => null);
     const body = res ? await res.json().catch(() => ({})) : {};
+    syncingRef.current = false;
     setSyncing(false);
     if (res?.ok) {
       setReconnect(false);
@@ -151,6 +155,7 @@ export default function TablePage({ params }: { params: Promise<{ id: string }> 
     window.history.replaceState(null, "", window.location.pathname);
     // eslint-disable-next-line react-hooks/set-state-in-effect -- finishes the sync once, when the page is first loaded back from Google
     if (flag === "connected" && q.get("sync")) void sync();
+    else if (flag === "scope") toast("Google didn't give DevChat access to the sheets it creates. Try again and keep that box ticked.", "error");
     else if (flag !== "connected") toast("Google wasn't connected. Try again.", "error");
   }, [table, sync, toast]);
 
@@ -280,7 +285,7 @@ export default function TablePage({ params }: { params: Promise<{ id: string }> 
                 <Sheet size={14} aria-hidden="true" /> Reconnect Google
               </a>
             ) : (
-              <button type="button" onClick={() => void sync()} disabled={syncing} className="focus-ring glass-button inline-flex h-9 items-center gap-1.5 rounded-[var(--glass-radius-md)] px-3 text-sm font-medium">
+              <button type="button" onClick={() => void sync()} aria-disabled={syncing} className="focus-ring glass-button aria-disabled:opacity-60 inline-flex h-9 items-center gap-1.5 rounded-[var(--glass-radius-md)] px-3 text-sm font-medium">
                 <Sheet size={14} aria-hidden="true" /> {syncing ? "Syncing…" : "Sync to Google Sheets"}
               </button>
             )}

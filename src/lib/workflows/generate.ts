@@ -41,7 +41,8 @@ function fieldLine(f: FieldSpec, def: Record<string, unknown>): string {
 function cardBlock(def: CardDef): string {
   const d = def.defaults();
   const outs = def.outputs(d).join(", ");
-  return [`- ${def.type} ("${def.label}", ${def.category}): ${def.description}`, ...(def.fields.length ? ["  config:", ...def.fields.filter((f) => !isSensitiveKey(f.key) && f.key !== "tableId").map((f) => fieldLine(f, d))] : ["  config: none"]), `  outputs: ${outs}${def.type === "agent" ? " (with outputFields, one output per field)" : ""}`].join("\n");
+  const lines = def.fields.filter((f) => !isSensitiveKey(f.key) && f.key !== "tableId").map((f) => fieldLine(f, d));
+  return [`- ${def.type} ("${def.label}", ${def.category}): ${def.description}`, ...(lines.length ? ["  config:", ...lines] : ["  config: none"]), `  outputs: ${outs}${def.type === "agent" ? " (with outputFields, one output per field)" : ""}`].join("\n");
 }
 
 /** Every card in the catalog registry, as text for the system prompt. Cards added later appear on their own. */

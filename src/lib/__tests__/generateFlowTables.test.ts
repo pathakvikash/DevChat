@@ -100,5 +100,6 @@ describe("generated flows with table cards", () => {
     expect(text).toContain('fields: list of { "column": "column name", "value": "{{item.title}}" }');
     expect(text).toContain("filter");
     expect(text).not.toMatch(/tableId:/);
+    expect(text).toMatch(/sheetSync[^\n]*\n  config: none\n  outputs: sheetUrl, rows/);
   });
 });

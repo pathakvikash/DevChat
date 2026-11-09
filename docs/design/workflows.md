@@ -679,7 +679,7 @@ Saving is automatic: a `PATCH` 800 ms after the last change. The header reads "S
 
 ### 8.7 Table view
 
-- **Header:** name, row count, **Export CSV**, and **Sync to Google Sheet** (phase 7).
+- **Header:** name, row count, **Open sheet** (once a sheet exists), **Sync to Google Sheets** (phase 7) and **Export CSV**.
 - **Toolbar** (wraps): search (`glass-input`), a status filter `<select>`, and bulk actions once rows are ticked: **Set status ▾** and **Delete** (`glass-button-danger`, with `confirm()`).
 - **Grid:** a semantic `<table>` with a sticky `<thead>`.
   - A checkbox column, labelled `Select <first text cell>`.
@@ -744,7 +744,9 @@ Every route calls `requireUserId()` (`src/lib/auth.ts`). Every query is scoped b
 | GET, PATCH, DELETE | `/api/tables/[id]/rows` | `?status=&q=&cursor=` for 100 rows; `{ ids, status }` for bulk status; `{ ids }` to delete | 2 |
 | GET | `/api/tables/[id]/export` | CSV download | 2 |
 | GET | `/api/integrations/google/connect`, `/callback` | Incremental OAuth for Sheets | 7 |
-| POST | `/api/tables/[id]/sheet-sync` | "Sync now" | 7 |
+| GET, DELETE | `/api/integrations/google` | Connection state (never a token); Disconnect deletes the tokens and revokes the grant | 7 |
+| POST | `/api/integrations/google/test` | Sanity suite only (404 elsewhere): ages the fake Google's tokens, makes refresh fail, reads back its sheets | 7 |
+| POST | `/api/tables/[id]/sheet-sync` | "Sync now" (`maxDuration` 60) | 7 |
 
 The existing `/api/models`, `/api/registry` and `/api/mcp/servers/[id]/tools` routes feed the model picker, the tools picker and the MCP picker.
 
@@ -784,6 +786,7 @@ Section 6.10 lists it. There is no shell, no file writes without the folder opt-
 ### 10.5 Prompt injection
 
 - Card data reaches agents fenced (5.1, 6.10). The system prompt marks fenced blocks, tool results and pages as data.
+- **Google Sheets is an allowed path out**, to the user's own Google account only: the destination is fixed (`DataTable.sheetId`, created by DevChat, never set by a card, template or the model), so a web page cannot steer it. That is why `sheetSync` is not a web reacher and a private table can be synced. The table's private kinds still apply to the cards after it.
 - Messages sent to chats are framed as coming from a workflow (decision 18).
 - Generated flows are previewed and cleaned of risky settings (7).
 - **Private readers** are cards that can read data the web must not see: a chat-reading tool (`searchChats`, `readChat`), the MCP tool card, an agent with any MCP tool, and an agent on a CLI model with a folder. **Web reachers** are Web search and Fetch cards, an agent with `fetchUrl` or `webSearch`, and an MCP card or agent with MCP tools (servers can make network calls). A CLI folder is a private reader only: workflow cards run the CLI with its own web tools switched off (`web: false`: Claude Code without WebSearch/WebFetch, OpenCode webfetch/websearch denied, Codex `tools.web_search=false`), so only the web tools the card ticked remain.
@@ -948,6 +951,9 @@ Sanity mode uses no network and no real model, following the precedent at `src/l
 - **Privacy:** `sheetSync` is not in `reachesWeb` or `reachesOpenWeb` (it writes only to the user's own sheet). It is a *reader* of its table (`TABLE_READERS` in `privacy.ts`): a private table's kinds apply to any web card after it, at Start and again when the card runs, and a Save after it inherits them. It is not a writer, so it never marks a table private.
 - **Routes added beyond section 9:** `GET` and `DELETE /api/integrations/google` (state, and Disconnect, which deletes the tokens and asks Google to revoke them), and a sanity-only `POST /api/integrations/google/test` (404 outside sanity mode).
 - **Sanity suite:** `src/lib/google/fake.ts` answers the token and Sheets calls in-process, and the "consent screen" is the callback itself, so nothing reaches Google.
+- **Writes are safe to fail:** cells are cut at 49,999 characters plus "…" (Google's limit is 50,000), rows go up in writes of at most 1,000 rows or about 2 MB, and the new content is written first; only the rows below and columns right of it are cleared afterwards, so a failed write leaves the old sheet. A 403 or 404 on the sheet makes a new one. A sheet in Drive's Trash is still written by id until the trash is emptied. Two syncs racing to create the first sheet agree on one (compare-and-set on `sheetId`); the loser's empty sheet is left in Drive.
+- **Errors:** a refresh counts as "Reconnect Google" only when Google answers 400 `invalid_grant`; any other failure (429, `invalid_client`, 5xx, no network) keeps the tokens and says "Couldn't reach Google. Try again." Only messages written for the user reach the page or the card; anything else is logged and shown as a generic line. Tokens that cannot be decrypted (`AUTH_SECRET` changed) count as not connected.
+- **Disconnect** revokes the grant at Google, which is per OAuth client. Sign-in shares that client, so the next sign-in may show Google's consent screen again.
 - **Start:** a run with a `sheetSync` card is refused when Google is not connected ("Connect Google in Settings first").
 
 ### Later

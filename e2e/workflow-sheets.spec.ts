@@ -146,7 +146,8 @@ test("Settings shows the connection; Disconnect deletes the tokens, and no token
 
 test("the callback refuses a bad or missing state", async ({ request }) => {
   const res = await request.get("/api/integrations/google/callback?code=sanity-code&state=nope", { maxRedirects: 0 });
-  expect(res.status()).toBe(400);
+  expect(res.status()).toBe(307);
+  expect(res.headers().location).toMatch(/\/settings\?google=failed$/);
   expect(await (await request.get("/api/integrations/google")).json()).toMatchObject({ connected: false });
 });
 
@@ -203,3 +204,40 @@ for (const theme of ["dark", "light"] as const) {
     await expect(header).toHaveScreenshot(`table-header-synced-${theme}.png`);
   });
 }
+
+test("table header with three buttons at 400px, dark", async ({ page, request }) => {
+  await page.addInitScript(() => localStorage.setItem("vas:theme", "dark"));
+  await page.setViewportSize({ width: 400, height: 800 });
+  const id = await seed(request);
+  await page.goto(`/tables/${id}`);
+  await page.waitForLoadState("networkidle");
+  await syncButton(page).click();
+  await expect(openSheet(page)).toBeVisible();
+  await expect(page.getByText("Synced 3 rows to Google Sheets")).toHaveCount(0, { timeout: 15_000 });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)).toBeLessThanOrEqual(0);
+  await page.evaluate(() => document.fonts.ready);
+  await page.mouse.move(2, 2);
+  await expect(page.locator("main > div > div").first()).toHaveScreenshot("table-header-synced-400-dark.png");
+});
+
+test("table header in the Reconnect Google state, dark", async ({ page, request }) => {
+  await page.addInitScript(() => localStorage.setItem("vas:theme", "dark"));
+  const id = await seed(request);
+  await page.goto(`/tables/${id}`);
+  await page.waitForLoadState("networkidle");
+  await syncButton(page).click();
+  await expect(openSheet(page)).toBeVisible();
+  await fake(request, { expireAccess: true, failRefresh: true });
+  await syncButton(page).click();
+  await expect(page.getByRole("link", { name: "Reconnect Google" })).toBeVisible();
+  await expect(page.getByText("Google access ended. Reconnect Google, then try again.")).toHaveCount(0, { timeout: 15_000 });
+  await page.evaluate(() => document.fonts.ready);
+  await page.mouse.move(2, 2);
+  await expect(page.locator("main > div > div").first()).toHaveScreenshot("table-header-reconnect-dark.png");
+});
+
+test("Settings drops ?google= from the address after showing the message", async ({ page }) => {
+  await page.goto("/settings?google=scope");
+  await expect(page.getByText("keep that box ticked").last()).toBeVisible();
+  await expect(page).toHaveURL(/\/settings$/);
+});

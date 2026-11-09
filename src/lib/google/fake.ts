@@ -42,14 +42,25 @@ export async function fakeGoogle(url: string, init: RequestInit = {}): Promise<R
     st.sheets.set(id, { title: JSON.parse(String(init.body)).properties.title, values: [], raw: false });
     return json({ spreadsheetId: id });
   }
-  const m = u.pathname.match(/^\/v4\/spreadsheets\/([^/]+)\/values\/(.+)$/);
-  const sheet = m ? st.sheets.get(decodeURIComponent(m[1])) : undefined;
-  if (!m || !sheet) return json({ error: { code: 404 } }, 404);
-  if (m[2].endsWith(":clear")) {
-    sheet.values = [];
+  const batch = u.pathname.match(/^\/v4\/spreadsheets\/([^/]+)\/values:batchClear$/);
+  const whole = u.pathname.match(/^\/v4\/spreadsheets\/([^/]+)\/values\/A(\d+)$/);
+  const sheet = st.sheets.get(decodeURIComponent((batch ?? whole)?.[1] ?? ""));
+  if (!sheet) return json({ error: { code: 404 } }, 404);
+  if (batch) {
+    for (const r of JSON.parse(String(init.body)).ranges as string[]) {
+      const rowsBelow = r.match(/^A(\d+):ZZ$/);
+      const colsRight = r.match(/^([A-Z]+)1:ZZ$/);
+      if (rowsBelow) sheet.values.length = Math.min(sheet.values.length, Number(rowsBelow[1]) - 1);
+      else if (colsRight) {
+        const col = [...colsRight[1]].reduce((n, c) => n * 26 + c.charCodeAt(0) - 64, 0);
+        sheet.values = sheet.values.map((row) => row.slice(0, col - 1));
+      }
+    }
     return json({});
   }
-  sheet.values = JSON.parse(String(init.body)).values;
+  if (!whole) return json({ error: { code: 404 } }, 404);
+  const rows = JSON.parse(String(init.body)).values as unknown[][];
+  sheet.values.splice(Number(whole[2]) - 1, rows.length, ...rows);
   sheet.raw = u.searchParams.get("valueInputOption") === "RAW";
-  return json({ updatedRows: sheet.values.length });
+  return json({ updatedRows: rows.length });
 }

@@ -1,13 +1,14 @@
 import { randomBytes } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
+import { appOrigin } from "@/lib/appOrigin";
 import { withUser } from "@/lib/workflows/http";
-import { authorizeUrl, COOKIE_PATH, googleConfigured, safeReturn, siteOf, STATE_COOKIE } from "@/lib/google/sheets";
+import { authorizeUrl, COOKIE_PATH, googleConfigured, safeReturn, STATE_COOKIE } from "@/lib/google/sheets";
 import { isSanityMode } from "@/lib/sanityMode";
 
 /** Starts Google sign-in for Sheets (scope drive.file only). `?returnTo=/tables/x` is where the user lands afterwards. */
 export async function GET(req: NextRequest) {
   return withUser(async () => {
-    const site = siteOf(req);
+    const site = appOrigin(req);
     const returnTo = safeReturn(req.nextUrl.searchParams.get("returnTo"));
     if (!googleConfigured()) return NextResponse.redirect(`${site}${returnTo}${returnTo.includes("?") ? "&" : "?"}google=not-configured`);
     const state = randomBytes(24).toString("base64url");
