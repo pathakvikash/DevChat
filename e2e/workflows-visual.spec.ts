@@ -36,7 +36,8 @@ for (const theme of THEMES) {
     await page.addInitScript((t) => localStorage.setItem("vas:theme", t), theme);
     await seed(request, true);
     await page.goto("/workflows");
-    await expect(page.getByRole("link", { name: "News digest" })).toBeVisible();
+    // Exact and inside <main>: the run posts a "News digest — <date>" chat that the sidebar lists as a link too.
+    await expect(page.locator("main").getByRole("link", { name: "News digest", exact: true })).toBeVisible();
     await settle(page, theme);
     await expect(page).toHaveScreenshot(`workflows-list-${theme}.png`, { mask: relativeTimes(page) });
   });
