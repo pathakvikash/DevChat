@@ -52,7 +52,7 @@ vi.mock("@/lib/db", () => ({
 }));
 vi.mock("@/lib/workflows/cards/agent", async (orig) => ({ ...(await orig<object>()), resolveAgentModel: vi.fn() }));
 
-import { advanceRun, cancelRun, resumeRun, startRun, stopAllRuns, sweepOrphans, type RunnerDeps } from "@/lib/workflows/runner";
+import { advanceRun, cancelRun, capOutput, resetShutdownForTests, resumeRun, startRun, stopAllRuns, sweepOrphans, type RunnerDeps } from "@/lib/workflows/runner";
 import { resolveAgentModel } from "@/lib/workflows/cards/agent";
 import { emptyGraph, type CardRun, type FlowNode, type WorkflowGraph } from "@/lib/workflows/graph";
 import type { CardCtx, CardImpl } from "@/lib/workflows/cards";
@@ -106,6 +106,7 @@ beforeEach(() => {
   runs.clear();
   saves.length = 0;
   failProgressSave = false;
+  resetShutdownForTests();
   workflowRow = null;
   chats.clear();
 });
@@ -403,7 +404,8 @@ describe("cancel, heartbeat and shutdown", () => {
     expect(nodesOf().a.status).toBe("running"); // not recorded as failed
     expect(nodesOf().b).toBeUndefined();
 
-    // Stale, then Interrupted, then Resume finishes it.
+    // Stale, then Interrupted, then Resume finishes it (in a restarted process).
+    resetShutdownForTests();
     runs.get("run1").heartbeatAt = new Date(Date.now() - 120_000);
     expect(await sweepOrphans("u1")).toBe(1);
     expect(await resumeRun("u1", "run1")).toEqual({ ok: true, runId: "run1" });
@@ -468,6 +470,7 @@ describe("per-item checkpoint and token cap", () => {
       await loop;
       expect(firstRun).toEqual([1, 2, 3]);
 
+      resetShutdownForTests(); // the restarted process
       runs.get("run1").heartbeatAt = new Date(Date.now() - 120_000);
       await sweepOrphans("u1");
       expect(await resumeRun("u1", "run1")).toEqual({ ok: true, runId: "run1" });
@@ -621,5 +624,68 @@ describe("startRun", () => {
     for (let i = 0; i < 52; i++) seedRun(graphOf(), { workflowId: "wf1", state: "succeeded" }, `old${i}`);
     await startRun("u1", "wf1");
     expect(runs.size).toBe(50); // 53 rows, the 3 beyond the newest 50 deleted
+  });
+});
+
+describe("follow-ups", () => {
+  const items = (n: number) => Array.from({ length: n }, (_, i) => ({ n: i + 1 }));
+  const perItemGraph = () => graphOf(agentNode("a", ["trigger"], 1, { perItem: true, items: "{{trigger.list}}" }));
+
+  it("keeps the last checkpoint that fit when the results grow past 200 KB", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      const g = gate();
+      const d = deps(async (c) => {
+        vi.setSystemTime(Date.now() + 3000);
+        if (c.tctx.index === 3) await g.open;
+        return { output: { big: "x".repeat(100_000) } };
+      });
+      d.deps.cards.agent = { ...d.deps.cards.agent, concurrency: () => 1 };
+      d.deps.cards.trigger = { run: async () => ({ output: { list: items(3) } }) };
+      seedRun(perItemGraph());
+      const loop = advanceRun("run1", d.deps);
+      await vi.waitFor(() => expect(d.ran).toHaveLength(3));
+      await vi.waitFor(() => expect(nodesOf().a.partial).toBeDefined());
+      // Item 2 pushed the saved results over the cap, so the checkpoint is still the one with item 1 only.
+      expect(Object.keys(nodesOf().a.partial!.results)).toEqual(["0"]);
+      stopAllRuns();
+      g.release();
+      await loop;
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("a run started after the shutdown signal does nothing and stays resumable", async () => {
+    const d = deps(() => ({ output: {} }));
+    seedRun(graphOf(agentNode("a", ["trigger"], 1)));
+    stopAllRuns();
+    await advanceRun("run1", d.deps);
+    expect(d.ran).toEqual([]);
+    expect(runs.get("run1")).toMatchObject({ state: "running", endedAt: null });
+    runs.get("run1").heartbeatAt = new Date(Date.now() - 120_000);
+    expect(await sweepOrphans("u1")).toBe(1);
+  });
+
+  it("capOutput cuts one long text field instead of replacing the whole output", () => {
+    const text = 'say "hi"\n'.repeat(30_000); // about 270k characters, more after JSON escaping
+    const out = capOutput({ text }) as { text: string; truncated: boolean };
+    expect(out.truncated).toBe(true);
+    expect(out.text.length).toBeGreaterThan(50_000);
+    expect(JSON.stringify(out).length).toBeLessThanOrEqual(200_000);
+    expect(capOutput({ text: "short" })).toEqual({ text: "short" });
+    expect(capOutput({ a: 1, big: [1].concat(new Array(100_000).fill(1234567)) })).toEqual({ truncated: true });
+  });
+
+  it("counts the tokens of failed items toward the run's cap", async () => {
+    const d = deps(() => {
+      throw Object.assign(new Error("model failed"), { usage: { inputTokens: 400, outputTokens: 100 } });
+    });
+    d.deps.cards.agent = { ...d.deps.cards.agent, concurrency: () => 1 };
+    d.deps.cards.trigger = { run: async () => ({ output: { list: items(10) } }) };
+    seedRun({ ...perItemGraph(), maxRunTokens: 1000 });
+    await advanceRun("run1", d.deps);
+    expect(d.ran).toHaveLength(3); // 500, 1000, 1500 > 1000
+    expect(runs.get("run1")).toMatchObject({ state: "failed", inputTokens: 1200, outputTokens: 300 });
   });
 });

@@ -131,6 +131,14 @@ const CHAT_READ_TOOLS: string[] = ["searchChats", "readChat"];
 const OUTBOUND_TOOLS: string[] = ["fetchUrl", "webSearch"];
 export const TOOL_CONFLICT_MESSAGE = "This card can read your chats and reach the web. Pick one, so a web page can't make it send your chats out.";
 
+/** Whether the card reads chats (an agent with a chat-reading tool). */
+export const readsChats = (type: string, config: Record<string, unknown>): boolean =>
+  type === "agent" && Array.isArray(config.tools) && config.tools.some((t) => CHAT_READ_TOOLS.includes(t));
+
+/** Whether the card can send data to the web: an agent with an outbound tool, or a web search / fetch card. */
+export const reachesWeb = (type: string, config: Record<string, unknown>): boolean =>
+  type === "webSearch" || type === "fetch" || (type === "agent" && Array.isArray(config.tools) && config.tools.some((t) => OUTBOUND_TOOLS.includes(t)));
+
 /** A card that reads chats must not also reach the web: a page it reads could steer it into sending chat text out. */
 export const hasToolConflict = (tools: unknown): boolean =>
   Array.isArray(tools) && tools.some((t) => CHAT_READ_TOOLS.includes(t)) && tools.some((t) => OUTBOUND_TOOLS.includes(t));

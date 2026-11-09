@@ -24,8 +24,8 @@ function fakeRequest(opts: any, cb: (res: unknown) => void) {
   };
   return req;
 }
-vi.mock("node:https", () => ({ default: { request: (o: any, cb: any) => fakeRequest(o, cb) } }));
-vi.mock("node:http", () => ({ default: { request: (o: any, cb: any) => fakeRequest(o, cb) } }));
+vi.mock("node:https", () => ({ default: { Agent: class {}, request: (o: any, cb: any) => fakeRequest(o, cb) } }));
+vi.mock("node:http", () => ({ default: { Agent: class {}, request: (o: any, cb: any) => fakeRequest(o, cb) } }));
 
 import { isBlockedIp, safeFetch } from "@/lib/net/safeFetch";
 

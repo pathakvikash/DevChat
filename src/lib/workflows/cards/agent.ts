@@ -209,17 +209,19 @@ export const agentCard: CardImpl = {
         errorMsg: result.error ?? null,
         toolCalls: progress.steps.map((s) => ({ toolName: s.tool, ok: s.state !== "error" })),
       });
+    // A failed call still spent its tokens: the error carries them so the run's token cap counts them.
+    const fail = (msg: string) => Object.assign(new Error(msg), { usage });
     if (result.status === "stopped") {
       await trace("aborted");
-      throw new Error("Cancelled");
+      throw fail("Cancelled");
     }
     if (result.status === "timeout") {
       await trace("error");
-      throw new Error("The agent took more than 5 minutes");
+      throw fail("The agent took more than 5 minutes");
     }
     if (result.status === "error") {
       await trace("error");
-      throw new Error(result.error || "The model call failed");
+      throw fail(result.error || "The model call failed");
     }
 
     let output: Record<string, unknown> = { text: result.report };
@@ -246,7 +248,7 @@ export const agentCard: CardImpl = {
       }
       if (!parsed.ok) {
         await trace("error");
-        throw new Error("Couldn't read the output as JSON");
+        throw fail("Couldn't read the output as JSON");
       }
       output = parsed.value;
     }

@@ -99,6 +99,10 @@ export interface SafeFetchResult {
   text: string;
 }
 
+// Our own pools, so connections made here never mix with the rest of the app's.
+const httpAgent = new http.Agent({ keepAlive: true });
+const httpsAgent = new https.Agent({ keepAlive: true });
+
 function send(url: URL, headers: Record<string, string> | undefined, signal: AbortSignal): Promise<IncomingMessage> {
   return new Promise((resolve, reject) => {
     const req = (url.protocol === "https:" ? https : http).request(
@@ -109,6 +113,7 @@ function send(url: URL, headers: Record<string, string> | undefined, signal: Abo
         path: `${url.pathname}${url.search}`,
         method: "GET",
         headers: { "accept-encoding": "gzip, deflate, br", ...headers },
+        agent: url.protocol === "https:" ? httpsAgent : httpAgent,
         lookup: guardedLookup,
         signal,
       },

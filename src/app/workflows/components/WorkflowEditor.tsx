@@ -113,7 +113,7 @@ export default function WorkflowEditor({ id }: { id: string }) {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
           body,
-          ...(opts.leaving && body.length < KEEPALIVE_MAX_BYTES ? { keepalive: true } : {}),
+          ...(opts.leaving && new Blob([body]).size < KEEPALIVE_MAX_BYTES ? { keepalive: true } : {}),
         });
         if (res.status >= 400 && res.status < 500) {
           // The server refused this content; sending it again will not change that.
@@ -304,7 +304,7 @@ export default function WorkflowEditor({ id }: { id: string }) {
       void fetchNodeRun(run.id, a).then((c) => {
         if (c) setOutputs((o) => ({ ...o, [key]: c.output ?? null }));
         else asked.current.delete(key);
-      });
+      }).catch(() => asked.current.delete(key));
     }
   }, [graph, selected, run]);
 

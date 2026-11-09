@@ -2,7 +2,8 @@ import path from "node:path";
 import { defineConfig, devices } from "@playwright/test";
 import { ENV_ALIASES, PROVIDERS } from "./src/lib/providers";
 
-const PORT = 3210;
+// SANITY_PORT lets suites in separate worktrees run side by side.
+const PORT = Number(process.env.SANITY_PORT ?? 3210);
 // Loopback only: this server has the no-password test login, so it must not be reachable from the network.
 const HOST = "127.0.0.1";
 const live = process.env.SANITY_LIVE === "1";

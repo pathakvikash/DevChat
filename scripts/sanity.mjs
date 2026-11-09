@@ -9,7 +9,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const PORT = 3210;
+const PORT = Number(process.env.SANITY_PORT ?? 3210); // must match playwright.config.ts
 const SANITY_DB = path.join(root, "prisma", "sanity.db");
 const LINT_BASELINE = path.join(root, "scripts", "eslint-baseline.json");
 

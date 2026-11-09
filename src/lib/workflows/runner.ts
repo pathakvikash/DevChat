@@ -35,11 +35,12 @@ interface ActiveRun {
   /** Set by shutdown: the loop returns without a final save, so the run goes stale and becomes Interrupted. */
   stopping: boolean;
 }
-const g = globalThis as unknown as { __workflowRuns?: Map<string, ActiveRun>; __workflowSignals?: boolean };
+const g = globalThis as unknown as { __workflowRuns?: Map<string, ActiveRun>; __workflowSignals?: boolean; __workflowStopping?: boolean };
 const active = (g.__workflowRuns ??= new Map<string, ActiveRun>());
 
 /** Aborts every run active in this process and keeps them from saving again. Also called by the signal handlers. */
 export function stopAllRuns(): void {
+  g.__workflowStopping = true; // an after() that starts later returns at once too
   for (const a of active.values()) {
     a.stopping = true;
     a.ctrl.abort();
@@ -62,6 +63,11 @@ function registerShutdown(): void {
   }
 }
 
+/** For tests: a process that stopped its runs can run again. */
+export function resetShutdownForTests(): void {
+  g.__workflowStopping = false;
+}
+
 const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
 const isObject = (v: unknown): v is Record<string, unknown> => !!v && typeof v === "object" && !Array.isArray(v);
 
@@ -75,6 +81,16 @@ export function capOutput(output: unknown): unknown {
     return { ...output, items, truncated: true };
   }
   if (typeof output === "string") return output.slice(0, OUTPUT_CAP_BYTES);
+  if (isObject(output)) {
+    // One long text field (an agent's report): cut the longest string until the whole fits, after JSON escaping.
+    const cut: Record<string, unknown> = { ...output, truncated: true };
+    for (let i = 0; i < 40 && size(cut) > OUTPUT_CAP_BYTES; i++) {
+      const longest = Object.entries(cut).filter(([, v]) => typeof v === "string").sort((a, b) => (b[1] as string).length - (a[1] as string).length)[0];
+      if (!longest) break;
+      cut[longest[0]] = (longest[1] as string).slice(0, Math.floor((longest[1] as string).length * 0.8));
+    }
+    if (size(cut) <= OUTPUT_CAP_BYTES) return cut;
+  }
   return { truncated: true };
 }
 
@@ -150,12 +166,16 @@ async function runItems({ impl, base, onProgress, resume, tokens }: ItemCtx): Pr
         log = o.log ?? log;
       } catch (e) {
         failed++;
+        const spent = (e as { usage?: Usage }).usage;
+        usage.inputTokens += spent?.inputTokens ?? 0;
+        usage.outputTokens += spent?.outputTokens ?? 0;
         if (itemErrors.length < 20) itemErrors.push({ index: i + 1, error: message(e) });
       }
       done++;
-      // Too big to keep in the run row: stop checkpointing rather than fail the save.
-      const partial = JSON.stringify(saved).length <= OUTPUT_CAP_BYTES ? { total: list.length, results: { ...saved }, usage: { ...usage } } : undefined;
-      onProgress({ items: { done, failed, total: list.length }, usage: { ...usage }, itemErrors: [...itemErrors], log, partial });
+      // Too big to keep in the run row: the last checkpoint that fit stays as it was, rather than failing the save.
+      const fits = JSON.stringify(saved).length <= OUTPUT_CAP_BYTES;
+      const partial = { total: list.length, results: { ...saved }, usage: { ...usage } };
+      onProgress({ items: { done, failed, total: list.length }, usage: { ...usage }, itemErrors: [...itemErrors], log, ...(fits ? { partial } : {}) });
     }
   });
   await Promise.all(workers);
@@ -210,6 +230,8 @@ async function execCard(
  * Every card status change is saved, so a process that dies mid-run leaves a run that can resume.
  */
 export async function advanceRun(runId: string, deps: RunnerDeps = defaultDeps): Promise<void> {
+  // Shutting down: leave the run as saved. Its heartbeat goes stale, it becomes Interrupted, and Resume can pick it up.
+  if (g.__workflowStopping) return;
   const run = await prisma.workflowRun.findUnique({ where: { id: runId }, include: { workflow: { select: { name: true } } } });
   if (!run || run.state !== "running") return;
   // A loop for this attempt is already going. One for an older attempt (a Resume raced it) is told to stop.

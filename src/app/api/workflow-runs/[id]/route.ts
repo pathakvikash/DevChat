@@ -30,7 +30,7 @@ export async function GET(req: NextRequest, { params }: Ctx) {
       inputTokens: run.inputTokens,
       outputTokens: run.outputTokens,
       graph: parseGraph(run.graph),
-      nodes: Object.fromEntries(Object.entries(nodes).map(([cardId, r]) => [cardId, { ...r, output: undefined }])),
+      nodes: Object.fromEntries(Object.entries(nodes).map(([cardId, r]) => [cardId, { ...r, output: undefined, partial: undefined }])),
     });
   });
 }

@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { CATALOG, hasToolConflict, isCardType, parseConfig, templateValues, TOOL_CONFLICT_MESSAGE, type CardType } from "./catalog";
+import { CATALOG, hasToolConflict, isCardType, parseConfig, reachesWeb, readsChats, templateValues, TOOL_CONFLICT_MESSAGE, type CardType } from "./catalog";
 import { refRoot, templateRefs } from "./template";
 
 export const MAX_NODES = 30;
@@ -76,6 +76,7 @@ export function validateStructure(graph: WorkflowGraph): string[] {
     }
   }
   for (const n of graph.nodes) if (n.type === "agent" && hasToolConflict(n.config.tools)) errors.push(`${n.ui.label || n.id}: ${TOOL_CONFLICT_MESSAGE}`);
+  if (errors.length === 0) for (const l of chatLeaks(graph)) errors.push(l.message);
   if (errors.length === 0 && topoOrder(graph).length !== graph.nodes.length) errors.push("The cards form a loop");
   return errors;
 }
@@ -113,6 +114,17 @@ export function ancestorsOf(graph: WorkflowGraph, id: string): Set<string> {
   };
   walk(id);
   return seen;
+}
+
+/** A card that reads chats with a card that reaches the web somewhere after it: chat text could travel along the flow and out. */
+export function chatLeaks(graph: WorkflowGraph): { nodeId: string; message: string }[] {
+  const out: { nodeId: string; message: string }[] = [];
+  for (const n of graph.nodes) {
+    if (!readsChats(n.type, n.config)) continue;
+    const downstream = graph.nodes.some((m) => m.id !== n.id && reachesWeb(m.type, m.config) && ancestorsOf(graph, m.id).has(n.id));
+    if (downstream) out.push({ nodeId: n.id, message: `${n.ui.label || n.id} reads your chats and a later card reaches the web. Split them into two workflows, so a web page can't make it send your chats out.` });
+  }
+  return out;
 }
 
 export interface GraphIssue {
@@ -160,6 +172,7 @@ export function checkGraph(graph: WorkflowGraph): GraphIssue[] {
       }
     }
   }
+  for (const l of chatLeaks(graph)) issues.push({ nodeId: l.nodeId, field: "tools", message: l.message });
   return issues;
 }
 

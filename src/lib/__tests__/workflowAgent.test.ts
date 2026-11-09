@@ -139,6 +139,11 @@ describe("agent card", () => {
     expect((r.output as { why: string }).why).toHaveLength(20_000);
   });
 
+  it("a failed call still reports the tokens it spent", async () => {
+    scripted(["prose", "more prose"]);
+    await expect(agentCard.run(itemCtx())).rejects.toMatchObject({ message: "Couldn't read the output as JSON", usage: { inputTokens: 10, outputTokens: 10 } });
+  });
+
   it("returns { text } when the card has no output fields", async () => {
     scripted(["A short digest."]);
     const r = await agentCard.run(ctx({ instructions: "Digest", input: "{{news.items}}" }));

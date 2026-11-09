@@ -96,6 +96,28 @@ describe("chat-reading plus outbound tools", () => {
   });
 });
 
+describe("chat data flowing to a card that reaches the web", () => {
+  const leak = (name: string) => `${name} reads your chats and a later card reaches the web. Split them into two workflows, so a web page can't make it send your chats out.`;
+  const reader = (id: string, from: string[], x: number) => node(id, from, x, 0, "agent", { tools: ["readChat"] });
+
+  it("refuses a later agent with an outbound tool, even through a card in between", () => {
+    const g = graphOf(reader("read", ["trigger"], 1), node("mid", ["read"], 2), node("out", ["mid"], 3, 0, "agent", { tools: ["fetchUrl"] }));
+    expect(validateStructure(g)).toContain(leak("read"));
+    expect(checkGraph(g).find((i) => i.nodeId === "read")?.message).toBe(leak("read"));
+  });
+
+  it("refuses a later Web search card", () => {
+    const g = graphOf(reader("read", ["trigger"], 1), node("search", ["read"], 2, 0, "webSearch", { queries: "{{read.text}}" }));
+    expect(validateStructure(g)).toContain(leak("read"));
+  });
+
+  it("allows the web before the chat reader, a separate branch, and a later card with no outbound tool", () => {
+    expect(validateStructure(graphOf(node("search", ["trigger"], 1, 0, "webSearch", { queries: "x" }), reader("read", ["search"], 2)))).toEqual([]);
+    expect(validateStructure(graphOf(reader("read", ["trigger"], 1), node("other", ["trigger"], 2, 0, "webSearch", { queries: "x" })))).toEqual([]);
+    expect(validateStructure(graphOf(reader("read", ["trigger"], 1), node("calc", ["read"], 2, 0, "agent", { tools: ["calculator"] })))).toEqual([]);
+  });
+});
+
 describe("helpers", () => {
   it("parses a graph and fills defaults", () => {
     const g = parseGraph(JSON.stringify({ version: 1, nodes: [] }));
