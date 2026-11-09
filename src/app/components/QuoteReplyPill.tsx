@@ -2,14 +2,17 @@
 
 import { useEffect, useState, type RefObject } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { TextQuote } from "lucide-react";
+import { MessageSquarePlus, Mic, TextQuote } from "lucide-react";
+import { isVoiceSupported } from "@/lib/useVoiceDictation";
 import { trimQuote } from "@/lib/utils/quoteReply";
 
 const PILL_HEIGHT = 32;
 const GAP = 8;
 const FLIP_ZONE = 48;
-// Half the pill's width, to keep it clear of the wrapper edges without measuring.
-const HALF_WIDTH = 44;
+// Rough widths of the pill's parts, to keep it clear of the wrapper edges without measuring.
+const WIDTH_REPLY = 72;
+const WIDTH_SIDE = 140;
+const WIDTH_MIC = 34;
 
 function messageOf(node: Node | null): Element | null {
   const el = node?.nodeType === Node.ELEMENT_NODE ? (node as Element) : (node?.parentElement ?? null);
@@ -27,14 +30,21 @@ function lastSelectedNode(range: Range): Node {
 interface QuoteReplyPillProps {
   /** The transcript's scroll element. Its offset parent (the `relative` wrapper) positions the pill. */
   containerRef: RefObject<HTMLElement | null>;
-  onQuote: (text: string) => void;
+  onQuote: (text: string, dictate?: boolean) => void;
+  /** Start a side chat about the selection. Left out where none can open. */
+  onSideChat?: (text: string) => void;
+  /** Offer the mic. Off where no composer can take dictation (a side chat). */
+  voice?: boolean;
   /** An overlay is open: keep the pill away. */
   suppressed?: boolean;
 }
 
-/** "Reply" pill that appears over a selection made inside a single message (UX guide 3.1). */
-export default function QuoteReplyPill({ containerRef, onQuote, suppressed }: QuoteReplyPillProps) {
+/** Pill (Start a side chat, Reply, mic) that appears over a selection made inside a single message (UX guide 3.1). */
+export default function QuoteReplyPill({ containerRef, onQuote, onSideChat, voice = true, suppressed }: QuoteReplyPillProps) {
   const [pill, setPill] = useState<{ text: string; left: number; top: number } | null>(null);
+
+  const mic = voice && isVoiceSupported();
+  const halfWidth = (WIDTH_REPLY + (onSideChat ? WIDTH_SIDE : 0) + (mic ? WIDTH_MIC : 0)) / 2;
 
   useEffect(() => {
     const container = containerRef.current;
@@ -58,7 +68,7 @@ export default function QuoteReplyPill({ containerRef, onQuote, suppressed }: Qu
       const below = above < FLIP_ZONE || window.matchMedia("(pointer: coarse)").matches;
       setPill({
         text,
-        left: Math.min(Math.max(sr.left + sr.width / 2 - hr.left, GAP + HALF_WIDTH), hr.width - GAP - HALF_WIDTH),
+        left: Math.min(Math.max(sr.left + sr.width / 2 - hr.left, GAP + halfWidth), hr.width - GAP - halfWidth),
         top: below ? sr.bottom - hr.top + GAP : above,
       });
     }
@@ -88,31 +98,71 @@ export default function QuoteReplyPill({ containerRef, onQuote, suppressed }: Qu
       container.removeEventListener("scroll", hide);
       window.removeEventListener("resize", hide);
     };
-  }, [containerRef]);
+  }, [containerRef, halfWidth]);
+
+  const btn = "focus-ring inline-flex h-7 items-center gap-1.5 rounded-full px-2.5 hover:bg-[var(--glass-bg-hover)]";
+  const divider = "h-4 w-px bg-[var(--glass-border-strong)]";
+  // Run the action with the text captured at mouseup, then clear the selection and hide the pill.
+  function act(run: () => void) {
+    run();
+    window.getSelection()?.removeAllRanges();
+    setPill(null);
+  }
 
   return (
     <AnimatePresence>
       {pill && !suppressed && (
         <div className="absolute z-20 -translate-x-1/2" style={{ left: pill.left, top: pill.top }}>
-          <motion.button
-            type="button"
-            aria-label="Reply to selected text"
-            title="Reply to selected text"
-            // Keep the selection alive through the click.
+          <motion.div
+            role="group"
+            // Keep the selection alive through any click on the pill.
             onMouseDown={(e) => e.preventDefault()}
-            onClick={() => {
-              onQuote(pill.text);
-              window.getSelection()?.removeAllRanges();
-              setPill(null);
-            }}
+            aria-label="Selected text actions"
             initial={{ opacity: 0, scale: 0.96 }}
             animate={{ opacity: 1, scale: 1, transition: { duration: 0.12 } }}
             exit={{ opacity: 0, scale: 0.96, transition: { duration: 0.08 } }}
-            className="focus-ring inline-flex h-8 items-center gap-1.5 rounded-full glass-panel-strong px-3 text-xs font-medium text-[var(--foreground)]"
+            className="inline-flex h-8 items-center rounded-full glass-panel-strong px-0.5 text-xs font-medium text-[var(--foreground)]"
           >
-            <TextQuote size={14} />
-            Reply
-          </motion.button>
+            {onSideChat && (
+              <>
+                <button
+                  type="button"
+                  aria-label="Start a side chat about the selected text"
+                  title="Start a side chat"
+                  onClick={() => act(() => onSideChat(pill.text))}
+                  className={btn}
+                >
+                  <MessageSquarePlus size={14} />
+                  Start a side chat
+                </button>
+                <span aria-hidden className={divider} />
+              </>
+            )}
+            <button
+              type="button"
+              aria-label="Reply to selected text"
+              title="Reply to selected text"
+              onClick={() => act(() => onQuote(pill.text))}
+              className={btn}
+            >
+              <TextQuote size={14} />
+              Reply
+            </button>
+            {mic && (
+              <>
+                <span aria-hidden className={divider} />
+                <button
+                  type="button"
+                  aria-label="Reply to selected text by voice"
+                  title="Reply by voice"
+                  onClick={() => act(() => onQuote(pill.text, true))}
+                  className="focus-ring inline-flex h-7 w-8 items-center justify-center rounded-full hover:bg-[var(--glass-bg-hover)]"
+                >
+                  <Mic size={14} />
+                </button>
+              </>
+            )}
+          </motion.div>
         </div>
       )}
     </AnimatePresence>

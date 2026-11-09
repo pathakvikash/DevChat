@@ -1,3 +1,5 @@
+import { useSyncExternalStore } from "react";
+
 /** A side chat as listed under its main chat. */
 export interface SideChatSummary {
   id: string;
@@ -34,4 +36,30 @@ export function takeSideQuestion(id: string): string | undefined {
   const text = pendingQuestions.get(id);
   pendingQuestions.delete(id);
   return text;
+}
+
+// A selection sent to a side chat from the main chat. The side pane may not be mounted yet, so it waits here
+// until the pane takes it (it becomes the pane's one quote card).
+export interface SideQuote {
+  text: string;
+  instruction: string;
+}
+const sideQuotes = new Map<string, SideQuote>();
+const sideQuoteListeners = new Set<() => void>();
+
+export function setSideQuote(id: string, quote: SideQuote): void {
+  sideQuotes.set(id, quote);
+  sideQuoteListeners.forEach((l) => l());
+}
+
+export function takeSideQuote(id: string): void {
+  if (sideQuotes.delete(id)) sideQuoteListeners.forEach((l) => l());
+}
+
+export function usePendingSideQuote(id: string): SideQuote | undefined {
+  return useSyncExternalStore(
+    (cb) => (sideQuoteListeners.add(cb), () => void sideQuoteListeners.delete(cb)),
+    () => sideQuotes.get(id),
+    () => undefined,
+  );
 }

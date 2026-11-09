@@ -53,6 +53,9 @@ const SpeechRecognition =
     | SpeechRecognitionConstructor
     | undefined;
 
+/** False in browsers without the Web Speech API. */
+export const isVoiceSupported = () => !!SpeechRecognition;
+
 export function useVoiceDictation(
   onTranscript: (text: string) => void,
 ) {
@@ -136,5 +139,5 @@ export function useVoiceDictation(
     };
   }, []);
 
-  return { isListening, toggle, isSupported };
+  return { isListening, toggle, start, stop, isSupported };
 }

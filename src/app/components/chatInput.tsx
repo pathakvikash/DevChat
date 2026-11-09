@@ -64,6 +64,11 @@ interface ChatInputProps {
   onQuoteRemove: (id: string) => void;
   /** Cmd/Ctrl+Enter in a quote card: send just that card. */
   onSendQuote: (id: string) => void;
+  /** A quote card's side-chat button. Left out where no side chat can open. */
+  onQuoteSide?: (id: string) => void;
+  /** The pill's mic added this card: start dictating into its instruction. */
+  dictateQuoteId?: string | null;
+  onDictateStarted?: () => void;
   /** Temporary chat: dashed composer and its own placeholder. */
   temporary?: boolean;
   conversationId: string;
@@ -112,6 +117,9 @@ export default function ChatInput({
   onQuoteChange,
   onQuoteRemove,
   onSendQuote,
+  onQuoteSide,
+  dictateQuoteId,
+  onDictateStarted,
   temporary,
   conversationId,
   mentions,
@@ -136,16 +144,53 @@ export default function ChatInput({
   const inputRef = useRef(input);
   inputRef.current = input;
 
-  const { isListening, toggle: toggleVoice, isSupported: voiceSupported } =
+  // One dictation runs at a time. `voiceTarget` is where it writes: a quote card's id, or null for the main box.
+  const [voiceTarget, setVoiceTarget] = useState<string | null>(null);
+  const live = useRef({ quotes, onQuoteChange, setInput });
+  useEffect(() => {
+    live.current = { quotes, onQuoteChange, setInput };
+  });
+  const targetRef = useRef<string | null>(null);
+  const { isListening, start: startVoice, stop: stopVoice, isSupported: voiceSupported } =
     useVoiceDictation(
-      useCallback(
-        (text: string) => {
-          const current = inputRef.current;
-          setInput(current + (current && !current.endsWith(" ") ? " " : "") + text);
-        },
-        [setInput],
-      ),
+      useCallback((text: string) => {
+        const add = (current: string) => current + (current && !current.endsWith(" ") ? " " : "") + text;
+        const { quotes, onQuoteChange, setInput } = live.current;
+        const card = quotes.find((q) => q.id === targetRef.current);
+        if (card) onQuoteChange(card.id, add(card.instruction));
+        else if (targetRef.current === null) setInput(add(inputRef.current));
+      }, []),
     );
+
+  /** Mic of the main box (null) or of one card: starts, moves the target, or stops when it is already the target. */
+  function dictateTo(id: string | null) {
+    if (isListening && targetRef.current === id) {
+      stopVoice();
+      return;
+    }
+    const moving = isListening;
+    targetRef.current = id;
+    setVoiceTarget(id);
+    // A restart drops words still in flight, so they don't land in the new target.
+    if (moving) stopVoice();
+    startVoice();
+  }
+
+  // The target card was removed or sent: stop listening.
+  useEffect(() => {
+    if (isListening && voiceTarget !== null && !quotes.some((q) => q.id === voiceTarget)) {
+      stopVoice();
+      targetRef.current = null;
+    }
+  }, [isListening, voiceTarget, quotes, stopVoice]);
+
+  // The selection pill's mic added a card.
+  useEffect(() => {
+    if (!dictateQuoteId || !quotes.some((q) => q.id === dictateQuoteId)) return;
+    onDictateStarted?.();
+    if (voiceSupported) dictateTo(dictateQuoteId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dictateQuoteId, quotes]);
 
   const cmdQuery = activeCommandQuery(input);
   const cmdMatches: SlashCommand[] = cmdQuery !== null ? matchCommands(cmdQuery) : [];
@@ -394,6 +439,9 @@ export default function ChatInput({
               onSendAll={submitFromKey}
               focusTextarea={focusTextarea}
               busy={isLoading}
+              listeningId={isListening ? voiceTarget : null}
+              onDictate={voiceSupported ? dictateTo : undefined}
+              onSideChat={onQuoteSide}
             />
             {(files.length > 0 || mentions.length > 0) && (
               <div className="space-y-2">
@@ -781,17 +829,17 @@ export default function ChatInput({
             {voiceSupported && (
               <button
                 type="button"
-                onClick={toggleVoice}
+                onClick={() => dictateTo(null)}
                 disabled={isLoading}
                 className={`flex h-9 w-9 items-center justify-center rounded-[var(--glass-radius-md)] transition-all ${
-                  isListening
+                  isListening && voiceTarget === null
                     ? "glass-button-primary text-white"
                     : "glass-button text-zinc-400"
                 } disabled:opacity-50`}
-                style={isListening ? { animation: "mic-pulse 2s ease-in-out infinite" } : undefined}
-                title={isListening ? "Stop dictation" : "Voice dictation"}
+                style={isListening && voiceTarget === null ? { animation: "mic-pulse 2s ease-in-out infinite" } : undefined}
+                title={isListening && voiceTarget === null ? "Stop dictation" : "Voice dictation"}
               >
-                {isListening ? (
+                {isListening && voiceTarget === null ? (
                   <Mic size={16} className="animate-pulse" />
                 ) : (
                   <MicOff size={16} />

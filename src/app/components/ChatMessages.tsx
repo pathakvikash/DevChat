@@ -27,7 +27,9 @@ interface ChatMessagesProps {
   /** Shown with the indicator before the assistant bubble exists, e.g. "Waiting for Claude Code…". */
   statusLabel?: string;
   /** Shows the Reply pill over a selection inside one message. */
-  onQuote: (text: string) => void;
+  onQuote: (text: string, dictate?: boolean) => void;
+  /** Starts a side chat about the selection. Left out where no side chat can open. */
+  onSideChat?: (text: string) => void;
   /** An overlay is open: hide the Reply pill. */
   quoteSuppressed?: boolean;
   /** Side chats: the last reply gets "Send to main", which prefills the main chat's box. */
@@ -60,6 +62,7 @@ function ChatMessages({
   scrollRef,
   statusLabel,
   onQuote,
+  onSideChat,
   quoteSuppressed,
   sendToMain,
   compact = false,
@@ -159,7 +162,7 @@ function ChatMessages({
 
       <div ref={messagesEndRef} />
       {/* Positions against the transcript wrapper, so it doesn't scroll with the messages. */}
-      <QuoteReplyPill containerRef={scrollRef} onQuote={onQuote} suppressed={quoteSuppressed} />
+      <QuoteReplyPill containerRef={scrollRef} onQuote={onQuote} onSideChat={onSideChat} voice={!compact} suppressed={quoteSuppressed} />
     </div>
   );
 }

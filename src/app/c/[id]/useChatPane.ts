@@ -10,7 +10,7 @@ import { useConversationMode, type ModelCaps } from "@/app/contexts/ChatModeCont
 import { useSplitViewOptional } from "@/app/c/SplitViewContext";
 import { buildAgentMessagePart, type AgentMessageData } from "@/lib/chat/agentMessages";
 import { AGENT_DELIVERED, AGENT_NOT_OPEN } from "@/lib/utils/agentLink";
-import { takeSideQuestion } from "@/lib/sideChat";
+import { setSideQuote, takeSideQuestion, takeSideQuote, usePendingSideQuote } from "@/lib/sideChat";
 import { useKeyboardShortcuts } from "@/app/hooks/useKeyboardShortcuts";
 import type { ApprovalAnswer, PlanAnswer } from "@/app/components/ToolAnswers";
 import type { MinimapMessage } from "@/app/components/MinimapNavigator";
@@ -129,6 +129,8 @@ export function useChatPane(conversationId: string, { focused, kind, searchProvi
   const [quotes, setQuotes] = useState<QuoteCard[]>([]);
   const [announcement, setAnnouncement] = useState("");
   const quoteSeq = useRef(0);
+  /** A quote card the composer should start dictating into (set by the pill's mic). */
+  const [dictateQuoteId, setDictateQuoteId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const scrollRef = useRef<HTMLDivElement>(null);
   const [selectedKbId, setSelectedKbId] = useState<string>("");
@@ -814,14 +816,55 @@ export function useChatPane(conversationId: string, { focused, kind, searchProvi
 
   /* ─── Quote cards ───────────────────────────────────────────────────────── */
 
-  function addQuote(text: string) {
-    setQuotes((prev) => [...prev, { id: `quote-${quoteSeq.current++}`, text, instruction: "" }]);
+  function addQuote(text: string, dictate = false) {
+    const id = `quote-${quoteSeq.current++}`;
+    const card = { id, text, instruction: "" };
+    // A side chat holds one quote: a new one replaces it.
+    setQuotes((prev) => (isSide ? [card] : [...prev, card]));
+    if (dictate) setDictateQuoteId(id);
     // The no-break space makes the live region change, so a second quote is announced too.
     setAnnouncement((a) => (a === "Quote added" ? "Quote added\u00A0" : "Quote added"));
   }
   const updateQuote = (id: string, instruction: string) =>
     setQuotes((prev) => prev.map((q) => (q.id === id ? { ...q, instruction } : q)));
   const removeQuote = (id: string) => setQuotes((prev) => prev.filter((q) => q.id !== id));
+
+  // A side chat holds one quote, sent from the main chat: a new one replaces the old.
+  const pendingSideQuote = usePendingSideQuote(conversationId);
+  const appliedSideQuote = useRef<unknown>(null);
+  useEffect(() => {
+    // Strict Mode runs effects twice with the same object; apply it once so the instruction isn't added twice.
+    if (!pendingSideQuote || appliedSideQuote.current === pendingSideQuote) return;
+    appliedSideQuote.current = pendingSideQuote;
+    takeSideQuote(conversationId);
+    setQuotes([{ id: `quote-${quoteSeq.current++}`, text: pendingSideQuote.text, instruction: "" }]);
+    // The instruction typed on the main card is the start of the question.
+    {
+      const instr = pendingSideQuote.instruction.trim();
+      if (instr) setInput((prev) => (prev.trim() ? `${prev.trimEnd()}\n\n${instr}` : instr));
+    }
+    requestAnimationFrame(() => document.querySelector<HTMLTextAreaElement>(`[data-pane-id="${conversationId}"] textarea`)?.focus());
+  }, [pendingSideQuote, conversationId]);
+
+  /** Opens this chat's side chat with `text` quoted in it. False when no pane could open: the quote stays here. */
+  async function sendToSide(text: string, instruction = ""): Promise<boolean> {
+    // A side chat already open for this chat (maybe an older one from history) takes it; else open the newest.
+    const open = split?.ids.find((x) => split.parentOf[x] === conversationId);
+    if (open) split?.focusPane(open);
+    const sideId = open ?? (await split?.openSide(conversationId).catch(() => null));
+    if (!sideId) return false;
+    setSideQuote(sideId, { text, instruction });
+    return true;
+  }
+  /** The pill's Start a side chat: if it can't open, the selection becomes a normal quote card. */
+  async function askSide(text: string) {
+    if (!(await sendToSide(text))) addQuote(text);
+  }
+  /** A quote card's side-chat button: the card moves over only once the side chat has it. */
+  async function moveQuoteToSide(id: string) {
+    const quote = quotes.find((q) => q.id === id);
+    if (quote && (await sendToSide(quote.text, quote.instruction))) removeQuote(id);
+  }
 
   /** Cmd/Ctrl+Enter in a card: sends just that card; the rest of the composer stays. */
   async function sendQuote(id: string) {
@@ -1020,7 +1063,7 @@ export function useChatPane(conversationId: string, { focused, kind, searchProvi
   return {
     conversation, setConversation, loading, setLoading,
     input, setInput, files, setFiles, mentions, setMentions, mentionCuts, suggestion, setSuggestion,
-    quotes, addQuote, updateQuote, removeQuote, sendQuote, sendComposed, announcement,
+    quotes, addQuote, updateQuote, removeQuote, askSide, moveQuoteToSide, dictateQuoteId, setDictateQuoteId, sendQuote, sendComposed, announcement,
     toggleTemporary,
     scratchpadOpen, setScratchpadOpen,
     todoPanelOpen, setTodoPanelOpen,

@@ -71,6 +71,8 @@ export default function ConversationPane({ conversationId, focused, initialPromp
   }, [p.messages]);
   // A sub-agent transcript: read only, and never a target for sendToChat.
   const isSub = p.isSubagent;
+  // Where a side chat can open from here: a main chat on a screen wide enough for two panes.
+  const canSide = !isSub && !isSide && !!split && split.limit > 1;
   const parentId = p.conversation?.parentId ?? null;
   const parentTitle = (parentId && split?.info[parentId]?.title) || "Main chat";
   const setPaneKind = split?.setPaneKind;
@@ -266,6 +268,7 @@ export default function ConversationPane({ conversationId, focused, initialPromp
               scrollRef={p.scrollRef}
               statusLabel={p.currentModelName ? `Waiting for ${p.currentModelName}…` : undefined}
               onQuote={p.addQuote}
+              onSideChat={canSide ? p.askSide : undefined}
               quoteSuppressed={isSub || p.isDialogOpen}
               sendToMain={isSide && parentId ? { title: parentTitle, onSend: (text: string) => window.dispatchEvent(new CustomEvent("vas:send-to-main", { detail: { id: parentId, text } })) } : undefined}
               compact={isSide}
@@ -309,6 +312,8 @@ export default function ConversationPane({ conversationId, focused, initialPromp
             onQueueEdit={p.editQueued}
             onQueueRemove={p.removeQueued}
             onQueueRetry={p.retryQueued}
+            quote={p.quotes[0]}
+            onQuoteRemove={p.removeQuote}
           />
         )}
         {!isSub && !isSide && (
@@ -347,6 +352,9 @@ export default function ConversationPane({ conversationId, focused, initialPromp
           quotes={p.quotes}
           onQuoteChange={p.updateQuote}
           onQuoteRemove={p.removeQuote}
+          onQuoteSide={canSide ? p.moveQuoteToSide : undefined}
+          dictateQuoteId={p.dictateQuoteId}
+          onDictateStarted={() => p.setDictateQuoteId(null)}
           onSendQuote={p.sendQuote}
           temporary={p.conversation.temporary}
           queued={p.queued}

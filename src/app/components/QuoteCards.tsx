@@ -2,7 +2,7 @@
 
 import { useEffect, useRef } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { TextQuote, X } from "lucide-react";
+import { Mic, MessageSquarePlus, TextQuote, X } from "lucide-react";
 import type { QuoteCard } from "@/lib/utils/quoteReply";
 import { sendShortcutLabel } from "@/lib/utils/platform";
 
@@ -17,6 +17,12 @@ interface QuoteCardsProps {
   focusTextarea: () => void;
   /** A reply is running: Cmd/Ctrl+Enter waits until it ends. */
   busy: boolean;
+  /** The card whose instruction is being dictated, if any. */
+  listeningId?: string | null;
+  /** Mic button on each card. Left out where voice isn't supported. */
+  onDictate?: (id: string) => void;
+  /** Moves a card to the side chat. Left out where no side chat can open. */
+  onSideChat?: (id: string) => void;
 }
 
 /** Quote cards for the composer tray (UX guide 2.2 / 3.1). */
@@ -28,6 +34,9 @@ export default function QuoteCards({
   onSendAll,
   focusTextarea,
   busy,
+  listeningId = null,
+  onDictate,
+  onSideChat,
 }: QuoteCardsProps) {
   const inputs = useRef<Record<string, HTMLInputElement | null>>({});
   const added = useRef<string | null>(null);
@@ -75,7 +84,8 @@ export default function QuoteCards({
               }}
               className="overflow-hidden"
             >
-              <div className="group relative flex items-start gap-2 glass-card rounded-[var(--glass-radius-md)] px-3 py-2 pr-9 text-sm focus-within:border-[var(--glass-accent)]!">
+              <div className="group relative flex items-start gap-2 glass-card rounded-[var(--glass-radius-md)] px-3 py-2 text-sm focus-within:border-[var(--glass-accent)]!"
+                style={{ paddingRight: 8 + 28 * (1 + (onDictate ? 1 : 0) + (onSideChat ? 1 : 0)) }}>
                 <TextQuote size={14} className="mt-0.5 shrink-0 text-zinc-500" />
                 <div className="min-w-0 flex-1">
                   <blockquote
@@ -115,18 +125,48 @@ export default function QuoteCards({
                     {sendShortcutLabel()} this quote · ↵ all
                   </p>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => {
-                    onRemove(q.id);
-                    focusNeighbour(i, true);
-                  }}
-                  aria-label={`Remove quote ${i + 1}`}
-                  title={`Remove quote ${i + 1}`}
-                  className="focus-ring absolute right-1.5 top-1.5 flex h-6 w-6 items-center justify-center rounded-[var(--glass-radius-sm)] text-zinc-500 hover:bg-[var(--glass-bg-hover)] hover:text-[var(--foreground)]"
-                >
-                  <X size={14} />
-                </button>
+                <div className="absolute right-1.5 top-1.5 flex gap-1">
+                  {onDictate && (
+                    <button
+                      type="button"
+                      onClick={() => onDictate(q.id)}
+                      aria-label={`Dictate into quote ${i + 1}`}
+                      aria-pressed={listeningId === q.id}
+                      title={listeningId === q.id ? "Stop dictation" : "Dictate instruction"}
+                      className={`focus-ring flex h-6 w-6 items-center justify-center rounded-[var(--glass-radius-sm)] ${
+                        listeningId === q.id
+                          ? "glass-button-primary text-white"
+                          : "text-zinc-500 hover:bg-[var(--glass-bg-hover)] hover:text-[var(--foreground)]"
+                      }`}
+                      style={listeningId === q.id ? { animation: "mic-pulse 2s ease-in-out infinite" } : undefined}
+                    >
+                      <Mic size={14} className={listeningId === q.id ? "animate-pulse" : undefined} />
+                    </button>
+                  )}
+                  {onSideChat && (
+                    <button
+                      type="button"
+                      onClick={() => onSideChat(q.id)}
+                      aria-label={`Ask quote ${i + 1} in a side chat`}
+                      title="Ask in a side chat"
+                      className="focus-ring flex h-6 w-6 items-center justify-center rounded-[var(--glass-radius-sm)] text-zinc-500 hover:bg-[var(--glass-bg-hover)] hover:text-[var(--foreground)]"
+                    >
+                      <MessageSquarePlus size={14} />
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onRemove(q.id);
+                      focusNeighbour(i, true);
+                    }}
+                    aria-label={`Remove quote ${i + 1}`}
+                    title={`Remove quote ${i + 1}`}
+                    className="focus-ring flex h-6 w-6 items-center justify-center rounded-[var(--glass-radius-sm)] text-zinc-500 hover:bg-[var(--glass-bg-hover)] hover:text-[var(--foreground)]"
+                  >
+                    <X size={14} />
+                  </button>
+                </div>
               </div>
             </motion.div>
           ))}

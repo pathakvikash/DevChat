@@ -25,7 +25,11 @@ export interface ChatPaneState extends DataActions {
   setMentions: React.Dispatch<React.SetStateAction<string[]>>;
   mentionCuts: Record<string, { kept: number; total: number }>;
   quotes: QuoteCard[];
-  addQuote: (text: string) => void;
+  addQuote: (text: string, dictate?: boolean) => void;
+  askSide: (text: string) => Promise<void>;
+  moveQuoteToSide: (id: string) => Promise<void>;
+  dictateQuoteId: string | null;
+  setDictateQuoteId: React.Dispatch<React.SetStateAction<string | null>>;
   updateQuote: (id: string, instruction: string) => void;
   removeQuote: (id: string) => void;
   sendQuote: (id: string) => Promise<void>;
