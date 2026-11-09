@@ -96,6 +96,8 @@ test("Cancel run ends the run as Cancelled and creates no chat", async ({ page, 
   await page.getByRole("button", { name: "Run", exact: true }).click();
   await expect(card(page, "Write the digest", "Agent", "Running")).toBeVisible({ timeout: 30_000 });
 
+  // The "Run started" toast sits over the Cancel run button; a click that waits for it to fade can land after the run is over.
+  await page.getByRole("button", { name: "Dismiss" }).click({ timeout: 1000 }).catch(() => {});
   await page.getByRole("button", { name: "Cancel run" }).click();
   await expect(toast(page, "Run cancelled")).toBeVisible();
   await expect(card(page, "Write the digest", "Agent", "Cancelled")).toBeVisible();

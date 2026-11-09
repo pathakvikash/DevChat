@@ -6,7 +6,7 @@ import ModelSelector from "@/app/components/conversation/ModelSelector";
 import WorkingFolderPicker from "@/app/components/conversation/WorkingFolderPicker";
 import type { ModelInfo } from "@/app/components/conversation/types";
 import { AGENT_TOOL_CHOICES, hasToolConflict, isCliModelId, MCP_WARNING, MCP_WEB_WARNING, OUTPUT_FIELD_TYPES, type FieldSpec, type OutputField } from "@/lib/workflows/catalog";
-import FieldPicker, { type PickerRow } from "./FieldPicker";
+import FieldPicker, { typedBraces, type PickerRow } from "./FieldPicker";
 
 export const NEEDS_TOOLS = "Needs a model that can use tools. Pick one with the wrench icon.";
 
@@ -30,11 +30,31 @@ function TemplateField({ spec, value, onChange, error, env, id }: { spec: FieldS
   const [picking, setPicking] = useState(false);
   const area = useRef<HTMLTextAreaElement>(null);
   const caret = useRef<number | null>(null);
+  // Typing `{{` opens the picker; picking then replaces those two characters.
+  const braces = useRef(false);
   const preview = value.includes("{{") ? env.preview(value) : null;
+  const insertButton = useRef<HTMLButtonElement>(null);
+  const close = () => {
+    braces.current = false;
+    setPicking(false);
+  };
+  // A click outside the picker closes it (the Insert field button toggles it itself).
+  useEffect(() => {
+    if (!picking) return;
+    const outside = (e: MouseEvent) => {
+      const t = e.target as Node;
+      if (!(t as Element).closest?.('[role="dialog"][aria-label="Insert field"]') && !insertButton.current?.contains(t)) close();
+    };
+    document.addEventListener("mousedown", outside);
+    return () => document.removeEventListener("mousedown", outside);
+  }, [picking]);
 
   function insert(path: string) {
     const at = caret.current ?? value.length;
-    onChange(`${value.slice(0, at)}{{${path}}}${value.slice(at)}`);
+    // Only swallow the `{{` that opened the picker if it is still right before the caret.
+    const from = braces.current && at >= 2 && value.slice(at - 2, at) === "{{" ? at - 2 : at;
+    onChange(`${value.slice(0, from)}{{${path}}}${value.slice(at)}`);
+    braces.current = false;
     setPicking(false);
     requestAnimationFrame(() => area.current?.focus());
   }
@@ -47,18 +67,37 @@ function TemplateField({ spec, value, onChange, error, env, id }: { spec: FieldS
         value={value}
         rows={spec.rows ?? 3}
         disabled={env.readOnly}
-        onChange={(e) => onChange(e.target.value)}
+        onChange={(e) => {
+          onChange(e.target.value);
+          caret.current = e.target.selectionStart;
+          if (String((e.nativeEvent as InputEvent).inputType).startsWith("insert") && typedBraces(e.target.value, e.target.selectionStart)) {
+            braces.current = true;
+            setPicking(true);
+          }
+        }}
         onSelect={(e) => (caret.current = e.currentTarget.selectionStart)}
         onBlur={(e) => (caret.current = e.currentTarget.selectionStart)}
         aria-invalid={!!error || undefined}
         className={`${inputClass} resize-y`}
       />
       {!env.readOnly && (
-        <button type="button" onClick={() => setPicking((p) => !p)} className="focus-ring glass-button mt-1 h-7 rounded-[var(--glass-radius-sm)] px-2 text-xs">
+        <button type="button" ref={insertButton} onClick={() => {
+          braces.current = false;
+          setPicking((p) => !p);
+        }} className="focus-ring glass-button mt-1 h-7 rounded-[var(--glass-radius-sm)] px-2 text-xs">
           Insert field
         </button>
       )}
-      {picking && <FieldPicker rows={env.rows} onPick={insert} onClose={() => setPicking(false)} />}
+      {picking && (
+        <FieldPicker
+          rows={env.rows}
+          onPick={insert}
+          onClose={() => {
+            close();
+            requestAnimationFrame(() => area.current?.focus());
+          }}
+        />
+      )}
       {value.includes("{{") && (
         <p className="mt-1 text-[11px] text-zinc-400">{preview === null ? "Run once to see a preview" : `Preview: ${preview}`}</p>
       )}

@@ -156,7 +156,7 @@ export const readsPrivate = (type: string, config: Cfg, defaultModel = ""): bool
   readsChats(type, config) || usesMcp(type, config) || hasCliFolder(type, config, defaultModel);
 
 /** The open web: a search or fetch card, or an agent with a web tool. */
-export const reachesOpenWeb = (type: string, config: Cfg, defaultModel = ""): boolean =>
+export const reachesOpenWeb = (type: string, config: Cfg, _defaultModel = ""): boolean =>
   type === "webSearch" || type === "fetch" || (type === "agent" && toolList(config).some((t) => OUTBOUND_TOOLS.includes(t)));
 
 /** Can send data out: the open web, or MCP (servers can make network calls). */

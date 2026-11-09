@@ -1049,6 +1049,8 @@ function runCli(
       } else {
         const scratch = join(tmpdir(), "devchat-cli");
         await mkdir(scratch, { recursive: true });
+        // Already cancelled (also while the folder was made): don't start a process nobody will read.
+        if (signal?.aborted) return controller.error(signal.reason ?? new Error("Aborted"));
         const cwd = spec!.cwd || scratch;
         child = spawn(def.bin, spec!.args, { cwd, env: childEnv(spec!.env, cwd), stdio: ["pipe", "pipe", "pipe"] });
         run = {

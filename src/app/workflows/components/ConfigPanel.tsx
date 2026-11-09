@@ -3,7 +3,8 @@
 import { useState } from "react";
 import { AlertTriangle, Bot, Copy, Check, MessageSquare, Plug, Play, Search, Trash2, X, ChevronDown, ChevronRight } from "lucide-react";
 import { CATALOG, isCliModelId, MCP_WEB_WARNING, reachesOpenWeb, type FieldSpec } from "@/lib/workflows/catalog";
-import { ancestorsOf, TRIGGER_ID, type CardRun, type FlowNode, type GraphIssue, type RunState, type WorkflowGraph } from "@/lib/workflows/graph";
+import { useToast } from "@/app/components/Toast";
+import { ancestorsOf, connectionError, TRIGGER_ID, type CardRun, type FlowNode, type GraphIssue, type RunState, type WorkflowGraph } from "@/lib/workflows/graph";
 import ConfigField, { type FieldEnv } from "./ConfigField";
 import { cardStatus, formatDuration, formatTokens, StatusBadge } from "./RunStatus";
 import { fetchNodeRun } from "./useWorkflowRun";
@@ -133,6 +134,7 @@ export default function ConfigPanel({
   onClose: () => void;
   overlay?: boolean;
 }) {
+  const { toast } = useToast();
   const [tab, setTab] = useState<"settings" | "last">("settings");
   const [advanced, setAdvanced] = useState(false);
   const def = CATALOG[node.type];
@@ -240,7 +242,13 @@ export default function ConfigPanel({
                             className="h-4 w-4"
                             disabled={env.readOnly}
                             checked={node.fromIds.includes(n.id)}
-                            onChange={(e) => onChange({ fromIds: e.target.checked ? [...node.fromIds, n.id] : node.fromIds.filter((f) => f !== n.id) })}
+                            onChange={(e) => {
+                              if (!e.target.checked) return onChange({ fromIds: node.fromIds.filter((f) => f !== n.id) });
+                              // The same rules as a save; a refused connection leaves the box unticked.
+                              const err = connectionError(graph, n.id, node.id);
+                              if (err) toast(err, "error");
+                              else onChange({ fromIds: [...node.fromIds, n.id] });
+                            }}
                           />
                           {n.ui.label}
                         </label>

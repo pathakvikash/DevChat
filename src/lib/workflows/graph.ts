@@ -232,7 +232,7 @@ export function newCard(graph: WorkflowGraph, type: CardType): FlowNode {
     type,
     fromIds: last ? [last.id] : [],
     config: def.defaults(),
-    ui: { label: def.label, position: { x: (last?.ui.position.x ?? -280) + 280, y: last?.ui.position.y ?? 0 } },
+    ui: { label: def.label, position: { x: (last?.ui.position.x ?? -LAYOUT_DX) + LAYOUT_DX, y: last?.ui.position.y ?? 0 } },
   };
 }
 
@@ -266,3 +266,57 @@ export interface CardRun {
 
 export const TERMINAL_STATES: RunState[] = ["succeeded", "failed", "cancelled", "interrupted"];
 export const ACTIVE_STATES: RunState[] = ["running", "waiting"];
+
+// ─── Canvas (phase 4) ───
+
+/** Spacing of `autoLayout`: a column per level, a row per card. Multiples of the canvas's 20px snap grid. */
+export const LAYOUT_DX = 340;
+export const LAYOUT_DY = 140;
+export const LOOP_MESSAGE = "Cards can't loop back";
+
+/**
+ * Positions by level: a card sits one column right of its furthest input. Cards in one level stack in run order,
+ * centred on y 0. Cards caught in a loop go in a last column. Pure: returns a new graph.
+ */
+export function autoLayout(graph: WorkflowGraph): WorkflowGraph {
+  const order = topoOrder(graph);
+  const level = new Map<string, number>();
+  for (const n of order) level.set(n.id, Math.max(-1, ...n.fromIds.map((f) => level.get(f) ?? -1)) + 1);
+  const last = Math.max(-1, ...level.values()) + 1;
+  for (const n of graph.nodes) if (!level.has(n.id)) level.set(n.id, last);
+  const columns = new Map<number, string[]>();
+  for (const n of [...order, ...graph.nodes.filter((m) => !order.includes(m))]) {
+    const l = level.get(n.id)!;
+    columns.set(l, [...(columns.get(l) ?? []), n.id]);
+  }
+  const snap = (v: number) => Math.sign(v) * Math.round(Math.abs(v) / 20) * 20; // symmetric, so -70 and 70 mirror
+  const pos = new Map<string, { x: number; y: number }>();
+  for (const [l, ids] of columns) ids.forEach((id, row) => pos.set(id, { x: l * LAYOUT_DX, y: snap((row - (ids.length - 1) / 2) * LAYOUT_DY) }));
+  return { ...graph, nodes: graph.nodes.map((n) => ({ ...n, ui: { ...n.ui, position: pos.get(n.id)! } })) };
+}
+
+/** Why `from → to` can't be drawn, or null. Uses the save rules (validateStructure), so the canvas and the server agree. */
+export function connectionError(graph: WorkflowGraph, from: string, to: string): string | null {
+  const target = graph.nodes.find((n) => n.id === to);
+  if (!target || !graph.nodes.some((n) => n.id === from)) return "That card no longer exists";
+  if (from === to || ancestorsOf(graph, from).has(to)) return LOOP_MESSAGE;
+  if (target.fromIds.includes(from)) return "Those cards are already connected";
+  const before = new Set(validateStructure(graph));
+  const candidate = { ...graph, nodes: graph.nodes.map((n) => (n.id === to ? { ...n, fromIds: [...n.fromIds, from] } : n)) };
+  return validateStructure(candidate).find((e) => !before.has(e)) ?? null;
+}
+
+/**
+ * `node` with its `fromIds` checked one by one against the save rules, as if it were added unconnected first.
+ * A connection that breaks a rule is left out and its message returned, so the card still lands, unconnected.
+ */
+export function connectNew(graph: WorkflowGraph, node: FlowNode): { node: FlowNode; error: string | null } {
+  let current: FlowNode = { ...node, fromIds: [] };
+  let error: string | null = null;
+  for (const from of node.fromIds) {
+    const err = connectionError({ ...graph, nodes: [...graph.nodes, current] }, from, node.id);
+    if (err) error ??= err;
+    else current = { ...current, fromIds: [...current.fromIds, from] };
+  }
+  return { node: current, error };
+}
