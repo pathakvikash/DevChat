@@ -11,7 +11,7 @@ import ModelSelector from "@/app/components/conversation/ModelSelector";
 import type { ModelInfo } from "@/app/components/conversation/types";
 import SidePanel from "@/app/components/ui/SidePanel";
 import { fetchModels } from "@/app/hooks/useModelsApi";
-import { CATALOG, type CardType } from "@/lib/workflows/catalog";
+import { CATALOG, isCodexModelId, type CardType } from "@/lib/workflows/catalog";
 import { ancestorsOf, autoLayout, checkGraph, connectNew, MAX_NODES, newCard, TRIGGER_ID, validateStructure, type CardRun, type FlowNode, type WorkflowGraph } from "@/lib/workflows/graph";
 import { renderText, renderTemplate, templateRefs, refRoot, type TemplateContext } from "@/lib/workflows/template";
 import Canvas, { type AddOptions } from "./Canvas";
@@ -371,7 +371,7 @@ export default function WorkflowEditor({ id }: { id: string }) {
   const nodes: Record<string, CardRun> = (!previewing && run?.nodes) || {};
   const runState = previewing ? undefined : run?.state;
   const issues = useMemo(() => (graph ? checkGraph(graph) : []), [graph]);
-  const invalid = useMemo(() => new Set(issues.map((i) => i.nodeId)), [issues]);
+  const invalid = useMemo(() => new Set(issues.filter((i) => !i.warning).map((i) => i.nodeId)), [issues]);
   const selected = graph?.nodes.find((n) => n.id === selectedId) ?? null;
 
   // Outputs of the cards before the selected one, for previews and the field picker. Each is fetched once per run.
@@ -625,7 +625,7 @@ export default function WorkflowEditor({ id }: { id: string }) {
         <section className="space-y-2">
           <h3 className="text-sm font-medium text-zinc-200">Default model</h3>
           <p className="text-xs text-zinc-400">Agent cards with no model of their own use this one.</p>
-          <ModelSelector currentModel={wf.graph.defaultModel} onModelChange={(m) => editGraph((g) => ({ ...g, defaultModel: m }))} />
+          <ModelSelector currentModel={wf.graph.defaultModel} onModelChange={(m) => editGraph((g) => ({ ...g, defaultModel: m }))} exclude={(m) => isCodexModelId(m.id)} />
         </section>
         <section className="space-y-2">
           <h3 className="text-sm font-medium text-zinc-200">Token limit per run</h3>

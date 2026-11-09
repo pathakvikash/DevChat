@@ -1,7 +1,9 @@
 import { prisma } from "@/lib/db";
 import { CARDS, type CardImpl, type CardOutcome } from "./cards";
 import { cliProviderForModel } from "@/lib/cliProviders";
-import { resolveAgentModel } from "./cards/agent";
+import { resolveAgentModel, resolveMcpTools } from "./cards/agent";
+import { ownedEnabledServer } from "./cards/mcpTool";
+import { canUseHostTools, HOST_TOOLS_REFUSED } from "@/lib/hostAccess";
 import { CATALOG, DEFAULT_MAX_ITEMS, MAX_ITEMS_LIMIT, OUTPUT_CAP_BYTES, parseConfig } from "./catalog";
 import {
   checkGraph,
@@ -380,21 +382,31 @@ export async function preflight(userId: string, graph: WorkflowGraph): Promise<{
     else if (!same.nodeId) same.nodeId = nodeId; // the structure check does not know the card; the later check does
   };
   for (const m of validateStructure(graph)) add("", m);
-  for (const i of checkGraph(graph)) add(i.nodeId, i.message);
+  for (const i of checkGraph(graph)) if (!i.warning) add(i.nodeId, i.message);
   for (const n of graph.nodes) {
     const label = n.ui.label || n.id;
     if (n.type === "agent") {
       const modelId = String(n.config.model || graph.defaultModel);
       try {
         const model = await resolveAgentModel(userId, modelId);
-        // Codex runs only inside a folder; folders for workflow cards arrive in phase 6.
-        if (cliProviderForModel(modelId)?.needsFolder) add(n.id, `${label}: ${model.name} needs a working folder, which workflow cards don't support yet. Pick another model.`);
-        if (Array.isArray(n.config.tools) && n.config.tools.length > 0 && !model.supportsTools) {
+        // Codex runs only inside a folder (whether the folder is usable is checked when the card runs).
+        if (cliProviderForModel(modelId)?.needsFolder && !n.config.folder) add(n.id, `${label}: ${model.name} needs a working folder. Pick one in the card's settings, or pick another model.`);
+        const mcpTools = Array.isArray(n.config.mcpTools) ? (n.config.mcpTools as string[]) : [];
+        if (((Array.isArray(n.config.tools) && n.config.tools.length > 0) || mcpTools.length > 0) && !model.supportsTools) {
           add(n.id, `${label}: ${model.name} can't use tools. Untick the tools or pick another model.`);
         }
       } catch (e) {
         add(n.id, `${label}: ${message(e)}`);
       }
+    }
+    const usesMcp = n.type === "mcpTool" || (n.type === "agent" && Array.isArray(n.config.mcpTools) && n.config.mcpTools.length > 0);
+    if (usesMcp && !(await canUseHostTools(userId))) add(n.id, `${label}: ${HOST_TOOLS_REFUSED}`);
+    else if (n.type === "agent" && usesMcp) {
+      // Missing, disabled or foreign servers and vanished tools fail now, not halfway through the run.
+      await resolveMcpTools(userId, n.config.mcpTools as string[]).catch((e) => add(n.id, `${label}: ${message(e)}`));
+    }
+    if (n.type === "mcpTool" && !(await ownedEnabledServer(userId, String(n.config.serverId ?? "")))) {
+      add(n.id, `${label}: pick an MCP server that is turned on`);
     }
     if (n.type === "chatMessage" && n.config.chat && n.config.chat !== "new") {
       const chat = await prisma.conversation.findFirst({ where: { id: String(n.config.chat), userId }, select: { id: true } });
