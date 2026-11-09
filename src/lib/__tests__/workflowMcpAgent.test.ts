@@ -58,7 +58,9 @@ describe("one card that reads private data and reaches the web", () => {
     ["chat + fetchUrl", { tools: ["readChat", "fetchUrl"] }],
   ])("refuses %s at save and at Run", (_n, config) => {
     expect(refused(config)).toBe(true);
-    expect(checkGraph(one(config)).some((i) => !i.warning && /private data|read your chats/.test(i.message))).toBe(true);
+    const messages = checkGraph(one(config)).filter((i) => !i.warning).map((i) => i.message);
+    expect(messages.some((m) => /reaches the web itself|read your chats and reach the web/.test(m))).toBe(true);
+    if (!_n.startsWith("chat")) expect(messages.join()).toContain("reads private data (chats, MCP or a folder) and reaches the web itself. Untick one");
   });
 
   it.each([
@@ -122,10 +124,15 @@ const usage = {
 };
 /** A fake model that records what each call received. */
 function fakeModel(id: string) {
-  const calls: { providerOptions: unknown; system?: string }[] = [];
+  const calls: { providerOptions: unknown; system?: string }[] & { repairs?: unknown[] } = [];
+  calls.repairs = [];
   const mock = new MockLanguageModelV3({
     provider: "mock",
     modelId: id,
+    doGenerate: async (o) => {
+      calls.repairs!.push(o.providerOptions);
+      return { content: [{ type: "text", text: '{"score": 1}' }], finishReason: { unified: "stop", raw: undefined }, usage, warnings: [] };
+    },
     doStream: async (o) => {
       calls.push({ providerOptions: o.providerOptions, system: o.prompt.find((m: any) => m.role === "system")?.content as string });
       const parts: any[] = [{ type: "stream-start", warnings: [] }, { type: "text-start", id: "t" }, { type: "text-delta", id: "t", delta: "done" }, { type: "text-end", id: "t" }, { type: "finish", usage, finishReason: { unified: "stop", raw: undefined } }];
@@ -153,6 +160,15 @@ describe("agentCard.run", () => {
     await agentCard.run(agentCtx({}, CLI));
     const opts = calls.map((c) => (c.providerOptions as any)["claude-code"]);
     expect(opts.map((o) => [o.cwd, o.access])).toEqual([["/work/app", "agent"], ["/work/app", "chat"], ["", "chat"]]);
+  });
+
+  it("sends the repair call with the card's own provider options, folder and web: false included", async () => {
+    const calls = fakeModel(CLI);
+    const ctx = agentCtx({ folder: "/work/app", outputFields: [{ name: "score", type: "number", description: "" }] }, CLI);
+    const r = await agentCard.run(ctx);
+    expect(r.output).toEqual({ score: 1 }); // the stream said "done", so the repair call produced the JSON
+    expect(calls.repairs).toHaveLength(1);
+    expect((calls.repairs![0] as any)["claude-code"]).toMatchObject({ cwd: "/work/app", access: "chat", web: false });
   });
 
   it("fails a folder outside the runnable list before calling the model", async () => {
@@ -210,10 +226,13 @@ describe("preflight", () => {
     expect(await run(ok)).toContain("can't use tools");
   });
 
-  it("lets Codex through with a folder, and still refuses it without one", async () => {
+  it("refuses Codex as a workflow card model until a live check is done, with or without a folder", async () => {
     model("Codex");
-    const g = (config: Record<string, unknown>) => graphOf("codex/default", node("a", ["trigger"], "agent", { instructions: "x", ...config }));
-    expect(await run(g({ folder: "/work/app" }))).toBe("");
-    expect(await run(g({}))).toContain("needs a working folder");
+    const g = (config: Record<string, unknown>, dm = "codex/default") => graphOf(dm, node("a", ["trigger"], "agent", { instructions: "x", ...config }));
+    expect(await run(g({ folder: "/work/app" }))).toContain("Codex can't run workflow cards yet. Pick another model.");
+    expect(await run(g({}))).toContain("Codex can't run workflow cards yet");
+    expect(await run(g({ model: "codex/default" }, "mock/wf"))).toContain("Codex can't run workflow cards yet");
+    expect(validateStructure(g({ model: "codex/default" }, "mock/wf")).join()).toContain("Codex can't run workflow cards yet");
+    expect(await run(g({ model: "mock/wf" }, "mock/wf"))).toBe("");
   });
 });

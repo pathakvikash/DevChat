@@ -275,6 +275,7 @@ export const agentCard: CardImpl = {
         const repair = await generateText({
           model: model.model,
           abortSignal: c.signal,
+          providerOptions, // the card's own: a CLI model keeps its folder access and `web: false`
           prompt: [
             `Turn this into JSON with exactly these fields:\n${fields.map(fieldLine).join("\n")}\nReply with only the JSON.`,
             "",

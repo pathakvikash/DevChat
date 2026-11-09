@@ -49,6 +49,7 @@ async function connectToServer(serverId: string): Promise<void> {
     }
   }
 
+  const gen = genOf(serverId);
   const server = await (prisma as any).mcpServer.findUnique({ where: { id: serverId } });
   if (!server) throw new Error(`MCP server "${serverId}" not found`);
 
@@ -64,14 +65,23 @@ async function connectToServer(serverId: string): Promise<void> {
   );
 
   await client.connect(transport);
+  if (genOf(serverId) !== gen) {
+    // The server was edited while this connected (its address or credentials may be old): start over from the database.
+    try { await transport.close(); } catch {}
+    return connectToServer(serverId);
+  }
   clientCache.set(serverId, { client, transport });
 }
 
 /** A server's tool list is kept this long, so a workflow run lists it once, not once per item or per check. */
 const TOOLS_TTL_MS = 30_000;
 const toolsCache = new Map<string, { at: number; tools: McpTool[] }>();
+/** Bumped whenever a server is invalidated, so a connect or list that started before it can't cache stale results. */
+const generation = new Map<string, number>();
+const genOf = (serverId: string) => generation.get(serverId) ?? 0;
 
 export async function disconnectFromServer(serverId: string): Promise<void> {
+  generation.set(serverId, genOf(serverId) + 1);
   toolsCache.delete(serverId);
   const entry = clientCache.get(serverId);
   if (!entry) return;
@@ -84,6 +94,7 @@ export async function listServerTools(serverId: string, opts: { fresh?: boolean 
   const hit = toolsCache.get(serverId);
   if (!opts.fresh && hit && Date.now() - hit.at < TOOLS_TTL_MS) return hit.tools;
   await connectToServer(serverId);
+  const gen = genOf(serverId);
   const entry = clientCache.get(serverId);
   if (!entry) throw new Error(`MCP server "${serverId}" not connected`);
 
@@ -93,7 +104,7 @@ export async function listServerTools(serverId: string, opts: { fresh?: boolean 
     description: t.description,
     inputSchema: t.inputSchema,
   }));
-  toolsCache.set(serverId, { at: Date.now(), tools });
+  if (genOf(serverId) === gen) toolsCache.set(serverId, { at: Date.now(), tools });
   return tools;
 }
 

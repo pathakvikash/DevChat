@@ -66,7 +66,15 @@ export async function GET(
       maxAge: 600,
     });
 
-    // The client secret stays in the database; the callback reads it from there.
+    // The client secret stays in the database; the callback reads it from there. This hash of the address lets the
+    // callback refuse if the server was pointed somewhere else while the user was at the provider.
+    response.cookies.set("mcp_oauth_server", crypto.createHash("sha256").update(server.url).digest("hex"), {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+      sameSite: "lax",
+      path: `/api/mcp/servers/${id}/oauth`,
+      maxAge: 600,
+    });
     response.cookies.set("mcp_oauth_token_url", tokenUrl, {
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",

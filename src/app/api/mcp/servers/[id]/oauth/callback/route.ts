@@ -1,3 +1,4 @@
+import crypto from "crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { exchangeCode } from "@/lib/mcp/oauth2";
 import { disconnectFromServer } from "@/lib/mcp/client";
@@ -43,6 +44,7 @@ export async function GET(
     clearResponse.cookies.set("mcp_oauth_state", "", { maxAge: 0, path: `/api/mcp/servers/${id}/oauth` });
     clearResponse.cookies.set("mcp_oauth_client_secret", "", { maxAge: 0, path: `/api/mcp/servers/${id}/oauth` });
     clearResponse.cookies.set("mcp_oauth_token_url", "", { maxAge: 0, path: `/api/mcp/servers/${id}/oauth` });
+    clearResponse.cookies.set("mcp_oauth_server", "", { maxAge: 0, path: `/api/mcp/servers/${id}/oauth` });
 
     if (!tokenUrl) {
       return clearResponse;
@@ -53,6 +55,11 @@ export async function GET(
       return clearResponse;
     }
     const { server } = result;
+    // The server must still be the one the user authorised: same address, still oauth2.
+    const urlHash = crypto.createHash("sha256").update(server.url).digest("hex");
+    if (server.authType !== "oauth2" || req.cookies.get("mcp_oauth_server")?.value !== urlHash) {
+      return NextResponse.redirect(new URL("/settings/mcp?oauth=error&reason=server_changed", req.url));
+    }
 
     let authConfig: Record<string, string> = {};
     if (server.authConfig) {

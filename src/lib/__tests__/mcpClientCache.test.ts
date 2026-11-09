@@ -12,7 +12,8 @@ vi.mock("@modelcontextprotocol/sdk/client/index.js", () => ({
   },
 }));
 vi.mock("@modelcontextprotocol/sdk/client/streamableHttp.js", () => ({ StreamableHTTPClientTransport: class { close = vi.fn(async () => {}); } }));
-vi.mock("@/lib/db", () => ({ prisma: { mcpServer: { findUnique: vi.fn(async () => ({ id: "s1", url: "http://x.test/mcp", authType: "none" })) } } }));
+const findUnique = vi.fn(async () => ({ id: "s1", url: "http://x.test/mcp", authType: "none" }));
+vi.mock("@/lib/db", () => ({ prisma: { mcpServer: { findUnique: () => findUnique() } } }));
 
 import { disconnectFromServer, listServerTools } from "@/lib/mcp/client";
 
@@ -20,6 +21,9 @@ beforeEach(async () => {
   await disconnectFromServer("s1");
   listTools.mockReset();
   listTools.mockResolvedValue({ tools: [{ name: "a" }] });
+  connect.mockClear();
+  connect.mockImplementation(async () => {});
+  findUnique.mockClear();
 });
 
 describe("listServerTools cache", () => {
@@ -45,5 +49,28 @@ describe("listServerTools cache", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+describe("an edit that lands while connecting", () => {
+  it("does not leave the stale connection cached: it reconnects from the database", async () => {
+    connect.mockImplementationOnce(async () => {
+      await disconnectFromServer("s1"); // the PATCH, between the lookup and the cache write
+    });
+    await listServerTools("s1");
+    expect(findUnique).toHaveBeenCalledTimes(2);
+    expect(connect).toHaveBeenCalledTimes(2);
+    await listServerTools("s1");
+    expect(connect).toHaveBeenCalledTimes(2); // the second connection is the one that stuck
+  });
+
+  it("does not cache a tool list that was fetched across an invalidation", async () => {
+    listTools.mockImplementationOnce(async () => {
+      await disconnectFromServer("s1");
+      return { tools: [{ name: "old" }] };
+    });
+    await listServerTools("s1");
+    listTools.mockResolvedValue({ tools: [{ name: "new" }] });
+    expect((await listServerTools("s1")).map((t) => t.name)).toEqual(["new"]);
   });
 });

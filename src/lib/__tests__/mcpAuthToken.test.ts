@@ -58,4 +58,9 @@ describe("a stored OAuth token", () => {
     await patch({ authType: "oauth2", url: "http://a.test/mcp" });
     expect(update.mock.calls[3][0].data).not.toHaveProperty("authToken");
   });
+
+  it("a token set in the same request is kept when the URL changes", async () => {
+    await patch({ url: "http://other.test/mcp", token: { access_token: "fresh" } });
+    expect(update.mock.calls[0][0].data.authToken).toBe(JSON.stringify({ access_token: "fresh" }));
+  });
 });

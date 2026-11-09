@@ -603,12 +603,12 @@ describe("startRun", () => {
     expect(await startRun("u1", "wf1")).toMatchObject({ ok: true });
   });
 
-  it("refuses Codex until workflow cards can have a folder", async () => {
+  it("refuses Codex as a workflow card model until a live check is done", async () => {
     vi.mocked(resolveAgentModel).mockResolvedValue(model({ id: "codex/default", name: "Codex" }) as never);
     withWorkflow(graphOf(agent({ model: "codex/default" })));
     const r = await startRun("u1", "wf1");
     expect(r).toMatchObject({ ok: false, status: 400 });
-    expect((r as any).error).toContain("needs a working folder");
+    expect((r as any).error).toContain("Codex can't run workflow cards yet");
   });
 
   it("refuses a card that reads chats and reaches the web", async () => {

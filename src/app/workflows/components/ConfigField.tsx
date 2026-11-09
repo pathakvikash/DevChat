@@ -5,7 +5,7 @@ import { AlertTriangle, Plus, Trash2, Wrench, XCircle } from "lucide-react";
 import ModelSelector from "@/app/components/conversation/ModelSelector";
 import WorkingFolderPicker from "@/app/components/conversation/WorkingFolderPicker";
 import type { ModelInfo } from "@/app/components/conversation/types";
-import { AGENT_TOOL_CHOICES, hasToolConflict, isCliModelId, MCP_WARNING, MCP_WEB_WARNING, OUTPUT_FIELD_TYPES, type FieldSpec, type OutputField } from "@/lib/workflows/catalog";
+import { AGENT_TOOL_CHOICES, hasToolConflict, isCliModelId, isCodexModelId, MCP_WARNING, MCP_WEB_WARNING, OUTPUT_FIELD_TYPES, type FieldSpec, type OutputField } from "@/lib/workflows/catalog";
 import FieldPicker, { typedBraces, type PickerRow } from "./FieldPicker";
 
 export const NEEDS_TOOLS = "Needs a model that can use tools. Pick one with the wrench icon.";
@@ -345,7 +345,7 @@ export default function ConfigField({ spec, config, onChange, error, env }: { sp
     case "model":
       control = (
         <div className="flex items-center gap-2">
-          <ModelSelector currentModel={String(value || env.defaultModel)} onModelChange={set} disabled={env.readOnly} size="sm" />
+          <ModelSelector currentModel={String(value || env.defaultModel)} onModelChange={set} disabled={env.readOnly} size="sm" exclude={(m) => isCodexModelId(m.id)} />
           {!!value && !env.readOnly && (
             <button type="button" onClick={() => set("")} className="focus-ring glass-button h-7 rounded-[var(--glass-radius-sm)] px-2 text-xs">
               Use default

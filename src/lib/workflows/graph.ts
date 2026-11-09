@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { CATALOG, hasToolConflict, isCardType, leaksTo, parseConfig, PRIVATE_LEAK_MESSAGE, reachesOpenWeb, readsPrivate, templateValues, MCP_WEB_WARNING, TOOL_CONFLICT_MESSAGE, usesMcp, type CardType } from "./catalog";
+import { CATALOG, CODEX_BLOCKED, hasToolConflict, isCodexModelId, isCardType, leaksTo, parseConfig, PRIVATE_LEAK_MESSAGE, reachesOpenWeb, readsPrivate, templateValues, MCP_WEB_WARNING, TOOL_CONFLICT_MESSAGE, usesMcp, type CardType } from "./catalog";
 import { refRoot, templateRefs } from "./template";
 
 export const MAX_NODES = 30;
@@ -122,6 +122,7 @@ export function ancestorsOf(graph: WorkflowGraph, id: string): Set<string> {
 /** One card that both reads private data and reaches the web (chat or folder or MCP with a web tool, folder with MCP), or null. */
 function cardConflict(n: FlowNode, defaultModel: string): string | null {
   const label = n.ui.label || n.id;
+  if (n.type === "agent" && isCodexModelId(String(n.config.model || defaultModel))) return `${label}: ${CODEX_BLOCKED}`;
   if (n.type === "agent" && hasToolConflict(n.config.tools, n.config.mcpTools)) return `${label}: ${TOOL_CONFLICT_MESSAGE}`;
   if (leaksTo(n, n, defaultModel)) return `${label} reads private data (chats, MCP or a folder) and reaches the web itself. Untick one, so a web page can't make it send your data out.`;
   return null;

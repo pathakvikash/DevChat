@@ -2,7 +2,7 @@ import { generateText, type ModelMessage } from "ai";
 import { z } from "zod";
 import { contextWindowFor } from "@/lib/chat/contextBudget";
 import type { ModelConfig } from "@/lib/models";
-import { AGENT_TOOL_IDS, CATALOG, isCardType, parseConfig, type CardDef, type FieldSpec } from "./catalog";
+import { AGENT_TOOL_IDS, CATALOG, CODEX_BLOCKED, isCardType, isCodexModelId, parseConfig, type CardDef, type FieldSpec } from "./catalog";
 import { autoLayout, MAX_NODES, parseGraph, TRIGGER_ID, validateStructure, checkGraph, type WorkflowGraph } from "./graph";
 import { buildTemplate, TEMPLATE_OPTIONS } from "./templates";
 import { providerOptionsFor } from "@/lib/chat/providerOptions";
@@ -259,7 +259,9 @@ export async function generateFlow(o: GenerateOptions): Promise<{ graph: Workflo
   const user = current ? `${o.description}\n\nChange this flow:\n\`\`\`json\n${JSON.stringify(forModel(current))}\n\`\`\`` : o.description;
   const messages: ModelMessage[] = [{ role: "user", content: user }];
   const defaultModel = o.defaultModel ?? o.current?.defaultModel ?? o.model.id;
-  const providerOptions = providerOptionsFor({ modelId: o.model.id, numCtx: o.model.contextWindow, cwd: "", access: "chat", conversationId: "", userId: o.userId ?? "", allowedTools: [] });
+  if (isCodexModelId(defaultModel)) throw new GenerateError(CODEX_BLOCKED);
+  // A design run only writes JSON: a CLI model gets no network tools.
+  const providerOptions = providerOptionsFor({ modelId: o.model.id, numCtx: o.model.contextWindow, cwd: "", access: "chat", conversationId: "", userId: o.userId ?? "", allowedTools: [], web: false });
   const ask = async () => {
     o.signal?.throwIfAborted();
     const { text } = await generateText({ model: o.model.model, system, messages, providerOptions, abortSignal: o.signal });

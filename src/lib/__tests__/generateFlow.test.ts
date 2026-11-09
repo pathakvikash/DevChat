@@ -1,6 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { MockLanguageModelV3 } from "ai/test";
-import { z } from "zod";
 import type { ModelConfig } from "@/lib/models";
 
 const h = vi.hoisted(() => ({
@@ -344,7 +343,9 @@ describe("generateFlow hardening", () => {
       const sent = JSON.stringify(s.calls[0].prompt);
       expect(sent).toContain("notify");
       expect(sent).not.toContain("list_files");
-      expect(graph.nodes.find((n) => n.id === "notify")!.config).toMatchObject(current.nodes[2].config);
+      const notify = graph.nodes.find((n) => n.id === "notify")!.config;
+      expect(notify).toMatchObject(current.nodes[2].config);
+      expect(notify.args).toEqual(current.nodes[2].config.args);
       expect(warnings.filter((w) => /Removed/.test(w))).toEqual([]);
       // unchanged agent keeps its by-hand settings
       expect(graph.nodes.find((n) => n.id === "digest")!.config).toMatchObject({ folder: "/work", allowEdits: true, mcpTools: ["mcp_srv_list"] });
