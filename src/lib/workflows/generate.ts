@@ -54,15 +54,14 @@ export function catalogForPrompt(): string {
 /** A graph as the model sees it: no positions, no variable values, no settings only the user may set. */
 const forModel = (g: WorkflowGraph) => ({
   vars: g.vars.map((v) => ({ key: v.key, label: v.label, value: "" })),
-  nodes: g.nodes
-    .filter((n) => !SENSITIVE_TYPES.includes(n.type))
-    .map((n) => ({
-      id: n.id,
-      type: n.type,
-      fromIds: n.fromIds,
-      config: Object.fromEntries(Object.entries(n.config).filter(([k]) => !isUserOnlyKey(k))),
-      label: n.ui.label,
-    })),
+  // A by-hand card (MCP tool) is a stub: the model sees where it sits, so it keeps the wiring, but not what it does.
+  nodes: g.nodes.map((n) => ({
+    id: n.id,
+    type: n.type,
+    fromIds: n.fromIds,
+    config: SENSITIVE_TYPES.includes(n.type) ? {} : Object.fromEntries(Object.entries(n.config).filter(([k]) => !isUserOnlyKey(k))),
+    label: n.ui.label,
+  })),
 });
 
 export function buildSystemPrompt(window: number): string {
@@ -134,6 +133,10 @@ function sanitize(raw: Rec, current: WorkflowGraph | undefined, warnings: string
     warnings.push(`Removed the "${n.id}" card: MCP tools can only be added by hand.`);
     if (!keptIds.has(String(n.id))) dropped.set(String(n.id), Array.isArray(n.fromIds) ? n.fromIds.map(String) : []);
   }
+  // A by-hand card the reply lost shows in the preview, so Apply doesn't silently delete it.
+  for (const c of current?.nodes ?? []) {
+    if (SENSITIVE_TYPES.includes(c.type) && !all.some((n) => n.id === c.id && n.type === c.type)) warnings.push(`Removed the "${c.ui.label || c.id}" card: MCP tools can only be added by hand.`);
+  }
   const through = (ids: string[]): string[] => {
     const out = new Set<string>();
     const seen = new Set<string>();
@@ -152,29 +155,43 @@ function sanitize(raw: Rec, current: WorkflowGraph | undefined, warnings: string
       const config: Rec = isRec(n.config) ? { ...n.config } : {};
       const label = String(n.id);
       const before = was(n);
+      const fromIds = through(Array.isArray(n.fromIds) ? n.fromIds.map(String) : []);
+      const ui = isRec(n.ui) ? n.ui : {};
+      const def = isCardType(n.type) ? CATALOG[n.type] : undefined;
+      const card = { id: n.id, type: n.type, fromIds, ui: { label: String(ui.label ?? n.label ?? def?.label ?? n.id), position: { x: 0, y: 0 } } };
+      // A by-hand card that is still the same card is the user's, whatever the reply says about it.
+      if (before && SENSITIVE_TYPES.includes(String(n.type))) return { ...card, config: structuredClone(before.config) };
+
       for (const k of Object.keys(config)) {
         if (!isUserOnlyKey(k)) continue;
         delete config[k];
         if (k !== "model" && !(before && k in before.config)) warnings.push(`Removed "${k}" from "${label}": it can only be set by hand.`);
       }
-      // A change keeps what the user set by hand on a card that is still the same card.
-      for (const [k, v] of Object.entries(before?.config ?? {})) if (isUserOnlyKey(k)) config[k] = v;
+      if (before) {
+        const hand = Object.entries(before.config).filter(([k]) => isUserOnlyKey(k));
+        for (const [k, v] of hand) if (k === "model") config[k] = v;
+        // Folder, edit and MCP settings stay only while the card does the same job: same settings, same inputs.
+        const same =
+          JSON.stringify(editable(String(n.type), config)) === JSON.stringify(editable(String(n.type), before.config)) &&
+          JSON.stringify([...fromIds].sort()) === JSON.stringify([...before.fromIds].sort());
+        const risky = hand.filter(([k]) => k !== "model");
+        if (same) for (const [k, v] of risky) config[k] = v;
+        else if (risky.length) warnings.push(`"${label}" changed, so its folder, edit and MCP settings were removed. Set them again by hand.`);
+      }
       if (Array.isArray(config.tools)) {
         const kept = config.tools.filter((t) => !isMcpName(t));
         if (kept.length !== config.tools.length) warnings.push(`Removed MCP tools from "${label}": they can only be ticked by hand.`);
         config.tools = kept;
       }
-      const ui = isRec(n.ui) ? n.ui : {};
-      const def = isCardType(n.type) ? CATALOG[n.type] : undefined;
-      return {
-        id: n.id,
-        type: n.type,
-        fromIds: through(Array.isArray(n.fromIds) ? n.fromIds.map(String) : []),
-        config,
-        ui: { label: String(ui.label ?? n.label ?? def?.label ?? n.id), position: { x: 0, y: 0 } },
-      };
+      return { ...card, config };
     });
   return { version: 1, vars: cleanVars(raw.vars, current), nodes: out };
+}
+
+/** What the model may edit on a card, in the schema's own shape, so two configs compare by JSON. */
+function editable(type: string, config: Rec): unknown {
+  const rest = Object.fromEntries(Object.entries(config).filter(([k]) => !isUserOnlyKey(k)));
+  return isCardType(type) ? parseConfig(type, rest).config : rest;
 }
 
 const MAX_VARS = 20;
@@ -275,7 +292,7 @@ export async function generateFlow(o: GenerateOptions): Promise<{ graph: Workflo
   let checked = validate(extractJson(reply), current, warnings, defaultModel);
   if (!checked.ok) {
     warnings.length = 0;
-    messages.push({ role: "assistant", content: reply }, { role: "user", content: `That flow has problems:\n${checked.errors.slice(0, 15).map((e) => `- ${e}`).join("\n")}\nReply with the corrected JSON only.` });
+    messages.push({ role: "assistant", content: reply.slice(0, MAX_REPLY_CHARS) }, { role: "user", content: `That flow has problems:\n${checked.errors.slice(0, 15).map((e) => `- ${e}`).join("\n")}\nReply with the corrected JSON only.` });
     reply = await ask();
     checked = validate(extractJson(reply), current, warnings, defaultModel);
   }

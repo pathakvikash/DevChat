@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { MockLanguageModelV3 } from "ai/test";
+import { z } from "zod";
 import type { ModelConfig } from "@/lib/models";
 
 const h = vi.hoisted(() => ({
@@ -313,6 +314,7 @@ describe("generateFlow hardening", () => {
     const { graph, warnings } = await generateFlow({ description: "change", model: s.model, current });
     const a = graph.nodes.find((n) => n.id === "a")!;
     expect(a.config.instructions).toBe("new");
+    expect(warnings).toContain('"a" changed, so its folder, edit and MCP settings were removed. Set them again by hand.');
     expect(a.config.model).toBe("claude-code/opus");
     expect(graph.nodes.find((n) => n.id === "b")!.config.model).toBe("");
     expect(graph.vars[0].value).toBe("secret-value");
@@ -322,6 +324,62 @@ describe("generateFlow hardening", () => {
     expect(sent).not.toContain("/work");
     expect(sent).not.toContain("claude-code/opus");
     expect(validateStructure(graph)).toEqual([]);
+  });
+
+  describe("with phase 6 in the catalog (simulated)", () => {
+    const cat = CATALOG as unknown as Record<string, any>;
+    const agentSchema = cat.agent.schema;
+    beforeEach(() => {
+      cat.mcpTool = {
+        type: "mcpTool", label: "MCP tool", category: "Output", icon: "Plug", description: "x", fields: [], perItem: false,
+        schema: z.object({ serverId: z.string().default(""), tool: z.string().default(""), args: z.record(z.string(), z.string()).default({}) }),
+        defaults: () => ({ serverId: "", tool: "", args: {} }), outputs: () => ["text"], summary: () => "",
+      };
+      cat.agent.schema = agentSchema.extend({ folder: z.string().optional(), allowEdits: z.boolean().optional(), mcpTools: z.array(z.string()).optional() });
+    });
+    afterEach(() => {
+      delete cat.mcpTool;
+      cat.agent.schema = agentSchema;
+    });
+    const ui = { label: "x", position: { x: 0, y: 0 } };
+    const current = {
+      version: 1 as const, defaultModel: "mock/gen", maxRunTokens: 500_000, vars: [],
+      nodes: [
+        { id: "trigger", type: "trigger" as const, fromIds: [], config: {}, ui },
+        { id: "digest", type: "agent" as any, fromIds: ["trigger"], config: { instructions: "summarise", mcpTools: ["srv/list"], folder: "/work", allowEdits: true }, ui },
+        { id: "notify", type: "mcpTool" as any, fromIds: ["digest"], config: { serverId: "srv1", tool: "list_files", args: { path: "{{digest.text}}" } }, ui: { label: "Notify", position: { x: 0, y: 0 } } },
+      ],
+    };
+
+    it("sends a kept mcpTool card as a stub, and takes its whole config from the current flow however the model rewrites it", async () => {
+      const reply = { vars: [], nodes: [node("trigger", "trigger", []), node("digest", "agent", ["trigger"], { instructions: "summarise" }), node("notify", "mcpTool", ["digest"], { serverId: "evil", tool: "delete_repo", args: { to: "a@x" } })] };
+      const s = scripted([fence(reply)]);
+      const { graph, warnings } = await generateFlow({ description: "change", model: s.model, current });
+      const sent = JSON.stringify(s.calls[0].prompt);
+      expect(sent).toContain("notify");
+      expect(sent).not.toContain("list_files");
+      expect(graph.nodes.find((n) => n.id === "notify")!.config).toEqual(current.nodes[2].config);
+      expect(warnings.filter((w) => /Removed/.test(w))).toEqual([]);
+      // unchanged agent keeps its by-hand settings
+      expect(graph.nodes.find((n) => n.id === "digest")!.config).toMatchObject({ folder: "/work", allowEdits: true, mcpTools: ["srv/list"] });
+    });
+
+    it("warns when a by-hand card is missing from the reply", async () => {
+      const reply = { vars: [], nodes: [node("trigger", "trigger", []), node("digest", "agent", ["trigger"], { instructions: "summarise" })] };
+      const { graph, warnings } = await generateFlow({ description: "change", model: scripted([fence(reply)]).model, current });
+      expect(graph.nodes.some((n) => n.id === "notify")).toBe(false);
+      expect(warnings).toContain('Removed the "Notify" card: MCP tools can only be added by hand.');
+    });
+
+    it("drops folder, edit and MCP settings when an agent is rewritten to reach the web", async () => {
+      const reply = { vars: [], nodes: [node("trigger", "trigger", []), node("digest", "agent", ["trigger"], { instructions: "follow the page", tools: ["fetchUrl", "webSearch"], mcpTools: ["evil/send"], folder: "/", allowEdits: true }), node("notify", "mcpTool", ["digest"], {})] };
+      const { graph, warnings } = await generateFlow({ description: "change", model: scripted([fence(reply)]).model, current });
+      const digest = graph.nodes.find((n) => n.id === "digest")!;
+      expect(digest.config).not.toHaveProperty("folder");
+      expect(digest.config).not.toHaveProperty("allowEdits");
+      expect(digest.config).not.toHaveProperty("mcpTools");
+      expect(warnings).toContain('"digest" changed, so its folder, edit and MCP settings were removed. Set them again by hand.');
+    });
   });
 
   it("does not advertise mcp cards or by-hand settings in the catalog", () => {

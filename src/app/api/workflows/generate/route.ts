@@ -56,7 +56,7 @@ export async function POST(req: NextRequest) {
           return fail("The model took too long. Try again or pick a faster model.", 504);
         }
         const msg = e instanceof Error ? e.message : "";
-        console.warn("[workflows/generate]", msg);
+        console.error("[workflows/generate]", e);
         return fail(isTransientProviderError(msg) ? "The model is busy or can't be reached right now. Try again in a moment." : "The model call failed. Check the model in Settings or pick another.", 502);
       }
     } finally {
