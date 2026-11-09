@@ -67,7 +67,7 @@ export default function MermaidBlock({ code }: { code: string }) {
             type="button"
             onClick={copy}
             title="Copy diagram source"
-            aria-label="Copy diagram source"
+            aria-label={copied ? "Copied" : "Copy diagram source"}
             className={`flex items-center gap-1 hover:text-zinc-200 transition ${RING}`}
           >
             {copied ? <Check size={14} /> : <Copy size={14} />}

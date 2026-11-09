@@ -8,19 +8,34 @@ let counter = 0;
 type Opts = { theme: MermaidTheme; securityLevel: "strict" | "loose" };
 
 // Mermaid's own secure list (keys a %%{init}%% directive may not change), plus the keys that restyle the whole app:
-// themeCSS (@keyframes and any CSS) and the font families (CSS declarations). Setting `secure` replaces the default.
+// themeCSS (@keyframes and any CSS) and the font families (CSS declarations). Mermaid 11.16 merges `secure` with its
+// defaults; the explicit list keeps this safe if that ever changes.
 const SECURE_KEYS = ["secure", "securityLevel", "startOnLoad", "maxTextSize", "suppressErrorRendering", "maxEdges", "themeCSS", "fontFamily", "altFontFamily"];
 
-// DOMPurify keeps these in labels even under strict: a label could draw a password form that posts elsewhere, or a link.
-// Tags are removed and their contents kept. The pattern skips quoted attribute values, which may contain ">".
-const INTERACTIVE = /<\/?(?:form|input|button|textarea|select|a)(?=[\s/>])(?:"[^"]*"|'[^']*'|[^>"'])*>/gi;
-export const stripInteractive = (svg: string): string => svg.replace(INTERACTIVE, "");
+// DOMPurify keeps these in labels even under strict: a label could draw a password form that posts elsewhere, a link
+// or an image map. They are unwrapped through the DOM (a regex on the string misparses attributes). Inside the SVG
+// namespace the children stay; HTML elements (labels are foreignObject HTML) become their text.
+export function stripInteractive(svg: string): string {
+  const t = document.createElement("template");
+  t.innerHTML = svg;
+  t.content.querySelectorAll("form,input,button,textarea,select,a,area,map").forEach((n) =>
+    n.namespaceURI === "http://www.w3.org/2000/svg" ? n.replaceWith(...n.childNodes) : n.replaceWith(n.textContent ?? ""),
+  );
+  return t.innerHTML;
+}
 
-const cache = new Map<string, string>(); // oldest first; ponytail: 100 diagrams, plain FIFO eviction
+type Entry = { id: string; svg: string };
+const cache = new Map<string, Entry>(); // oldest first; ponytail: 100 diagrams, plain FIFO eviction
 const keyOf = (source: string, o: Opts) => `${o.securityLevel}|${o.theme}|${source}`;
 
+/** The entry's SVG with a fresh id: its marker and gradient ids are prefixed with it, so two copies on one page must not share it. */
+export const withFreshIds = (e: Entry): string => e.svg.replace(new RegExp(`${e.id}(?!\\d)`, "g"), `mermaid-${++counter}`);
+
 /** The SVG for this source if it was drawn before (a remounted block shows it with no flash of code). */
-export const cachedSvg = (source: string, o: Opts): string | undefined => cache.get(keyOf(source, o));
+export const cachedSvg = (source: string, o: Opts): string | undefined => {
+  const e = cache.get(keyOf(source, o));
+  return e && withFreshIds(e);
+};
 
 /**
  * Renders mermaid source to an SVG string. Loaded lazily; mermaid's config is global, so renders run one at a time
@@ -45,7 +60,7 @@ export function renderMermaid(source: string, opts: Opts, isCancelled: () => boo
     try {
       let svg = (await mermaid.render(id, source)).svg;
       if (opts.securityLevel === "strict") svg = stripInteractive(svg);
-      cache.set(keyOf(source, opts), svg);
+      cache.set(keyOf(source, opts), { id, svg });
       if (cache.size > 100) cache.delete(cache.keys().next().value!);
       return svg;
     } finally {

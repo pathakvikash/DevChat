@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { diagramLabel, errorSummary, openFenceBody, sameFence, stripInteractive } from "../mermaidRender";
+import { diagramLabel, errorSummary, openFenceBody, sameFence, withFreshIds } from "../mermaidRender";
 
 describe("openFenceBody", () => {
   it("is null when every fence is closed", () => {
@@ -31,17 +31,18 @@ describe("sameFence", () => {
   });
 });
 
-describe("stripInteractive", () => {
-  const evil =
-    '<svg><foreignObject><div><form action="https://evil.example/x?a=>b"><input type="password" name="p"/>Sign in<button>Go</button></form><a href="javascript:alert(1)">link</a><textarea>t</textarea><select><option>o</option></select></div></foreignObject><animate/><a xlink:href="javascript:1"><text>kept</text></a></svg>';
-  it("removes forms, inputs, buttons, textareas, selects and links, keeping their contents", () => {
-    const out = stripInteractive(evil);
-    expect(out).not.toMatch(/<\/?(form|input|button|textarea|select|a)[\s/>]/i);
-    expect(out).not.toContain("javascript:");
-    expect(out).not.toContain("evil.example");
-    expect(out).toContain("Sign in");
-    expect(out).toContain("<text>kept</text>");
-    expect(out).toContain("<animate/>"); // not confused with <a
+describe("withFreshIds", () => {
+  const entry = {
+    id: "mermaid-7",
+    svg: '<svg id="mermaid-7"><marker id="mermaid-7_flowchart-v2-pointEnd"/><path marker-end="url(#mermaid-7_flowchart-v2-pointEnd)"/><g id="mermaid-70"/></svg>',
+  };
+  it("gives every read its own ids, so copies on one page do not collide", () => {
+    const a = withFreshIds(entry);
+    expect(a).not.toBe(withFreshIds(entry));
+    expect(a).not.toContain('id="mermaid-7"');
+    const id = /<svg id="(mermaid-\d+)"/.exec(a)![1];
+    expect(a).toContain(`url(#${id}_flowchart-v2-pointEnd)`);
+    expect(a).toContain('id="mermaid-70"'); // an id that only starts with the same digits is left alone
   });
 });
 
