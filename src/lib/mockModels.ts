@@ -91,6 +91,23 @@ function workflowTurn(o: CallOptions): Turn {
   return { chunks: [`Mock digest (deterministic): ${n} items`], delayMs: STEP_MS };
 }
 
+// "Describe your flow" (workflows 7): a fixed News graph. Text containing "broken" gets invalid JSON first; the repair
+// call (it follows an assistant message) gets the valid graph.
+const NEWS_FLOW = {
+  vars: [{ key: "topics", label: "Topics to search, one per line", value: "AI developer tools news" }],
+  nodes: [
+    { id: "trigger", type: "trigger", fromIds: [], config: {}, label: "Run manually" },
+    { id: "news", type: "webSearch", fromIds: ["trigger"], config: { queries: "{{vars.topics}}" }, label: "Search the news" },
+    { id: "digest", type: "agent", fromIds: ["news"], config: { instructions: "Write a short digest with links.", input: "{{news.items}}" }, label: "Write the digest" },
+    { id: "post", type: "chatMessage", fromIds: ["digest"], config: { chat: "new", message: "{{digest.text}}" }, label: "Post to a chat" },
+  ],
+};
+function flowgenTurn(o: CallOptions): Turn {
+  const repairing = o.prompt.some((m) => m.role === "assistant");
+  const broken = o.prompt.some((m) => m.role === "user" && textOf(m).includes("broken"));
+  return { chunks: [broken && !repairing ? "```json\n{ not json" : `\`\`\`json\n${JSON.stringify(NEWS_FLOW)}\n\`\`\``] };
+}
+
 const MODELS: Record<string, { name: string; tools: boolean; turn: (o: CallOptions) => Turn }> = {
   "mock/echo": { name: "Mock Echo", tools: true, turn: echo },
   "mock/slow": {
@@ -161,6 +178,7 @@ const MODELS: Record<string, { name: string; tools: boolean; turn: (o: CallOptio
         : { chunks: words("sent"), delayMs: 15 },
   },
   "mock/workflow": { name: "Mock Workflow", tools: true, turn: workflowTurn },
+  "mock/flowgen": { name: "Mock Flow Generator", tools: false, turn: flowgenTurn },
   "mock/notools": {
     name: "Mock No Tools",
     tools: false,
