@@ -3,9 +3,10 @@
 import { Suspense, use, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Download, Lock, Search, ShieldQuestion, Table2, Trash2 } from "lucide-react";
+import { Download, ExternalLink, Lock, Search, Sheet, ShieldQuestion, Table2, Trash2 } from "lucide-react";
 import AppShell, { SidebarToggleButton } from "@/app/components/AppShell";
 import { useToast } from "@/app/components/Toast";
+import { connectHref } from "@/app/components/GoogleConnection";
 import { kindsText } from "@/lib/workflows/privacy";
 import type { CardRun } from "@/lib/workflows/graph";
 import type { Column } from "@/lib/workflows/tables";
@@ -19,6 +20,7 @@ interface Table {
   rowCount: number;
   private: boolean;
   privateKinds: string[];
+  sheetUrl: string | null;
 }
 
 const inputClass = "focus-ring glass-input rounded-[var(--glass-radius-md)] px-3 py-2 text-sm";
@@ -120,6 +122,11 @@ function TableView({ params }: { params: Promise<{ id: string }> }) {
   const [status, setStatus] = useState("");
   const [picked, setPicked] = useState<Set<string>>(new Set());
   const [open, setOpen] = useState<TableRow | null>(null);
+  const [syncing, setSyncing] = useState(false);
+  // True after Google refused a refresh: the button turns into Reconnect Google.
+  const [reconnect, setReconnect] = useState(false);
+  const resumed = useRef(false);
+  const syncingRef = useRef(false);
 
   useEffect(() => {
     const t = setTimeout(() => setQ(typed.trim()), 250);
@@ -139,6 +146,59 @@ function TableView({ params }: { params: Promise<{ id: string }> }) {
       stop = true;
     };
   }, [id]);
+
+  /** Overwrites the table's Google sheet. Not connected yet: goes to Google first and comes back here to finish. */
+  // Where Google sends the user back to: this table, still in pick mode if it was.
+  const back = `/tables/${id}?sync=1${pickRunId ? `&pick=${encodeURIComponent(pickRunId)}` : ""}`;
+  const sync = useCallback(async () => {
+    if (syncingRef.current) return;
+    syncingRef.current = true;
+    setSyncing(true);
+    const res = await fetch(`/api/tables/${id}/sheet-sync`, { method: "POST" }).catch(() => null);
+    const body = res ? await res.json().catch(() => ({})) : {};
+    syncingRef.current = false;
+    setSyncing(false);
+    if (res?.ok) {
+      setReconnect(false);
+      setTable((t) => (t ? { ...t, sheetUrl: body.sheetUrl } : t));
+      return toast(`Synced ${body.rows} ${body.rows === 1 ? "row" : "rows"} to Google Sheets`, "success");
+    }
+    if (res?.status === 409 && body.reconnect) {
+      if (!body.connected) return void (window.location.href = connectHref(back));
+      setReconnect(true);
+    }
+    toast(res ? body.error ?? "Couldn't sync. Try again." : "Couldn't reach the server.", "error");
+  }, [id, back, toast]);
+
+  // A refusal remembered from an earlier visit shows Reconnect Google at once.
+  useEffect(() => {
+    let stop = false;
+    fetch("/api/integrations/google")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((g) => !stop && g?.reconnect && setReconnect(true))
+      .catch(() => undefined);
+    return () => {
+      stop = true;
+    };
+  }, []);
+
+  // Back from Google: finish the sync that started the trip.
+  useEffect(() => {
+    if (resumed.current || !table) return;
+    resumed.current = true;
+    const q = new URLSearchParams(window.location.search);
+    const flag = q.get("google");
+    if (!flag) return;
+    const wantSync = !!q.get("sync");
+    // Take only the Google flags out of the address: ?pick= stays.
+    q.delete("google");
+    q.delete("sync");
+    window.history.replaceState(null, "", `${window.location.pathname}${q.size ? `?${q}` : ""}`);
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- finishes the sync once, when the page is first loaded back from Google
+    if (flag === "connected" && wantSync) void sync();
+    else if (flag === "scope") toast("Google didn't give DevChat access to the sheets it creates. Try again and keep that box ticked.", "error");
+    else if (flag !== "connected") toast("Google wasn't connected. Try again.", "error");
+  }, [table, sync, toast]);
 
   // Pick mode: which waiting card of which run asks for rows from this table.
   useEffect(() => {
@@ -293,6 +353,20 @@ function TableView({ params }: { params: Promise<{ id: string }> }) {
                 </p>
               )}
             </div>
+            {table.sheetUrl && (
+              <a href={table.sheetUrl} target="_blank" rel="noopener noreferrer" className="focus-ring glass-button inline-flex h-9 items-center gap-1.5 rounded-[var(--glass-radius-md)] px-3 text-sm font-medium">
+                <ExternalLink size={14} aria-hidden="true" /> Open sheet
+              </a>
+            )}
+            {reconnect ? (
+              <a href={connectHref(back)} className="focus-ring glass-button-primary inline-flex h-9 items-center gap-1.5 rounded-[var(--glass-radius-md)] px-3 text-sm font-medium text-white">
+                <Sheet size={14} aria-hidden="true" /> Reconnect Google
+              </a>
+            ) : (
+              <button type="button" onClick={() => void sync()} aria-disabled={syncing} className="focus-ring glass-button aria-disabled:opacity-60 inline-flex h-9 items-center gap-1.5 rounded-[var(--glass-radius-md)] px-3 text-sm font-medium">
+                <Sheet size={14} aria-hidden="true" /> {syncing ? "Syncing…" : "Sync to Google Sheets"}
+              </button>
+            )}
             <a href={`/api/tables/${id}/export`} download className="focus-ring glass-button inline-flex h-9 items-center gap-1.5 rounded-[var(--glass-radius-md)] px-3 text-sm font-medium">
               <Download size={14} aria-hidden="true" /> Export CSV
             </a>

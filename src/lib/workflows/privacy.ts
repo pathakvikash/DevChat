@@ -29,9 +29,9 @@ export function privateKindsOf(type: string, config: Record<string, unknown>, de
 
 /** The table a Save card writes to. */
 const writesTable = (n: FlowNode): string => (n.type === "table" ? String(n.config.tableId ?? "") : "");
-/** The table a card reads rows from: a Save card (which also writes it) or a Pick rows card, which hands the rows on.
- *  A card on a private table is a reader of its kinds. */
-export const readsTable = (n: FlowNode): string => (n.type === "table" || n.type === "pickRows" ? String(n.config.tableId ?? "") : "");
+/** Cards that read rows from a table: they are readers of its private kinds. Only Save to table writes to one. */
+export const TABLE_READERS = ["table", "pickRows", "sheetSync"];
+export const readsTable = (n: FlowNode): string => (TABLE_READERS.includes(n.type) ? String(n.config.tableId ?? "") : "");
 
 /**
  * The kinds each table would hold once this graph has run its Save cards: what the tables hold now, plus the kinds of

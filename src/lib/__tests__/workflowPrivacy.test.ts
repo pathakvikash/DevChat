@@ -83,9 +83,10 @@ describe("Pick rows on a private table (phase 3)", () => {
     expect(webAfter(g, "p", ["mcp"]).map((n) => n.id).sort()).toEqual(["jobs", "page"]);
   });
 
-  it("readsTable names the table of a Save or Pick rows card, and nothing else", () => {
+  it("readsTable names the table of a Save, Pick rows or Sync to Google Sheet card, and nothing else", () => {
     expect(readsTable(pick("p", [], 1, "t9"))).toBe("t9");
     expect(readsTable(save("s", [], 1, "t8"))).toBe("t8");
+    expect(readsTable(node("g", "sheetSync", [], 1, { tableId: "t7" }))).toBe("t7");
     expect(readsTable(page("f", [], 1))).toBe("");
   });
 });

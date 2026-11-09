@@ -92,6 +92,8 @@ vi.mock("@/lib/db", () => {
 });
 const callServerTool = vi.fn();
 vi.mock("@/lib/mcp/client", () => ({ listServerTools: vi.fn(async () => [{ name: "create_issue" }]), callServerTool: (...a: unknown[]) => callServerTool(...a) }));
+// Google is connected for every user here (the sheetSync preflight reads the connection).
+vi.mock("@/lib/settings", async (orig) => ({ ...(await orig<object>()), getSettingsKey: vi.fn(async () => JSON.stringify({ accessToken: "a" })) }));
 vi.mock("@/lib/hostAccess", () => ({ canUseHostTools: vi.fn(async () => true), HOST_TOOLS_REFUSED: "This is only available to the server's owner." }));
 vi.mock("@/lib/workflows/cards/agent", async (orig) => ({ ...(await orig<object>()), resolveAgentModel: vi.fn() }));
 
@@ -842,6 +844,54 @@ describe("private tables", () => {
     expect(await preflight("u1", graphOf(save("keep", ["trigger"], 1), fetchNode("page", ["trigger"], 2)))).toEqual([]);
     table("t1");
     expect(await preflight("u1", graphOf(save("keep", ["trigger"], 1), fetchNode("page", ["keep"], 2)))).toEqual([]);
+  });
+
+  describe("sheetSync", () => {
+    const sync = (id: string, from: string[], x: number, tableId = "t1"): FlowNode => ({ id, type: "sheetSync", fromIds: from, config: { tableId }, ui: { label: id.toUpperCase(), position: { x, y: 0 } } });
+
+    it("is a reader of a private table: a card that reaches the web after it is refused, naming the kinds", async () => {
+      table("t1", "chats");
+      expect(await preflight("u1", graphOf(sync("push", ["trigger"], 1), fetchNode("page", ["push"], 2)))).toEqual([{ nodeId: "page", message: leak("Notes", "chats", "PAGE") }]);
+      // MCP counts as reaching out too, and a branch beside it or a public table is fine
+      expect(await preflight("u1", graphOf(sync("push", ["trigger"], 1), fetchNode("page", ["trigger"], 2)))).toEqual([]);
+      table("t1");
+      expect(await preflight("u1", graphOf(sync("push", ["trigger"], 1), fetchNode("page", ["push"], 2)))).toEqual([]);
+    });
+
+    it("is not a web card: it may follow a private reader, and a table it reads is not marked by it", async () => {
+      table("t1");
+      expect(await preflight("u1", graphOf(reader, sync("push", ["read"], 2)))).toEqual([]);
+      await markPrivateTables("u1", graphOf(reader, sync("push", ["read"], 2)));
+      expect(dataTables.get("t1")!.privateFrom).toBe("");
+    });
+
+    it("a private table's kinds pass through to the table a later Save writes", async () => {
+      table("t1", "chats");
+      table("t2");
+      await markPrivateTables("u1", graphOf(sync("push", ["trigger"], 1), save("copy", ["push"], 2, "t2")));
+      expect(dataTables.get("t2")!.privateFrom).toBe("chats");
+    });
+
+    it("is checked again when it runs: a private table with a web card after it fails the card, which never syncs", async () => {
+      table("t1", "mcp,chats");
+      seedRun(graphOf(sync("push", ["trigger"], 1), fetchNode("page", ["push"], 2)));
+      const { deps: d } = deps(() => ({ output: {} }));
+      const ran: string[] = [];
+      d.cards.sheetSync = { run: async () => (ran.push("sync"), { output: {} }) };
+      await advanceRun("run1", d);
+      expect(ran).toEqual([]);
+      expect(nodesOf().push).toMatchObject({ status: "failed", error: leak("Notes", "chats and MCP", "PAGE") });
+    });
+
+    it("needs Google connected to start, and a table to point at", async () => {
+      table("t1");
+      const { getSettingsKey } = await import("@/lib/settings");
+      vi.mocked(getSettingsKey).mockResolvedValueOnce(null);
+      expect((await preflight("u1", graphOf(sync("push", ["trigger"], 1)))).map((e) => e.message)).toEqual(["PUSH: Connect Google in Settings first"]);
+      vi.mocked(getSettingsKey).mockResolvedValueOnce(JSON.stringify({ needsReconnect: true }));
+      expect((await preflight("u1", graphOf(sync("push", ["trigger"], 1)))).map((e) => e.message)).toEqual(["PUSH: Reconnect Google in Settings first"]);
+      expect((await preflight("u1", graphOf(sync("push", ["trigger"], 1, "gone")))).map((e) => e.message)).toEqual(["PUSH: that table no longer exists"]);
+    });
   });
 
   it("marks mcp and folder tables too, and keeps what the table already held", async () => {

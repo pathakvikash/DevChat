@@ -5,7 +5,8 @@ import { resolveAgentModel, resolveMcpTools } from "./cards/agent";
 import { ownedEnabledServer } from "./cards/mcpTool";
 import { canUseHostTools, HOST_TOOLS_REFUSED } from "@/lib/hostAccess";
 import { CATALOG, DEFAULT_MAX_ITEMS, MAX_ITEMS_LIMIT, OUTPUT_CAP_BYTES, parseConfig } from "./catalog";
-import { parseKinds, joinKinds, planKinds, privateTableMessage, readsTable, webAfter, type PrivateKind } from "./privacy";
+import { connectionState } from "@/lib/google/sheets";
+import { parseKinds, joinKinds, planKinds, privateTableMessage, readsTable, TABLE_READERS, webAfter, type PrivateKind } from "./privacy";
 import {
   checkGraph,
   parseGraph,
@@ -326,9 +327,9 @@ export async function advanceRun(runId: string, deps: RunnerDeps = defaultDeps):
         if (!(await save())) return;
         continue;
       }
-      // Private tables are checked again right before a Save or Pick rows card runs: another run may have marked the table
+      // Private tables are checked again right before a Save, Pick rows or Sync card runs: another run may have marked the table
       // since Start, and a Resume never went through the Start checks.
-      if (node.type === "table" || node.type === "pickRows") {
+      if (TABLE_READERS.includes(node.type)) {
         // If the check itself fails, the card does not run: it cannot be shown that the table is safe to read.
         // A Save card first marks its table with what this graph has put in it (a table that turned private while the run
         // waited passes its kinds on to later Save targets), then the check reads the marks.
@@ -446,7 +447,7 @@ export async function preflight(userId: string, graph: WorkflowGraph): Promise<{
         add(n.id, `${label}: ${message(e)}`);
       }
     }
-    if ((n.type === "table" || n.type === "pickRows") && n.config.tableId) {
+    if (TABLE_READERS.includes(n.type) && n.config.tableId) {
       const table = tables.get(String(n.config.tableId));
       if (!table) add(n.id, `${label}: that table no longer exists`);
       // A Save or Pick rows card on a private table (counting what this very graph is about to put in it) is a
@@ -455,6 +456,10 @@ export async function preflight(userId: string, graph: WorkflowGraph): Promise<{
         const kinds = plan.get(String(n.config.tableId)) ?? [];
         if (kinds.length > 0) for (const m of webAfter(graph, n.id, kinds)) add(m.id, privateTableMessage(table.name, kinds, m));
       }
+    }
+    if (n.type === "sheetSync") {
+      const g = await connectionState(userId);
+      if (!g.connected) add(n.id, `${label}: ${g.reconnect ? "Reconnect" : "Connect"} Google in Settings first`);
     }
     const usesMcp = n.type === "mcpTool" || (n.type === "agent" && Array.isArray(n.config.mcpTools) && n.config.mcpTools.length > 0);
     if (usesMcp && !(await canUseHostTools(userId))) add(n.id, `${label}: ${HOST_TOOLS_REFUSED}`);

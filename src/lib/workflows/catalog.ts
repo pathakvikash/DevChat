@@ -2,7 +2,7 @@
 import { z } from "zod";
 import { FILTER_OPS } from "./filterRules";
 
-export type CardType = "trigger" | "webSearch" | "agent" | "chatMessage" | "mcpTool" | "fetch" | "filter" | "table" | "jobBoards" | "pickRows";
+export type CardType = "trigger" | "webSearch" | "agent" | "chatMessage" | "mcpTool" | "fetch" | "filter" | "table" | "jobBoards" | "pickRows" | "sheetSync";
 export type CardCategory = "Start" | "Get data" | "AI" | "Logic" | "Table" | "Output";
 
 export interface FieldSpec {
@@ -375,6 +375,22 @@ const mcpTool: CardDef = {
   summary: (c) => (c.tool ? `Calls ${trim(c.tool, 40)}` : "No tool picked yet"),
 };
 
+// Phase 7. Config is only the table: the sheet it writes to is DataTable.sheetId, created by DevChat on the first sync.
+// Nothing here can name a sheet, an id, a URL or a range.
+const sheetSyncCard: CardDef = {
+  type: "sheetSync",
+  label: "Sync to Google Sheet",
+  category: "Table",
+  icon: "Sheet",
+  description: "Copies every row of a DevChat table to its own Google Sheet, replacing what the sheet held. DevChat creates the sheet on the first sync, and can only touch sheets it created.",
+  schema: z.object({ tableId: z.string().default("") }),
+  defaults: () => ({ tableId: "" }),
+  fields: [{ key: "tableId", label: "Table", kind: "table" }],
+  perItem: false,
+  outputs: () => ["sheetUrl", "rows"],
+  summary: () => "Overwrites the table's sheet",
+};
+
 
 // ─── Phase 3: Job boards and Pick rows (new cards go at the end of the lists) ───
 
@@ -447,10 +463,10 @@ const pickRows: CardDef = {
 /** The statuses a Pick rows card offers, from its comma-separated field. */
 export const pickStatuses = (c: Record<string, unknown>): string[] => [...new Set(String(c.statuses ?? "").split(",").map((s) => s.trim()).filter(Boolean))];
 
-export const CATALOG: Record<CardType, CardDef> = { trigger, webSearch, agent, chatMessage, mcpTool, fetch: fetchCard, filter: filterCard, table: tableCard, jobBoards, pickRows };
+export const CATALOG: Record<CardType, CardDef> = { trigger, webSearch, agent, chatMessage, mcpTool, fetch: fetchCard, filter: filterCard, table: tableCard, jobBoards, pickRows, sheetSync: sheetSyncCard };
 export const CARD_TYPES = Object.keys(CATALOG) as CardType[];
 /** Cards the user can add (the trigger is created with the workflow). */
-export const ADDABLE_TYPES: CardType[] = ["webSearch", "fetch", "agent", "filter", "table", "mcpTool", "chatMessage", "jobBoards", "pickRows"];
+export const ADDABLE_TYPES: CardType[] = ["webSearch", "fetch", "agent", "filter", "table", "mcpTool", "chatMessage", "jobBoards", "pickRows", "sheetSync"];
 
 /** The template whose list gives a card its {{item}}: the Items field of a per-item card, or the List field of a card (Filter,
  *  Save to table) that reads {{item}} in its rules and columns. Undefined when the card has no item. */

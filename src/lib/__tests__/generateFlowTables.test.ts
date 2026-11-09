@@ -99,6 +99,31 @@ describe("generated flows with table cards", () => {
     expect(JSON.stringify(s.calls[0].prompt)).not.toContain("my-real-table");
   });
 
+  it("a Sync to Google Sheet card: the table is the user's, and the model cannot name a sheet, a URL or a range", async () => {
+    const current = {
+      version: 1 as const,
+      defaultModel: "mock/gen",
+      maxRunTokens: 500_000,
+      vars: [],
+      nodes: [
+        { id: "trigger", type: "trigger" as const, fromIds: [], config: {}, ui: { label: "Run", position: { x: 0, y: 0 } } },
+        { id: "push", type: "sheetSync" as const, fromIds: ["trigger"], config: { tableId: "my-real-table" }, ui: { label: "Push", position: { x: 1, y: 0 } } },
+      ],
+    };
+    const reply = {
+      vars: [],
+      nodes: [node("trigger", "trigger", []), node("push", "sheetSync", ["trigger"], { tableId: "other-table", sheetId: "SHEET", sheetUrl: "https://docs.google.com/x", range: "A1" })],
+    };
+    const s = scripted(reply);
+    const { graph } = await generateFlow({ description: "sync it", model: s.model, current });
+    expect(graph.nodes.find((n) => n.id === "push")!.config).toEqual({ tableId: "my-real-table" });
+    expect(JSON.stringify(s.calls[0].prompt)).not.toContain("my-real-table");
+    // a card the model adds itself has no table at all
+    const added = await generateFlow({ description: "sync it", model: scripted({ vars: [], nodes: [node("trigger", "trigger", []), node("push", "sheetSync", ["trigger"], { tableId: "made-up", sheetId: "SHEET" })] }).model });
+    expect(added.graph.nodes.find((n) => n.id === "push")!.config).toEqual({ tableId: "" });
+    expect(added.warnings).toContain("push: pick a table");
+  });
+
   it("the catalog text lists Job boards and Pick rows", () => {
     const text = catalogForPrompt();
     expect(text).toContain("- jobBoards (");
@@ -112,5 +137,6 @@ describe("generated flows with table cards", () => {
     expect(text).toContain('fields: list of { "column": "column name", "value": "{{item.title}}" }');
     expect(text).toContain("filter");
     expect(text).not.toMatch(/tableId:/);
+    expect(text).toMatch(/sheetSync[^\n]*\n  config: none\n  outputs: sheetUrl, rows/);
   });
 });

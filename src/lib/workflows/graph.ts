@@ -172,7 +172,7 @@ export function checkGraph(graph: WorkflowGraph): GraphIssue[] {
     if (n.type === "chatMessage" && !String(config.message ?? "").trim()) issues.push({ nodeId: n.id, field: "message", message: `${label}: add a message` });
     if (n.type === "fetch" && !String(config.url ?? "").trim()) issues.push({ nodeId: n.id, field: "url", message: `${label}: add a URL` });
     if ((n.type === "filter" || n.type === "table") && !String(config.list ?? "").trim()) issues.push({ nodeId: n.id, field: "list", message: `${label}: add the list to work on, like {{news.items}}` });
-    if (n.type === "table" && !String(config.tableId ?? "").trim()) issues.push({ nodeId: n.id, field: "tableId", message: `${label}: pick a table` });
+    if ((n.type === "table" || n.type === "sheetSync") && !String(config.tableId ?? "").trim()) issues.push({ nodeId: n.id, field: "tableId", message: `${label}: pick a table` });
     if (n.type === "mcpTool" && !String(config.tool ?? "").trim()) issues.push({ nodeId: n.id, field: "tool", message: `${label}: pick a tool` });
     if (n.type === "jobBoards") {
       const lines = boardLines(config.boards);
