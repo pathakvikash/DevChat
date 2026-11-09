@@ -22,7 +22,7 @@ test.beforeEach(async ({ request }) => {
 test("each MCP card shows its own arguments, and the web warning follows an upstream web card", async ({ page, request }) => {
   const id = await createNews(request);
   const { graph } = await (await request.get(`/api/workflows/${id}`)).json();
-  graph.nodes.push(mcpCard("push_a", "Push A", ["news"], 900, { alpha: "1" }), mcpCard("push_b", "Push B", ["trigger"], 1000, { beta: "2" }));
+  graph.nodes.push(mcpCard("push_a", "Push A", ["news"], 900, { alpha: "1" }), mcpCard("push_b", "Push B", ["trigger"], 1300, { beta: "2" }));
   expect((await request.patch(`/api/workflows/${id}`, { data: { graph } })).ok()).toBe(true);
 
   await page.goto(`/workflows/${id}`);

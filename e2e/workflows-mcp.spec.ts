@@ -50,7 +50,7 @@ test("the MCP-after-MCP warning shows on the later card", async ({ page, request
   const id = await createNews(request);
   const { graph } = await (await request.get(`/api/workflows/${id}`)).json();
   const card = (cid: string, from: string[], x: number) => ({ id: cid, type: "mcpTool", fromIds: from, config: { serverId: "s1", tool: "t" }, ui: { label: cid === "m1" ? "First" : "Second", position: { x, y: 300 } } });
-  graph.nodes.push(card("m1", ["trigger"], 900), card("m2", ["m1"], 1000));
+  graph.nodes.push(card("m1", ["trigger"], 900), card("m2", ["m1"], 1300));
   expect((await request.patch(`/api/workflows/${id}`, { data: { graph } })).ok()).toBe(true);
   await page.goto(`/workflows/${id}`);
   await page.waitForLoadState("networkidle");
