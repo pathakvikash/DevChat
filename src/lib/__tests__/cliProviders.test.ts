@@ -491,7 +491,7 @@ describe("working folder and access", () => {
     expect(perm(oc.invoke({ ...base, model: "default", cwd: "/repo", access: "agent" }))).toEqual({ ...NEVER_ASK, bash: "deny", edit: "allow", webfetch: "allow", websearch: "allow" });
     expect(oc.invoke({ ...base, model: "default", cwd: "/repo" }).args).toEqual(expect.arrayContaining(["--dir", "/repo"]));
     // A model that repeats a denied call forever is cut off.
-    expect(JSON.parse(oc.invoke({ ...base, model: "default" }).env!.OPENCODE_CONFIG_CONTENT).agent).toEqual({ build: { steps: 50 } });
+    expect(JSON.parse(oc.invoke({ ...base, model: "default" }).env!.OPENCODE_CONFIG_CONTENT).agent.build.steps).toBe(50);
     // Its sub-agents are silent until they finish, so it gets a long watchdog; the others keep the default.
     expect(oc.inactivityMs).toBe(15 * 60_000);
     expect(claude.inactivityMs).toBeUndefined();

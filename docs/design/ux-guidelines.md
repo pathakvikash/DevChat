@@ -729,7 +729,16 @@ An inline card (2.3), one per helper. Up to 3 stack with the normal `my-2` gap. 
 - Glass tokens only (`glass-card`, `glass-input`, `glass-button*`, `glass-panel*`, `glass-nav`), no hex, no new colours. Text is `text-zinc-400` or stronger.
 - Run status always shows the icon **and** its word (Not run, Running, Done, Failed, Skipped, Waiting for you, Cancelled, Interrupted). Colour goes on the 14px icon only.
 - Check the list and the editor at 400px: no horizontal scroll, the editor shows the read-only list view, and Run, Cancel run and Resume still work.
-- Every new control has the focus ring (2.5); icon buttons have `aria-label` and `title`. One `aria-live="polite"` region announces only Run started, done, failed, cancelled and waiting.
+- Every new control has the focus ring (2.5); icon buttons have `aria-label` and `title`. One `aria-live="polite"` region announces only Run started, done, failed, cancelled and waiting, and the describe box's build messages below.
+
+**Describe your flow** (`DescribeBox.tsx`, workflows 7):
+
+- The box is a `glass-card` strip above the cards, in the Canvas and List views. It is open on a workflow with only the trigger (the empty state, larger, with the heading "Describe what you want done and DevChat lays out the cards") and a collapsed "Describe your flow" button otherwise. Under 768px it is not shown: the editor is read-only there, so there is nothing to apply.
+- Keyboard: **Enter builds, Shift+Enter adds a line**, Esc anywhere in the box cancels a request in progress. Cmd/Ctrl+Enter inside the box does nothing (it is not Run). The hint "Enter builds · Shift+Enter adds a line" sits next to the model picker.
+- While building, the one button turns into **Cancel** (same element, so focus stays), the text becomes read-only, a spinner and "Building your flow…" show, and the cards, Run and Workflow settings are read-only, so nothing is edited under the request. Cancel, Esc, and leaving the page abort it; the typed text stays. The box stays open until the answer.
+- An error shows in a row under the box: a red icon, the word "Failed." and the server's plain message, with **Retry** (`aria-describedby` points at the message). Focus moves to Retry, and back to the text box when Retry is pressed. The 409, 422, 502, 504 and 403 messages come from the route; a dropped connection says "Couldn't reach the server."
+- The preview bar ("Preview · 4 cards · Nothing is saved until you apply it." with **Apply** and **Discard**) replaces the box. Focus goes to Apply; Esc inside the bar discards. Warnings list under "Check before you run" with an amber icon and that heading as the word. Apply keeps the current variable values and the variables the proposal lacks, checks the flow against the save rules (a refusal is a toast and the preview stays), asks `confirm("Replace the current flow?")` only when the flow has cards, then saves through the editor's normal autosave. After Apply or Discard, focus goes to the editor area. Run is `aria-disabled` while a preview shows. A past run (`?run=`) never shows a preview.
+- The proposed cards use dashed borders (`.wf-preview` in `canvas.css`), are not selectable or editable (in the List view they are plain, not buttons), and show "Not run". There is no extra live region: "Building your flow…" (cleared when the build ends), "Preview ready: n cards", "Flow applied" and "Preview discarded" go through the editor's one polite region.
 
 ---
 

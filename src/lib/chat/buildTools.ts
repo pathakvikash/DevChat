@@ -105,7 +105,7 @@ function jsonSchemaToZod(schema: any): z.ZodTypeAny {
   return z.any();
 }
 
-function mcpToolId(serverName: string, toolName: string): string {
+export function mcpToolId(serverName: string, toolName: string): string {
   return `mcp_${serverName}_${toolName}`;
 }
 
@@ -143,8 +143,8 @@ export async function buildTools({
             description: mcpTool.description || `MCP tool: ${mcpTool.name} (${server.name})`,
             inputSchema: zodSchema as any,
             needsApproval: needsApproval(mode, id, allowed),
-            execute: async (args: Record<string, unknown>) => {
-              const result = await callServerTool(server.id, mcpTool.name, args);
+            execute: async (args: Record<string, unknown>, options?: { abortSignal?: AbortSignal }) => {
+              const result = await callServerTool(server.id, mcpTool.name, args, { signal: options?.abortSignal });
               const texts = result.content
                 .filter((c: any) => c.type === "text")
                 .map((c: any) => c.text)

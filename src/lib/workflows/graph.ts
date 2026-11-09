@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { CATALOG, hasToolConflict, isCardType, parseConfig, reachesWeb, readsChats, templateValues, TOOL_CONFLICT_MESSAGE, type CardType } from "./catalog";
+import { CATALOG, CODEX_BLOCKED, hasToolConflict, isCodexModelId, isCardType, leaksTo, parseConfig, PRIVATE_LEAK_MESSAGE, reachesOpenWeb, readsPrivate, templateValues, MCP_WEB_WARNING, TOOL_CONFLICT_MESSAGE, usesMcp, type CardType } from "./catalog";
 import { refRoot, templateRefs } from "./template";
 
 export const MAX_NODES = 30;
@@ -75,7 +75,10 @@ export function validateStructure(graph: WorkflowGraph): string[] {
       if (from === n.id) errors.push(`Card "${n.id}" is connected to itself`);
     }
   }
-  for (const n of graph.nodes) if (n.type === "agent" && hasToolConflict(n.config.tools)) errors.push(`${n.ui.label || n.id}: ${TOOL_CONFLICT_MESSAGE}`);
+  for (const n of graph.nodes) {
+    const sameCard = cardConflict(n, graph.defaultModel);
+    if (sameCard) errors.push(sameCard);
+  }
   if (errors.length === 0) for (const l of chatLeaks(graph)) errors.push(l.message);
   if (errors.length === 0 && topoOrder(graph).length !== graph.nodes.length) errors.push("The cards form a loop");
   return errors;
@@ -116,13 +119,22 @@ export function ancestorsOf(graph: WorkflowGraph, id: string): Set<string> {
   return seen;
 }
 
-/** A card that reads chats with a card that reaches the web somewhere after it: chat text could travel along the flow and out. */
+/** One card that both reads private data and reaches the web (chat or folder or MCP with a web tool, folder with MCP), or null. */
+function cardConflict(n: FlowNode, defaultModel: string): string | null {
+  const label = n.ui.label || n.id;
+  if (n.type === "agent" && isCodexModelId(String(n.config.model || defaultModel))) return `${label}: ${CODEX_BLOCKED}`;
+  if (n.type === "agent" && hasToolConflict(n.config.tools, n.config.mcpTools)) return `${label}: ${TOOL_CONFLICT_MESSAGE}`;
+  if (leaksTo(n, n, defaultModel)) return `${label} reads private data (chats, MCP or a folder) and reaches the web itself. Untick one, so a web page can't make it send your data out.`;
+  return null;
+}
+
+/** A card that reads private data (chats, MCP, a folder) with a card that reaches the web somewhere after it: the data could travel along the flow and out. */
 export function chatLeaks(graph: WorkflowGraph): { nodeId: string; message: string }[] {
   const out: { nodeId: string; message: string }[] = [];
   for (const n of graph.nodes) {
-    if (!readsChats(n.type, n.config)) continue;
-    const downstream = graph.nodes.some((m) => m.id !== n.id && reachesWeb(m.type, m.config) && ancestorsOf(graph, m.id).has(n.id));
-    if (downstream) out.push({ nodeId: n.id, message: `${n.ui.label || n.id} reads your chats and a later card reaches the web. Split them into two workflows, so a web page can't make it send your chats out.` });
+    if (!readsPrivate(n.type, n.config, graph.defaultModel)) continue;
+    const downstream = graph.nodes.some((m) => m.id !== n.id && ancestorsOf(graph, m.id).has(n.id) && leaksTo(n, m, graph.defaultModel));
+    if (downstream) out.push({ nodeId: n.id, message: PRIVATE_LEAK_MESSAGE(n.ui.label || n.id) });
   }
   return out;
 }
@@ -131,6 +143,8 @@ export interface GraphIssue {
   nodeId: string;
   message: string;
   field?: string;
+  /** Shown in the editor but does not stop a run. */
+  warning?: boolean;
 }
 
 const SINGLE_REF = /^\s*\{\{\s*[^{}]+?\s*\}\}\s*$/;
@@ -149,11 +163,24 @@ export function checkGraph(graph: WorkflowGraph): GraphIssue[] {
     if (isPerItem && !SINGLE_REF.test(String(config.items ?? ""))) {
       issues.push({ nodeId: n.id, field: "items", message: `${label}: Items must be one reference to a list, like {{news.items}}` });
     }
-    if (n.type === "agent" && hasToolConflict(config.tools)) issues.push({ nodeId: n.id, field: "tools", message: `${label}: ${TOOL_CONFLICT_MESSAGE}` });
+    const sameCard = cardConflict({ ...n, config }, graph.defaultModel);
+    if (sameCard) issues.push({ nodeId: n.id, field: sameCard.includes(CODEX_BLOCKED) ? "model" : "tools", message: sameCard });
     if (n.type === "webSearch" && !String(config.queries ?? "").trim()) issues.push({ nodeId: n.id, field: "queries", message: `${label}: add at least one query` });
     if (n.type === "agent" && !String(config.instructions ?? "").trim()) issues.push({ nodeId: n.id, field: "instructions", message: `${label}: add instructions` });
     if (n.type === "chatMessage" && !String(config.message ?? "").trim()) issues.push({ nodeId: n.id, field: "message", message: `${label}: add a message` });
+    if (n.type === "mcpTool" && !String(config.tool ?? "").trim()) issues.push({ nodeId: n.id, field: "tool", message: `${label}: pick a tool` });
+    if (n.type === "agent" && config.allowEdits === true && !config.folder) issues.push({ nodeId: n.id, field: "allowEdits", message: `${label}: Allow edits needs a working folder` });
     const ancestors = ancestorsOf(graph, n.id);
+    if (usesMcp(n.type, config)) {
+      const web = reachesOpenWeb(n.type, config, graph.defaultModel) || [...ancestors].some((a) => {
+        const up = graph.nodes.find((x) => x.id === a);
+        return !!up && reachesOpenWeb(up.type, up.config, graph.defaultModel);
+      });
+      if (web) issues.push({ nodeId: n.id, field: n.type === "agent" ? "mcpTools" : "tool", warning: true, message: `${label}: ${MCP_WEB_WARNING}` });
+      if ([...ancestors].some((a) => { const up = graph.nodes.find((x) => x.id === a); return !!up && usesMcp(up.type, up.config); })) {
+        issues.push({ nodeId: n.id, field: n.type === "agent" ? "mcpTools" : "tool", warning: true, message: `${label}: an earlier card read data through MCP. Check what you pass on.` });
+      }
+    }
     for (const { field, value } of templateValues(n.type, config)) {
       for (const path of templateRefs(value)) {
         const root = refRoot(path);

@@ -1,13 +1,13 @@
 // Safe to import in the browser: no server code here. Each card's server code lives in ./cards.
 import { z } from "zod";
 
-export type CardType = "trigger" | "webSearch" | "agent" | "chatMessage";
+export type CardType = "trigger" | "webSearch" | "agent" | "chatMessage" | "mcpTool";
 export type CardCategory = "Start" | "Get data" | "AI" | "Output";
 
 export interface FieldSpec {
   key: string;
   label: string;
-  kind: "template" | "textarea" | "text" | "select" | "number" | "model" | "tools" | "outputFields" | "chat" | "perItem";
+  kind: "template" | "textarea" | "text" | "select" | "number" | "model" | "tools" | "outputFields" | "chat" | "perItem" | "mcpTools" | "mcpServer" | "mcpToolName" | "args" | "folder" | "allowEdits";
   help?: string;
   options?: { value: string; label: string }[];
   rows?: number;
@@ -127,21 +127,61 @@ export const AGENT_TOOL_CHOICES: { id: (typeof AGENT_TOOL_IDS)[number]; label: s
   { id: "readChat", label: "Read chat" },
 ];
 
+export const isCodexModelId = (id: string): boolean => id.startsWith("codex/");
+/** Its offline flags are unverified until a live check runs, so a workflow card can't use it yet (lift this in `cardConflict`). */
+export const CODEX_BLOCKED = "Codex can't run workflow cards yet. Pick another model.";
+/** CLI model ids start with their provider id (cliProviders.ts); kept here because that file is server-only. */
+export const isCliModelId = (id: string): boolean => /^(claude-code|codex|opencode)\//.test(id);
+/** What an MCP tool card and an agent card with MCP tools can do outside DevChat (8.5). */
+export const MCP_WARNING = "Can change things outside DevChat";
+export const MCP_WEB_WARNING = "This card reads web pages and can act through MCP. A page could try to steer it.";
+export const mcpToolIds = (config: Record<string, unknown>): string[] => (Array.isArray(config.mcpTools) ? (config.mcpTools as string[]) : []);
+
 const CHAT_READ_TOOLS: string[] = ["searchChats", "readChat"];
 const OUTBOUND_TOOLS: string[] = ["fetchUrl", "webSearch"];
 export const TOOL_CONFLICT_MESSAGE = "This card can read your chats and reach the web. Pick one, so a web page can't make it send your chats out.";
 
+type Cfg = Record<string, unknown>;
+const toolList = (c: Cfg): string[] => (Array.isArray(c.tools) ? (c.tools as string[]) : []);
+
+/** A command-line model with a folder: it can read the folder. Workflow cards run it with its own web tools switched off (`web: false`). */
+export const hasCliFolder = (type: string, config: Cfg, defaultModel = ""): boolean =>
+  type === "agent" && !!config.folder && isCliModelId(String(config.model || defaultModel));
+
 /** Whether the card reads chats (an agent with a chat-reading tool). */
-export const readsChats = (type: string, config: Record<string, unknown>): boolean =>
-  type === "agent" && Array.isArray(config.tools) && config.tools.some((t) => CHAT_READ_TOOLS.includes(t));
+export const readsChats = (type: string, config: Cfg): boolean => type === "agent" && toolList(config).some((t) => CHAT_READ_TOOLS.includes(t));
 
-/** Whether the card can send data to the web: an agent with an outbound tool, or a web search / fetch card. */
-export const reachesWeb = (type: string, config: Record<string, unknown>): boolean =>
-  type === "webSearch" || type === "fetch" || (type === "agent" && Array.isArray(config.tools) && config.tools.some((t) => OUTBOUND_TOOLS.includes(t)));
+/** Whether the card uses MCP: the MCP tool card, or an agent with any MCP tool. */
+export const usesMcp = (type: string, config: Cfg): boolean => type === "mcpTool" || (type === "agent" && mcpToolIds(config).length > 0);
 
-/** A card that reads chats must not also reach the web: a page it reads could steer it into sending chat text out. */
-export const hasToolConflict = (tools: unknown): boolean =>
-  Array.isArray(tools) && tools.some((t) => CHAT_READ_TOOLS.includes(t)) && tools.some((t) => OUTBOUND_TOOLS.includes(t));
+/** Private data a card can read: chats, MCP servers, or a folder. */
+export const readsPrivate = (type: string, config: Cfg, defaultModel = ""): boolean =>
+  readsChats(type, config) || usesMcp(type, config) || hasCliFolder(type, config, defaultModel);
+
+/** The open web: a search or fetch card, or an agent with a web tool. */
+export const reachesOpenWeb = (type: string, config: Cfg, _defaultModel = ""): boolean =>
+  type === "webSearch" || type === "fetch" || (type === "agent" && toolList(config).some((t) => OUTBOUND_TOOLS.includes(t)));
+
+/** Can send data out: the open web, or MCP (servers can make network calls). */
+export const reachesWeb = (type: string, config: Cfg, defaultModel = ""): boolean => reachesOpenWeb(type, config, defaultModel) || usesMcp(type, config);
+
+/** Whether `later` may come after `earlier` (reader). A private reader must not feed a card that reaches the web,
+ *  except MCP followed by MCP: both are servers the user set up themselves. */
+export const leaksTo = (earlier: { type: string; config: Cfg }, later: { type: string; config: Cfg }, defaultModel = ""): boolean => {
+  if (!readsPrivate(earlier.type, earlier.config, defaultModel) || !reachesWeb(later.type, later.config, defaultModel)) return false;
+  const mcpToMcp =
+    !readsChats(earlier.type, earlier.config) && !hasCliFolder(earlier.type, earlier.config, defaultModel) && !reachesOpenWeb(later.type, later.config, defaultModel);
+  return !mcpToMcp;
+};
+
+export const PRIVATE_LEAK_MESSAGE = (label: string) =>
+  `${label} reads private data (chats, MCP or a folder) and a later card reaches the web. Split them into two workflows, so a web page can't make it send your data out.`;
+
+/** A card that reads chats must not also reach the web or use MCP: a page it reads could steer it into sending chat text out. */
+export const hasToolConflict = (tools: unknown, mcpTools: unknown = []): boolean =>
+  Array.isArray(tools) &&
+  tools.some((t) => CHAT_READ_TOOLS.includes(t)) &&
+  (tools.some((t) => OUTBOUND_TOOLS.includes(t)) || (Array.isArray(mcpTools) && mcpTools.length > 0));
 
 const agent: CardDef = {
   type: "agent",
@@ -154,16 +194,24 @@ const agent: CardDef = {
     input: z.string().default(""),
     model: z.string().default(""),
     tools: z.array(z.enum(AGENT_TOOL_IDS)).default([]),
+    /** Owner only. Ids like mcp_<server>_<tool>, checked at run time against the user's enabled servers. The enum above stays closed. */
+    mcpTools: z.array(z.string().regex(/^mcp_.{1,200}$/)).max(20).default([]),
+    /** Owner only, CLI models only: a folder Claude Code has worked in, and whether the model may change files in it. */
+    folder: z.string().max(1000).default(""),
+    allowEdits: z.boolean().default(false),
     outputFields: z.array(outputFieldSchema).default([]),
     preset: z.string().optional(),
     ...perItemShape,
   }),
-  defaults: () => ({ instructions: "", input: "", model: "", tools: [], outputFields: [], perItem: false, items: "", maxItems: DEFAULT_MAX_ITEMS }),
+  defaults: () => ({ instructions: "", input: "", model: "", tools: [], mcpTools: [], folder: "", allowEdits: false, outputFields: [], perItem: false, items: "", maxItems: DEFAULT_MAX_ITEMS }),
   fields: [
     { key: "instructions", label: "Instructions", kind: "template", rows: 5 },
     { key: "input", label: "Input", kind: "template", rows: 2, help: "Data from earlier cards. The model treats it as data, never as instructions." },
     { key: "model", label: "Model", kind: "model", help: "Empty uses the workflow's default model." },
     { key: "tools", label: "Tools", kind: "tools" },
+    { key: "mcpTools", label: "MCP tools", kind: "mcpTools", help: "Only for the server's owner. Each tool you tick can be called without asking." },
+    { key: "folder", label: "Working folder", kind: "folder", help: "Command-line models only. Without one the model can't see any files." },
+    { key: "allowEdits", label: "Allow edits in the folder", kind: "allowEdits" },
     { key: "outputFields", label: "Output fields", kind: "outputFields", help: "Empty means the output is plain text." },
     ...perItemFields,
   ],
@@ -198,10 +246,34 @@ const chatMessage: CardDef = {
   summary: (c) => `${c.chat === "new" || !c.chat ? "A new chat each run" : "An existing chat"} · ${trim(c.message, 40)}`,
 };
 
-export const CATALOG: Record<CardType, CardDef> = { trigger, webSearch, agent, chatMessage };
+const mcpTool: CardDef = {
+  type: "mcpTool",
+  label: "MCP tool",
+  category: "Output",
+  icon: "Plug",
+  description: `${MCP_WARNING}. Calls one tool on one of your MCP servers. Only for the server's owner.`,
+  schema: z.object({
+    serverId: z.string().default(""),
+    tool: z.string().max(200).default(""),
+    args: z.record(z.string(), z.string()).default({}),
+    ...perItemShape,
+  }),
+  defaults: () => ({ serverId: "", tool: "", args: {}, perItem: false, items: "", maxItems: DEFAULT_MAX_ITEMS }),
+  fields: [
+    { key: "serverId", label: "MCP server", kind: "mcpServer" },
+    { key: "tool", label: "Tool", kind: "mcpToolName", help: "Pick a tool from that server." },
+    { key: "args", label: "Arguments", kind: "args", help: "Values can use templates such as {{item.url}}." },
+    ...perItemFields,
+  ],
+  perItem: true,
+  outputs: (c) => (c.perItem === true ? ["items", "count", "failed"] : ["text", "data"]),
+  summary: (c) => (c.tool ? `Calls ${trim(c.tool, 40)}` : "No tool picked yet"),
+};
+
+export const CATALOG: Record<CardType, CardDef> = { trigger, webSearch, agent, chatMessage, mcpTool };
 export const CARD_TYPES = Object.keys(CATALOG) as CardType[];
 /** Cards the user can add (the trigger is created with the workflow). */
-export const ADDABLE_TYPES: CardType[] = ["webSearch", "agent", "chatMessage"];
+export const ADDABLE_TYPES: CardType[] = ["webSearch", "agent", "chatMessage", "mcpTool"];
 
 export const isCardType = (t: unknown): t is CardType => typeof t === "string" && Object.hasOwn(CATALOG, t);
 
@@ -220,6 +292,9 @@ export function templateValues(type: CardType, config: Record<string, unknown>):
   const out: { field: string; value: string }[] = [];
   for (const f of CATALOG[type].fields) {
     if (f.kind === "template" && typeof config[f.key] === "string") out.push({ field: f.key, value: config[f.key] as string });
+    if (f.kind === "args" && config[f.key] && typeof config[f.key] === "object") {
+      for (const v of Object.values(config[f.key] as Record<string, unknown>)) if (typeof v === "string") out.push({ field: f.key, value: v });
+    }
   }
   return out;
 }

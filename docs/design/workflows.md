@@ -580,7 +580,7 @@ The user message is the description. When the workflow already has cards, it als
 **Clean-up.** This happens after validation:
 - Fill in config defaults and drop unknown keys.
 - Remove settings that only the user may set by hand: MCP tools in allowlists, `folder`, `allowEdits`, and `mcpTool` cards. Each removal becomes a warning.
-- Lay the cards out automatically: x = level × 280, y = index within the level × 160. Positions from the model are ignored.
+- Lay the cards out with `autoLayout` (graph.ts). Positions from the model are ignored; the model's card order breaks ties within a level.
 - Warnings list the variables that need values ("Fill in: Your profile").
 
 **Preview, then apply.** The proposed cards show with dashed borders in place of the current flow, under a bar: "Preview · 6 cards · **Apply** · Discard". Apply saves through `PATCH` and asks the native `confirm("Replace the current flow?")` first if the canvas has cards. Nothing runs until the user clicks Run.
@@ -675,7 +675,7 @@ Saving is automatic: a `PATCH` 800 ms after the last change. The header reads "S
 
 - **Runs** opens a `SidePanel`. Each row shows the status icon and word, "Manual", relative time (`getRelativeTime`), duration, and tokens with cost in `font-mono tabular-nums`. Clicking a row opens `?run=<id>`: a read-only canvas, a header chip "Run · 9 Nov 14:02 · Done ×", and **Resume** when the run failed or was interrupted.
 - **Polling:** `GET /api/workflow-runs/[id]` every 1.5 s while running, or every 5 s while the tab is hidden. Polling stops when the run ends or starts waiting.
-- **Live region:** one `aria-live="polite"` region per page. It announces only "Run started", "Run waiting for you", "Run done", "Run failed at <card>" and "Run cancelled".
+- **Live region:** one `aria-live="polite"` region per page. It announces only "Run started", "Run waiting for you", "Run done", "Run failed at <card>" and "Run cancelled", plus the describe box's "Building your flow…", "Preview ready: n cards", "Flow applied" and "Preview discarded". Errors are not announced here: Retry's `aria-describedby` reads them.
 
 ### 8.7 Table view
 
@@ -786,8 +786,10 @@ Section 6.10 lists it. There is no shell, no file writes without the folder opt-
 - Card data reaches agents fenced (5.1, 6.10). The system prompt marks fenced blocks, tool results and pages as data.
 - Messages sent to chats are framed as coming from a workflow (decision 18).
 - Generated flows are previewed and cleaned of risky settings (7).
-- An agent card cannot tick a chat-reading tool (`searchChats`, `readChat`) together with an outbound one (`fetchUrl`, `webSearch`). Save and Run both refuse it: "This card can read your chats and reach the web. Pick one, so a web page can't make it send your chats out."
-- The same holds across the flow: no card with an outbound tool, and no Web search or Fetch card, may come after a card that reads chats. Save and Run refuse it: "<card> reads your chats and a later card reaches the web. Split them into two workflows, so a web page can't make it send your chats out."
+- **Private readers** are cards that can read data the web must not see: a chat-reading tool (`searchChats`, `readChat`), the MCP tool card, an agent with any MCP tool, and an agent on a CLI model with a folder. **Web reachers** are Web search and Fetch cards, an agent with `fetchUrl` or `webSearch`, and an MCP card or agent with MCP tools (servers can make network calls). A CLI folder is a private reader only: workflow cards run the CLI with its own web tools switched off (`web: false`: Claude Code without WebSearch/WebFetch, OpenCode webfetch/websearch denied, Codex `tools.web_search=false`), so only the web tools the card ticked remain.
+- One card cannot be both. Save and Run refuse chat reading with a web tool, MCP or a folder ("This card can read your chats and reach the web. Pick one, so a web page can't make it send your chats out."), and MCP with a web tool, a folder with a web tool, or a folder with MCP ("<card> reads private data (chats, MCP or a folder) and a later card reaches the web. Split them into two workflows, so a web page can't make it send your data out."). MCP alone, a folder alone and an MCP tool card alone are fine. The editor disables the clashing boxes and says why.
+- Across the flow, no web reacher may come after a private reader; Save and Run refuse it with the same message. One exception: MCP followed by MCP is allowed with a warning, because both are servers the user set up (read issues, then post to Slack). The warning shows on the later card, as does the "A page could try to steer it" warning on an MCP card that follows a card reaching the open web.
+- The folder and `allowEdits` are cleared when the card's model is not a CLI model, and `allowEdits` is cleared with the folder.
 - The worst outcome left is a bad draft, which the user reads before using.
 
 ### 10.6 Output safety

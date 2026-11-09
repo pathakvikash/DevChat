@@ -1,6 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { MockLanguageModelV3 } from "ai/test";
-import { z } from "zod";
 import type { ModelConfig } from "@/lib/models";
 
 const h = vi.hoisted(() => ({
@@ -15,8 +14,8 @@ vi.mock("@/lib/hostAccess", () => ({ canUseHostTools: h.canUseHostTools, HOST_TO
 vi.mock("@/lib/settings", () => ({ getSettingsKey: vi.fn(async () => "") }));
 vi.mock("@/lib/db", () => ({ prisma: { workflow: { findFirst: h.findFirst } } }));
 
-import { buildSystemPrompt, catalogForPrompt, extractJson, generateFlow, GenerateError, layoutGraph } from "@/lib/workflows/generate";
-import { validateStructure } from "@/lib/workflows/graph";
+import { buildSystemPrompt, catalogForPrompt, extractJson, generateFlow, GenerateError } from "@/lib/workflows/generate";
+import { autoLayout, validateStructure } from "@/lib/workflows/graph";
 import { CATALOG } from "@/lib/workflows/catalog";
 const { POST } = await import("@/app/api/workflows/generate/route");
 
@@ -68,7 +67,7 @@ describe("generateFlow", () => {
     const search = graph.nodes.find((n) => n.id === "news")!;
     expect(search.config).toMatchObject({ provider: "", perItem: false, maxItems: 25 });
     expect(search.config).not.toHaveProperty("junk");
-    expect(graph.nodes.map((n) => n.ui.position)).toEqual([0, 1, 2, 3].map((l) => ({ x: l * 280, y: 0 })));
+    expect(graph.nodes.map((n) => n.ui.position)).toEqual([0, 1, 2, 3].map((l) => ({ x: l * 340, y: 0 })));
     expect(warnings).toContain("Fill in: Your topics");
     expect(validateStructure(graph)).toEqual([]);
     expect(graph.defaultModel).toBe("mock/gen");
@@ -104,8 +103,7 @@ describe("generateFlow", () => {
     const { graph, warnings } = await generateFlow({ description: "x", model });
     const digest = graph.nodes.find((n) => n.id === "digest")!;
     expect(digest.config.tools).toEqual(["calculator"]);
-    expect(digest.config).not.toHaveProperty("folder");
-    expect(digest.config).not.toHaveProperty("allowEdits");
+    expect(digest.config).toMatchObject({ folder: "", allowEdits: false, mcpTools: [] });
     expect(graph.nodes.some((n) => n.type === ("mcpTool" as string))).toBe(false);
     expect(digest.fromIds).toEqual(["trigger"]);
     expect(warnings.filter((w) => /Removed/.test(w))).toHaveLength(4);
@@ -122,20 +120,21 @@ describe("generateFlow", () => {
     expect(calls).toHaveLength(2);
   });
 
-  it("lays out by level and row", () => {
-    const g = layoutGraph({
+  it("lays out by level, siblings centred in the model's order", () => {
+    const g = autoLayout({
       version: 1,
       defaultModel: "",
       maxRunTokens: 1000,
       vars: [],
       nodes: [node("trigger", "trigger", []), node("a", "webSearch", ["trigger"]), node("b", "webSearch", ["trigger"]), node("c", "agent", ["a", "b"])].map((n) => ({ ...n, type: n.type as any, ui: { label: n.id, position: { x: 9, y: 9 } } })),
     });
-    expect(g.nodes.map((n) => [n.id, n.ui.position.x, n.ui.position.y])).toEqual([["trigger", 0, 0], ["a", 280, 0], ["b", 280, 160], ["c", 560, 0]]);
+    expect(g.nodes.map((n) => [n.id, n.ui.position.x, n.ui.position.y])).toEqual([["trigger", 0, 0], ["a", 340, -80], ["b", 340, 80], ["c", 680, 0]]);
   });
 
   it("builds the catalog text from the registry and leaves examples out for small windows", () => {
     const text = catalogForPrompt();
-    for (const type of Object.keys(CATALOG)) expect(text).toContain(`- ${type} (`);
+    for (const type of Object.keys(CATALOG).filter((t) => t !== "mcpTool")) expect(text).toContain(`- ${type} (`);
+    expect(text).not.toContain("- mcpTool (");
     expect(buildSystemPrompt(8192)).not.toContain("Example workflows");
     expect(buildSystemPrompt(32_000)).toContain("Example workflows");
   });
@@ -306,7 +305,7 @@ describe("generateFlow hardening", () => {
       vars: [{ key: "topics", label: "Topics", value: "secret-value" }],
       nodes: [
         { id: "trigger", type: "trigger" as const, fromIds: [], config: {}, ui: { label: "Run", position: { x: 0, y: 0 } } },
-        { id: "a", type: "agent" as const, fromIds: ["trigger"], config: { instructions: "old", model: "claude-code/opus", folder: "/work", allowEdits: true, mcpTools: ["s/t"] }, ui: { label: "A", position: { x: 0, y: 0 } } },
+        { id: "a", type: "agent" as const, fromIds: ["trigger"], config: { instructions: "old", model: "claude-code/opus", folder: "/work", allowEdits: true, mcpTools: ["mcp_s_t"] }, ui: { label: "A", position: { x: 0, y: 0 } } },
       ],
     };
     const reply = { vars: [{ key: "topics", label: "Topics", value: "" }], nodes: [node("trigger", "trigger", []), node("a", "agent", ["trigger"], { instructions: "new", folder: "/etc" }), node("b", "agent", ["a"], { instructions: "b", model: "x/y" })] };
@@ -326,27 +325,13 @@ describe("generateFlow hardening", () => {
     expect(validateStructure(graph)).toEqual([]);
   });
 
-  describe("with phase 6 in the catalog (simulated)", () => {
-    const cat = CATALOG as unknown as Record<string, any>;
-    const agentSchema = cat.agent.schema;
-    beforeEach(() => {
-      cat.mcpTool = {
-        type: "mcpTool", label: "MCP tool", category: "Output", icon: "Plug", description: "x", fields: [], perItem: false,
-        schema: z.object({ serverId: z.string().default(""), tool: z.string().default(""), args: z.record(z.string(), z.string()).default({}) }),
-        defaults: () => ({ serverId: "", tool: "", args: {} }), outputs: () => ["text"], summary: () => "",
-      };
-      cat.agent.schema = agentSchema.extend({ folder: z.string().optional(), allowEdits: z.boolean().optional(), mcpTools: z.array(z.string()).optional() });
-    });
-    afterEach(() => {
-      delete cat.mcpTool;
-      cat.agent.schema = agentSchema;
-    });
+  describe("with phase 6 in the catalog", () => {
     const ui = { label: "x", position: { x: 0, y: 0 } };
     const current = {
       version: 1 as const, defaultModel: "mock/gen", maxRunTokens: 500_000, vars: [],
       nodes: [
         { id: "trigger", type: "trigger" as const, fromIds: [], config: {}, ui },
-        { id: "digest", type: "agent" as any, fromIds: ["trigger"], config: { instructions: "summarise", mcpTools: ["srv/list"], folder: "/work", allowEdits: true }, ui },
+        { id: "digest", type: "agent" as any, fromIds: ["trigger"], config: { instructions: "summarise", mcpTools: ["mcp_srv_list"], folder: "/work", allowEdits: true }, ui },
         { id: "notify", type: "mcpTool" as any, fromIds: ["digest"], config: { serverId: "srv1", tool: "list_files", args: { path: "{{digest.text}}" } }, ui: { label: "Notify", position: { x: 0, y: 0 } } },
       ],
     };
@@ -358,10 +343,12 @@ describe("generateFlow hardening", () => {
       const sent = JSON.stringify(s.calls[0].prompt);
       expect(sent).toContain("notify");
       expect(sent).not.toContain("list_files");
-      expect(graph.nodes.find((n) => n.id === "notify")!.config).toEqual(current.nodes[2].config);
+      const notify = graph.nodes.find((n) => n.id === "notify")!.config;
+      expect(notify).toMatchObject(current.nodes[2].config);
+      expect(notify.args).toEqual(current.nodes[2].config.args);
       expect(warnings.filter((w) => /Removed/.test(w))).toEqual([]);
       // unchanged agent keeps its by-hand settings
-      expect(graph.nodes.find((n) => n.id === "digest")!.config).toMatchObject({ folder: "/work", allowEdits: true, mcpTools: ["srv/list"] });
+      expect(graph.nodes.find((n) => n.id === "digest")!.config).toMatchObject({ folder: "/work", allowEdits: true, mcpTools: ["mcp_srv_list"] });
     });
 
     it("keeps a kept mcpTool card's own inputs when the model rewires it", async () => {
@@ -378,12 +365,10 @@ describe("generateFlow hardening", () => {
     });
 
     it("drops folder, edit and MCP settings when an agent is rewritten to reach the web", async () => {
-      const reply = { vars: [], nodes: [node("trigger", "trigger", []), node("digest", "agent", ["trigger"], { instructions: "follow the page", tools: ["fetchUrl", "webSearch"], mcpTools: ["evil/send"], folder: "/", allowEdits: true }), node("notify", "mcpTool", ["digest"], {})] };
+      const reply = { vars: [], nodes: [node("trigger", "trigger", []), node("digest", "agent", ["trigger"], { instructions: "follow the page", tools: ["fetchUrl", "webSearch"], mcpTools: ["mcp_evil_send"], folder: "/", allowEdits: true }), node("notify", "mcpTool", ["digest"], {})] };
       const { graph, warnings } = await generateFlow({ description: "change", model: scripted([fence(reply)]).model, current });
       const digest = graph.nodes.find((n) => n.id === "digest")!;
-      expect(digest.config).not.toHaveProperty("folder");
-      expect(digest.config).not.toHaveProperty("allowEdits");
-      expect(digest.config).not.toHaveProperty("mcpTools");
+      expect(digest.config).toMatchObject({ folder: "", allowEdits: false, mcpTools: [] });
       expect(warnings).toContain('"digest" changed, so its folder, edit and MCP settings were removed. Set them again by hand.');
     });
   });

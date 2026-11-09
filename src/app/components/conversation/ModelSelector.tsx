@@ -14,6 +14,8 @@ interface ModelSelectorProps {
   onOpenSettings?: () => void;
   disabled?: boolean;
   size?: "default" | "sm";
+  /** Models to leave out of the list. */
+  exclude?: (m: ModelInfo) => boolean;
 }
 
 export default function ModelSelector({
@@ -22,6 +24,7 @@ export default function ModelSelector({
   onOpenSettings,
   disabled = false,
   size = "default",
+  exclude,
 }: ModelSelectorProps) {
   const [showDropdown, setShowDropdown] = useState(false);
   const [selectedProvider, setSelectedProvider] = useState<string | null>(null);
@@ -65,7 +68,7 @@ export default function ModelSelector({
     [],
     { onError: (e) => console.error("Failed to load models:", e) },
   );
-  const models = modelsData ?? [];
+  const models = (modelsData ?? []).filter((m) => !exclude?.(m));
 
   const modelGroups = useMemo(() => {
     return groupModelsByProvider(models).map((g) => ({

@@ -14,6 +14,12 @@
   color: var(--foreground);
 }
 
+/* A proposed flow ("Describe your flow", 7): dashed borders until it is applied. */
+.wf-preview .glass-card {
+  border-style: dashed;
+  border-color: var(--glass-border-strong);
+}
+
 /* Cards: the focus ring and the selected ring are outlines, because the glass box-shadows beat Tailwind's ring. */
 .devchat-flow .react-flow__node {
   outline: none;

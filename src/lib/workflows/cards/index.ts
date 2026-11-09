@@ -5,6 +5,7 @@ import { trigger } from "./trigger";
 import { webSearchCard } from "./webSearch";
 import { agentCard } from "./agent";
 import { chatMessageCard } from "./chatMessage";
+import { mcpToolCard } from "./mcpTool";
 
 /** What a card gets when it runs. For a per-item card the runner calls `run` once per item, with `tctx.item` set. */
 export interface CardCtx {
@@ -42,4 +43,5 @@ export const CARDS: Record<CardType, CardImpl> = {
   webSearch: webSearchCard,
   agent: agentCard,
   chatMessage: chatMessageCard,
+  mcpTool: mcpToolCard,
 };
