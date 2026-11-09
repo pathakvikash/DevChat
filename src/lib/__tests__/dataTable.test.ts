@@ -11,7 +11,7 @@ let clashes = 0;
 vi.mock("@/lib/db", () => ({
   prisma: {
     dataTable: {
-      findFirst: vi.fn(async ({ where }: any) => (table && table.id === where.id && table.userId === where.userId ? table : null)),
+      findFirst: vi.fn(async ({ where }: any) => (table && table.id === where.id && (where.userId === undefined || table.userId === where.userId) ? table : null)),
       update: vi.fn(async ({ data }: any) => Object.assign(table, data)),
     },
     dataTableRow: {
@@ -152,6 +152,16 @@ describe("two runs saving at once", () => {
     expect(err).toBeInstanceOf(Error);
     expect((err as Error).message).toBe("Another run is saving to “Jobs” at the same time. Run this one again.");
     expect((err as Error).message).not.toMatch(/Unique|P2002|prisma/i);
+  });
+
+  it("reloads the table before the second attempt, so columns another run added are kept", async () => {
+    clashes = 1;
+    clashHook = () => {
+      other();
+      table.columns = JSON.stringify([{ key: "extra", label: "extra", type: "text" }]); // another run added a column
+    };
+    await writeRows(info(), "upsert", [{ key: "k1", data: { note: "mine" }, status: "new" }]);
+    expect(JSON.parse(table.columns).map((c: { key: string }) => c.key)).toEqual(["extra", "note"]);
   });
 
   it("does not retry any other error", async () => {

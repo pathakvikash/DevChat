@@ -5,7 +5,7 @@ CREATE TABLE "DataTable" (
     "name" TEXT NOT NULL,
     "columns" TEXT NOT NULL DEFAULT '[]',
     "statuses" TEXT NOT NULL DEFAULT '["new"]',
-    "private" BOOLEAN NOT NULL DEFAULT false,
+    "privateFrom" TEXT NOT NULL DEFAULT '',
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL,
 

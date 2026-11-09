@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { Lock, Table2 } from "lucide-react";
 import AppShell, { SidebarToggleButton } from "@/app/components/AppShell";
+import { kindsText } from "@/lib/workflows/privacy";
 import { getRelativeTime } from "@/app/components/MessageActions";
 
 interface Row {
@@ -11,6 +12,7 @@ interface Row {
   name: string;
   rowCount: number;
   private: boolean;
+  privateKinds: string[];
   updatedAt: string;
 }
 
@@ -59,7 +61,7 @@ export default function TablesPage() {
                         <span className="glass inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 font-medium">
                           <Lock size={11} aria-hidden="true" /> Private
                         </span>
-                        <span>Filled from chats, MCP or a folder. Workflows can&apos;t send what is in it to the web.</span>
+                        <span>{`Filled from ${kindsText(r.privateKinds)}. Workflows can't send what is in it to the web.`}</span>
                       </p>
                     )}
                   </div>

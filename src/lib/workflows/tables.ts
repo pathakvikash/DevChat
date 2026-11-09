@@ -21,8 +21,8 @@ export type RowItem = Record<string, unknown> & { _rowId: string; status: string
 
 export const MAX_TABLE_ROWS = 10_000;
 export const MAX_WRITE_ROWS = 1_000;
-/** A key longer than this is stored as its sha256: Postgres cannot index a very long value in the unique key. */
-export const MAX_KEY_CHARS = 1000;
+/** A key over this many bytes (UTF-8, after percent-encoding) is stored as its sha256: Postgres cannot index a value over 2,704 bytes in the unique key. */
+export const MAX_KEY_BYTES = 1000;
 export const DEFAULT_STATUS = "new";
 /** What the News template's table starts with: the fields a web search result has. */
 export const NEWS_COLUMNS: Column[] = [
@@ -48,6 +48,12 @@ export function toTableInfo(row: { id: string; name: string; columns: string; st
   return { id: row.id, name: row.name, columns: Array.isArray(columns) ? columns : [], statuses: Array.isArray(statuses) && statuses.length ? statuses : [DEFAULT_STATUS] };
 }
 
+/** A table by id with no owner check: for a caller that already holds the TableInfo. */
+async function loadTableById(id: string): Promise<TableInfo | null> {
+  const row = await prisma.dataTable.findFirst({ where: { id } });
+  return row ? toTableInfo(row) : null;
+}
+
 /** The user's table by id, or null (also when it belongs to someone else). */
 export async function loadTable(userId: string, id: string): Promise<TableInfo | null> {
   const row = await prisma.dataTable.findFirst({ where: { id, userId } });
@@ -64,8 +70,8 @@ export function parseRowData(data: string): Record<string, unknown> {
  * Anything else is just trimmed. Empty stays empty.
  */
 export function normalizeKey(raw: unknown): string {
-  const s = String(raw ?? "").trim();
-  return s.length > MAX_KEY_CHARS ? `sha256:${createHash("sha256").update(normalizeUrl(s)).digest("hex")}` : normalizeUrl(s);
+  const key = normalizeUrl(String(raw ?? "").trim());
+  return Buffer.byteLength(key) > MAX_KEY_BYTES ? `sha256:${createHash("sha256").update(key).digest("hex")}` : key;
 }
 
 function normalizeUrl(s: string): string {
@@ -93,10 +99,10 @@ export function guessType(value: unknown): ColumnType {
   return "text";
 }
 
-/** One CSV cell (RFC 4180). A text cell that starts with = + - @ or a tab or return gets a leading ' so a spreadsheet won't run it. */
+/** One CSV cell (RFC 4180). A text cell that starts with = + - @ or a tab or return (after any spaces) gets a leading ' so a spreadsheet won't run it. */
 export function csvCell(value: unknown): string {
   let s = value === null || value === undefined ? "" : typeof value === "object" ? JSON.stringify(value) : String(value);
-  if (typeof value === "string" && /^[=+\-@\t\r]/.test(s)) s = `'${s}`;
+  if (typeof value === "string" && /^(?:[=+\-@\t\r]|\s+[=+\-@])/.test(s)) s = `'${s}`;
   return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 }
 
@@ -193,8 +199,10 @@ export async function writeRows(table: TableInfo, action: "upsert" | "update", i
   } catch (e) {
     if (!isClash(e)) throw e;
   }
+  // Read the table again: the other run may have added columns or statuses, which this write must not overwrite.
+  const fresh = (await loadTableById(table.id)) ?? table;
   try {
-    return await writeRowsOnce(table, action, inputs);
+    return await writeRowsOnce(fresh, action, inputs);
   } catch (e) {
     if (isClash(e)) throw new Error(`Another run is saving to “${table.name}” at the same time. Run this one again.`);
     throw e;

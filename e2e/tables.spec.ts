@@ -281,5 +281,19 @@ test("a table filled after a chat reader is private, and a later card that reach
   expect((await request.patch(`/api/workflows/${other.id}`, { data: { graph: g2 } })).ok()).toBe(true);
   const refused = await request.post(`/api/workflows/${other.id}/runs`);
   expect(refused.status()).toBe(400);
-  expect((await refused.json()).error).toContain("“Chat notes” holds private data (it was filled from chats, MCP or a folder)");
+  expect((await refused.json()).error).toContain("“Chat notes” holds private data (it was filled from chats)");
+});
+
+test("a rows page after a cursor that no longer matches the filter drops no real row", async ({ request }) => {
+  await runToEnd(request, await createNews(request));
+  const table = await newsTable(request);
+  const all = await rowsOf(request, table.id); // newest first: r1, r2, r3
+  expect(all).toHaveLength(3);
+  // r1 and r3 are new, r2 stays read: r2 is the cursor but does not match status=new
+  expect((await request.patch(`/api/tables/${table.id}/rows`, { data: { ids: [all[0].id, all[2].id], status: "new" } })).ok()).toBe(true);
+  const page = await (await request.get(`/api/tables/${table.id}/rows?status=new&cursor=${all[1].id}`)).json();
+  expect(page.rows.map((r: { id: string }) => r.id)).toEqual([all[2].id]);
+  expect(page.nextCursor).toBeNull();
+  const first = await (await request.get(`/api/tables/${table.id}/rows?status=new`)).json();
+  expect(first.rows.map((r: { id: string }) => r.id)).toEqual([all[0].id, all[2].id]);
 });

@@ -30,7 +30,8 @@ function news(defaultModel: string, tableId: string): WorkflowGraph {
       id: "fresh",
       type: "filter",
       fromIds: ["save"],
-      // Every saved row still marked new, not only the ones this run added: articles from a run that never posted are digested too.
+      // Rows this run's search returned that are still marked new: the ones it added, and ones an earlier run saved but never posted.
+      // (Articles that the search no longer returns are not digested; they stay marked new.)
       config: { list: "{{save.items}}", rules: [{ field: "{{item.status}}", op: "eq", value: "new" }], match: "all", stopIfEmpty: true },
       ui: { label: "New articles", position: { x: 840, y: 0 } },
     },

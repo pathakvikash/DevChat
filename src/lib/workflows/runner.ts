@@ -2,9 +2,9 @@ import { prisma } from "@/lib/db";
 import { CARDS, type CardImpl, type CardOutcome } from "./cards";
 import { cliProviderForModel } from "@/lib/cliProviders";
 import { resolveAgentModel } from "./cards/agent";
-import { CATALOG, DEFAULT_MAX_ITEMS, MAX_ITEMS_LIMIT, OUTPUT_CAP_BYTES, parseConfig, reachesWeb, readsPrivate } from "./catalog";
+import { CATALOG, DEFAULT_MAX_ITEMS, MAX_ITEMS_LIMIT, OUTPUT_CAP_BYTES, parseConfig } from "./catalog";
+import { kindsText, parseKinds, joinKinds, planKinds, privateTableMessage, webAfter, type PrivateKind } from "./privacy";
 import {
-  ancestorsOf,
   checkGraph,
   parseGraph,
   topoOrder,
@@ -302,6 +302,16 @@ export async function advanceRun(runId: string, deps: RunnerDeps = defaultDeps):
         if (!(await save())) return;
         continue;
       }
+      // Private tables are checked again right before the Save card runs: another run may have marked the table since
+      // Start, and a Resume never went through the Start checks.
+      if (node.type === "table") {
+        const blocked = await privateBlock(run.userId, graph, node).catch(() => null);
+        if (blocked) {
+          nodes[node.id] = { status: "failed", startedAt: new Date().toISOString(), endedAt: new Date().toISOString(), error: blocked };
+          if (!(await save())) return;
+          continue;
+        }
+      }
       // A card cut off mid-way keeps the items it finished.
       const resume = have?.partial;
       nodes[node.id] = { status: "running", startedAt: new Date().toISOString(), ...(resume ? { partial: resume } : {}) };
@@ -384,6 +394,8 @@ export async function preflight(userId: string, graph: WorkflowGraph): Promise<{
   };
   for (const m of validateStructure(graph)) add("", m);
   for (const i of checkGraph(graph)) add(i.nodeId, i.message);
+  const tables = await tableKinds(userId, graph);
+  const plan = planKinds(graph, new Map([...tables].map(([id, t]) => [id, t.kinds])));
   for (const n of graph.nodes) {
     const label = n.ui.label || n.id;
     if (n.type === "agent") {
@@ -400,15 +412,13 @@ export async function preflight(userId: string, graph: WorkflowGraph): Promise<{
       }
     }
     if (n.type === "table" && n.config.tableId) {
-      const table = await prisma.dataTable.findFirst({ where: { id: String(n.config.tableId), userId }, select: { id: true, name: true, private: true } });
+      const table = tables.get(String(n.config.tableId));
       if (!table) add(n.id, `${label}: that table no longer exists`);
-      // A card that reads a private table is a private-data reader: no card that reaches the web may come after it.
-      else if (table.private) {
-        for (const m of graph.nodes) {
-          if (m.id !== n.id && reachesWeb(m.type, m.config) && ancestorsOf(graph, m.id).has(n.id)) {
-            add(m.id, `“${table.name}” holds private data (it was filled from chats, MCP or a folder), and ${m.ui.label || m.id} reaches the web after a card that reads it. Split them into two workflows, so a web page can't make it send that data out.`);
-          }
-        }
+      // A card on a private table (counting what this very graph is about to put in it) is a private-data reader:
+      // no card that reaches the web may come after it.
+      else {
+        const kinds = plan.get(String(n.config.tableId)) ?? [];
+        if (kinds.length > 0) for (const m of webAfter(graph, n.id)) add(m.id, privateTableMessage(table.name, kinds, m));
       }
     }
     if (n.type === "chatMessage" && n.config.chat && n.config.chat !== "new") {
@@ -419,14 +429,36 @@ export async function preflight(userId: string, graph: WorkflowGraph): Promise<{
   return errors;
 }
 
-/** A table that a card after a private-data reader saves to becomes private, for good: later flows that read it are held to the same rule. */
-export async function markPrivateTables(userId: string, graph: WorkflowGraph): Promise<void> {
-  const readsAny = (id: string) => [...ancestorsOf(graph, id)].some((a) => { const m = graph.nodes.find((x) => x.id === a); return !!m && readsPrivate(m.type, m.config); });
-  for (const n of graph.nodes) {
-    if (n.type === "table" && n.config.tableId && readsAny(n.id)) {
-      await prisma.dataTable.updateMany({ where: { id: String(n.config.tableId), userId, private: false }, data: { private: true } });
-    }
+/** The user's tables that the graph's Save cards point at: name and the kinds of private data each holds now. */
+async function tableKinds(userId: string, graph: WorkflowGraph): Promise<Map<string, { name: string; kinds: PrivateKind[] }>> {
+  const out = new Map<string, { name: string; kinds: PrivateKind[] }>();
+  for (const id of new Set(graph.nodes.map((n) => (n.type === "table" ? String(n.config.tableId ?? "") : "")).filter(Boolean))) {
+    const t = await prisma.dataTable.findFirst({ where: { id, userId }, select: { id: true, name: true, privateFrom: true } });
+    if (t) out.set(id, { name: t.name, kinds: parseKinds(t.privateFrom) });
   }
+  return out;
+}
+
+/**
+ * A table that a Save card fills after a private-data reader (or after a card on a private table) becomes private for
+ * good, with the kinds it took in. Later flows that read it are held to the same rule.
+ */
+export async function markPrivateTables(userId: string, graph: WorkflowGraph): Promise<void> {
+  const tables = await tableKinds(userId, graph);
+  const plan = planKinds(graph, new Map([...tables].map(([id, t]) => [id, t.kinds])));
+  for (const [id, kinds] of plan) {
+    if (kinds.length > (tables.get(id)?.kinds.length ?? 0)) await prisma.dataTable.updateMany({ where: { id, userId }, data: { privateFrom: joinKinds(kinds) } });
+  }
+}
+
+/** The refusal for a Save card whose table is private now (read again, so a mark made after Run started counts) with a web card after it. */
+async function privateBlock(userId: string, graph: WorkflowGraph, node: FlowNode): Promise<string | null> {
+  const tables = await tableKinds(userId, graph);
+  const plan = planKinds(graph, new Map([...tables].map(([id, t]) => [id, t.kinds])));
+  const id = String(node.config.tableId ?? "");
+  const kinds = plan.get(id) ?? [];
+  const web = kinds.length > 0 ? webAfter(graph, node.id)[0] : undefined;
+  return web ? privateTableMessage(tables.get(id)!.name, kinds, web) : null;
 }
 
 /** Start (6.1). The caller then runs `after(() => advanceRun(runId))`. */
@@ -441,11 +473,12 @@ export async function startRun(userId: string, workflowId: string): Promise<Star
   }
   const errors = await preflight(userId, graph);
   if (errors.length > 0) return { ok: false, status: 400, error: errors[0].message, errors };
-  await markPrivateTables(userId, graph);
   await sweepOrphans(userId);
   // ponytail: check-then-create, so two starts in the same instant could both pass; a unique partial index would close it.
   const capped = await checkCaps(userId, workflowId);
   if (capped) return capped;
+  // After the caps: a Run that is refused marks nothing.
+  await markPrivateTables(userId, graph);
 
   const run = await prisma.workflowRun.create({ data: { workflowId, userId, state: "running", graph: JSON.stringify(graph), nodes: "{}" } });
   const old = await prisma.workflowRun.findMany({ where: { workflowId }, orderBy: { startedAt: "desc" }, skip: MAX_RUNS_KEPT, select: { id: true } });

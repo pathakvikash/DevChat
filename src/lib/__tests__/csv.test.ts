@@ -15,6 +15,12 @@ describe("csvCell", () => {
     expect(csvCell("=1,2")).toBe(`"'=1,2"`);
   });
 
+  it("guards a formula that starts after spaces too", () => {
+    expect(csvCell(' =HYPERLINK("http://x.test","a")')).toBe(`"' =HYPERLINK(""http://x.test"",""a"")"`);
+    expect(csvCell("  +1")).toBe("'  +1");
+    expect(csvCell("a =b")).toBe("a =b");
+  });
+
   it("leaves numbers, empties and everything else alone", () => {
     expect(csvCell(-5)).toBe("-5");
     expect(csvCell(72)).toBe("72");

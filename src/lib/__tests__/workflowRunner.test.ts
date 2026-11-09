@@ -15,7 +15,7 @@ const matches = (r: any, where: Record<string, any>) =>
 let failProgressSave = false;
 let workflowRow: any = null;
 const chats = new Set<string>();
-const dataTables = new Map<string, { id: string; userId: string; name: string; private: boolean }>();
+const dataTables = new Map<string, { id: string; userId: string; name: string; privateFrom: string }>();
 vi.mock("@/lib/db", () => ({
   prisma: {
     workflow: { findFirst: vi.fn(async ({ where }: any) => (workflowRow && workflowRow.id === where.id && workflowRow.userId === where.userId ? workflowRow : null)) },
@@ -27,7 +27,7 @@ vi.mock("@/lib/db", () => ({
       }),
       updateMany: vi.fn(async ({ where, data }: any) => {
         const t = dataTables.get(where.id);
-        if (!t || t.userId !== where.userId || t.private !== where.private) return { count: 0 };
+        if (!t || t.userId !== where.userId) return { count: 0 };
         Object.assign(t, data);
         return { count: 1 };
       }),
@@ -735,45 +735,95 @@ describe("private tables", () => {
   const reader = agentNode("read", ["trigger"], 1, { tools: ["readChat"] });
   const save = (id: string, from: string[], x: number, tableId = "t1"): FlowNode => ({ id, type: "table", fromIds: from, config: { tableId, list: "{{trigger.items}}" }, ui: { label: id.toUpperCase(), position: { x, y: 0 } } });
   const fetchNode = (id: string, from: string[], x: number): FlowNode => ({ id, type: "fetch", fromIds: from, config: { url: "https://a.test" }, ui: { label: id.toUpperCase(), position: { x, y: 0 } } });
-  const seedTable = (over: Partial<{ private: boolean; userId: string }> = {}) => dataTables.set("t1", { id: "t1", userId: "u1", name: "Notes", private: false, ...over });
+  const table = (id: string, privateFrom = "", userId = "u1") => dataTables.set(id, { id, userId, name: id === "t1" ? "Notes" : id === "t2" ? "Queue" : id, privateFrom });
+  const leak = (name: string, from: string, card: string) => `“${name}” holds private data (it was filled from ${from}), and ${card} reaches the web after a card that reads it. Split them into two workflows, so a web page can't make it send that data out.`;
 
-  it("a table saved to after a chat reader becomes private, and one saved to before it does not", async () => {
-    seedTable();
-    dataTables.set("t2", { id: "t2", userId: "u1", name: "Other", private: false });
-    await markPrivateTables("u1", graphOf(reader, save("keep", ["read"], 2), save("before", ["trigger"], 3, "t2")));
-    expect(dataTables.get("t1")!.private).toBe(true);
-    expect(dataTables.get("t2")!.private).toBe(false);
+  it("a table saved to after a chat reader becomes private with the kind chats, and one saved to before it does not", async () => {
+    table("t1");
+    table("t3");
+    await markPrivateTables("u1", graphOf(reader, save("keep", ["read"], 2), save("before", ["trigger"], 3, "t3")));
+    expect(dataTables.get("t1")!.privateFrom).toBe("chats");
+    expect(dataTables.get("t3")!.privateFrom).toBe("");
   });
 
-  it("leaves a table alone when no card before the Save reads private data, or the table is someone else's", async () => {
-    seedTable({ userId: "u2" });
+  it("leaves a table alone when nothing before the Save reads private data, or the table is someone else's", async () => {
+    table("t1", "", "u2");
     await markPrivateTables("u1", graphOf(reader, save("keep", ["read"], 2)));
-    expect(dataTables.get("t1")!.private).toBe(false);
-    seedTable();
+    expect(dataTables.get("t1")!.privateFrom).toBe("");
+    table("t1");
     await markPrivateTables("u1", graphOf(agentNode("a", ["trigger"], 1, { tools: ["calculator"] }), save("keep", ["a"], 2)));
-    expect(dataTables.get("t1")!.private).toBe(false);
+    expect(dataTables.get("t1")!.privateFrom).toBe("");
   });
 
-  it("refuses a card that reaches the web after a card that reads a private table", async () => {
-    seedTable({ private: true });
-    const errors = await preflight("u1", graphOf(save("keep", ["trigger"], 1), fetchNode("page", ["keep"], 2)));
-    expect(errors).toEqual([{ nodeId: "page", message: "“Notes” holds private data (it was filled from chats, MCP or a folder), and PAGE reaches the web after a card that reads it. Split them into two workflows, so a web page can't make it send that data out." }]);
+  it("copying through a second table keeps the flag: a Save card on a private table makes the next table private too", async () => {
+    table("t1", "chats");
+    table("t2");
+    table("t3");
+    // web search -> Save News (private) -> Save Queue -> Save Archive
+    await markPrivateTables("u1", graphOf(save("a", ["trigger"], 1, "t1"), save("b", ["a"], 2, "t2"), save("c", ["b"], 3, "t3")));
+    expect(dataTables.get("t2")!.privateFrom).toBe("chats");
+    expect(dataTables.get("t3")!.privateFrom).toBe("chats");
+  });
+
+  it("refuses a card that reaches the web after a card that reads a private table, and names the kinds", async () => {
+    table("t1", "chats");
+    expect(await preflight("u1", graphOf(save("keep", ["trigger"], 1), fetchNode("page", ["keep"], 2)))).toEqual([{ nodeId: "page", message: leak("Notes", "chats", "PAGE") }]);
+    table("t1", "chats,mcp");
+    expect((await preflight("u1", graphOf(save("keep", ["trigger"], 1), fetchNode("page", ["keep"], 2))))[0].message).toContain("filled from chats and MCP");
+  });
+
+  it("counts the tables this graph is about to mark: a chat reader feeding Save T in one branch, Save T feeding the web in another", async () => {
+    table("t1");
+    table("t2");
+    const g = graphOf(reader, save("one", ["read"], 2), save("two", ["trigger"], 3), fetchNode("page", ["two"], 4));
+    g.nodes[3].config.tableId = "t1"; // Save "two" writes the same table as Save "one"
+    expect((await preflight("u1", g)).map((e) => e.message)).toContain(leak("Notes", "chats", "PAGE"));
+    // a copy into a second table inside one graph
+    const copy = graphOf(reader, save("one", ["read"], 2), save("two", ["one"], 3, "t2"), fetchNode("page", ["two"], 4));
+    expect((await preflight("u1", copy)).map((e) => e.message)).toContain(leak("Queue", "chats", "PAGE"));
   });
 
   it("allows the web before the private table, a branch beside it, and a public table", async () => {
-    seedTable({ private: true });
+    table("t1", "chats");
     expect(await preflight("u1", graphOf(fetchNode("page", ["trigger"], 1), save("keep", ["page"], 2)))).toEqual([]);
     expect(await preflight("u1", graphOf(save("keep", ["trigger"], 1), fetchNode("page", ["trigger"], 2)))).toEqual([]);
-    seedTable({ private: false });
+    table("t1");
     expect(await preflight("u1", graphOf(save("keep", ["trigger"], 1), fetchNode("page", ["keep"], 2)))).toEqual([]);
   });
 
-  it("startRun marks the table before the run begins", async () => {
-    seedTable();
+  it("startRun marks the table, but only after the caps: a refused Run marks nothing", async () => {
+    table("t1");
     workflowRow = { id: "wf1", userId: "u1", name: "WF", graph: JSON.stringify(graphOf(reader, save("keep", ["read"], 2))) };
     vi.mocked(resolveAgentModel).mockResolvedValue({ name: "M", supportsTools: true } as never);
-    const r = await startRun("u1", "wf1");
-    expect(r.ok).toBe(true);
-    expect(dataTables.get("t1")!.private).toBe(true);
+    seedRun(graphOf(), { workflowId: "wf1" }, "busy"); // this workflow already has a run in progress
+    const refused = await startRun("u1", "wf1");
+    expect(refused).toMatchObject({ ok: false, status: 409 });
+    expect(dataTables.get("t1")!.privateFrom).toBe("");
+    runs.delete("busy");
+    expect((await startRun("u1", "wf1")).ok).toBe(true);
+    expect(dataTables.get("t1")!.privateFrom).toBe("chats");
+  });
+
+  it("checks again right before a Save card runs: a table marked after Start fails that card, and Resume gets the same check", async () => {
+    table("t1"); // public when the run started
+    const g = graphOf(save("keep", ["trigger"], 1), fetchNode("page", ["keep"], 2));
+    seedRun(g);
+    const { deps: d } = deps(() => ({ output: {} }));
+    const ran: string[] = [];
+    d.cards.table = { run: async () => (ran.push("table"), { output: { items: [] } }) };
+    d.cards.fetch = { run: async () => (ran.push("fetch"), { output: {} }) };
+    table("t1", "chats"); // another run marked it in the meantime
+    await advanceRun("run1", d);
+    const n = nodesOf();
+    expect(ran).toEqual([]);
+    expect(n.keep).toMatchObject({ status: "failed", error: leak("Notes", "chats", "PAGE") });
+    expect(n.page).toMatchObject({ status: "skipped" });
+    expect(runs.get("run1").state).toBe("failed");
+
+    // Resume goes through the same per-card check
+    expect((await resumeRun("u1", "run1")).ok).toBe(true);
+    await advanceRun("run1", d);
+    expect(ran).toEqual([]);
+    expect(nodesOf().keep.status).toBe("failed");
   });
 });

@@ -5,7 +5,7 @@ CREATE TABLE "DataTable" (
     "name" TEXT NOT NULL,
     "columns" TEXT NOT NULL DEFAULT '[]',
     "statuses" TEXT NOT NULL DEFAULT '["new"]',
-    "private" BOOLEAN NOT NULL DEFAULT false,
+    "privateFrom" TEXT NOT NULL DEFAULT '',
     "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" DATETIME NOT NULL,
     CONSTRAINT "DataTable_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User" ("id") ON DELETE CASCADE ON UPDATE CASCADE

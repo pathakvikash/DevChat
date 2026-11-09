@@ -11,7 +11,7 @@ import ModelSelector from "@/app/components/conversation/ModelSelector";
 import type { ModelInfo } from "@/app/components/conversation/types";
 import SidePanel from "@/app/components/ui/SidePanel";
 import { fetchModels } from "@/app/hooks/useModelsApi";
-import { CATALOG, type CardType } from "@/lib/workflows/catalog";
+import { itemListOf, type CardType } from "@/lib/workflows/catalog";
 import { ancestorsOf, checkGraph, MAX_NODES, newCard, type CardRun, type FlowNode, type WorkflowGraph } from "@/lib/workflows/graph";
 import { renderText, renderTemplate, templateRefs, refRoot, type TemplateContext } from "@/lib/workflows/template";
 import CardList from "./CardList";
@@ -325,7 +325,8 @@ export default function WorkflowEditor({ id }: { id: string }) {
     if (!graph || !selected) return null;
     const byId: Record<string, unknown> = {};
     if (run) for (const a of ancestorsOf(graph, selected.id)) if (outputs[`${run.id}:${a}`] !== undefined) byId[a] = outputs[`${run.id}:${a}`];
-    const perItem = CATALOG[selected.type].perItem && selected.config.perItem === true;
+    const itemList = itemListOf(selected.type, selected.config);
+    const perItem = itemList !== undefined;
     const ctx = (item?: unknown): TemplateContext => ({
       nodes: byId,
       vars: Object.fromEntries(graph.vars.map((v) => [v.key, v.value])),
@@ -334,7 +335,7 @@ export default function WorkflowEditor({ id }: { id: string }) {
       run: { id: run?.id ?? "", date: (run?.startedAt ?? new Date().toISOString()).slice(0, 10), startedAt: run?.startedAt ?? "" },
       workflow: { name: wf?.name ?? "" },
     });
-    const list = perItem ? renderTemplate(String(selected.config.items ?? ""), ctx()).value : undefined;
+    const list = itemList !== undefined ? renderTemplate(itemList, ctx()).value : undefined;
     const sampleItem = Array.isArray(list) ? list[0] : undefined;
     const cardIds = new Set(graph.nodes.map((n) => n.id));
     return {

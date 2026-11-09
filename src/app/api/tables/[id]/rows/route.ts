@@ -27,13 +27,17 @@ export async function GET(req: NextRequest, { params }: Ctx) {
     const rows = await prisma.dataTableRow.findMany({
       where: { tableId: id, ...(status ? { status } : {}), ...(q ? { data: contains(q) } : {}) },
       orderBy: [{ createdAt: "desc" }, { id: "desc" }],
-      take: PAGE + 1,
-      ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
+      // The cursor row starts the page and is dropped here, not with `skip`: if it no longer matches the filter,
+      // `skip: 1` would drop a real row instead.
+      take: PAGE + 2,
+      ...(cursor ? { cursor: { id: cursor } } : {}),
     });
-    const page = rows.slice(0, PAGE);
+    const after = cursor ? rows.filter((r) => r.id !== cursor) : rows;
+    const more = after.length > PAGE;
+    const page = after.slice(0, PAGE);
     return NextResponse.json({
       rows: page.map((r) => ({ id: r.id, key: r.key, status: r.status, data: parseRowData(r.data), createdAt: r.createdAt, updatedAt: r.updatedAt })),
-      nextCursor: rows.length > PAGE ? page[page.length - 1].id : null,
+      nextCursor: more ? page[page.length - 1].id : null,
     });
   });
 }

@@ -9,8 +9,12 @@ async function seed(request: APIRequestContext): Promise<string> {
   for (const w of (await (await request.get("/api/workflows")).json()) as Array<{ id: string }>) await request.delete(`/api/workflows/${w.id}`);
   for (const t of (await (await request.get("/api/tables")).json()) as Array<{ id: string }>) await request.delete(`/api/tables/${t.id}`);
   await deleteAllChats(request);
-  const id = (await (await request.post("/api/workflows", { data: { template: "news", model: "mock/workflow" } })).json()).id;
-  const { runId } = await (await request.post(`/api/workflows/${id}/runs`)).json();
+  const made = await request.post("/api/workflows", { data: { template: "news", model: "mock/workflow" } });
+  expect(made.ok(), `creating the workflow: ${made.status()} ${await made.text()}`).toBe(true);
+  const id = (await made.json()).id;
+  const started = await request.post(`/api/workflows/${id}/runs`);
+  expect(started.ok(), `starting the run: ${started.status()} ${await started.text()}`).toBe(true);
+  const { runId } = await started.json();
   await expect.poll(async () => (await (await request.get(`/api/workflow-runs/${runId}`)).json()).state, { timeout: 30_000 }).toBe("succeeded");
   const tables: Array<{ id: string; name: string }> = await (await request.get("/api/tables")).json();
   return tables.find((t) => t.name === "News")!.id;

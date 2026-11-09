@@ -138,10 +138,6 @@ export const TOOL_CONFLICT_MESSAGE = "This card can read your chats and reach th
 export const readsChats = (type: string, config: Record<string, unknown>): boolean =>
   type === "agent" && Array.isArray(config.tools) && config.tools.some((t) => CHAT_READ_TOOLS.includes(t));
 
-/** Whether the card reads data that must not leave DevChat. Today that is chats; MCP tools and a CLI folder join when phase 6 lands.
- *  A table written by a card that follows one of these becomes private (see markPrivateTables). */
-export const readsPrivate = (type: string, config: Record<string, unknown>): boolean => readsChats(type, config);
-
 /** Whether the card can send data to the web: an agent with an outbound tool, or a web search / fetch card. */
 export const reachesWeb = (type: string, config: Record<string, unknown>): boolean =>
   type === "webSearch" || type === "fetch" || (type === "agent" && Array.isArray(config.tools) && config.tools.some((t) => OUTBOUND_TOOLS.includes(t)));
@@ -311,6 +307,15 @@ export const CATALOG: Record<CardType, CardDef> = { trigger, webSearch, agent, c
 export const CARD_TYPES = Object.keys(CATALOG) as CardType[];
 /** Cards the user can add (the trigger is created with the workflow). */
 export const ADDABLE_TYPES: CardType[] = ["webSearch", "fetch", "agent", "filter", "table", "chatMessage"];
+
+/** The template whose list gives a card its {{item}}: the Items field of a per-item card, or the List field of a card (Filter,
+ *  Save to table) that reads {{item}} in its rules and columns. Undefined when the card has no item. */
+export function itemListOf(type: CardType, config: Record<string, unknown>): string | undefined {
+  const def = CATALOG[type];
+  if (def.perItem && config.perItem === true) return String(config.items ?? "");
+  if (def.itemFields?.length) return String(config.list ?? "");
+  return undefined;
+}
 
 export const isCardType = (t: unknown): t is CardType => typeof t === "string" && Object.hasOwn(CATALOG, t);
 

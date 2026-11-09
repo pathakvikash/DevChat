@@ -5,6 +5,7 @@ import Link from "next/link";
 import { Download, Lock, Search, Table2, Trash2 } from "lucide-react";
 import AppShell, { SidebarToggleButton } from "@/app/components/AppShell";
 import { useToast } from "@/app/components/Toast";
+import { kindsText } from "@/lib/workflows/privacy";
 import type { Column } from "@/lib/workflows/tables";
 import RowDrawer, { cellText, isHttpUrl, type TableRow } from "../components/RowDrawer";
 
@@ -15,6 +16,7 @@ interface Table {
   statuses: string[];
   rowCount: number;
   private: boolean;
+  privateKinds: string[];
 }
 
 const inputClass = "focus-ring glass-input rounded-[var(--glass-radius-md)] px-3 py-2 text-sm";
@@ -28,10 +30,10 @@ const MAX_PICK = 1000;
 const TOO_MANY = "You can change up to 1,000 rows at a time.";
 
 /** A checkbox with a 32px hit area around the 16px box. */
-function Tick({ label, checked, onChange }: { label: string; checked: boolean; onChange: (on: boolean) => void }) {
+function Tick({ label, checked, indeterminate, onChange }: { label: string; checked: boolean; indeterminate?: boolean; onChange: (on: boolean) => void }) {
   return (
     <label className="flex h-8 w-8 cursor-pointer items-center justify-center">
-      <input type="checkbox" aria-label={label} checked={checked} onChange={(e) => onChange(e.target.checked)} className="h-4 w-4" />
+      <input type="checkbox" aria-label={label} checked={checked} ref={(el) => { if (el) el.indeterminate = !!indeterminate; }} onChange={(e) => onChange(e.target.checked)} className="h-4 w-4" />
     </label>
   );
 }
@@ -215,7 +217,7 @@ export default function TablePage({ params }: { params: Promise<{ id: string }> 
                   <span className="glass inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 font-medium">
                     <Lock size={11} aria-hidden="true" /> Private
                   </span>
-                  <span>Filled from chats, MCP or a folder. Workflows can&apos;t send what is in it to the web.</span>
+                  <span>{`Filled from ${kindsText(table.privateKinds)}. Workflows can't send what is in it to the web.`}</span>
                 </p>
               )}
             </div>
@@ -267,19 +269,21 @@ export default function TablePage({ params }: { params: Promise<{ id: string }> 
               <table className="w-full min-w-max border-collapse text-left text-sm">
                 <thead className="sticky top-0 z-[2] bg-[var(--background)] text-xs text-zinc-300">
                   <tr className="border-b border-[var(--glass-border)]">
-                    <th scope="col" className={`${stickyCell} left-0 w-10 px-3 py-2`}>
+                    <th scope="col" className={`${stickyCell} left-0 w-14 px-3 py-2`}>
                       <Tick
                         label="Select all rows"
                         checked={allPicked}
-                        onChange={(on) => {
-                          if (on && visible.length > MAX_PICK) toast(TOO_MANY, "info");
-                          setPicked(on ? new Set(visible.slice(0, MAX_PICK).map((r) => r.id)) : new Set());
+                        indeterminate={picked.size > 0 && !allPicked}
+                        onChange={() => {
+                          // Anything ticked: one click clears it. Nothing ticked: tick the rows, at most 1,000 of them.
+                          if (picked.size === 0 && visible.length > MAX_PICK) toast(TOO_MANY, "info");
+                          setPicked(picked.size > 0 ? new Set() : new Set(visible.slice(0, MAX_PICK).map((r) => r.id)));
                         }}
                       />
                     </th>
                     {layout.map((l) =>
                       l.col ? (
-                        <th key={l.col.key} scope="col" className={`px-3 py-2 font-medium ${l.first ? `${stickyCell} left-10 ${firstCol}` : ""}`}>
+                        <th key={l.col.key} scope="col" className={`px-3 py-2 font-medium ${l.first ? `${stickyCell} left-14 ${firstCol}` : ""}`}>
                           {l.col.label || l.col.key}
                         </th>
                       ) : (
@@ -304,7 +308,7 @@ export default function TablePage({ params }: { params: Promise<{ id: string }> 
                         }
                         const c = l.col;
                         const text = cellText(r.data[c.key]);
-                        const sticky = l.first ? `${stickyCell} left-10 ${firstCol}` : "max-w-xs";
+                        const sticky = l.first ? `${stickyCell} left-14 ${firstCol}` : "max-w-xs";
                         let body: React.ReactNode = text;
                         if (c.type === "url" && isHttpUrl(text)) {
                           body = (

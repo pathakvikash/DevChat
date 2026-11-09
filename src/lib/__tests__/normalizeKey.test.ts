@@ -24,6 +24,17 @@ describe("normalizeKey", () => {
     expect(normalizeKey("https://a.test/p?utm_source=x&q=a%20b")).toBe("https://a.test/p?q=a+b");
   });
 
+  it("hashes on UTF-8 bytes, not characters: a non-ASCII URL grows when percent-encoded", () => {
+    const url = `https://a.test/${"é".repeat(324)}`; // 324 characters, over 2,000 bytes once percent-encoded
+    expect(url.length).toBeLessThan(1000);
+    expect(normalizeKey(url)).toMatch(/^sha256:[0-9a-f]{64}$/);
+    const cjk = "漢".repeat(999); // 999 characters, 2,997 bytes
+    expect(normalizeKey(cjk)).toMatch(/^sha256:[0-9a-f]{64}$/);
+    expect(normalizeKey(cjk)).toBe(normalizeKey(` ${cjk} `));
+    expect(normalizeKey("漢".repeat(300))).toBe("漢".repeat(300)); // 900 bytes: kept
+    expect(Buffer.byteLength(normalizeKey("漢".repeat(333)))).toBeLessThanOrEqual(1000);
+  });
+
   it("stores the sha256 of a key over 1,000 characters, and a short key as it is", () => {
     const long = `https://a.test/${"x".repeat(1200)}`;
     const k = normalizeKey(long);

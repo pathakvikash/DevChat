@@ -97,7 +97,7 @@ Design decisions (made in this doc):
 ### 2.2 News digest
 
 1. Click **New workflow → News digest** and fill in the **Topics** variable, one topic per line.
-2. Click **Run**. Web search runs one query per line. **Save to table** adds the results to "News", deduped by URL. **Filter** stops the run if nothing is new; the later cards show "Skipped: nothing new". **Digest** writes a short digest grouped by topic, with links. **Send to chat** posts it to a new chat called "News digest — 9 Nov". The chat appears in the sidebar, and the message is labelled From "News digest".
+2. Click **Run**. Web search runs one query per line. **Save to table** adds the results to "News", deduped by URL. **New articles** (a Filter on rows still marked `new`) stops the run if nothing is new; the later cards show "Skipped: Nothing left after New articles". **Digest** writes a short digest grouped by topic, with links. **Send to chat** posts it to a new chat called "News digest — 9 Nov". The chat appears in the sidebar, and the message is labelled From "News digest". **Mark as read** then sets those rows to `read`, so the next run digests only what is new again.
 3. Ask follow-ups in that chat as usual. To use RSS, replace Web search with **Fetch URL** in feed mode, once per feed URL.
 
 ---
@@ -354,7 +354,7 @@ Boards are fetched 5 at a time, each with a 15 s timeout. Each job comes out as 
 **Templates** (`src/lib/workflows/templates.ts`):
 
 - **Jobs:** `trigger` → `jobs` (jobBoards) → `save` (table upsert into "Job leads", key `url`) → `score` (agent, per item over `{{save.inserted}}`) → `scored` (table update: score, fit, status `{{item.status}}`) → `pick` (pickRows: shortlist, sorted by score) → `draft` (agent, per item over `{{pick.items}}`) → `drafts` (table update, status `drafted`).
-- **News:** `trigger` → `news` (webSearch, queries `{{vars.topics}}`) → `save` (table upsert into "News") → `fresh` (filter over `{{save.inserted}}`) → `digest` (agent) → `post` (chatMessage, new chat, `{{digest.text}}`).
+- **News:** `trigger` → `news` (webSearch, queries `{{vars.topics}}`) → `save` (table upsert into "News") → `fresh` (filter over `{{save.items}}`, keep status `new`) → `digest` (agent) → `post` (chatMessage, new chat, `{{digest.text}}`) → `mark` (table update, status `read`, over `{{fresh.items}}`).
 - **Phase-1 News:** `trigger` → `news` → `digest` (input `{{news.items}}`) → `post`.
 
 ---
@@ -788,7 +788,7 @@ Section 6.10 lists it. There is no shell, no file writes without the folder opt-
 - Generated flows are previewed and cleaned of risky settings (7).
 - An agent card cannot tick a chat-reading tool (`searchChats`, `readChat`) together with an outbound one (`fetchUrl`, `webSearch`). Save and Run both refuse it: "This card can read your chats and reach the web. Pick one, so a web page can't make it send your chats out."
 - The same holds across the flow: no card with an outbound tool, and no Web search or Fetch card, may come after a card that reads chats. Save and Run refuse it: "<card> reads your chats and a later card reaches the web. Split them into two workflows, so a web page can't make it send your chats out."
-- A table that a Save to table card fills after a card that reads private data (chats today; MCP and a CLI folder later) is marked **private**, for good. At Run, a card that reads a private table counts as one of those readers, so any later card that reaches the web is refused: "<table> holds private data …, and a later card reaches the web." The table list and view show a Private badge.
+- A table that a Save to table card fills after a card that reads private data (chats today; MCP and a CLI folder later) is marked **private**, for good, with the kinds of data it took in (`DataTable.privateFrom`). A Save card on a private table is itself such a reader, so a copy into a second table inherits the kinds. At Run, and again just before each Save card runs (which also covers Resume), a card that reads a private table with a card that reaches the web after it is refused: "<table> holds private data (it was filled from chats), and <card> reaches the web …". The table list and view show a Private badge naming the sources.
 - The worst outcome left is a bad draft, which the user reads before using.
 
 ### 10.6 Output safety
@@ -868,7 +868,7 @@ Sanity mode uses no network and no real model, following the precedent at `src/l
 - `feed.test.ts`: RSS 2.0, Atom, CDATA.
 
 **e2e** `tables.spec.ts`:
-- Run News twice. The table has no duplicates, and the second run shows Filter Done, then "Skipped: nothing new".
+- Run News twice. The table has no duplicates, and the second run shows Filter Done, then "Skipped: Nothing left after New articles".
 - The CSV download has the header and the rows.
 - Bulk status change.
 
