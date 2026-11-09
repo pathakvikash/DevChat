@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { testConnection, disconnectFromServer } from "@/lib/mcp/client";
-import { getPrismaMcp } from "@/lib/api/mcpServers";
+import { getPrismaMcp, redactAuthConfig } from "@/lib/api/mcpServers";
 import { requireUserId } from "@/lib/auth";
 
 export async function GET() {
@@ -16,7 +16,7 @@ export async function GET() {
         name: s.name,
         url: s.url,
         authType: s.authType,
-        authConfig: s.authConfig,
+        ...redactAuthConfig(s.authConfig),
         hasAuthToken: !!s.authToken,
         enabled: s.enabled,
         errorMsg: s.errorMsg,

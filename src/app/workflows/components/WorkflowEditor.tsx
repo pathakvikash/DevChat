@@ -290,7 +290,7 @@ export default function WorkflowEditor({ id }: { id: string }) {
   const graph = viewingPast && run ? run.graph : wf?.graph;
   const nodes: Record<string, CardRun> = run?.nodes ?? {};
   const issues = useMemo(() => (graph ? checkGraph(graph) : []), [graph]);
-  const invalid = useMemo(() => new Set(issues.map((i) => i.nodeId)), [issues]);
+  const invalid = useMemo(() => new Set(issues.filter((i) => !i.warning).map((i) => i.nodeId)), [issues]);
   const selected = graph?.nodes.find((n) => n.id === selectedId) ?? null;
 
   // Outputs of the cards before the selected one, for previews and the field picker. Each is fetched once per run.
@@ -367,6 +367,7 @@ export default function WorkflowEditor({ id }: { id: string }) {
   const interruptedCard = interruptedNode && run ? run.nodes[interruptedNode.id] : undefined;
   const panel = selected && env && (
     <ConfigPanel
+      key={selected.id}
       node={selected}
       graph={graph}
       card={nodes[selected.id]}

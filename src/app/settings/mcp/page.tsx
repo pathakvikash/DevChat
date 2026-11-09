@@ -13,7 +13,7 @@ import { useToast } from "@/app/components/Toast";
 
 interface McpServer {
   id: string; name: string; url: string; authType: string;
-  authConfig?: string; hasAuthToken: boolean; enabled: boolean;
+  authConfig?: string; hasApiKey?: boolean; hasClientSecret?: boolean; hasAuthToken: boolean; enabled: boolean;
   errorMsg?: string | null; lastPingAt?: string | null; createdAt: string;
 }
 
@@ -128,9 +128,9 @@ export default function McpSettingsPage() {
     if (server.authConfig) {
       try {
         const cfg = JSON.parse(server.authConfig);
-        apiKey = cfg.apiKey || "";
+        apiKey = "";
         clientId = cfg.clientId || "";
-        clientSecret = cfg.clientSecret || "";
+        clientSecret = "";
         scopes = cfg.scopes || "";
       } catch {}
     }
@@ -393,7 +393,7 @@ export default function McpSettingsPage() {
                 <label className="block text-sm font-medium text-zinc-300 mb-1">Client Secret</label>
                 <input type="password" value={form.clientSecret}
                   onChange={(e) => setForm({ ...form, clientSecret: e.target.value })}
-                  placeholder="from your OAuth app"
+                  placeholder={editingId && servers.find((s) => s.id === editingId)?.hasClientSecret ? "Saved. Leave blank to keep it" : "from your OAuth app"}
                   className="w-full glass-input rounded-[var(--glass-radius-md)] px-3 py-2 text-sm" />
               </div>
               <div>
@@ -490,7 +490,7 @@ export default function McpSettingsPage() {
                   <label className="block text-sm font-medium text-zinc-300 mb-1">API Key</label>
                   <input type="password" value={form.apiKey}
                     onChange={(e) => setForm({ ...form, apiKey: e.target.value })}
-                    placeholder="sk-..." className="w-full glass-input rounded-[var(--glass-radius-md)] px-3 py-2 text-sm" />
+                    placeholder={editingId && servers.find((s) => s.id === editingId)?.hasApiKey ? "Saved. Leave blank to keep it" : "sk-..."} className="w-full glass-input rounded-[var(--glass-radius-md)] px-3 py-2 text-sm" />
                 </div>
               )}
 

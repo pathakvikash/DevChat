@@ -44,7 +44,7 @@ test("a chat-reading card before an MCP card is refused at save, and an MCP card
   graph.nodes.push(mcpCard("digest"));
   const refused = await request.patch(`/api/workflows/${id}`, { data: { graph } });
   expect(refused.status()).toBe(400);
-  expect((await refused.json()).error).toContain("reads your chats and a later card reaches the web");
+  expect((await refused.json()).error).toContain("reads private data (chats, MCP or a folder) and a later card reaches the web");
 
   digest.config.tools = [];
   expect((await request.patch(`/api/workflows/${id}`, { data: { graph } })).ok()).toBe(true);

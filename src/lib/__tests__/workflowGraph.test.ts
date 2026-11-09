@@ -97,7 +97,7 @@ describe("chat-reading plus outbound tools", () => {
 });
 
 describe("chat data flowing to a card that reaches the web", () => {
-  const leak = (name: string) => `${name} reads your chats and a later card reaches the web. Split them into two workflows, so a web page can't make it send your chats out.`;
+  const leak = (name: string) => `${name} reads private data (chats, MCP or a folder) and a later card reaches the web. Split them into two workflows, so a web page can't make it send your data out.`;
   const reader = (id: string, from: string[], x: number) => node(id, from, x, 0, "agent", { tools: ["readChat"] });
 
   it("refuses a later agent with an outbound tool, even through a card in between", () => {

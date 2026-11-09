@@ -36,7 +36,7 @@ export const mcpToolCard: CardImpl = {
       for (const m of r.missing) if (warnings.length < 10) warnings.push(`{{${m}}} was empty`);
     }
 
-    const result = await callServerTool(server.id, tool, args);
+    const result = await callServerTool(server.id, tool, args, { signal: c.signal });
     const text = result.content
       .filter((p): p is { type: "text"; text: string } => !!p && (p as { type?: unknown }).type === "text" && typeof (p as { text?: unknown }).text === "string")
       .map((p) => p.text)

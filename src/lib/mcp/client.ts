@@ -66,7 +66,12 @@ async function connectToServer(serverId: string): Promise<void> {
   clientCache.set(serverId, { client, transport });
 }
 
+/** A server's tool list is kept this long, so a workflow run lists it once, not once per item or per check. */
+const TOOLS_TTL_MS = 30_000;
+const toolsCache = new Map<string, { at: number; tools: McpTool[] }>();
+
 export async function disconnectFromServer(serverId: string): Promise<void> {
+  toolsCache.delete(serverId);
   const entry = clientCache.get(serverId);
   if (!entry) return;
   try { await entry.transport.close(); } catch {}
@@ -74,32 +79,34 @@ export async function disconnectFromServer(serverId: string): Promise<void> {
   clientCache.delete(serverId);
 }
 
-export async function listServerTools(serverId: string): Promise<McpTool[]> {
+export async function listServerTools(serverId: string, opts: { fresh?: boolean } = {}): Promise<McpTool[]> {
+  const hit = toolsCache.get(serverId);
+  if (!opts.fresh && hit && Date.now() - hit.at < TOOLS_TTL_MS) return hit.tools;
   await connectToServer(serverId);
   const entry = clientCache.get(serverId);
   if (!entry) throw new Error(`MCP server "${serverId}" not connected`);
 
   const result = await entry.client.listTools();
-  return result.tools.map((t) => ({
+  const tools = result.tools.map((t) => ({
     name: t.name,
     description: t.description,
     inputSchema: t.inputSchema,
   }));
+  toolsCache.set(serverId, { at: Date.now(), tools });
+  return tools;
 }
 
 export async function callServerTool(
   serverId: string,
   toolName: string,
   args: Record<string, unknown>,
+  opts: { signal?: AbortSignal } = {},
 ): Promise<McpCallResult> {
   await connectToServer(serverId);
   const entry = clientCache.get(serverId);
   if (!entry) throw new Error(`MCP server "${serverId}" not connected`);
 
-  const result = await entry.client.callTool({
-    name: toolName,
-    arguments: args,
-  });
+  const result = await entry.client.callTool({ name: toolName, arguments: args }, undefined, { signal: opts.signal });
 
   return {
     content: result.content as unknown[],

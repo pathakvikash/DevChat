@@ -46,7 +46,7 @@ describe("mcpTool card", () => {
   it("calls the tool with rendered args and keeps parsed JSON as data", async () => {
     callServerTool.mockResolvedValue({ content: [{ type: "text", text: '{"id":7}' }] });
     const r = await mcpToolCard.run(cardCtx(cfg));
-    expect(callServerTool).toHaveBeenCalledWith("s1", "create_issue", { title: "Hi https://a.test", n: 1 });
+    expect(callServerTool).toHaveBeenCalledWith("s1", "create_issue", { title: "Hi https://a.test", n: 1 }, { signal: expect.any(AbortSignal) });
     expect(r.output).toEqual({ text: '{"id":7}', data: { id: 7 } });
   });
 
@@ -125,8 +125,8 @@ describe("MCP counts as reaching the web", () => {
   it("refuses a chat-reading card upstream of an MCP tool card", () => {
     const g = graphOf(reader, node("push", ["reader"], "mcpTool", { serverId: "s1", tool: "t" }));
     expect(chatLeaks(g).map((l) => l.nodeId)).toEqual(["reader"]);
-    expect(validateStructure(g).join()).toMatch(/reads your chats and a later card reaches the web/);
-    expect(checkGraph(g).some((i) => /reads your chats/.test(i.message))).toBe(true);
+    expect(validateStructure(g).join()).toMatch(/reads private data .* a later card reaches the web/);
+    expect(checkGraph(g).some((i) => /reads private data/.test(i.message))).toBe(true);
   });
 
   it("refuses a chat-reading card upstream of an agent with an MCP tool", () => {

@@ -7,7 +7,7 @@ export type CardCategory = "Start" | "Get data" | "AI" | "Output";
 export interface FieldSpec {
   key: string;
   label: string;
-  kind: "template" | "textarea" | "text" | "select" | "number" | "model" | "tools" | "outputFields" | "chat" | "perItem" | "mcpTools" | "mcpServer" | "args" | "folder" | "allowEdits";
+  kind: "template" | "textarea" | "text" | "select" | "number" | "model" | "tools" | "outputFields" | "chat" | "perItem" | "mcpTools" | "mcpServer" | "mcpToolName" | "args" | "folder" | "allowEdits";
   help?: string;
   options?: { value: string; label: string }[];
   rows?: number;
@@ -138,23 +138,47 @@ const CHAT_READ_TOOLS: string[] = ["searchChats", "readChat"];
 const OUTBOUND_TOOLS: string[] = ["fetchUrl", "webSearch"];
 export const TOOL_CONFLICT_MESSAGE = "This card can read your chats and reach the web. Pick one, so a web page can't make it send your chats out.";
 
+type Cfg = Record<string, unknown>;
+const toolList = (c: Cfg): string[] => (Array.isArray(c.tools) ? (c.tools as string[]) : []);
+
+/** A command-line model with a folder: Claude Code and OpenCode get their own web tools once they have a folder, and it can read the folder. */
+export const hasCliFolder = (type: string, config: Cfg, defaultModel = ""): boolean =>
+  type === "agent" && !!config.folder && isCliModelId(String(config.model || defaultModel));
+
 /** Whether the card reads chats (an agent with a chat-reading tool). */
-export const readsChats = (type: string, config: Record<string, unknown>): boolean =>
-  type === "agent" && Array.isArray(config.tools) && config.tools.some((t) => CHAT_READ_TOOLS.includes(t));
+export const readsChats = (type: string, config: Cfg): boolean => type === "agent" && toolList(config).some((t) => CHAT_READ_TOOLS.includes(t));
 
-/** Whether the card can send data to the web: an agent with an outbound tool, or a web search / fetch card. */
-/** MCP servers can make network calls, so an MCP tool card, or an agent with any MCP tool, counts as reaching the web. */
-export const reachesWeb = (type: string, config: Record<string, unknown>): boolean =>
-  type === "webSearch" ||
-  type === "fetch" ||
-  type === "mcpTool" ||
-  (type === "agent" && ((Array.isArray(config.tools) && config.tools.some((t) => OUTBOUND_TOOLS.includes(t))) || mcpToolIds(config).length > 0));
+/** Whether the card uses MCP: the MCP tool card, or an agent with any MCP tool. */
+export const usesMcp = (type: string, config: Cfg): boolean => type === "mcpTool" || (type === "agent" && mcpToolIds(config).length > 0);
 
-/** A card that reads chats must not also reach the web: a page it reads could steer it into sending chat text out. */
-export const hasToolConflict = (tools: unknown, mcpTools: unknown = []): boolean =>
+/** Private data a card can read: chats, MCP servers, or a folder. */
+export const readsPrivate = (type: string, config: Cfg, defaultModel = ""): boolean =>
+  readsChats(type, config) || usesMcp(type, config) || hasCliFolder(type, config, defaultModel);
+
+/** The open web: a search or fetch card, an agent with a web tool, or a CLI agent with a folder (its own web tools). */
+export const reachesOpenWeb = (type: string, config: Cfg, defaultModel = ""): boolean =>
+  type === "webSearch" || type === "fetch" || (type === "agent" && toolList(config).some((t) => OUTBOUND_TOOLS.includes(t))) || hasCliFolder(type, config, defaultModel);
+
+/** Can send data out: the open web, or MCP (servers can make network calls). */
+export const reachesWeb = (type: string, config: Cfg, defaultModel = ""): boolean => reachesOpenWeb(type, config, defaultModel) || usesMcp(type, config);
+
+/** Whether `later` may come after `earlier` (reader). A private reader must not feed a card that reaches the web,
+ *  except MCP followed by MCP: both are servers the user set up themselves. */
+export const leaksTo = (earlier: { type: string; config: Cfg }, later: { type: string; config: Cfg }, defaultModel = ""): boolean => {
+  if (!readsPrivate(earlier.type, earlier.config, defaultModel) || !reachesWeb(later.type, later.config, defaultModel)) return false;
+  const mcpToMcp =
+    !readsChats(earlier.type, earlier.config) && !hasCliFolder(earlier.type, earlier.config, defaultModel) && !reachesOpenWeb(later.type, later.config, defaultModel);
+  return !mcpToMcp;
+};
+
+export const PRIVATE_LEAK_MESSAGE = (label: string) =>
+  `${label} reads private data (chats, MCP or a folder) and a later card reaches the web. Split them into two workflows, so a web page can't make it send your data out.`;
+
+/** A card that reads chats must not also reach the web, use MCP or have a folder: a page it reads could steer it into sending chat text out. */
+export const hasToolConflict = (tools: unknown, mcpTools: unknown = [], folder = false): boolean =>
   Array.isArray(tools) &&
   tools.some((t) => CHAT_READ_TOOLS.includes(t)) &&
-  (tools.some((t) => OUTBOUND_TOOLS.includes(t)) || (Array.isArray(mcpTools) && mcpTools.length > 0));
+  (tools.some((t) => OUTBOUND_TOOLS.includes(t)) || (Array.isArray(mcpTools) && mcpTools.length > 0) || folder);
 
 const agent: CardDef = {
   type: "agent",
@@ -234,12 +258,12 @@ const mcpTool: CardDef = {
   defaults: () => ({ serverId: "", tool: "", args: {}, perItem: false, items: "", maxItems: DEFAULT_MAX_ITEMS }),
   fields: [
     { key: "serverId", label: "MCP server", kind: "mcpServer" },
-    { key: "tool", label: "Tool", kind: "text", help: "The tool's name on that server." },
+    { key: "tool", label: "Tool", kind: "mcpToolName", help: "Pick a tool from that server." },
     { key: "args", label: "Arguments", kind: "args", help: "Values can use templates such as {{item.url}}." },
     ...perItemFields,
   ],
   perItem: true,
-  outputs: () => ["text", "data"],
+  outputs: (c) => (c.perItem === true ? ["items", "count", "failed"] : ["text", "data"]),
   summary: (c) => (c.tool ? `Calls ${trim(c.tool, 40)}` : "No tool picked yet"),
 };
 

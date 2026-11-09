@@ -17,6 +17,7 @@ let workflowRow: any = null;
 const chats = new Set<string>();
 vi.mock("@/lib/db", () => ({
   prisma: {
+    mcpServer: { findFirst: vi.fn(async () => ({ id: "s1", name: "gh" })) },
     workflow: { findFirst: vi.fn(async ({ where }: any) => (workflowRow && workflowRow.id === where.id && workflowRow.userId === where.userId ? workflowRow : null)) },
     conversation: { findFirst: vi.fn(async ({ where }: any) => (chats.has(where.id) ? { id: where.id } : null)) },
     workflowRun: {
@@ -50,10 +51,14 @@ vi.mock("@/lib/db", () => ({
     },
   },
 }));
+const callServerTool = vi.fn();
+vi.mock("@/lib/mcp/client", () => ({ listServerTools: vi.fn(async () => [{ name: "create_issue" }]), callServerTool: (...a: unknown[]) => callServerTool(...a) }));
+vi.mock("@/lib/hostAccess", () => ({ canUseHostTools: vi.fn(async () => true), HOST_TOOLS_REFUSED: "This is only available to the server's owner." }));
 vi.mock("@/lib/workflows/cards/agent", async (orig) => ({ ...(await orig<object>()), resolveAgentModel: vi.fn() }));
 
 import { advanceRun, cancelRun, capOutput, resetShutdownForTests, resumeRun, startRun, stopAllRuns, sweepOrphans, type RunnerDeps } from "@/lib/workflows/runner";
 import { resolveAgentModel } from "@/lib/workflows/cards/agent";
+import { mcpToolCard } from "@/lib/workflows/cards/mcpTool";
 import { emptyGraph, type CardRun, type FlowNode, type WorkflowGraph } from "@/lib/workflows/graph";
 import type { CardCtx, CardImpl } from "@/lib/workflows/cards";
 
@@ -243,6 +248,26 @@ describe("advanceRun", () => {
       expect(out.count).toBe(25);
       expect(out.items[0]).toEqual({ url: "u0", score: 1 }); // item fields stay, the card's result is added, index is 1-based
       expect(a.usage).toEqual({ inputTokens: 25, outputTokens: 25 });
+    });
+
+    it("runs an MCP tool card once per item, fails an item on isError, and merges the result into the item", async () => {
+      callServerTool.mockReset();
+      callServerTool.mockImplementation(async (_s: string, _t: string, args: { title: string }) =>
+        args.title === "u2" ? { content: [{ type: "text", text: "no" }], isError: true } : { content: [{ type: "text", text: `{"ok":"${args.title}"}` }] },
+      );
+      const g = graphOf({ id: "m", type: "mcpTool", fromIds: ["trigger"], config: { serverId: "s1", tool: "create_issue", args: { title: "{{item.url}}" }, perItem: true, items: "{{trigger.list}}" }, ui: { label: "M", position: { x: 1, y: 0 } } });
+      const { deps: d } = deps(() => ({ output: {} }));
+      d.cards.mcpTool = mcpToolCard;
+      d.cards.trigger = triggerWith([{ url: "u1" }, { url: "u2" }, { url: "u3" }]);
+      seedRun(g);
+      await advanceRun("run1", d);
+      const m = nodesOf().m;
+      expect(m.status).toBe("succeeded");
+      expect(m.itemErrors).toEqual([{ index: 2, error: "no" }]);
+      const out = m.output as { items: Record<string, unknown>[]; count: number; failed: number };
+      expect(out).toMatchObject({ count: 2, failed: 1 });
+      expect(out.items[0]).toMatchObject({ url: "u1", text: '{"ok":"u1"}', data: { ok: "u1" } });
+      expect(callServerTool).toHaveBeenCalledTimes(3);
     });
 
     it("leaves failed items out and lists them; fails the card when every item fails; skips on an empty list", async () => {

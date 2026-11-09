@@ -786,8 +786,10 @@ Section 6.10 lists it. There is no shell, no file writes without the folder opt-
 - Card data reaches agents fenced (5.1, 6.10). The system prompt marks fenced blocks, tool results and pages as data.
 - Messages sent to chats are framed as coming from a workflow (decision 18).
 - Generated flows are previewed and cleaned of risky settings (7).
-- An agent card cannot tick a chat-reading tool (`searchChats`, `readChat`) together with an outbound one (`fetchUrl`, `webSearch`). Save and Run both refuse it: "This card can read your chats and reach the web. Pick one, so a web page can't make it send your chats out."
-- The same holds across the flow: no card with an outbound tool, and no Web search or Fetch card, may come after a card that reads chats. Save and Run refuse it: "<card> reads your chats and a later card reaches the web. Split them into two workflows, so a web page can't make it send your chats out."
+- **Private readers** are cards that can read data the web must not see: a chat-reading tool (`searchChats`, `readChat`), the MCP tool card, an agent with any MCP tool, and an agent on a CLI model with a folder. **Web reachers** are Web search and Fetch cards, an agent with `fetchUrl` or `webSearch`, an MCP card or agent with MCP tools (servers can make network calls), and a CLI agent with a folder (Claude Code and OpenCode get their own web tools once they have one).
+- An agent card cannot read chats and also reach the web, use MCP or have a CLI folder. Save and Run refuse it: "This card can read your chats and reach the web. Pick one, so a web page can't make it send your chats out." MCP with a web tool on one card is allowed, with a warning ("This card reads web pages and can act through MCP. A page could try to steer it.").
+- Across the flow, no web reacher may come after a private reader. Save and Run refuse it: "<card> reads private data (chats, MCP or a folder) and a later card reaches the web. Split them into two workflows, so a web page can't make it send your data out." One exception: MCP followed by MCP is allowed with a warning, because both are servers the user set up (read issues, then post to Slack). The warning also shows on an MCP card that follows a card reaching the open web.
+- The folder and `allowEdits` are cleared when the card's model is not a CLI model, and `allowEdits` is cleared with the folder.
 - The worst outcome left is a bad draft, which the user reads before using.
 
 ### 10.6 Output safety
