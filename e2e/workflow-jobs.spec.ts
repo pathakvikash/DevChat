@@ -100,7 +100,9 @@ test("Run pauses at Pick rows; in the table tick two rows and Continue run (2) d
   const { rows } = await leads(request);
   expect(rows.filter((r) => r.status === "drafted").map((r) => r.data.title).sort()).toEqual([SECOND, FIRST].sort());
   expect(rows.filter((r) => r.status === "new")).toHaveLength(7);
-  expect(byTitle(rows, FIRST).data).toMatchObject({ coverLetter: "mock coverLetter", cvNotes: "mock cvNotes", answers: "mock answers", applyUrl: "mock applyUrl" });
+  expect(byTitle(rows, FIRST).data).toMatchObject({ coverLetter: "mock coverLetter", cvNotes: "mock cvNotes", answers: "mock answers" });
+  // the apply link is the board's own URL (set by the flow), not something the model wrote
+  expect(byTitle(rows, FIRST).data.applyUrl).toBe(byTitle(rows, FIRST).data.url);
   expect(byTitle(rows, FIRST).data.url).toMatch(/^https:\/\/jobs\.ashbyhq\.com\/supabase\//);
 });
 
@@ -128,7 +130,7 @@ test("a drafted row's drawer shows the cover letter with a Copy button", async (
   await expect(drawer.getByRole("button", { name: "Copy Cover letter" })).toHaveText("Copied");
   expect(await page.evaluate(() => navigator.clipboard.readText())).toBe("mock coverLetter");
   // the job link is a link, and nothing in the flow submitted anything
-  await expect(drawer.getByRole("link", { name: /^https:\/\/jobs\.ashbyhq\.com\/supabase\// })).toBeVisible();
+  await expect(drawer.getByRole("link", { name: /^https:\/\/jobs\.ashbyhq\.com\/supabase\// })).toHaveCount(2); // URL and Apply link: the same address
 });
 
 test("Cancel run while waiting ends the run as Cancelled and picks nothing", async ({ page, request }) => {

@@ -17,7 +17,7 @@ import {
   type WorkflowGraph,
 } from "./graph";
 import { renderTemplate, type TemplateContext } from "./template";
-import { loadTable, offeredRows } from "./tables";
+import { loadTable, offeredRows, toTableInfo } from "./tables";
 
 export const RUN_LIMIT_MS = 30 * 60_000;
 export const HEARTBEAT_MS = 15_000;
@@ -214,14 +214,23 @@ async function execCard(
     const o = CATALOG[node.type].perItem && config.perItem === true ? await runItems({ impl, base, onProgress, resume: extra.resume, tokens: extra.tokens }) : await impl.run(base);
     // Pick rows: paused until the user hands it rows (continueRun).
     if (o.wait) return { status: "waiting", startedAt, waiting: o.wait, ...(o.warnings?.length ? { warnings: o.warnings.slice(0, 10) } : {}) };
+    const output = capOutput(o.output);
+    const warnings = [...(o.warnings ?? [])];
+    if (isObject(output) && output.truncated === true) {
+      const kept = Array.isArray(output.items) ? output.items.length : undefined;
+      const total = isObject(o.output) && Array.isArray(o.output.items) ? o.output.items.length : undefined;
+      warnings.unshift(kept !== undefined && total !== undefined ? `Kept the first ${kept} of ${total} items: output over 200 KB` : "Output over 200 KB was cut");
+      // `count` says what was kept, not what was found.
+      if (kept !== undefined && "count" in output) output.count = kept;
+    }
     return {
       status: o.skip ? "skipped" : "succeeded",
       startedAt,
       endedAt: new Date().toISOString(),
-      output: capOutput(o.output),
+      output,
       ...(o.skip ? { skippedReason: o.skip } : {}),
       ...(o.stop ? { stopReason: o.stop } : {}),
-      ...(o.warnings?.length ? { warnings: o.warnings.slice(0, 10) } : {}),
+      ...(warnings.length ? { warnings: warnings.slice(0, 10) } : {}),
       ...(o.usage ? { usage: o.usage } : {}),
       ...(o.log ? { log: o.log.slice(-20) } : {}),
       ...(o.items ? { items: o.items } : {}),
@@ -311,7 +320,11 @@ export async function advanceRun(runId: string, deps: RunnerDeps = defaultDeps):
       // since Start, and a Resume never went through the Start checks.
       if (node.type === "table" || node.type === "pickRows") {
         // If the check itself fails, the card does not run: it cannot be shown that the table is safe to read.
-        const blocked = await privateBlock(run.userId, graph, node).catch(() => "Couldn't check whether this table holds private data. Run it again.");
+        // A Save card first marks its table with what this graph has put in it (a table that turned private while the run
+        // waited passes its kinds on to later Save targets), then the check reads the marks.
+        const blocked = await (node.type === "table" ? markPrivateTables(run.userId, graph) : Promise.resolve())
+          .then(() => privateBlock(run.userId, graph, node))
+          .catch(() => "Couldn't check whether this table holds private data. Run it again.");
         if (blocked) {
           nodes[node.id] = { status: "failed", startedAt: new Date().toISOString(), endedAt: new Date().toISOString(), error: blocked };
           if (!(await save())) return;
@@ -381,7 +394,7 @@ export async function advanceRun(runId: string, deps: RunnerDeps = defaultDeps):
 
 export type StartResult =
   | { ok: true; runId: string }
-  | { ok: false; status: 400 | 404 | 409 | 429; error: string; runId?: string; errors?: { nodeId: string; message: string }[] };
+  | { ok: false; status: 400 | 404 | 409 | 429 | 503; error: string; runId?: string; errors?: { nodeId: string; message: string }[] };
 
 /** The two caps (6.9) shared by Start and Resume. */
 async function checkCaps(userId: string, workflowId: string, exceptRunId?: string): Promise<StartResult | null> {
@@ -544,6 +557,8 @@ export async function resumeRun(userId: string, runId: string): Promise<StartRes
   return { ok: true, runId };
 }
 
+class RowsChanged extends Error {}
+
 /**
  * Continue (6.4): the user ticked rows for the waiting Pick rows card. The ids are checked again here: they must be rows
  * of the card's table that still have one of the offered statuses, and no more than `maxPick`. Zero rows is allowed
@@ -565,9 +580,10 @@ export async function continueRun(userId: string, runId: string, nodeId: string,
   const ids = [...new Set(rowIds as string[])];
   if (ids.length > w.maxPick) return { ok: false, status: 400, error: `Pick at most ${w.maxPick} ${w.maxPick === 1 ? "row" : "rows"}.` };
 
+  // A table deleted while the run waited can still be continued with none: the cards after the card are skipped.
   const table = await loadTable(userId, w.tableId);
-  if (!table) return { ok: false, status: 400, error: "The table no longer exists." };
-  const picked = ids.length > 0 ? await offeredRows(table.id, w.statuses, ids) : [];
+  if (!table && ids.length > 0) return { ok: false, status: 400, error: "The table no longer exists." };
+  const picked = table && ids.length > 0 ? await offeredRows(table.id, w.statuses, ids) : [];
   if (picked.length !== ids.length) {
     return { ok: false, status: 400, error: "Some of those rows are not in this table or no longer have a status that is on offer. Reload the table and pick again." };
   }
@@ -575,7 +591,13 @@ export async function continueRun(userId: string, runId: string, nodeId: string,
   const graph = parseGraph(run.graph);
   const node = graph.nodes.find((n) => n.id === nodeId);
   // The table may have turned private since the card started waiting: the run fails here, as it would at the card.
-  const blocked = node ? await privateBlock(userId, graph, node).catch(() => "Couldn't check whether this table holds private data. Try again.") : null;
+  // A check that itself fails is not a block: the run stays waiting and the user can try again.
+  let blocked: string | null = null;
+  try {
+    if (node) blocked = await privateBlock(userId, graph, node);
+  } catch {
+    return { ok: false, status: 503, error: "Couldn't check whether this table holds private data. Try again." };
+  }
   const now = new Date().toISOString();
   if (blocked) {
     nodes[nodeId] = { status: "failed", startedAt: waiting.startedAt, endedAt: now, error: blocked };
@@ -594,20 +616,32 @@ export async function continueRun(userId: string, runId: string, nodeId: string,
     output: { items, count: items.length },
     ...(items.length === 0 ? { stopReason: "Nothing picked" } : {}),
   };
-  const won = await prisma.$transaction(async (tx) => {
-    const r = await tx.workflowRun.updateMany({
-      where: { id: runId, userId, state: "waiting" },
-      // attempt + 1: a loop that is somehow still winding down can no longer save over this one.
-      data: { nodes: JSON.stringify(nodes), state: "running", error: null, heartbeatAt: new Date(), attempt: { increment: 1 } },
+  const STALE_ROWS = "Some of those rows changed while you were picking. Reload the table and pick again.";
+  let outcome: "won" | "lost" | "rows";
+  try {
+    outcome = await prisma.$transaction(async (tx) => {
+      const r = await tx.workflowRun.updateMany({
+        where: { id: runId, userId, state: "waiting" },
+        // attempt + 1: a loop that is somehow still winding down can no longer save over this one.
+        data: { nodes: JSON.stringify(nodes), state: "running", error: null, heartbeatAt: new Date(), attempt: { increment: 1 } },
+      });
+      if (r.count === 0) return "lost" as const;
+      if (table && items.length > 0 && w.setStatus) {
+        // Only rows that still have an offered status: a row that moved on since the check above rolls the whole thing back.
+        const u = await tx.dataTableRow.updateMany({ where: { tableId: table.id, id: { in: ids }, status: { in: w.statuses } }, data: { status: w.setStatus } });
+        if (u.count !== ids.length) throw new RowsChanged();
+        const fresh = await tx.dataTable.findFirst({ where: { id: table.id, userId } });
+        const have = fresh ? toTableInfo(fresh).statuses : table.statuses;
+        if (!have.includes(w.setStatus)) await tx.dataTable.update({ where: { id: table.id }, data: { statuses: JSON.stringify([...have, w.setStatus]) } });
+      }
+      return "won" as const;
     });
-    if (r.count === 0) return false;
-    if (items.length > 0 && w.setStatus) {
-      await tx.dataTableRow.updateMany({ where: { tableId: table.id, id: { in: ids } }, data: { status: w.setStatus } });
-      if (!table.statuses.includes(w.setStatus)) await tx.dataTable.update({ where: { id: table.id }, data: { statuses: JSON.stringify([...table.statuses, w.setStatus]) } });
-    }
-    return true;
-  });
-  if (!won) return { ok: false, status: 409, error: "Another request already continued this run." };
+  } catch (e) {
+    if (!(e instanceof RowsChanged)) throw e;
+    outcome = "rows";
+  }
+  if (outcome === "lost") return { ok: false, status: 409, error: "Another request already continued this run." };
+  if (outcome === "rows") return { ok: false, status: 409, error: STALE_ROWS };
   return { ok: true, runId };
 }
 

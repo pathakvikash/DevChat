@@ -84,12 +84,14 @@ export const isTemplateKind = (k: unknown): k is TemplateKind => k === "blank" |
 
 /** Instructions of the Draft application preset (4). The profile is the user's own text; the job is fenced data. */
 export const DRAFT_INSTRUCTIONS =
-  "Draft, never submit. Using my profile, write a cover letter under 250 words, 3–5 notes on tailoring my CV, and answers to the form's questions (fetch the job page; if it lists none, answer 'Why this company?' and 'Why you?'). Don't invent experience. If my profile is empty, say so in the cover letter instead of making one up.\n\nMy profile: {{vars.profile}}";
+  "Draft, never submit. Using my profile, write a cover letter under 250 words, 3–5 notes on tailoring my CV, and answers to the form's likely questions (the job is in the input; if it names none, answer 'Why this company?' and 'Why you?'). Don't invent experience. If my profile is empty, say so in the cover letter instead of making one up.\n\nMy profile: {{vars.profile}}";
 
 /**
  * The Jobs template: the public boards → save to the Job leads table (new jobs only get status `new`) → pause and pick →
- * a draft for each picked job (cover letter, CV notes, form answers, apply link) → save the drafts and mark the rows
- * `drafted`. Nothing is submitted: the draft card has only `fetchUrl`, and the user applies on the company's site.
+ * a draft for each picked job (cover letter, CV notes, form answers) → save the drafts (with the board's own link as the
+ * apply link) and mark the rows `drafted`. Nothing is submitted, and the draft card has no tools at all: it sees the
+ * user's profile next to untrusted job text, so it must not be able to reach the web (a page, or the text of a posting,
+ * could otherwise steer it into sending the profile out in a request). The job's description is already in its input.
  */
 function jobs(defaultModel: string, tableId: string): WorkflowGraph {
   const g = emptyGraph(defaultModel);
@@ -105,7 +107,7 @@ function jobs(defaultModel: string, tableId: string): WorkflowGraph {
         titleExclude: "Intern",
         locationAllow: "Remote",
         locationBlock: "",
-        maxItems: 200,
+        maxItems: 60,
       },
       ui: { label: "Job boards", position: { x: 280, y: 0 } },
     },
@@ -121,7 +123,7 @@ function jobs(defaultModel: string, tableId: string): WorkflowGraph {
       id: "pick",
       type: "pickRows",
       fromIds: ["save"],
-      config: { tableId, statuses: "new", sortBy: "", maxPick: 10, message: "Draft application", setStatus: "picked" },
+      config: { tableId, statuses: "new,picked", sortBy: "", maxPick: 10, message: "Draft application", setStatus: "picked" },
       ui: { label: "Pick jobs", position: { x: 840, y: 0 } },
     },
     {
@@ -132,12 +134,11 @@ function jobs(defaultModel: string, tableId: string): WorkflowGraph {
         instructions: DRAFT_INSTRUCTIONS,
         input: "{{item}}",
         model: "",
-        tools: ["fetchUrl"],
+        tools: [],
         outputFields: [
           { name: "coverLetter", type: "text", description: "The cover letter, under 250 words" },
           { name: "cvNotes", type: "text", description: "3 to 5 notes on tailoring my CV to this job" },
           { name: "answers", type: "text", description: "Answers to the application form's questions" },
-          { name: "applyUrl", type: "text", description: "The link to apply" },
         ],
         preset: "Draft application",
         perItem: true,
@@ -160,7 +161,7 @@ function jobs(defaultModel: string, tableId: string): WorkflowGraph {
           { column: "coverLetter", value: "{{item.coverLetter}}" },
           { column: "cvNotes", value: "{{item.cvNotes}}" },
           { column: "answers", value: "{{item.answers}}" },
-          { column: "applyUrl", value: "{{item.applyUrl}}" },
+          { column: "applyUrl", value: "{{item.url}}" },
         ],
         status: "drafted",
       },

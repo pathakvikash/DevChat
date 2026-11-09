@@ -6,12 +6,15 @@ const safeFetch = vi.fn();
 vi.mock("@/lib/net/safeFetch", () => ({ safeFetch: (...a: unknown[]) => safeFetch(...a), SafeFetchError: class extends Error {} }));
 let sanity = false;
 vi.mock("@/lib/sanityMode", () => ({ isSanityMode: () => sanity }));
+// capOutput lives in the runner, which imports the database; nothing here queries it.
+vi.mock("@/lib/db", () => ({ prisma: {} }));
 
-import { boardLines, detectBoard, jobPasses, parseBoard, type Board, type Job } from "@/lib/workflows/jobBoards";
+import { boardLines, DESCRIPTION_CHARS, detectBoard, jobPasses, parseBoard, type Board, type Job } from "@/lib/workflows/jobBoards";
+import { capOutput } from "@/lib/workflows/runner";
 import { jobBoardsCard } from "@/lib/workflows/cards/jobBoards";
 import { buildTemplate } from "@/lib/workflows/templates";
 import { checkGraph } from "@/lib/workflows/graph";
-import { reachesOpenWeb, reachesWeb } from "@/lib/workflows/catalog";
+import { DEFAULT_MAX_JOBS, reachesOpenWeb, reachesWeb } from "@/lib/workflows/catalog";
 import type { CardCtx } from "@/lib/workflows/cards";
 
 const fx = (name: string): unknown => JSON.parse(readFileSync(path.join(process.cwd(), "e2e/fixtures/workflows", name), "utf8"));
@@ -39,6 +42,7 @@ describe("detectBoard (the cases of scan.mjs detectApi)", () => {
   it("Greenhouse: job-boards, the EU host, the old boards host, and the API address", () => {
     const api = "https://boards-api.greenhouse.io/v1/boards/vercel/jobs?content=true";
     expect(board("https://job-boards.greenhouse.io/vercel")).toEqual({ type: "greenhouse", org: "vercel", apiUrl: api });
+    // Checked against the real network on 2026-11-10: there is no boards-api.eu.greenhouse.io, and EU companies' boards answer on the main API host.
     expect(board("https://job-boards.eu.greenhouse.io/vercel").apiUrl).toBe(api);
     expect(board("https://boards.greenhouse.io/vercel/jobs/6231864004").apiUrl).toBe(api);
     expect(board("https://boards-api.greenhouse.io/v1/boards/vercel/jobs").apiUrl).toBe(api);
@@ -133,6 +137,8 @@ describe("title and location rules", () => {
 const ctx = (config: Record<string, unknown>, signal = new AbortController().signal) =>
   ({ config: { boards: "", titleInclude: "", titleExclude: "", locationAllow: "", locationBlock: "", maxItems: 200, ...config }, tctx: {}, signal }) as unknown as CardCtx;
 const ok = (body: unknown) => ({ status: 200, ok: true, url: "", contentType: "application/json", text: JSON.stringify(body) });
+/** The answer of safeFetch: `url` is where it ended up, which must be the host asked for. */
+const reply = (r: object) => async (url: string) => ({ ...r, url });
 
 beforeEach(() => {
   safeFetch.mockReset();
@@ -141,7 +147,7 @@ beforeEach(() => {
 
 describe("the Job boards card", () => {
   it("fetches each board's API address through safeFetch and keeps the matching jobs, deduped by link", async () => {
-    safeFetch.mockImplementation(async (url: string) => ok(url.includes("greenhouse") ? GH : url.includes("ashby") ? ASHBY : LEVER));
+    safeFetch.mockImplementation(async (url: string) => ({ ...ok(url.includes("greenhouse") ? GH : url.includes("ashby") ? ASHBY : LEVER), url }));
     const r = await jobBoardsCard.run(
       ctx({ boards: "https://job-boards.greenhouse.io/vercel\nhttps://jobs.ashbyhq.com/supabase\nhttps://jobs.lever.co/spotify\nhttps://jobs.lever.co/spotify", titleInclude: "engineer", titleExclude: "director\nsupport" }),
     );
@@ -164,7 +170,7 @@ describe("the Job boards card", () => {
   it("one failing board is a warning, and the others still give their jobs", async () => {
     safeFetch.mockImplementation(async (url: string) => {
       if (url.includes("lever")) return { status: 404, ok: false, url, contentType: "", text: "" };
-      return ok(ASHBY);
+      return { ...ok(ASHBY), url };
     });
     const r = await jobBoardsCard.run(ctx({ boards: "https://jobs.lever.co/gone\nhttps://jobs.ashbyhq.com/supabase" }));
     expect((r.output as { count: number }).count).toBe(3);
@@ -173,14 +179,14 @@ describe("the Job boards card", () => {
   });
 
   it("a response that is not JSON is that board's error", async () => {
-    safeFetch.mockResolvedValue({ status: 200, ok: true, url: "", contentType: "text/html", text: "<html>" });
+    safeFetch.mockImplementation(reply({ status: 200, ok: true, url: "", contentType: "text/html", text: "<html>" }));
     await expect(jobBoardsCard.run(ctx({ boards: "https://jobs.lever.co/x" }))).rejects.toThrow("The response is not valid JSON");
   });
 
   it("a 5xx is tried once more; every board failing fails the card", async () => {
     vi.useFakeTimers();
     try {
-      safeFetch.mockResolvedValue({ status: 503, ok: false, url: "", contentType: "", text: "" });
+      safeFetch.mockImplementation(reply({ status: 503, ok: false, url: "", contentType: "", text: "" }));
       const p = jobBoardsCard.run(ctx({ boards: "https://jobs.lever.co/x" }));
       const caught = p.catch((e: Error) => e);
       await vi.advanceTimersByTimeAsync(2500);
@@ -197,17 +203,45 @@ describe("the Job boards card", () => {
   });
 
   it("a bad address next to a good one is a warning", async () => {
-    safeFetch.mockResolvedValue(ok(LEVER));
+    safeFetch.mockImplementation(reply(ok(LEVER)));
     const r = await jobBoardsCard.run(ctx({ boards: "https://example.com/x\nhttps://jobs.lever.co/spotify" }));
     expect(r.warnings?.[0]).toContain("not a Greenhouse, Ashby or Lever careers URL");
     expect((r.output as { count: number }).count).toBe(4);
   });
 
   it("keeps at most maxItems, with a warning", async () => {
-    safeFetch.mockResolvedValue(ok(GH));
+    safeFetch.mockImplementation(reply(ok(GH)));
     const r = await jobBoardsCard.run(ctx({ boards: "https://job-boards.greenhouse.io/vercel", maxItems: 2 }));
     expect((r.output as { items: unknown[] }).items).toHaveLength(2);
     expect(r.warnings).toEqual(["Kept the first 2 of 4 matching jobs"]);
+  });
+
+  it("a board whose answer comes from another host after a redirect fails, and its body is not read", async () => {
+    safeFetch.mockImplementation(async () => ({ ...ok(LEVER), url: "https://evil.test/v0/postings/spotify" }));
+    await expect(jobBoardsCard.run(ctx({ boards: "https://jobs.lever.co/spotify" }))).rejects.toThrow("spotify (lever): The board redirected to another address");
+    // another board still gives its jobs
+    safeFetch.mockImplementation(async (url: string) => (url.includes("lever") ? { ...ok(LEVER), url: "https://evil.test/x" } : { ...ok(ASHBY), url }));
+    const r = await jobBoardsCard.run(ctx({ boards: "https://jobs.lever.co/spotify\nhttps://jobs.ashbyhq.com/supabase" }));
+    expect(r.warnings).toEqual(["spotify (lever): The board redirected to another address"]);
+    expect((r.output as { count: number }).count).toBe(3);
+  });
+
+  it("a big board through the card and the output cap: the default keeps every job in the run record, and a cut says so with the right count", async () => {
+    const big = Array.from({ length: 200 }, (_, i) => ({ id: `j${i}`, text: `Engineer ${i}`, hostedUrl: `https://jobs.lever.co/big/${i}`, categories: { location: "Remote" }, descriptionPlain: "x".repeat(6000) }));
+    safeFetch.mockImplementation(reply(ok(big)));
+    // the default (60) is the point of DESCRIPTION_CHARS = 2,500: all of it fits under 200 KB
+    const r = await jobBoardsCard.run(ctx({ boards: "https://jobs.lever.co/big", maxItems: DEFAULT_MAX_JOBS }));
+    const out = r.output as { items: Job[]; count: number };
+    expect(out.count).toBe(60);
+    expect(out.items.every((j) => j.description.length <= DESCRIPTION_CHARS)).toBe(true);
+    expect(JSON.stringify(capOutput(r.output)).length).toBeLessThanOrEqual(200_000);
+    expect((capOutput(r.output) as { truncated?: boolean }).truncated).toBeUndefined();
+    // a user who raises the cap past what fits: the runner cuts, warns, and count says what was kept
+    const all = await jobBoardsCard.run(ctx({ boards: "https://jobs.lever.co/big", maxItems: 200 }));
+    const capped = capOutput(all.output) as { items: unknown[]; truncated: boolean };
+    expect(capped.truncated).toBe(true);
+    expect(capped.items.length).toBeLessThan(200);
+    expect(DESCRIPTION_CHARS).toBe(2500);
   });
 
   it("no addresses at all fails the card", async () => {
@@ -233,11 +267,38 @@ describe("Job boards in the catalog", () => {
     expect(graph.nodes.map((n) => n.type)).toEqual(["trigger", "jobBoards", "table", "pickRows", "agent", "table"]);
     expect(checkGraph(graph).filter((i) => !i.warning)).toEqual([]);
     const draft = graph.nodes.find((n) => n.id === "draft")!;
-    expect(draft.config.tools).toEqual(["fetchUrl"]);
+    // no tools at all: it reads the profile next to untrusted job text, so it must not reach the web
+    expect(draft.config.tools).toEqual([]);
     expect(draft.config.mcpTools).toBeUndefined();
     expect(draft.config.folder).toBeUndefined();
-    expect(graph.nodes.find((n) => n.id === "drafts")!.config).toMatchObject({ action: "update", status: "drafted" });
+    expect(String(draft.config.instructions)).not.toMatch(/fetch/i);
+    expect((draft.config.outputFields as { name: string }[]).map((f) => f.name)).toEqual(["coverLetter", "cvNotes", "answers"]);
+    const drafts = graph.nodes.find((n) => n.id === "drafts")!;
+    expect(drafts.config).toMatchObject({ action: "update", status: "drafted" });
+    // the apply link is the board's own URL, not something the model wrote
+    expect((drafts.config.fields as { column: string; value: string }[]).find((f) => f.column === "applyUrl")).toEqual({ column: "applyUrl", value: "{{item.url}}" });
+    expect(graph.nodes.find((n) => n.id === "pick")!.config).toMatchObject({ statuses: "new,picked", maxPick: 10 });
+    expect(graph.nodes.find((n) => n.id === "jobs")!.config.maxItems).toBe(60);
     expect(graph.vars.map((v) => v.key)).toEqual(["profile"]);
+  });
+
+  it("Pick rows: empty statuses is an error, maxPick above 25 is refused, and a per-item card with a lower maxItems is a warning", () => {
+    const { graph } = buildTemplate("jobs", "m", "t");
+    const pick = graph.nodes.find((n) => n.id === "pick")!;
+    const draft = graph.nodes.find((n) => n.id === "draft")!;
+    expect(checkGraph(graph).filter((i) => i.nodeId === "pick" || i.nodeId === "draft")).toEqual([]);
+    pick.config.statuses = " , ";
+    expect(checkGraph(graph).find((i) => i.nodeId === "pick" && !i.warning)?.message).toContain("add at least one status to offer");
+    pick.config.statuses = "new";
+    pick.config.maxPick = 26;
+    expect(checkGraph(graph).find((i) => i.nodeId === "pick" && !i.warning)?.message).toContain("maxPick");
+    pick.config.maxPick = 25;
+    draft.config.maxItems = 10;
+    const w = checkGraph(graph).find((i) => i.nodeId === "draft");
+    expect(w).toMatchObject({ warning: true, field: "maxItems" });
+    expect(w?.message).toContain("at most 10 items");
+    draft.config.maxItems = 25;
+    expect(checkGraph(graph).filter((i) => i.nodeId === "draft")).toEqual([]);
   });
 
   it("a Job boards card with no valid address is an error on the card", () => {

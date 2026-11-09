@@ -20,13 +20,25 @@ const dataTables = new Map<string, { id: string; userId: string; name: string; p
 const tableRows = new Map<string, { id: string; tableId: string; status: string; data: string }>();
 vi.mock("@/lib/db", () => {
   const prisma: any = {
-    $transaction: vi.fn(async (fn: (tx: unknown) => unknown) => fn(prisma)),
+    // A transaction that throws puts the runs and the rows back, as a real one does.
+    $transaction: vi.fn(async (fn: (tx: unknown) => unknown) => {
+      const was = [new Map([...runs].map(([k, v]) => [k, { ...v }])), new Map([...tableRows].map(([k, v]) => [k, { ...v }]))] as const;
+      try {
+        return await fn(prisma);
+      } catch (e) {
+        runs.clear();
+        tableRows.clear();
+        for (const [k, v] of was[0]) runs.set(k, v);
+        for (const [k, v] of was[1]) tableRows.set(k, v);
+        throw e;
+      }
+    }),
     dataTableRow: {
       count: vi.fn(async ({ where }: any) => [...tableRows.values()].filter((r) => r.tableId === where.tableId && where.status.in.includes(r.status)).length),
       findMany: vi.fn(async ({ where }: any) => [...tableRows.values()].filter((r) => r.tableId === where.tableId && where.id.in.includes(r.id) && where.status.in.includes(r.status))),
       updateMany: vi.fn(async ({ where, data }: any) => {
         let count = 0;
-        for (const r of tableRows.values()) if (r.tableId === where.tableId && where.id.in.includes(r.id)) (Object.assign(r, data), count++);
+        for (const r of tableRows.values()) if (r.tableId === where.tableId && where.id.in.includes(r.id) && (!where.status || where.status.in.includes(r.status))) (Object.assign(r, data), count++);
         return { count };
       }),
     },
@@ -1110,6 +1122,75 @@ describe("Pick rows: waiting and continue (phase 3)", () => {
     expect(runs.get("run1").state).toBe("succeeded");
   });
 
+  it("duplicate row ids count once", async () => {
+    seedTable();
+    const { deps: d } = withPick();
+    seedRun(graph());
+    await advanceRun("run1", d);
+    expect((await continueRun("u1", "run1", "pick", ["r1", "r1", "r2"])).ok).toBe(true); // maxPick is 2: three ids, two rows
+    expect((nodesOf().pick.output as { count: number }).count).toBe(2);
+  });
+
+  it("a row that moved on between the check and the write rolls the whole Continue back with a 409", async () => {
+    seedTable();
+    const { deps: d } = withPick();
+    seedRun(graph());
+    await advanceRun("run1", d);
+    const { prisma } = await import("@/lib/db");
+    vi.mocked(prisma.dataTableRow.findMany).mockImplementationOnce((async () => {
+      const rows = [...tableRows.values()].filter((r) => ["r1", "r2"].includes(r.id));
+      tableRows.get("r2")!.status = "applied"; // lands after the read, before the write
+      return rows;
+    }) as never);
+    const r = await continueRun("u1", "run1", "pick", ["r1", "r2"]);
+    expect(r).toMatchObject({ ok: false, status: 409 });
+    expect(runs.get("run1").state).toBe("waiting");
+    expect(nodesOf().pick.status).toBe("waiting");
+    expect([rowStatus("r1"), rowStatus("r2")]).toEqual(["new", "applied"]); // r1 was not changed either
+  });
+
+  it("a failed privacy check at Continue is a 503 and the run stays waiting; only a real block fails it", async () => {
+    seedTable();
+    const { deps: d } = withPick();
+    seedRun(graph());
+    await advanceRun("run1", d);
+    const { prisma } = await import("@/lib/db");
+    // loadTable reads the table first; the privacy check reads it again
+    vi.mocked(prisma.dataTable.findFirst).mockImplementationOnce((async ({ where }: any) => dataTables.get(where.id)) as never).mockRejectedValueOnce(new Error("db down"));
+    const r = await continueRun("u1", "run1", "pick", ["r1"]);
+    expect(r).toMatchObject({ ok: false, status: 503 });
+    expect(runs.get("run1").state).toBe("waiting");
+    expect(rowStatus("r1")).toBe("new");
+    expect((await continueRun("u1", "run1", "pick", ["r1"])).ok).toBe(true); // try again
+  });
+
+  it("a table deleted while waiting: Continue with none still works and skips the cards after it; with rows it is a 400", async () => {
+    seedTable();
+    const { deps: d, ran } = withPick();
+    seedRun(graph());
+    await advanceRun("run1", d);
+    dataTables.clear();
+    expect(await continueRun("u1", "run1", "pick", ["r1"])).toMatchObject({ ok: false, status: 400 });
+    expect((await continueRun("u1", "run1", "pick", [])).ok).toBe(true);
+    await advanceRun("run1", d);
+    expect(ran).toEqual([]);
+    expect(nodesOf().draft).toMatchObject({ status: "skipped", skippedReason: "Nothing picked" });
+    expect(runs.get("run1").state).toBe("succeeded");
+  });
+
+  it("a card whose list is cut by the 200 KB cap says so, and count is what was kept", async () => {
+    const items = Array.from({ length: 100 }, (_, i) => ({ i, text: "x".repeat(5000) }));
+    const { deps: d } = deps(() => ({ output: { items, count: items.length } }));
+    seedRun(graphOf(agentNode("a", ["trigger"], 1)));
+    await advanceRun("run1", d);
+    const a = nodesOf().a;
+    const out = a.output as { items: unknown[]; count: number; truncated: boolean };
+    expect(out.truncated).toBe(true);
+    expect(out.count).toBe(out.items.length);
+    expect(out.items.length).toBeLessThan(100);
+    expect(a.warnings).toEqual([`Kept the first ${out.items.length} of 100 items: output over 200 KB`]);
+  });
+
   it("the real Pick rows card: waits when rows are on offer, stops when none are, and fails on a missing table", async () => {
     seedTable();
     const { deps: d, ran } = withPick();
@@ -1170,6 +1251,23 @@ describe("Pick rows: waiting and continue (phase 3)", () => {
       expect(nodesOf().pick).toMatchObject({ status: "failed", error: leak("chats", "PAGE") });
       expect(nodesOf().page.status).toBe("skipped");
       expect(runs.get("run1").state).toBe("failed");
+    });
+
+    it("a table that turns private while the run waits passes its kinds to the Save target that follows (the marking gap)", async () => {
+      seedTable(["new"], ""); // Job leads, public when the run starts
+      dataTables.set("t2", { id: "t2", userId: "u1", name: "Shortlist", privateFrom: "" });
+      const { deps: d } = withPick();
+      const save: FlowNode = { id: "keep", type: "table", fromIds: ["pick"], config: { tableId: "t2", list: "{{pick.items}}" }, ui: { label: "KEEP", position: { x: 2, y: 0 } } };
+      d.cards.table = { run: async () => ({ output: { items: [] } }) };
+      seedRun(graphOf(pickNode("pick", ["trigger"], 1), save));
+      await advanceRun("run1", d);
+      expect(runs.get("run1").state).toBe("waiting");
+      dataTables.get("t1")!.privateFrom = "chats"; // another run marked Job leads while this one waited
+      expect((await continueRun("u1", "run1", "pick", ["r1"])).ok).toBe(true);
+      await advanceRun("run1", d);
+      expect(nodesOf().keep.status).toBe("succeeded");
+      expect(dataTables.get("t2")!.privateFrom).toBe("chats");
+      expect(dataTables.get("t1")!.privateFrom).toBe("chats");
     });
 
     it("Continue checks again: a table marked while the run waited fails the run, and no row changes", async () => {

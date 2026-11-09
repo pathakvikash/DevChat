@@ -305,7 +305,7 @@ function TableView({ params }: { params: Promise<{ id: string }> }) {
               <span className="text-xs tabular-nums text-zinc-300">
                 {picked.size} picked{picked.size >= maxPick ? ` · Up to ${maxPick}` : ""}
               </span>
-              <button type="button" disabled={continuing} onClick={() => void continueRun([])} className="focus-ring glass-button inline-flex h-8 items-center rounded-[var(--glass-radius-md)] px-3 text-sm disabled:opacity-50">
+              <button type="button" disabled={continuing} onClick={() => (picked.size === 0 || window.confirm(`Continue without the ${picked.size} ticked ${picked.size === 1 ? "row" : "rows"}?`)) && void continueRun([])}className="focus-ring glass-button inline-flex h-8 items-center rounded-[var(--glass-radius-md)] px-3 text-sm disabled:opacity-50">
                 Continue with none
               </button>
               <button type="button" disabled={continuing || picked.size === 0} onClick={() => void continueRun([...picked])} className="focus-ring glass-button-primary inline-flex h-8 items-center rounded-[var(--glass-radius-md)] px-3 text-sm font-medium text-white disabled:opacity-50">

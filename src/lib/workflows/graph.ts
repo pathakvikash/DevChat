@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { CATALOG, CODEX_BLOCKED, hasToolConflict, isCodexModelId, isCardType, leaksTo, parseConfig, PRIVATE_LEAK_MESSAGE, reachesOpenWeb, readsPrivate, templateValues, MCP_WEB_WARNING, TOOL_CONFLICT_MESSAGE, usesMcp, type CardType } from "./catalog";
+import { CATALOG, CODEX_BLOCKED, hasToolConflict, isCodexModelId, isCardType, leaksTo, parseConfig, PRIVATE_LEAK_MESSAGE, reachesOpenWeb, readsPrivate, templateValues, MCP_WEB_WARNING, pickStatuses, TOOL_CONFLICT_MESSAGE, usesMcp, type CardType } from "./catalog";
 import { refRoot, templateRefs } from "./template";
 import { boardLines, detectBoard } from "./jobBoards";
 
@@ -148,7 +148,8 @@ export interface GraphIssue {
   warning?: boolean;
 }
 
-const SINGLE_REF = /^\s*\{\{\s*[^{}]+?\s*\}\}\s*$/;
+const refsCard = (template: string, id: string) => templateRefs(template).some((r) => refRoot(r) === id);
+const SINGLE_REF =/^\s*\{\{\s*[^{}]+?\s*\}\}\s*$/;
 
 /** Config and reference problems (5.3). The editor shows them as warnings; Run refuses on them. */
 export function checkGraph(graph: WorkflowGraph): GraphIssue[] {
@@ -182,6 +183,16 @@ export function checkGraph(graph: WorkflowGraph): GraphIssue[] {
       }
     }
     if (n.type === "pickRows" && !String(config.tableId ?? "").trim()) issues.push({ nodeId: n.id, field: "tableId", message: `${label}: pick a table` });
+    if (n.type === "pickRows" && pickStatuses(config).length === 0) issues.push({ nodeId: n.id, field: "statuses", message: `${label}: add at least one status to offer` });
+    if (n.type === "pickRows") {
+      // A per-item card that reads the picked rows and stops short of maxPick leaves picked rows undone.
+      for (const m of graph.nodes) {
+        const mc = parseConfig(m.type, m.config).config;
+        if (CATALOG[m.type].perItem && mc.perItem === true && Number(mc.maxItems) < Number(config.maxPick) && refsCard(String(mc.items ?? ""), n.id)) {
+          issues.push({ nodeId: m.id, field: "maxItems", warning: true, message: `${m.ui.label || m.id}: it runs on at most ${mc.maxItems} items, but ${label} can pick ${config.maxPick}. The rest are picked and left undone.` });
+        }
+      }
+    }
     if (n.type === "agent" && config.allowEdits === true && !config.folder) issues.push({ nodeId: n.id, field: "allowEdits", message: `${label}: Allow edits needs a working folder` });
     const ancestors = ancestorsOf(graph, n.id);
     if (usesMcp(n.type, config)) {

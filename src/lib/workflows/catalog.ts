@@ -378,9 +378,9 @@ const mcpTool: CardDef = {
 
 // ─── Phase 3: Job boards and Pick rows (new cards go at the end of the lists) ───
 
-export const DEFAULT_MAX_JOBS = 200;
+export const DEFAULT_MAX_JOBS = 60;
 export const DEFAULT_MAX_PICK = 10;
-export const MAX_PICK_LIMIT = 100;
+export const MAX_PICK_LIMIT = 25; // the same as the default of a per-item card after it, and keeps Continue's output well under 200 KB
 /** The status a picked row gets, and the one pickRows offers, unless the card says otherwise. */
 export const DEFAULT_PICK_STATUS = "picked";
 

@@ -20,7 +20,7 @@ export interface Job {
 }
 
 export const SLUG_RE = /^[\w.-]+$/;
-export const DESCRIPTION_CHARS = 4000;
+export const DESCRIPTION_CHARS = 2500;
 
 const API: Record<BoardType, (org: string) => string> = {
   greenhouse: (org) => `https://boards-api.greenhouse.io/v1/boards/${org}/jobs?content=true`,
@@ -31,6 +31,8 @@ const HOSTS: Record<string, BoardType> = {
   "jobs.ashbyhq.com": "ashby",
   "jobs.lever.co": "lever",
   "job-boards.greenhouse.io": "greenhouse",
+  // Checked 2026-11-10: boards-api.eu.greenhouse.io does not exist (no DNS), and EU-based companies' boards answer on
+  // boards-api.greenhouse.io. So the EU careers host maps to the same API as the others.
   "job-boards.eu.greenhouse.io": "greenhouse",
   "boards.greenhouse.io": "greenhouse",
 };
@@ -69,7 +71,7 @@ export const boardLines = (text: unknown): string[] => String(text ?? "").split(
 const isObject = (v: unknown): v is Record<string, unknown> => !!v && typeof v === "object" && !Array.isArray(v);
 const str = (v: unknown): string => (typeof v === "string" ? v : "");
 const decode = (s: string) => s.replace(/&quot;/g, '"').replace(/&#0?39;|&apos;/g, "'").replace(/&amp;/g, "&");
-/** Plain text, cut at 4,000 characters. */
+/** Plain text, cut at 2,500 characters: about 4 KB a job in the run record, so 60 jobs stay under its 200 KB cap. */
 const plain = (s: string): string => decode(htmlToText(s)).slice(0, DESCRIPTION_CHARS);
 /** "supabase" → "Supabase". The board APIs of Ashby and Lever do not name the company. */
 const companyOf = (org: string) => org.charAt(0).toUpperCase() + org.slice(1);

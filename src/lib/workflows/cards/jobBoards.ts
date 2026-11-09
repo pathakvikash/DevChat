@@ -2,6 +2,7 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { safeFetch } from "@/lib/net/safeFetch";
 import { isSanityMode } from "@/lib/sanityMode";
+import { DEFAULT_MAX_JOBS } from "../catalog";
 import { boardLines, detectBoard, jobPasses, parseBoard, type Board, type BoardType, type Job } from "../jobBoards";
 import { sleep } from "./webSearch";
 import type { CardImpl } from "./index";
@@ -25,6 +26,14 @@ async function getJson(url: string, signal: AbortSignal): Promise<unknown> {
     if (signal.aborted) throw new Error("Cancelled");
     res = await get();
   }
+  // A redirect to another host (safeFetch follows up to 3) is not this board's API: its answer is not read.
+  let host = "";
+  try {
+    host = new URL(res.url).hostname;
+  } catch {
+    // no usable final address: refused below
+  }
+  if (host !== new URL(url).hostname) throw new Error("The board redirected to another address");
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   try {
     return JSON.parse(res.text);
@@ -82,7 +91,7 @@ export const jobBoardsCard: CardImpl = {
       seen.add(job.url);
       kept.push(job);
     }
-    const max = Number(c.config.maxItems) || 200;
+    const max = Number(c.config.maxItems) || DEFAULT_MAX_JOBS;
     const warnings = errors.slice(0, 10);
     if (kept.length > max) warnings.push(`Kept the first ${max} of ${kept.length} matching jobs`);
     const items = kept.slice(0, max);
