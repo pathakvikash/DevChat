@@ -196,7 +196,7 @@ function MessageBubble({
                     </div>
                   ) : (
                     <>
-                      <MarkdownMessage content={cleanContent} />
+                      <MarkdownMessage content={cleanContent} streaming={isStreaming} />
                       {isStreaming && !toolParts.length && (
                         <span className="ml-1 animate-pulse">▊</span>
                       )}

@@ -100,7 +100,7 @@ export default function MessageContent({
                 ))}
                 </>
               ) : (
-                <MarkdownMessage content={(p as any).text} />
+                <MarkdownMessage content={(p as any).text} streaming={isStreaming} />
               )}
             </div>
           );

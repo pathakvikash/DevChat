@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback, useMemo, useRef, useId } from "react";
+import { useEffect, useState, useCallback, useMemo, useRef } from "react";
 import {
   FileCode,
   FileText,
@@ -22,6 +22,7 @@ import {
 } from "lucide-react";
 import CenteredDialog from "./ui/CenteredDialog";
 import SidePanel from "./ui/SidePanel";
+import { renderMermaid } from "@/lib/mermaidRender";
 import { resolveLanguage, highlightCode } from "@/lib/utils/highlight";
 import { parseDataArtifact } from "@/lib/generativeUi/data";
 import CodeRunner from "./CodeRunner";
@@ -598,26 +599,16 @@ function MermaidRenderer({ content }: { content: string }) {
   const [svg, setSvg] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [fullscreen, setFullscreen] = useState(false);
-  const renderId = `mermaid-artifact-${useId().replace(/:/g, "")}`;
 
   useEffect(() => {
     let cancelled = false;
     async function render() {
       try {
-        const mermaid = await import("mermaid");
-        mermaid.default.initialize({
-          startOnLoad: false,
-          theme: "dark",
-          securityLevel: "loose",
-        });
-        const { svg } = await mermaid.default.render(
-          `${renderId}-${Date.now()}`,
-          content,
-        );
+        const svg = await renderMermaid(content, { theme: "dark", securityLevel: "strict" }, () => cancelled);
         if (!cancelled) setSvg(svg);
       } catch (e) {
-        console.error("Mermaid render failed", e);
         if (!cancelled) {
+          console.error("Mermaid render failed", e);
           setError(e instanceof Error ? e.message : String(e));
           setSvg(null);
         }

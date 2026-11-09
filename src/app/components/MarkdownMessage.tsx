@@ -1,10 +1,25 @@
 "use client";
 
+import { createContext, useContext } from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
 import CodeBlock from "./CodeBlock";
+import MermaidBlock from "./MermaidBlock";
+import { openFenceBody, sameFence } from "@/lib/mermaidRender";
 
 interface MarkdownMessageProps {
   content: string;
+  /** The reply is still arriving: a fence left open is shown as code, not drawn. */
+  streaming?: boolean;
+}
+
+// The body of the still-open fence while streaming (the components map below is module scope, so it reads this).
+// ponytail: matched by text, so an earlier closed fence with identical text also shows as code until the message ends.
+const OpenFence = createContext<string | null>(null);
+
+function Code({ language, code }: { language: string; code: string }) {
+  const open = useContext(OpenFence);
+  if (language === "mermaid" && !sameFence(code, open)) return <MermaidBlock code={code} />;
+  return <CodeBlock language={language} code={code} />;
 }
 
 // Module scope: a new object per render gives every element a new component type, which remounts it and
@@ -16,7 +31,7 @@ const components: Components = {
     const code = String(children).replace(/\n$/, "");
 
     if (className) {
-      return <CodeBlock language={language} code={code} />;
+      return <Code language={language} code={code} />;
     }
 
     return (
@@ -78,14 +93,12 @@ const components: Components = {
   hr: () => <hr className="my-4 border-[var(--glass-border)]" />,
 };
 
-export default function MarkdownMessage({ content }: MarkdownMessageProps) {
+export default function MarkdownMessage({ content, streaming = false }: MarkdownMessageProps) {
   return (
     <div className="prose prose-invert max-w-none min-w-0 overflow-hidden">
-      <ReactMarkdown
-        components={components}
-      >
-        {content}
-      </ReactMarkdown>
+      <OpenFence.Provider value={streaming ? openFenceBody(content) : null}>
+        <ReactMarkdown components={components}>{content}</ReactMarkdown>
+      </OpenFence.Provider>
     </div>
   );
 }
