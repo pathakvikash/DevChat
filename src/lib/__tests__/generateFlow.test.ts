@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { MockLanguageModelV3 } from "ai/test";
 import type { ModelConfig } from "@/lib/models";
 
@@ -18,6 +18,8 @@ import { buildSystemPrompt, catalogForPrompt, extractJson, generateFlow, Generat
 import { validateStructure } from "@/lib/workflows/graph";
 import { CATALOG } from "@/lib/workflows/catalog";
 const { POST } = await import("@/app/api/workflows/generate/route");
+
+afterEach(() => vi.unstubAllEnvs());
 
 const usage = {
   inputTokens: { total: 5, noCache: 5, cacheRead: undefined, cacheWrite: undefined },
@@ -153,9 +155,9 @@ describe("mock/flowgen", () => {
 });
 
 describe("POST /api/workflows/generate", () => {
-  const post = async (body: unknown) => {
-    const res = await POST({ json: async () => body } as any);
-    return { status: res.status, body: await res.json() };
+  const post = async (body: unknown, signal: AbortSignal = new AbortController().signal) => {
+    const res = await POST({ json: async () => body, signal } as any);
+    return { status: res.status, body: res.status === 499 ? null : await res.json() };
   };
   beforeEach(() => {
     vi.clearAllMocks();
@@ -183,9 +185,157 @@ describe("POST /api/workflows/generate", () => {
     expect(h.findFirst).toHaveBeenCalledWith(expect.objectContaining({ where: { id: "w9", userId: "u1" } }));
   });
 
-  it("403 for a CLI model without host access", async () => {
-    h.resolveModel.mockResolvedValue({ ...scripted([fence(good)]).model, id: "claude-code/sonnet" });
+  it("403 for a CLI model without host access, before resolveModel can swap it for another", async () => {
     h.canUseHostTools.mockResolvedValue(false);
+    expect((await post({ description: "x", model: "claude-code/sonnet" })).status).toBe(403);
+    expect(h.resolveModel).not.toHaveBeenCalled();
+    // A saved default that resolves to a CLI model is refused after resolving.
+    h.resolveModel.mockResolvedValue({ ...scripted([fence(good)]).model, id: "claude-code/sonnet" });
     expect((await post({ description: "x" })).status).toBe(403);
+  });
+
+  it("422 for a CLI model that needs a working folder", async () => {
+    h.resolveModel.mockResolvedValue({ ...scripted([fence(good)]).model, id: "codex/default" });
+    const res = await post({ description: "x" });
+    expect(res.status).toBe(422);
+    expect(res.body.error).toMatch(/needs a working folder/);
+  });
+
+  it("409 for a second request while one runs, and the slot frees afterwards", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    const m = scripted([fence(good)]).model;
+    const slow = new MockLanguageModelV3({
+      doGenerate: async () => {
+        await gate;
+        return { content: [{ type: "text", text: fence(good) }], finishReason: { unified: "stop", raw: undefined }, usage, warnings: [] } as any;
+      },
+    });
+    h.resolveModel.mockResolvedValue({ ...m, model: slow });
+    const first = post({ description: "x" });
+    await new Promise((r) => setTimeout(r, 10));
+    expect((await post({ description: "y" })).status).toBe(409);
+    release();
+    expect((await first).status).toBe(200);
+    expect((await post({ description: "z" })).status).toBe(200);
+  });
+
+  it("maps an abort to 504 or 499, and a provider failure to 502", async () => {
+    h.resolveModel.mockResolvedValue(scripted([fence(good)]).model);
+    const gone = new AbortController();
+    gone.abort();
+    expect((await post({ description: "x" }, gone.signal)).status).toBe(499);
+    const failing = new MockLanguageModelV3({ doGenerate: async () => Promise.reject(new Error("fetch failed ECONNREFUSED")) });
+    h.resolveModel.mockResolvedValue({ ...scripted([]).model, model: failing });
+    const res = await post({ description: "x" });
+    expect(res.status).toBe(502);
+    expect(res.body.error).toMatch(/busy or can't be reached/);
+  });
+});
+
+describe("generateFlow hardening", () => {
+  const chain = (n: number, type = "mcpTool") => {
+    const nodes = [node("trigger", "trigger", [])];
+    let prev = "trigger";
+    for (let i = 0; i < n; i++) {
+      nodes.push(node(`m${i}`, type, [prev, prev]));
+      prev = `m${i}`;
+    }
+    nodes.push(node("a", "agent", [prev], { instructions: "x" }));
+    return { vars: [], nodes };
+  };
+
+  it("survives a self-referencing mcpTool card", async () => {
+    const g = { vars: [], nodes: [node("trigger", "trigger", []), node("t", "mcpTool", ["t"]), node("a", "agent", ["t"], { instructions: "x" })] };
+    const { graph } = await generateFlow({ description: "x", model: scripted([fence(g)]).model });
+    expect(graph.nodes.find((n) => n.id === "a")!.fromIds).toEqual([]);
+  });
+
+  it("rewires through a long doubling chain of dropped cards quickly", async () => {
+    const t0 = Date.now();
+    const { graph } = await generateFlow({ description: "x", model: scripted([fence(chain(25))]).model });
+    expect(Date.now() - t0).toBeLessThan(1000);
+    expect(graph.nodes.find((n) => n.id === "a")!.fromIds).toEqual(["trigger"]);
+  });
+
+  it("refuses a reply over the card cap without processing it", async () => {
+    const { calls } = scripted([]);
+    const s = scripted([fence(chain(40, "webSearch")), fence(chain(40, "webSearch"))]);
+    await expect(generateFlow({ description: "x", model: s.model })).rejects.toThrow(GenerateError);
+    expect(s.calls).toHaveLength(2);
+    expect(calls).toHaveLength(0);
+  });
+
+  it("keeps a real card that shares an id with a dropped mcpTool card", async () => {
+    const g = { vars: [], nodes: [node("trigger", "trigger", []), node("x", "mcpTool", ["trigger"]), node("x", "agent", ["trigger"], { instructions: "x" }), node("b", "agent", ["x"], { instructions: "b" })] };
+    const { graph } = await generateFlow({ description: "x", model: scripted([fence(g)]).model });
+    expect(graph.nodes.map((n) => n.id)).toEqual(["trigger", "x", "b"]);
+    expect(graph.nodes.find((n) => n.id === "b")!.fromIds).toEqual(["x"]);
+  });
+
+  it("does not call the model again after an abort", async () => {
+    const s = scripted(["nope", "nope"]);
+    const ac = new AbortController();
+    ac.abort(new DOMException("t", "TimeoutError"));
+    await expect(generateFlow({ description: "x", model: s.model, signal: ac.signal })).rejects.toThrow();
+    expect(s.calls).toHaveLength(0);
+  });
+
+  it("normalises variables: keys, labels, duplicates and size", async () => {
+    const g = {
+      vars: [{ key: "ok", value: "z".repeat(50_000) }, { key: "bad key", label: "x", value: "" }, { key: "ok", label: "dup", value: "" }, { key: "other", label: "Other" }],
+      nodes: [node("trigger", "trigger", []), node("a", "agent", ["trigger"], { instructions: "{{vars.ok}}" })],
+    };
+    const { graph, warnings } = await generateFlow({ description: "x", model: scripted([fence(g)]).model });
+    expect(graph.vars.map((v) => [v.key, v.label, v.value.length])).toEqual([["ok", "ok", 2000], ["other", "Other", 0]]);
+    expect(warnings).toContain("Fill in: Other");
+  });
+
+  it("clears an agent model on a fresh flow", async () => {
+    const g = { vars: [], nodes: [node("trigger", "trigger", []), node("a", "agent", ["trigger"], { instructions: "x", model: "claude-code/opus" })] };
+    const { graph } = await generateFlow({ description: "x", model: scripted([fence(g)]).model });
+    expect(graph.nodes[1].config.model).toBe("");
+  });
+
+  it("on a change keeps the model and by-hand settings of the same card, restores variable values, and hides them from the model", async () => {
+    const current = {
+      version: 1 as const,
+      defaultModel: "mock/gen",
+      maxRunTokens: 500_000,
+      vars: [{ key: "topics", label: "Topics", value: "secret-value" }],
+      nodes: [
+        { id: "trigger", type: "trigger" as const, fromIds: [], config: {}, ui: { label: "Run", position: { x: 0, y: 0 } } },
+        { id: "a", type: "agent" as const, fromIds: ["trigger"], config: { instructions: "old", model: "claude-code/opus", folder: "/work", allowEdits: true, mcpTools: ["s/t"] }, ui: { label: "A", position: { x: 0, y: 0 } } },
+      ],
+    };
+    const reply = { vars: [{ key: "topics", label: "Topics", value: "" }], nodes: [node("trigger", "trigger", []), node("a", "agent", ["trigger"], { instructions: "new", folder: "/etc" }), node("b", "agent", ["a"], { instructions: "b", model: "x/y" })] };
+    const s = scripted([fence(reply)]);
+    const { graph, warnings } = await generateFlow({ description: "change", model: s.model, current });
+    const a = graph.nodes.find((n) => n.id === "a")!;
+    expect(a.config.instructions).toBe("new");
+    expect(a.config.model).toBe("claude-code/opus");
+    expect(graph.nodes.find((n) => n.id === "b")!.config.model).toBe("");
+    expect(graph.vars[0].value).toBe("secret-value");
+    expect(warnings.some((w) => w.startsWith("Fill in"))).toBe(false);
+    const sent = JSON.stringify(s.calls[0].prompt);
+    expect(sent).not.toContain("secret-value");
+    expect(sent).not.toContain("/work");
+    expect(sent).not.toContain("claude-code/opus");
+    expect(validateStructure(graph)).toEqual([]);
+  });
+
+  it("does not advertise mcp cards or by-hand settings in the catalog", () => {
+    const text = catalogForPrompt();
+    expect(text).not.toMatch(/mcpTool|folder|allowEdits/);
+  });
+
+  it("extractJson prefers the last fence with nodes, tolerates inner backticks and caps huge replies", () => {
+    const old = "```json\n" + JSON.stringify({ nodes: [{ id: "old" }] }) + "\n```";
+    const next = "```json\n" + JSON.stringify({ nodes: [{ id: "new" }] }) + "\n```";
+    expect(extractJson(`Old:\n${old}\nNew:\n${next}`)).toEqual({ nodes: [{ id: "new" }] });
+    expect(extractJson("```json\n" + JSON.stringify({ nodes: [], note: "x" }) + "\n```\n```json\n{\"other\":1}\n```")).toEqual({ nodes: [], note: "x" });
+    const t0 = Date.now();
+    expect(extractJson("```" + " ".repeat(300_000))).toBeUndefined();
+    expect(Date.now() - t0).toBeLessThan(500);
   });
 });

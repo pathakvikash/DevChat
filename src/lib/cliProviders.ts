@@ -1037,6 +1037,8 @@ function runCli(
         );
         child = run.proc;
       } else {
+        // Already cancelled: don't start a process nobody will read.
+        if (signal?.aborted) return controller.error(signal.reason ?? new Error("Aborted"));
         const scratch = join(tmpdir(), "devchat-cli");
         await mkdir(scratch, { recursive: true });
         const cwd = spec!.cwd || scratch;
