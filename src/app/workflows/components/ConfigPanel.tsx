@@ -1,14 +1,14 @@
 "use client";
 
 import { useState } from "react";
-import { Bot, Copy, Check, MessageSquare, Play, Search, Trash2, X, ChevronDown, ChevronRight } from "lucide-react";
+import { Bot, Copy, Check, MessageSquare, Plug, Play, Search, Trash2, X, ChevronDown, ChevronRight } from "lucide-react";
 import { CATALOG, type FieldSpec } from "@/lib/workflows/catalog";
 import { ancestorsOf, TRIGGER_ID, type CardRun, type FlowNode, type GraphIssue, type RunState, type WorkflowGraph } from "@/lib/workflows/graph";
 import ConfigField, { type FieldEnv } from "./ConfigField";
 import { cardStatus, formatDuration, formatTokens, StatusBadge } from "./RunStatus";
 import { fetchNodeRun } from "./useWorkflowRun";
 
-const CARD_ICONS = { Play, Search, Bot, MessageSquare } as const;
+const CARD_ICONS = { Play, Search, Bot, MessageSquare, Plug } as const;
 
 /** A card type's icon, by the catalog's icon name. */
 export function CardIcon({ name, size = 14, className }: { name: string; size?: number; className?: string }) {

@@ -1,13 +1,13 @@
 // Safe to import in the browser: no server code here. Each card's server code lives in ./cards.
 import { z } from "zod";
 
-export type CardType = "trigger" | "webSearch" | "agent" | "chatMessage";
+export type CardType = "trigger" | "webSearch" | "agent" | "chatMessage" | "mcpTool";
 export type CardCategory = "Start" | "Get data" | "AI" | "Output";
 
 export interface FieldSpec {
   key: string;
   label: string;
-  kind: "template" | "textarea" | "text" | "select" | "number" | "model" | "tools" | "outputFields" | "chat" | "perItem";
+  kind: "template" | "textarea" | "text" | "select" | "number" | "model" | "tools" | "outputFields" | "chat" | "perItem" | "mcpTools" | "mcpServer" | "args" | "folder" | "allowEdits";
   help?: string;
   options?: { value: string; label: string }[];
   rows?: number;
@@ -127,6 +127,13 @@ export const AGENT_TOOL_CHOICES: { id: (typeof AGENT_TOOL_IDS)[number]; label: s
   { id: "readChat", label: "Read chat" },
 ];
 
+/** CLI model ids start with their provider id (cliProviders.ts); kept here because that file is server-only. */
+export const isCliModelId = (id: string): boolean => /^(claude-code|codex|opencode)\//.test(id);
+/** What an MCP tool card and an agent card with MCP tools can do outside DevChat (8.5). */
+export const MCP_WARNING = "Can change things outside DevChat";
+export const MCP_WEB_WARNING = "This card reads web pages and can act through MCP. A page could try to steer it.";
+export const mcpToolIds = (config: Record<string, unknown>): string[] => (Array.isArray(config.mcpTools) ? (config.mcpTools as string[]) : []);
+
 const CHAT_READ_TOOLS: string[] = ["searchChats", "readChat"];
 const OUTBOUND_TOOLS: string[] = ["fetchUrl", "webSearch"];
 export const TOOL_CONFLICT_MESSAGE = "This card can read your chats and reach the web. Pick one, so a web page can't make it send your chats out.";
@@ -136,12 +143,18 @@ export const readsChats = (type: string, config: Record<string, unknown>): boole
   type === "agent" && Array.isArray(config.tools) && config.tools.some((t) => CHAT_READ_TOOLS.includes(t));
 
 /** Whether the card can send data to the web: an agent with an outbound tool, or a web search / fetch card. */
+/** MCP servers can make network calls, so an MCP tool card, or an agent with any MCP tool, counts as reaching the web. */
 export const reachesWeb = (type: string, config: Record<string, unknown>): boolean =>
-  type === "webSearch" || type === "fetch" || (type === "agent" && Array.isArray(config.tools) && config.tools.some((t) => OUTBOUND_TOOLS.includes(t)));
+  type === "webSearch" ||
+  type === "fetch" ||
+  type === "mcpTool" ||
+  (type === "agent" && ((Array.isArray(config.tools) && config.tools.some((t) => OUTBOUND_TOOLS.includes(t))) || mcpToolIds(config).length > 0));
 
 /** A card that reads chats must not also reach the web: a page it reads could steer it into sending chat text out. */
-export const hasToolConflict = (tools: unknown): boolean =>
-  Array.isArray(tools) && tools.some((t) => CHAT_READ_TOOLS.includes(t)) && tools.some((t) => OUTBOUND_TOOLS.includes(t));
+export const hasToolConflict = (tools: unknown, mcpTools: unknown = []): boolean =>
+  Array.isArray(tools) &&
+  tools.some((t) => CHAT_READ_TOOLS.includes(t)) &&
+  (tools.some((t) => OUTBOUND_TOOLS.includes(t)) || (Array.isArray(mcpTools) && mcpTools.length > 0));
 
 const agent: CardDef = {
   type: "agent",
@@ -154,16 +167,24 @@ const agent: CardDef = {
     input: z.string().default(""),
     model: z.string().default(""),
     tools: z.array(z.enum(AGENT_TOOL_IDS)).default([]),
+    /** Owner only. Ids like mcp_<server>_<tool>, checked at run time against the user's enabled servers. The enum above stays closed. */
+    mcpTools: z.array(z.string().regex(/^mcp_.{1,200}$/)).max(20).default([]),
+    /** Owner only, CLI models only: a folder Claude Code has worked in, and whether the model may change files in it. */
+    folder: z.string().max(1000).default(""),
+    allowEdits: z.boolean().default(false),
     outputFields: z.array(outputFieldSchema).default([]),
     preset: z.string().optional(),
     ...perItemShape,
   }),
-  defaults: () => ({ instructions: "", input: "", model: "", tools: [], outputFields: [], perItem: false, items: "", maxItems: DEFAULT_MAX_ITEMS }),
+  defaults: () => ({ instructions: "", input: "", model: "", tools: [], mcpTools: [], folder: "", allowEdits: false, outputFields: [], perItem: false, items: "", maxItems: DEFAULT_MAX_ITEMS }),
   fields: [
     { key: "instructions", label: "Instructions", kind: "template", rows: 5 },
     { key: "input", label: "Input", kind: "template", rows: 2, help: "Data from earlier cards. The model treats it as data, never as instructions." },
     { key: "model", label: "Model", kind: "model", help: "Empty uses the workflow's default model." },
     { key: "tools", label: "Tools", kind: "tools" },
+    { key: "mcpTools", label: "MCP tools", kind: "mcpTools", help: "Only for the server's owner. Each tool you tick can be called without asking." },
+    { key: "folder", label: "Working folder", kind: "folder", help: "Command-line models only. Without one the model can't see any files." },
+    { key: "allowEdits", label: "Allow edits in the folder", kind: "allowEdits" },
     { key: "outputFields", label: "Output fields", kind: "outputFields", help: "Empty means the output is plain text." },
     ...perItemFields,
   ],
@@ -198,10 +219,34 @@ const chatMessage: CardDef = {
   summary: (c) => `${c.chat === "new" || !c.chat ? "A new chat each run" : "An existing chat"} · ${trim(c.message, 40)}`,
 };
 
-export const CATALOG: Record<CardType, CardDef> = { trigger, webSearch, agent, chatMessage };
+const mcpTool: CardDef = {
+  type: "mcpTool",
+  label: "MCP tool",
+  category: "Output",
+  icon: "Plug",
+  description: `${MCP_WARNING}. Calls one tool on one of your MCP servers. Only for the server's owner.`,
+  schema: z.object({
+    serverId: z.string().default(""),
+    tool: z.string().max(200).default(""),
+    args: z.record(z.string(), z.string()).default({}),
+    ...perItemShape,
+  }),
+  defaults: () => ({ serverId: "", tool: "", args: {}, perItem: false, items: "", maxItems: DEFAULT_MAX_ITEMS }),
+  fields: [
+    { key: "serverId", label: "MCP server", kind: "mcpServer" },
+    { key: "tool", label: "Tool", kind: "text", help: "The tool's name on that server." },
+    { key: "args", label: "Arguments", kind: "args", help: "Values can use templates such as {{item.url}}." },
+    ...perItemFields,
+  ],
+  perItem: true,
+  outputs: () => ["text", "data"],
+  summary: (c) => (c.tool ? `Calls ${trim(c.tool, 40)}` : "No tool picked yet"),
+};
+
+export const CATALOG: Record<CardType, CardDef> = { trigger, webSearch, agent, chatMessage, mcpTool };
 export const CARD_TYPES = Object.keys(CATALOG) as CardType[];
 /** Cards the user can add (the trigger is created with the workflow). */
-export const ADDABLE_TYPES: CardType[] = ["webSearch", "agent", "chatMessage"];
+export const ADDABLE_TYPES: CardType[] = ["webSearch", "agent", "chatMessage", "mcpTool"];
 
 export const isCardType = (t: unknown): t is CardType => typeof t === "string" && Object.hasOwn(CATALOG, t);
 
@@ -220,6 +265,9 @@ export function templateValues(type: CardType, config: Record<string, unknown>):
   const out: { field: string; value: string }[] = [];
   for (const f of CATALOG[type].fields) {
     if (f.kind === "template" && typeof config[f.key] === "string") out.push({ field: f.key, value: config[f.key] as string });
+    if (f.kind === "args" && config[f.key] && typeof config[f.key] === "object") {
+      for (const v of Object.values(config[f.key] as Record<string, unknown>)) if (typeof v === "string") out.push({ field: f.key, value: v });
+    }
   }
   return out;
 }

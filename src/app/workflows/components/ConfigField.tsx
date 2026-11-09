@@ -1,10 +1,11 @@
 "use client";
 
-import { useId, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { Plus, Trash2, Wrench, XCircle } from "lucide-react";
 import ModelSelector from "@/app/components/conversation/ModelSelector";
+import WorkingFolderPicker from "@/app/components/conversation/WorkingFolderPicker";
 import type { ModelInfo } from "@/app/components/conversation/types";
-import { AGENT_TOOL_CHOICES, hasToolConflict, OUTPUT_FIELD_TYPES, type FieldSpec, type OutputField } from "@/lib/workflows/catalog";
+import { AGENT_TOOL_CHOICES, hasToolConflict, isCliModelId, MCP_WARNING, MCP_WEB_WARNING, OUTPUT_FIELD_TYPES, type FieldSpec, type OutputField } from "@/lib/workflows/catalog";
 import FieldPicker, { type PickerRow } from "./FieldPicker";
 
 export const NEEDS_TOOLS = "Needs a model that can use tools. Pick one with the wrench icon.";
@@ -97,6 +98,111 @@ function OutputFields({ value, onChange, readOnly }: { value: OutputField[]; onC
   );
 }
 
+interface McpServerRow {
+  id: string;
+  name: string;
+  enabled: boolean;
+}
+
+/** The user's MCP servers (and, when asked, each enabled server's tools as `mcp_<server>_<tool>` ids). */
+function useMcp(withTools: boolean) {
+  const [servers, setServers] = useState<McpServerRow[]>([]);
+  const [tools, setTools] = useState<{ id: string; server: string; tool: string }[]>([]);
+  useEffect(() => {
+    let stop = false;
+    (async () => {
+      const res = await fetch("/api/mcp/servers").catch(() => null);
+      if (!res?.ok || stop) return;
+      const list = (await res.json()) as McpServerRow[];
+      setServers(list);
+      if (!withTools) return;
+      const found = await Promise.all(
+        list
+          .filter((s) => s.enabled)
+          .map(async (s) => {
+            const r = await fetch(`/api/mcp/servers/${s.id}/tools`).catch(() => null);
+            const body = r?.ok ? ((await r.json()) as { tools?: { name: string }[] }) : { tools: [] };
+            return (body.tools ?? []).map((t) => ({ id: `mcp_${s.name}_${t.name}`, server: s.name, tool: t.name }));
+          }),
+      );
+      if (!stop) setTools(found.flat());
+    })();
+    return () => {
+      stop = true;
+    };
+  }, [withTools]);
+  return { servers, tools };
+}
+
+function McpServerSelect({ id, value, onChange, readOnly }: { id: string; value: string; onChange: (v: string) => void; readOnly: boolean }) {
+  const { servers } = useMcp(false);
+  return (
+    <select id={id} value={value} disabled={readOnly} onChange={(e) => onChange(e.target.value)} className={inputClass}>
+      <option value="">Pick a server…</option>
+      {servers.filter((s) => s.enabled || s.id === value).map((s) => (
+        <option key={s.id} value={s.id}>{s.name}{s.enabled ? "" : " (off)"}</option>
+      ))}
+      {value && !servers.some((s) => s.id === value) && <option value={value}>Unknown server</option>}
+    </select>
+  );
+}
+
+function McpToolChoices({ value, other, onChange, readOnly, disabled }: { value: string[]; other: string[]; onChange: (v: string[]) => void; readOnly: boolean; disabled: boolean }) {
+  const { tools } = useMcp(true);
+  const known = new Set(tools.map((t) => t.id));
+  const rows = [...tools, ...value.filter((v) => !known.has(v)).map((id) => ({ id, server: "", tool: `${id} (not available now)` }))];
+  const web = other.includes("fetchUrl") || other.includes("webSearch");
+  return (
+    <div role="group" aria-label="MCP tools" className="space-y-1">
+      {rows.length === 0 && <p className="text-[11px] text-zinc-400">No MCP tools. Turn on a server in Settings first.</p>}
+      {value.length > 0 && <p className="text-[11px] text-zinc-400">{MCP_WARNING}</p>}
+      {value.length > 0 && web && <p className="text-[11px] text-zinc-300">{MCP_WEB_WARNING}</p>}
+      {rows.map((t) => (
+        <label key={t.id} className="flex items-center gap-2 text-sm text-zinc-300">
+          <input
+            type="checkbox"
+            checked={value.includes(t.id)}
+            disabled={readOnly || disabled || (!value.includes(t.id) && hasToolConflict(other, [...value, t.id]))}
+            onChange={(e) => onChange(e.target.checked ? [...value, t.id] : value.filter((x) => x !== t.id))}
+            className="h-4 w-4"
+          />
+          <Wrench size={12} className="text-zinc-500" aria-hidden="true" />
+          <span className="min-w-0 truncate">{t.server ? `${t.server}: ${t.tool}` : t.tool}</span>
+        </label>
+      ))}
+    </div>
+  );
+}
+
+function ArgsField({ value, onChange, readOnly }: { value: Record<string, string>; onChange: (v: Record<string, string>) => void; readOnly: boolean }) {
+  // Rows keep their order while a key is being typed, so edit as a list and save as an object.
+  const [rows, setRows] = useState<[string, string][]>(() => Object.entries(value));
+  const save = (next: [string, string][]) => {
+    setRows(next);
+    onChange(Object.fromEntries(next.filter(([k]) => k.trim())));
+  };
+  return (
+    <div className="space-y-2">
+      {rows.map(([k, v], i) => (
+        <div key={i} className="flex gap-1.5">
+          <input aria-label="Argument name" placeholder="name" value={k} disabled={readOnly} onChange={(e) => save(rows.map((r, j) => (j === i ? [e.target.value, r[1]] : r)))} className={`${inputClass} !w-28 !px-2 !py-1 font-mono`} />
+          <input aria-label="Argument value" placeholder="value" value={v} disabled={readOnly} onChange={(e) => save(rows.map((r, j) => (j === i ? [r[0], e.target.value] : r)))} className={`${inputClass} !px-2 !py-1`} />
+          {!readOnly && (
+            <button type="button" aria-label={`Remove argument ${k || i + 1}`} onClick={() => save(rows.filter((_, j) => j !== i))} className="focus-ring flex h-8 w-8 shrink-0 items-center justify-center rounded-[var(--glass-radius-sm)] text-zinc-400 hover:bg-[var(--glass-bg-hover)]">
+              <Trash2 size={14} />
+            </button>
+          )}
+        </div>
+      ))}
+      {!readOnly && (
+        <button type="button" onClick={() => setRows([...rows, ["", ""]])} className="focus-ring glass-button inline-flex h-8 items-center gap-1 rounded-[var(--glass-radius-md)] px-3 text-sm">
+          <Plus size={14} /> Add argument
+        </button>
+      )}
+    </div>
+  );
+}
+
 /** One settings field of a card, built from the catalog's field spec. */
 export default function ConfigField({ spec, config, onChange, error, env }: { spec: FieldSpec; config: Record<string, unknown>; onChange: (key: string, value: unknown) => void; error?: string; env: FieldEnv }) {
   const id = useId();
@@ -104,6 +210,8 @@ export default function ConfigField({ spec, config, onChange, error, env }: { sp
   const set = (v: unknown) => onChange(spec.key, v);
   const cardModel = String(config.model || env.defaultModel);
   const modelHasTools = env.models.find((m) => m.id === cardModel)?.supportsTools !== false;
+  // A folder and edits only mean something to a command-line model.
+  if ((spec.kind === "folder" || spec.kind === "allowEdits") && !isCliModelId(cardModel)) return null;
 
   let control: React.ReactNode;
   switch (spec.kind) {
@@ -157,7 +265,7 @@ export default function ConfigField({ spec, config, onChange, error, env }: { sp
               <input
                 type="checkbox"
                 checked={chosen.has(t.id)}
-                disabled={env.readOnly || !modelHasTools || (!chosen.has(t.id) && hasToolConflict([...chosen, t.id]))}
+                disabled={env.readOnly || !modelHasTools || (!chosen.has(t.id) && hasToolConflict([...chosen, t.id], config.mcpTools))}
                 onChange={(e) => set(e.target.checked ? [...chosen, t.id] : [...chosen].filter((x) => x !== t.id))}
                 className="h-4 w-4"
               />
@@ -169,6 +277,26 @@ export default function ConfigField({ spec, config, onChange, error, env }: { sp
       );
       break;
     }
+    case "mcpTools":
+      control = <McpToolChoices value={(value as string[]) ?? []} other={(config.tools as string[]) ?? []} onChange={set} readOnly={env.readOnly} disabled={!modelHasTools} />;
+      break;
+    case "mcpServer":
+      control = <McpServerSelect id={id} value={String(value ?? "")} onChange={set} readOnly={env.readOnly} />;
+      break;
+    case "args":
+      control = <ArgsField value={(value as Record<string, string>) ?? {}} onChange={set} readOnly={env.readOnly} />;
+      break;
+    case "folder":
+      control = <WorkingFolderPicker value={String(value ?? "") || null} onChange={(f) => set(f ?? "")} disabled={env.readOnly} />;
+      break;
+    case "allowEdits":
+      control = (
+        <label className="flex items-center gap-2 text-sm text-zinc-300">
+          <input type="checkbox" checked={value === true} disabled={env.readOnly || !config.folder} onChange={(e) => set(e.target.checked)} className="h-4 w-4" />
+          Allow edits in the folder
+        </label>
+      );
+      break;
     case "outputFields":
       control = <OutputFields value={(value as OutputField[]) ?? []} onChange={set} readOnly={env.readOnly} />;
       break;
@@ -184,7 +312,7 @@ export default function ConfigField({ spec, config, onChange, error, env }: { sp
       break;
   }
 
-  const labelled = spec.kind !== "perItem";
+  const labelled = spec.kind !== "perItem" && spec.kind !== "allowEdits";
   return (
     <div className="space-y-1">
       {labelled && (

@@ -105,7 +105,7 @@ function jsonSchemaToZod(schema: any): z.ZodTypeAny {
   return z.any();
 }
 
-function mcpToolId(serverName: string, toolName: string): string {
+export function mcpToolId(serverName: string, toolName: string): string {
   return `mcp_${serverName}_${toolName}`;
 }
 

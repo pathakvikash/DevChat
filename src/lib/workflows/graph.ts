@@ -75,7 +75,7 @@ export function validateStructure(graph: WorkflowGraph): string[] {
       if (from === n.id) errors.push(`Card "${n.id}" is connected to itself`);
     }
   }
-  for (const n of graph.nodes) if (n.type === "agent" && hasToolConflict(n.config.tools)) errors.push(`${n.ui.label || n.id}: ${TOOL_CONFLICT_MESSAGE}`);
+  for (const n of graph.nodes) if (n.type === "agent" && hasToolConflict(n.config.tools, n.config.mcpTools)) errors.push(`${n.ui.label || n.id}: ${TOOL_CONFLICT_MESSAGE}`);
   if (errors.length === 0) for (const l of chatLeaks(graph)) errors.push(l.message);
   if (errors.length === 0 && topoOrder(graph).length !== graph.nodes.length) errors.push("The cards form a loop");
   return errors;
@@ -149,7 +149,7 @@ export function checkGraph(graph: WorkflowGraph): GraphIssue[] {
     if (isPerItem && !SINGLE_REF.test(String(config.items ?? ""))) {
       issues.push({ nodeId: n.id, field: "items", message: `${label}: Items must be one reference to a list, like {{news.items}}` });
     }
-    if (n.type === "agent" && hasToolConflict(config.tools)) issues.push({ nodeId: n.id, field: "tools", message: `${label}: ${TOOL_CONFLICT_MESSAGE}` });
+    if (n.type === "agent" && hasToolConflict(config.tools, config.mcpTools)) issues.push({ nodeId: n.id, field: "tools", message: `${label}: ${TOOL_CONFLICT_MESSAGE}` });
     if (n.type === "webSearch" && !String(config.queries ?? "").trim()) issues.push({ nodeId: n.id, field: "queries", message: `${label}: add at least one query` });
     if (n.type === "agent" && !String(config.instructions ?? "").trim()) issues.push({ nodeId: n.id, field: "instructions", message: `${label}: add instructions` });
     if (n.type === "chatMessage" && !String(config.message ?? "").trim()) issues.push({ nodeId: n.id, field: "message", message: `${label}: add a message` });
