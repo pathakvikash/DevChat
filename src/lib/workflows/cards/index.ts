@@ -8,6 +8,7 @@ import { chatMessageCard } from "./chatMessage";
 import { fetchCard } from "./fetch";
 import { filterCard } from "./filter";
 import { tableCard } from "./table";
+import { mcpToolCard } from "./mcpTool";
 
 /** What a card gets when it runs. For a per-item card the runner calls `run` once per item, with `tctx.item` set. */
 export interface CardCtx {
@@ -50,4 +51,5 @@ export const CARDS: Record<CardType, CardImpl> = {
   fetch: fetchCard,
   filter: filterCard,
   table: tableCard,
+  mcpTool: mcpToolCard,
 };

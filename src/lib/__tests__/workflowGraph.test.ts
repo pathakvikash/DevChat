@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { buildTemplate } from "@/lib/workflows/templates";
-import { checkGraph, emptyGraph, idFromLabel, newCard, parseGraph, topoOrder, validateStructure, type FlowNode, type WorkflowGraph } from "@/lib/workflows/graph";
+import { autoLayout, checkGraph, connectionError, connectNew, emptyGraph, LAYOUT_DX, LAYOUT_DY, LOOP_MESSAGE, idFromLabel, newCard, parseGraph, topoOrder, validateStructure, type FlowNode, type WorkflowGraph } from "@/lib/workflows/graph";
 
 const node = (id: string, fromIds: string[], x = 0, y = 0, type: FlowNode["type"] = "agent", config: Record<string, unknown> = {}): FlowNode => ({
   id,
@@ -97,7 +97,7 @@ describe("chat-reading plus outbound tools", () => {
 });
 
 describe("chat data flowing to a card that reaches the web", () => {
-  const leak = (name: string) => `${name} reads your chats and a later card reaches the web. Split them into two workflows, so a web page can't make it send your chats out.`;
+  const leak = (name: string) => `${name} reads private data (chats, MCP or a folder) and a later card reaches the web. Split them into two workflows, so a web page can't make it send your data out.`;
   const reader = (id: string, from: string[], x: number) => node(id, from, x, 0, "agent", { tools: ["readChat"] });
 
   it("refuses a later agent with an outbound tool, even through a card in between", () => {
@@ -138,5 +138,94 @@ describe("helpers", () => {
     const c = newCard(g, "agent");
     expect(c.fromIds).toEqual(["mark"]);
     expect(c.ui.position.x).toBeGreaterThan(g.nodes.at(-1)!.ui.position.x);
+  });
+});
+
+describe("autoLayout", () => {
+  const at = (g: WorkflowGraph, id: string) => g.nodes.find((n) => n.id === id)!.ui.position;
+
+  it("puts a chain one column per level, on one row", () => {
+    const g = autoLayout(buildTemplate("news", "m").graph);
+    expect(g.nodes.map((n) => at(g, n.id))).toEqual(g.nodes.map((_, level) => ({ x: level * LAYOUT_DX, y: 0 }))); // a chain: one level per card
+  });
+
+  it("puts a card one column right of its furthest input, and stacks a level in run order, centred", () => {
+    const g = autoLayout(graphOf(node("a", ["trigger"]), node("b", ["trigger"], 0, 50), node("c", ["a", "b"]), node("d", ["trigger"], 0, 90)));
+    expect(at(g, "a").x).toBe(LAYOUT_DX);
+    expect(at(g, "c").x).toBe(2 * LAYOUT_DX);
+    const ys = ["a", "b", "d"].map((id) => at(g, id).y);
+    expect(ys).toEqual([-LAYOUT_DY, 0, LAYOUT_DY]);
+    expect(at(g, "c").y).toBe(0);
+  });
+
+  it("keeps everything else, does not mutate, and still places cards in a loop", () => {
+    const g = graphOf(node("a", ["b"]), node("b", ["a"]));
+    const out = autoLayout(g);
+    expect(g.nodes[1].ui.position).toEqual({ x: 0, y: 0 });
+    expect(out.nodes.map((n) => n.id)).toEqual(g.nodes.map((n) => n.id));
+    expect(at(out, "a").x).toBe(LAYOUT_DX);
+    expect(at(out, "b").x).toBe(LAYOUT_DX);
+    expect(at(out, "a").y).not.toBe(at(out, "b").y);
+  });
+});
+
+describe("connectionError", () => {
+  const g = graphOf(node("a", ["trigger"]), node("b", ["a"]), node("orphan", []), node("reader", ["trigger"], 0, 0, "agent", { tools: ["readChat"] }), node("web", ["trigger"], 0, 0, "agent", { tools: ["fetchUrl"] }));
+
+  it("accepts a plain connection", () => {
+    expect(connectionError(g, "a", "orphan")).toBeNull();
+    expect(connectionError(g, "orphan", "b")).toBeNull();
+  });
+
+  it("refuses a connection that would make a loop, to itself or back up the flow", () => {
+    expect(connectionError(g, "b", "a")).toBe(LOOP_MESSAGE);
+    expect(connectionError(g, "b", "b")).toBe(LOOP_MESSAGE);
+    expect(connectionError(g, "b", "trigger")).toBe(LOOP_MESSAGE);
+  });
+
+  it("refuses a second connection between the same cards", () => {
+    expect(connectionError(g, "a", "b")).toBe("Those cards are already connected");
+  });
+
+  it("keeps the single trigger: nothing connects into it", () => {
+    expect(connectionError(g, "orphan", "trigger")).toBe("The trigger card has no inputs");
+  });
+
+  it("shows the chat-leak rule's message", () => {
+    expect(connectionError(g, "reader", "web")).toMatch(/a later card reaches the web/);
+  });
+});
+
+describe("connectNew", () => {
+  const g = graphOf(node("reader", ["trigger"], 0, 0, "agent", { tools: ["readChat"] }), node("a", ["trigger"]));
+  const web = (fromIds: string[]) => node("web", fromIds, 0, 0, "webSearch", { queries: "x" });
+
+  it("keeps connections that pass the rules", () => {
+    expect(connectNew(g, web(["a"]))).toMatchObject({ error: null, node: { fromIds: ["a"] } });
+  });
+
+  it("leaves a refused connection out, with the rule's message, and keeps the card", () => {
+    const r = connectNew(g, web(["reader"]));
+    expect(r.node.fromIds).toEqual([]);
+    expect(r.error).toMatch(/a later card reaches the web/);
+  });
+
+  it("keeps the good connections and reports the first bad one", () => {
+    const r = connectNew(g, web(["a", "reader"]));
+    expect(r.node.fromIds).toEqual(["a"]);
+    expect(r.error).not.toBeNull();
+  });
+});
+
+describe("layout constants", () => {
+  it("newCard steps by the layout column width", () => {
+    const g = buildTemplate("news", "m").graph;
+    expect(newCard(g, "agent").ui.position.x - g.nodes.at(-1)!.ui.position.x).toBe(LAYOUT_DX);
+  });
+
+  it("centres two cards in a level symmetrically", () => {
+    const g = autoLayout(graphOf(node("a", ["trigger"]), node("b", ["trigger"], 0, 50)));
+    const [a, b] = ["a", "b"].map((id) => g.nodes.find((n) => n.id === id)!.ui.position.y);
+    expect(a).toBe(-b);
   });
 });

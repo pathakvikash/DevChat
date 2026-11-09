@@ -1,8 +1,6 @@
 "use client";
 
 import { Circle, CheckCircle2, CircleAlert, CircleSlash, Loader2, ShieldQuestion, Square, XCircle, RotateCcw } from "lucide-react";
-import SidePanel from "@/app/components/ui/SidePanel";
-import { getRelativeTime } from "@/app/components/MessageActions";
 import type { CardRun, RunState } from "@/lib/workflows/graph";
 
 export type DisplayStatus = "notrun" | "running" | "done" | "failed" | "skipped" | "waiting" | "cancelled" | "interrupted";
@@ -64,51 +62,6 @@ export interface RunRow {
   inputTokens: number;
   outputTokens: number;
   costUsd: number | null;
-}
-
-export function RunsDrawer({
-  open,
-  onClose,
-  runs,
-  currentId,
-  onOpen,
-}: {
-  open: boolean;
-  onClose: () => void;
-  runs: RunRow[] | null;
-  currentId: string | null;
-  onOpen: (id: string) => void;
-}) {
-  return (
-    <SidePanel isOpen={open} onClose={onClose} title="Runs" subtitle="Newest first. The last 50 are kept.">
-      {runs && runs.length === 0 && <p className="text-sm text-zinc-400">No runs yet. Press Run to start one.</p>}
-      {!runs && <p className="text-sm text-zinc-400">Loading…</p>}
-      <ul className="space-y-2">
-        {(runs ?? []).map((r) => (
-          <li key={r.id}>
-            <button
-              type="button"
-              onClick={() => onOpen(r.id)}
-              aria-current={r.id === currentId || undefined}
-              className="focus-ring glass-card w-full rounded-[var(--glass-radius-md)] px-3 py-2 text-left"
-            >
-              <div className="flex items-center justify-between gap-2">
-                <StatusBadge status={runStatus(r.state)} />
-                <span className="text-xs text-zinc-400">{getRelativeTime(r.startedAt)}</span>
-              </div>
-              <div className="mt-1 flex flex-wrap items-center gap-x-3 text-[11px] font-mono tabular-nums text-zinc-400">
-                <span className="font-sans">Manual</span>
-                <span>{formatDuration(r.startedAt, r.endedAt)}</span>
-                <span>{formatTokens(r.inputTokens + r.outputTokens)} tokens</span>
-                {r.costUsd !== null && r.costUsd > 0 && <span>${r.costUsd.toFixed(4)}</span>}
-              </div>
-              {r.error && <p className="mt-1 line-clamp-2 text-xs text-zinc-400">{r.error}</p>}
-            </button>
-          </li>
-        ))}
-      </ul>
-    </SidePanel>
-  );
 }
 
 export function ResumeButton({ onClick, at }: { onClick: () => void; at?: string }) {

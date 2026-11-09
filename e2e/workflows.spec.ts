@@ -101,9 +101,8 @@ test("Cancel run ends the run as Cancelled and creates no chat", async ({ page, 
 
   // The first request to the cancel route compiles it in dev, which can take seconds of the digest's 7: warm it up now.
   await request.post("/api/workflow-runs/warmup/cancel");
-  // The "Run started" toast can sit over the button; dismiss it first.
-  const dismiss = page.getByRole("button", { name: "Dismiss" });
-  for (let i = 0; i < 3 && (await dismiss.count()) > 0; i++) await dismiss.first().click({ timeout: 2000 }).catch(() => {}); // it may leave on its own
+  // The "Run started" toast sits over the Cancel run button; a click that waits for it to fade can land after the run is over.
+  await page.getByRole("button", { name: "Dismiss" }).click({ timeout: 1000 }).catch(() => {});
   await page.getByRole("button", { name: "Cancel run" }).click();
   await expect(toast(page, "Run cancelled")).toBeVisible();
   await expect(card(page, "Write the digest", "Agent", "Cancelled")).toBeVisible();

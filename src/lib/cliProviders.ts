@@ -65,6 +65,8 @@ export interface CliInvocation {
   /** chat and plan = read-only tools in `cwd` (plan also asks Claude Code for plan mode); agent = may also create/edit files there;
    *  ask = Claude Code may act but asks per change (CLIs without a bridge treat it as chat). */
   access?: "chat" | "plan" | "agent" | "ask";
+  /** false = switch off the tool's own web search and fetch (workflow cards). Default true. */
+  web?: boolean;
 }
 
 export interface CliProviderDef {
@@ -292,9 +294,14 @@ export const CLI_PROVIDERS: readonly CliProviderDef[] = [
     ],
     // --setting-sources "" skips the user's hooks/settings; --system-prompt replaces the
     // coding-agent prompt. Tool access widens with the working folder and mode.
-    invoke: ({ model, system, user, effort, cwd, access }) => {
+    invoke: ({ model, system, user, effort, cwd, access, web }) => {
       // Ask with a folder: every edit or command is a permission request on stdin/stdout (see `runCli`).
       const bridged = !!cwd && access === "ask";
+      // Workflow cards (web === false): no network at all. `--tools default` would still carry Task (sub-agents, including a
+      // web-fetch one), RemoteTrigger, Skill and more, so name exactly the tools allowed instead, and --strict-mcp-config keeps
+      // the user's own MCP servers and claude.ai connectors from loading (the no-folder branch already does).
+      const offline = web === false;
+      const allow = ["--tools", "Read", "Glob", "Grep", "Edit", "Write"];
       return {
         args: [
           "-p",
@@ -307,10 +314,10 @@ export const CLI_PROVIDERS: readonly CliProviderDef[] = [
           ...(!cwd
             ? ["--tools", "", "--strict-mcp-config"] // no --mcp-config given: none of the user's MCP servers start
             : access === "agent"
-              ? ["--tools", "default", "--permission-mode", "acceptEdits"]
+              ? [...(offline ? [...allow, "--strict-mcp-config"] : ["--tools", "default"]), "--permission-mode", "acceptEdits"]
               : bridged
-                ? ["--tools", "default", "--permission-mode", "default", "--permission-prompt-tool", "stdio"]
-                : ["--tools", "Read", "Glob", "Grep", "WebSearch", "WebFetch"]),
+                ? [...(offline ? [...allow, "--strict-mcp-config"] : ["--tools", "default"]), "--permission-mode", "default", "--permission-prompt-tool", "stdio"]
+                : ["--tools", "Read", "Glob", "Grep", ...(offline ? ["--strict-mcp-config"] : ["WebSearch", "WebFetch"])]),
           ...(access === "plan" ? ["--permission-mode", "plan"] : []),
           ...(system ? ["--system-prompt", system] : []),
           ...(model !== "default" ? ["--model", model] : []),
@@ -331,7 +338,7 @@ export const CLI_PROVIDERS: readonly CliProviderDef[] = [
     models: [{ id: "default", name: "Default (your Codex setting)" }],
     // --sandbox read-only still reads any file on disk, and no flag limits reads to the cwd.
     needsFolder: true,
-    invoke: ({ model, system, user, effort, cwd, access }) => ({
+    invoke: ({ model, system, user, effort, cwd, access, web }) => ({
       args: [
         "exec",
         "--json",
@@ -340,6 +347,9 @@ export const CLI_PROVIDERS: readonly CliProviderDef[] = [
         ...(cwd ? ["-C", cwd] : []),
         ...(model !== "default" ? ["--model", model] : []),
         ...(effort ? ["-c", `model_reasoning_effort="${effort === "max" ? "high" : effort}"`] : []),
+        // Workflow cards (web === false): no network. ponytail: these Codex flags are unverified until the @live Codex check
+        // runs, so Codex is blocked as a workflow card model for now (CODEX_BLOCKED in workflows/catalog.ts).
+        ...(web === false ? ["-c", "tools.web_search=false", "-c", 'web_search="disabled"', "-c", "sandbox_workspace_write.network_access=false"] : []),
         "-",
       ],
       stdin: withSystem(system, user),
@@ -355,11 +365,27 @@ export const CLI_PROVIDERS: readonly CliProviderDef[] = [
     models: "discover",
     // `opencode run --format json` prints a part only when it finishes, so a task sub-agent leaves both pipes silent for minutes.
     inactivityMs: 15 * 60_000,
-    invoke: ({ model, system, user, effort, cwd, access }) => ({
+    invoke: ({ model, system, user, effort, cwd, access, web }) => {
+      // Later rules win. Reading a .env file defaults to "ask", which ends the run, so say deny.
+      const permission = {
+        // Workflow cards (web === false): every tool not named below is denied, which covers MCP tools from the user's global
+        // config; search tools are named back in. ponytail: unverified against a real OpenCode until a live check runs.
+        // task and skill are named so no earlier or later rule can open them by ordering.
+        ...(web === false ? { "*": "deny", glob: "allow", grep: "allow", list: "allow", task: "deny", skill: "deny" } : {}),
+        read: { "*": "allow", "*.env": "deny", "*.env.*": "deny", "*.env.example": "allow" },
+        bash: "deny",
+        edit: cwd && access === "agent" ? "allow" : "deny",
+        webfetch: cwd && web !== false ? "allow" : "deny",
+        websearch: cwd && web !== false ? "allow" : "deny",
+        doom_loop: "allow",
+        external_directory: "deny",
+      };
+      return {
       args: [
         "run",
         "--format", "json",
         "--pure",
+        "--agent", "build", // not whatever `default_agent` the user's own config names
         "--thinking",
         ...(cwd ? ["--dir", cwd] : []),
         ...(model !== "default" ? ["--model", model] : []),
@@ -375,23 +401,20 @@ export const CLI_PROVIDERS: readonly CliProviderDef[] = [
         // the model an error it can recover from. doom_loop (the same call three
         // times) is checked outside the tool, so ask and deny both end the run:
         // allow it and let the step limit below stop a model that never recovers.
+        // The same rules sit on the build agent too: an opencode.json in the folder, or the user's own config, can set
+        // `agent.build.permission`, which would otherwise win over the top-level rules.
+        // Workflow cards also ignore the folder's own opencode.json (its rules, MCP servers and sub-agent settings);
+        // chat keeps the project's config.
+        ...(web === false ? { OPENCODE_DISABLE_PROJECT_CONFIG: "1" } : {}),
         OPENCODE_CONFIG_CONTENT: JSON.stringify({
-          permission: {
-            // Later rules win. Reading a .env file defaults to "ask", which ends the run, so say deny.
-            read: { "*": "allow", "*.env": "deny", "*.env.*": "deny", "*.env.example": "allow" },
-            bash: "deny",
-            edit: cwd && access === "agent" ? "allow" : "deny",
-            webfetch: cwd ? "allow" : "deny",
-            websearch: cwd ? "allow" : "deny",
-            doom_loop: "allow",
-            external_directory: "deny",
-          },
+          permission,
           // A model that keeps repeating a call stops after this many steps.
-          agent: { build: { steps: 50 } },
+          agent: { build: { steps: 50, permission } },
         }),
       },
       cwd,
-    }),
+    };
+    },
     parser: opencodeParser,
   },
 ];
@@ -1039,6 +1062,8 @@ function runCli(
       } else {
         const scratch = join(tmpdir(), "devchat-cli");
         await mkdir(scratch, { recursive: true });
+        // Already cancelled (also while the folder was made): don't start a process nobody will read.
+        if (signal?.aborted) return controller.error(signal.reason ?? new Error("Aborted"));
         const cwd = spec!.cwd || scratch;
         child = spawn(def.bin, spec!.args, { cwd, env: childEnv(spec!.env, cwd), stdio: ["pipe", "pipe", "pipe"] });
         run = {
@@ -1307,7 +1332,7 @@ export function createCliModel(def: CliProviderDef, modelArg: string): LanguageM
         ),
       };
     }
-    const spec = def.invoke({ model: modelArg, system, user: flat.user, effort, cwd, access });
+    const spec = def.invoke({ model: modelArg, system, user: flat.user, effort, cwd, access, web: po.web === false ? false : undefined });
     const toolNames = new Set(tools.map((t) => t.name));
     // Only the tools that may be allowed for a chat, and only in Ask: Chat and Plan are read-only, whatever the list says.
     const allowed = new Set(

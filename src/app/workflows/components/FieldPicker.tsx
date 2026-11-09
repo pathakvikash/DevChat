@@ -52,6 +52,9 @@ export function pickerRows(opts: {
   return rows;
 }
 
+/** True when the two characters before the caret are `{{`: the cue to open the picker. */
+export const typedBraces = (value: string, caret: number | null): boolean => caret !== null && caret >= 2 && value.slice(caret - 2, caret) === "{{";
+
 /** A small popover: type to filter, ↑↓ to move, Enter to insert, Esc to close (the slash-menu pattern). */
 export default function FieldPicker({
   rows,

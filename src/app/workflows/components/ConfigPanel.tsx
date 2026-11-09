@@ -1,14 +1,15 @@
 "use client";
 
 import { useState } from "react";
-import { Bot, Copy, Check, Funnel, Globe, MessageSquare, Play, Search, Table2, Trash2, X, ChevronDown, ChevronRight } from "lucide-react";
-import { CATALOG, type FieldSpec } from "@/lib/workflows/catalog";
-import { ancestorsOf, TRIGGER_ID, type CardRun, type FlowNode, type GraphIssue, type RunState, type WorkflowGraph } from "@/lib/workflows/graph";
+import { AlertTriangle, Bot, Copy, Check, MessageSquare, Funnel, Globe, Plug, Play, Search, Table2, Trash2, X, ChevronDown, ChevronRight } from "lucide-react";
+import { CATALOG, isCliModelId, MCP_WEB_WARNING, reachesOpenWeb, type FieldSpec } from "@/lib/workflows/catalog";
+import { useToast } from "@/app/components/Toast";
+import { ancestorsOf, connectionError, TRIGGER_ID, type CardRun, type FlowNode, type GraphIssue, type RunState, type WorkflowGraph } from "@/lib/workflows/graph";
 import ConfigField, { type FieldEnv } from "./ConfigField";
 import { cardStatus, formatDuration, formatTokens, StatusBadge } from "./RunStatus";
 import { fetchNodeRun } from "./useWorkflowRun";
 
-const CARD_ICONS = { Play, Search, Bot, MessageSquare, Globe, Funnel, Table2 } as const;
+const CARD_ICONS = { Play, Search, Bot, MessageSquare, Plug, Globe, Funnel, Table2 } as const;
 
 /** A card type's icon, by the catalog's icon name. */
 export function CardIcon({ name, size = 14, className }: { name: string; size?: number; className?: string }) {
@@ -134,14 +135,28 @@ export default function ConfigPanel({
   onClose: () => void;
   overlay?: boolean;
 }) {
+  const { toast } = useToast();
   const [tab, setTab] = useState<"settings" | "last">("settings");
   const [advanced, setAdvanced] = useState(false);
   const def = CATALOG[node.type];
-  const mine = issues.filter((i) => i.nodeId === node.id);
+  const mine = issues.filter((i) => i.nodeId === node.id && !i.warning);
+  // The MCP web warning already shows inside the MCP section, so it is left out of this list.
+  const warnings = issues.filter((i) => i.nodeId === node.id && i.warning && !i.message.endsWith(MCP_WEB_WARNING));
   const descendants = new Set(graph.nodes.filter((n) => ancestorsOf(graph, n.id).has(node.id)).map((n) => n.id));
   const canRunAfter = graph.nodes.filter((n) => n.id !== node.id && !descendants.has(n.id));
   const visible = (f: FieldSpec) => !f.when || f.when(node.config);
-  const setConfig = (key: string, value: unknown) => onChange({ config: { ...node.config, [key]: value } });
+  const setConfig = (key: string, value: unknown) => {
+    let config = { ...node.config, [key]: value };
+    // A folder only belongs to a command-line model, and edits only to a folder.
+    if (key === "model" && !isCliModelId(String(value || graph.defaultModel))) config = { ...config, folder: "", allowEdits: false };
+    if (key === "folder" && !value) config = { ...config, allowEdits: false };
+    onChange({ config });
+  };
+  const upstreamWeb = [...ancestorsOf(graph, node.id)].some((a) => {
+    const up = graph.nodes.find((n) => n.id === a);
+    return !!up && reachesOpenWeb(up.type, up.config, graph.defaultModel);
+  });
+  const fieldEnv = { ...env, upstreamWeb };
 
   return (
     <aside aria-label={`${node.ui.label} settings`} className={`flex h-full flex-col ${overlay ? "" : "glass-panel w-[360px] shrink-0 border-l border-[var(--glass-border)]"}`}>
@@ -189,7 +204,23 @@ export default function ConfigPanel({
           <>
             <p className="text-xs text-zinc-400">{def.description}</p>
             {def.fields.filter(visible).map((spec) => (
-              <ConfigField key={spec.key} spec={spec} config={node.config} onChange={setConfig} env={env} error={mine.find((i) => i.field === spec.key)?.message.replace(/^[^:]*: /, "")} />
+              <ConfigField key={spec.key} spec={spec} config={node.config} onChange={setConfig} env={fieldEnv} error={mine.find((i) => i.field === spec.key)?.message.replace(/^[^:]*: /, "")} />
+            ))}
+            {node.type === "mcpTool" && upstreamWeb && (
+              <p className="flex items-start gap-1.5 text-xs text-zinc-300">
+                <AlertTriangle size={14} className="mt-px shrink-0 text-amber-400" aria-hidden="true" />
+                <span>
+                  <span className="font-medium">Warning:</span> {MCP_WEB_WARNING}
+                </span>
+              </p>
+            )}
+            {warnings.map((w, i) => (
+              <p key={i} className="flex items-start gap-1.5 text-xs text-zinc-300">
+                <AlertTriangle size={14} className="mt-px shrink-0 text-amber-400" aria-hidden="true" />
+                <span>
+                  <span className="font-medium">Warning:</span> {w.message.replace(/^[^:]*: /, "")}
+                </span>
+              </p>
             ))}
             {def.fields.length === 0 && <p className="text-sm text-zinc-400">Nothing to set. This card starts the flow.</p>}
             {node.type !== "trigger" && (
@@ -212,7 +243,13 @@ export default function ConfigPanel({
                             className="h-4 w-4"
                             disabled={env.readOnly}
                             checked={node.fromIds.includes(n.id)}
-                            onChange={(e) => onChange({ fromIds: e.target.checked ? [...node.fromIds, n.id] : node.fromIds.filter((f) => f !== n.id) })}
+                            onChange={(e) => {
+                              if (!e.target.checked) return onChange({ fromIds: node.fromIds.filter((f) => f !== n.id) });
+                              // The same rules as a save; a refused connection leaves the box unticked.
+                              const err = connectionError(graph, n.id, node.id);
+                              if (err) toast(err, "error");
+                              else onChange({ fromIds: [...node.fromIds, n.id] });
+                            }}
                           />
                           {n.ui.label}
                         </label>

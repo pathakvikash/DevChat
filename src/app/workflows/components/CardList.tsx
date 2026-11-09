@@ -7,7 +7,7 @@ import { topoOrder, type CardRun, type FlowNode, type RunState, type WorkflowGra
 import { CardIcon } from "./ConfigPanel";
 import { cardStatus, formatTokens, STATUS_META, StatusBadge } from "./RunStatus";
 
-function footerOf(node: FlowNode, card: CardRun | undefined): string {
+export function footerOf(node: FlowNode, card: CardRun | undefined): string {
   const parts: string[] = [];
   if (CATALOG[node.type].perItem && node.config.perItem === true) parts.push("Each item");
   if (card?.items) parts.push(`${card.items.done}/${card.items.total}`);
@@ -37,7 +37,8 @@ export default function CardList({
   readOnly: boolean;
   /** False at the 30-card limit. */
   canAdd: boolean;
-  onSelect: (id: string) => void;
+  /** Without it the cards are plain, not buttons (a preview). */
+  onSelect?: (id: string) => void;
   onAdd: (type: CardType) => void;
 }) {
   const [menu, setMenu] = useState(false);
@@ -66,14 +67,7 @@ export default function CardList({
         const footer = footerOf(node, card);
         const border =
           status === "failed" ? "border-red-900/50" : status === "waiting" ? "border-amber-900/50" : "";
-        return (
-          <li key={node.id} className="flex flex-col items-stretch gap-2">
-            <div
-              role="group"
-              aria-label={`${node.ui.label}, ${def.label}, ${STATUS_META[status].label}`}
-              className={`glass-card overflow-hidden rounded-[var(--glass-radius-md)] border ${border || "border-transparent"} ${selectedId === node.id ? "ring-2 ring-[var(--glass-accent-strong)]" : ""}`}
-            >
-              <button type="button" onClick={() => onSelect(node.id)} aria-label={`Open settings for ${node.ui.label}`} className="focus-ring block w-full text-left">
+        const inner = <>
                 <div className="flex h-11 items-center gap-2 bg-[var(--glass-bg-elevated)] px-3">
                   <span className="glass flex h-6 w-6 shrink-0 items-center justify-center rounded-[var(--glass-radius-sm)]">
                     <CardIcon name={def.icon} className="text-zinc-300" />
@@ -91,7 +85,21 @@ export default function CardList({
                   {card?.skippedReason && <span className="mt-0.5 line-clamp-2">{card.skippedReason}</span>}
                 </div>
                 {footer && <div className="border-t border-[var(--glass-border)] px-3 py-1.5 font-mono text-[11px] tabular-nums text-zinc-400">{footer}</div>}
-              </button>
+              </>;
+        return (
+          <li key={node.id} className="flex flex-col items-stretch gap-2">
+            <div
+              role="group"
+              aria-label={`${node.ui.label}, ${def.label}, ${STATUS_META[status].label}`}
+              className={`glass-card overflow-hidden rounded-[var(--glass-radius-md)] border ${border || "border-transparent"} ${selectedId === node.id ? "ring-2 ring-[var(--glass-accent-strong)]" : ""}`}
+            >
+              {onSelect ? (
+                <button type="button" onClick={() => onSelect(node.id)} aria-label={`Open settings for ${node.ui.label}`} className="focus-ring block w-full text-left">
+                  {inner}
+                </button>
+              ) : (
+                <div>{inner}</div>
+              )}
             </div>
             {i < order.length - 1 && <ArrowDown size={14} className="mx-auto text-zinc-500" aria-hidden="true" />}
           </li>

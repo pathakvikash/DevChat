@@ -42,7 +42,7 @@ for (const theme of THEMES) {
   });
 
   test(`workflow editor with the News template, ${theme}`, async ({ page, request }) => {
-    await page.addInitScript((t) => localStorage.setItem("vas:theme", t), theme);
+    await page.addInitScript((t) => (localStorage.setItem("vas:theme", t), localStorage.setItem("vas:workflowView", "list")), theme); // the list view; the canvas has its own baselines
     const id = await seed(request, false);
     await page.goto(`/workflows/${id}`);
     await expect(page.getByRole("group", { name: "Write the digest, Agent, Not run" })).toBeVisible();
@@ -51,7 +51,7 @@ for (const theme of THEMES) {
   });
 
   test(`workflow editor with a finished run and a card open, ${theme}`, async ({ page, request }) => {
-    await page.addInitScript((t) => localStorage.setItem("vas:theme", t), theme);
+    await page.addInitScript((t) => (localStorage.setItem("vas:theme", t), localStorage.setItem("vas:workflowView", "list")), theme);
     const id = await seed(request, true);
     await page.goto(`/workflows/${id}`);
     await expect(page.getByRole("group", { name: "Post to a chat, Send to chat, Done" })).toBeVisible();
