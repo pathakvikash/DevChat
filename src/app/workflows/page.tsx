@@ -27,10 +27,15 @@ export default function WorkflowsPage() {
   const wrap = useRef<HTMLDivElement>(null);
   // Whether command-line models and folders can be used here; the local templates are disabled when not.
   const [hostTools, setHostTools] = useState(false);
+  const [hostWhy, setHostWhy] = useState("");
   useEffect(() => {
     fetch("/api/settings/keys")
       .then((res) => (res.ok ? res.json() : null))
-      .then((k) => k && setHostTools(k.hostTools === true))
+      .then((k) => {
+        if (!k) return;
+        setHostTools(k.hostTools === true);
+        setHostWhy(typeof k.hostToolsReason === "string" ? k.hostToolsReason : "");
+      })
       .catch(() => {});
   }, []);
 
@@ -113,7 +118,7 @@ export default function WorkflowsPage() {
                             {t.label}
                             {t.local && <span className="rounded-full border border-[var(--glass-border)] px-1.5 text-[10px] text-zinc-400">Local</span>}
                           </span>
-                          <span className="block text-xs text-zinc-400">{off ? "Not available here: it needs Claude Code or OpenCode on the server's own machine." : t.description}</span>
+                          <span className="block text-xs text-zinc-400">{off ? `Not available here. ${hostWhy}`.trim() : t.description}</span>
                         </button>
                       </li>
                     );

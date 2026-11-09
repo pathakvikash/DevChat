@@ -14,5 +14,5 @@ export function htmlToText(html: string): string {
     .trim();
 }
 
-/** A fetched body as readable text: HTML and XML lose their markup; anything else (plain text, markdown, source code with <Tags> and generics) is returned as it is. */
-export const readableText = (body: string, contentType: string): string => (/html|xml/i.test(contentType) ? htmlToText(body) : body);
+/** A fetched body as readable text: HTML and XML (and a body with no content type) lose their markup; anything else (plain text, markdown, source code with <Tags> and generics) is returned as it is. */
+export const readableText = (body: string, contentType: string): string => (!contentType || /html|xml/i.test(contentType) ? htmlToText(body) : body);

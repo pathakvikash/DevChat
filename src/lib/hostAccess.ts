@@ -33,14 +33,16 @@ export async function canUseHostTools(userId: string): Promise<boolean> {
   return ok;
 }
 
-/** Whether this user can use a Claude Code or OpenCode model with a folder here: the server's owner, on a machine where one is installed.
- *  Sanity mode counts as installed (the tests have none). */
-export async function hostToolsHere(userId: string): Promise<boolean> {
-  if (!(await canUseHostTools(userId))) return false;
-  if (isSanityMode()) return true;
+/** Why this user can't use a Claude Code or OpenCode model with a folder here, or null when they can: not the server's owner, or
+ *  no CLI installed. Sanity mode counts as installed (the tests have none). */
+export async function hostToolsReason(userId: string): Promise<string | null> {
+  if (!(await canUseHostTools(userId))) return HOST_TOOLS_REFUSED;
+  if (isSanityMode()) return null;
   const bins = await findCliBins();
-  return bins.has("claude-code") || bins.has("opencode");
+  return bins.has("claude-code") || bins.has("opencode") ? null : FOLDER_TEMPLATE_REFUSED;
 }
+
+export const hostToolsHere = async (userId: string): Promise<boolean> => (await hostToolsReason(userId)) === null;
 
 export const FOLDER_TEMPLATE_REFUSED = "Explaining a folder needs Claude Code or OpenCode on this server.";
 

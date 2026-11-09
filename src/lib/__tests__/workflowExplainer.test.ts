@@ -95,7 +95,7 @@ describe("the New workflow menu entries", () => {
 describe("the repo variable format", () => {
   it("the template marks its variable, reads a URL as owner/name, and keeps the mark through parseGraph", () => {
     const g = parseGraph(JSON.stringify(buildTemplate("explain-repo", "m").graph));
-    expect(g.vars.find((v) => v.key === "repo")).toMatchObject({ format: "githubRepo", value: "octocat/Hello-World" });
+    expect(g.vars.find((v) => v.key === "repo")).toMatchObject({ format: "githubRepo", value: "expressjs/cors" });
     expect(varValues([{ key: "repo", label: "", value: "https://github.com/a/b/", format: "githubRepo" }])).toEqual({ repo: "a/b" });
   });
 
@@ -106,10 +106,10 @@ describe("the repo variable format", () => {
     expect(a.vars[1]).not.toBe(b.vars[1]);
   });
 
-  it("lists only the top level of the tree and points the agent at /contents/ for folders", () => {
+  it("lists only the top level of the tree and points the agent at git/trees/HEAD:<folder> for folders", () => {
     const g = buildTemplate("explain-repo").graph;
     expect(String(g.nodes.find((n) => n.id === "tree")!.config.url)).toBe("https://api.github.com/repos/{{vars.repo}}/git/trees/HEAD");
-    expect(String(g.nodes.find((n) => n.id === "explain")!.config.instructions)).toContain("/contents/<folder>");
+    expect(String(g.nodes.find((n) => n.id === "explain")!.config.instructions)).toContain("/git/trees/HEAD:<folder>");
   });
 });
 
@@ -139,5 +139,6 @@ describe("readableText", () => {
     expect(readableText(tsx, "text/plain; charset=utf-8")).toBe(tsx);
     expect(readableText("<p>Hi <b>there</b></p>", "text/html")).toBe("Hi there");
     expect(readableText("<a>x</a>", "application/xml")).toBe("x");
+    expect(readableText("<p>Hi</p>", "")).toBe("Hi");
   });
 });

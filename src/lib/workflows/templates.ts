@@ -99,7 +99,7 @@ Plain language first, detail after. Never invent a file, function, route or line
 
 const REPO_INSTRUCTIONS = `${COMMON}
 
-Source: the GitHub repo {{vars.repo}}. The input holds its info and its top-level files and folders (GitHub API JSON). To list a folder, fetch https://api.github.com/repos/{{vars.repo}}/contents/<folder>. Use the Fetch URL tool for more, and only for raw.githubusercontent.com and api.github.com addresses of this repo, never any other site. GitHub allows about 60 requests an hour without a login, so fetch at most 8 URLs, folder listings included: the README first (https://raw.githubusercontent.com/{{vars.repo}}/HEAD/README.md), then the few files that matter (the package manifest, the entry points, the files the focus names). Use only paths you have seen listed. Each fetch returns about 8,000 characters and no line numbers, so cite file paths, and add :line only when you saw that line.`;
+Source: the GitHub repo {{vars.repo}}. The input holds its info and its top-level files and folders (GitHub API JSON). To list a folder, fetch https://api.github.com/repos/{{vars.repo}}/git/trees/HEAD:<folder> (shorter than /contents/<folder>, which is the fallback). Use the Fetch URL tool for more, and only for raw.githubusercontent.com and api.github.com addresses of this repo, never any other site. GitHub allows about 60 requests an hour without a login, so fetch at most 8 URLs, folder listings included: the README first, as listed in the top-level files, usually README.md (https://raw.githubusercontent.com/{{vars.repo}}/HEAD/<README file>), then the few files that matter (the package manifest, the entry points, the files the focus names). Use only paths you have seen listed. Each fetch returns about 8,000 characters and no line numbers, so cite file paths, and add :line only when you saw that line.`;
 
 const FOLDER_INSTRUCTIONS = `${COMMON}
 
@@ -107,7 +107,7 @@ Source: the working folder you were opened in. Read it yourself, read-only, and 
 
 function explainRepo(defaultModel: string): WorkflowGraph {
   const g = emptyGraph(defaultModel);
-  g.vars = [{ key: "repo", label: "GitHub repo, like owner/name, or its URL", value: "octocat/Hello-World", format: "githubRepo" }, focusVar()];
+  g.vars = [{ key: "repo", label: "GitHub repo, like owner/name, or its URL", value: "expressjs/cors", format: "githubRepo" }, focusVar()];
   g.nodes.push(
     {
       id: "info",

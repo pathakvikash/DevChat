@@ -173,7 +173,7 @@ export const TOOL_REGISTRY: Record<string, ToolDefinition> = {
         const ctype = res.contentType;
         const raw = res.text;
         if (ctype.includes("application/json")) {
-          return raw.slice(0, 8000);
+          return raw.length > 8000 ? raw.slice(0, 8000) + "\n…[truncated]" : raw;
         }
         // strip script/style + tags → readable text
         const text = readableText(raw, ctype);

@@ -12,7 +12,7 @@ vi.mock("@/lib/cliProviders", async (importOriginal) => ({
 
 import { prisma } from "@/lib/db";
 import { findCliBins } from "@/lib/cliProviders";
-import { canUseHostTools, hostToolsHere, resetHostAccessCache } from "@/lib/hostAccess";
+import { canUseHostTools, hostToolsHere, hostToolsReason, HOST_TOOLS_REFUSED, FOLDER_TEMPLATE_REFUSED, resetHostAccessCache } from "@/lib/hostAccess";
 import { getModel, listModels } from "@/lib/models";
 
 const find = vi.mocked((prisma as any).user.findUnique);
@@ -98,5 +98,16 @@ describe("hostToolsHere", () => {
     expect(await hostToolsHere("u1")).toBe(false);
     vi.mocked(findCliBins).mockResolvedValueOnce(new Set(["opencode"]));
     expect(await hostToolsHere("u1")).toBe(true);
+  });
+});
+
+describe("hostToolsReason", () => {
+  it("says owner-only to a non-owner, and the missing CLI only to an owner", async () => {
+    process.env.OWNER_EMAILS = "owner@example.com";
+    find.mockImplementation(async ({ where }: any) => ({ email: where.id === "o" ? "owner@example.com" : "x@example.com" }));
+    expect(await hostToolsReason("x")).toBe(HOST_TOOLS_REFUSED);
+    expect(await hostToolsReason("o")).toBe(FOLDER_TEMPLATE_REFUSED);
+    vi.mocked(findCliBins).mockResolvedValueOnce(new Set(["claude-code"]));
+    expect(await hostToolsReason("o")).toBeNull();
   });
 });
