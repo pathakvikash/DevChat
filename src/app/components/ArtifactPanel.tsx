@@ -604,7 +604,7 @@ function MermaidRenderer({ content }: { content: string }) {
     let cancelled = false;
     async function render() {
       try {
-        const svg = await renderMermaid(content, { theme: "dark", securityLevel: "loose" });
+        const svg = await renderMermaid(content, { theme: "dark", securityLevel: "strict" }, () => cancelled);
         if (!cancelled) setSvg(svg);
       } catch (e) {
         console.error("Mermaid render failed", e);

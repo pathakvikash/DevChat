@@ -4,7 +4,7 @@ import { createContext, useContext } from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
 import CodeBlock from "./CodeBlock";
 import MermaidBlock from "./MermaidBlock";
-import { openFenceBody } from "@/lib/mermaidRender";
+import { openFenceBody, sameFence } from "@/lib/mermaidRender";
 
 interface MarkdownMessageProps {
   content: string;
@@ -18,7 +18,7 @@ const OpenFence = createContext<string | null>(null);
 
 function Code({ language, code }: { language: string; code: string }) {
   const open = useContext(OpenFence);
-  if (language === "mermaid" && code !== open) return <MermaidBlock code={code} />;
+  if (language === "mermaid" && !sameFence(code, open)) return <MermaidBlock code={code} />;
   return <CodeBlock language={language} code={code} />;
 }
 
