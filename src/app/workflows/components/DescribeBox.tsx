@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { ChevronDown, ChevronRight, Loader2, Sparkles, TriangleAlert } from "lucide-react";
 import ModelSelector from "@/app/components/conversation/ModelSelector";
 import { generateErrorMessage, previewLabel } from "@/lib/workflows/describe";
@@ -23,6 +23,8 @@ export default function DescribeBox({
   hidden,
   beforeSend,
   onProposal,
+  onBusyChange,
+  onAnnounce,
 }: {
   workflowId: string;
   /** The flow has cards beyond the trigger. */
@@ -33,6 +35,10 @@ export default function DescribeBox({
   /** Called before the request, so the server sees the cards as they are on screen. */
   beforeSend: () => Promise<void>;
   onProposal: (p: Proposal) => void;
+  /** True from the click to the answer: the editor goes read-only so nothing is edited under the request. */
+  onBusyChange: (busy: boolean) => void;
+  /** The editor's one live region. */
+  onAnnounce: (message: string) => void;
 }) {
   const [open, setOpen] = useState(false);
   const [text, setText] = useState("");
@@ -42,12 +48,25 @@ export default function DescribeBox({
   const ctl = useRef<AbortController | null>(null);
   const area = useRef<HTMLTextAreaElement>(null);
   const retry = useRef<HTMLButtonElement>(null);
-  const expanded = open || !hasCards;
+  const expanded = open || !hasCards || busy;
+  const errorId = useId();
+  const busyRef = useRef(onBusyChange);
+  useEffect(() => {
+    busyRef.current = onBusyChange;
+  });
+  useEffect(() => {
+    busyRef.current(busy);
+    if (busy) onAnnounce("Building your flow…");
+  }, [busy, onAnnounce]);
+  useEffect(() => () => busyRef.current(false), []);
 
   useEffect(() => () => ctl.current?.abort(), []);
   useEffect(() => {
-    if (error) retry.current?.focus();
-  }, [error]);
+    if (error) {
+      retry.current?.focus();
+      onAnnounce(`Failed. ${error}`);
+    }
+  }, [error, onAnnounce]);
 
   const send = useCallback(async () => {
     const description = text.trim();
@@ -55,6 +74,7 @@ export default function DescribeBox({
     const mine = new AbortController();
     ctl.current = mine;
     setBusy(true);
+    if (error) area.current?.focus(); // the Retry button is about to go away
     setError(null);
     try {
       await beforeSend();
@@ -76,7 +96,7 @@ export default function DescribeBox({
       if (ctl.current === mine) ctl.current = null;
       setBusy(false);
     }
-  }, [text, model, defaultModel, workflowId, beforeSend, onProposal]);
+  }, [text, error, model, defaultModel, workflowId, beforeSend, onProposal]);
 
   const cancel = () => ctl.current?.abort();
 
@@ -103,7 +123,15 @@ export default function DescribeBox({
 
   const empty = !hasCards;
   return (
-    <section aria-label="Describe your flow" className={`border-b border-[var(--glass-border)] ${empty ? "px-4 py-6" : "px-4 py-3"}`}>
+    <section
+      aria-label="Describe your flow"
+      onKeyDown={(e) => {
+        if (e.key === "Escape" && busy) {
+          e.stopPropagation();
+          cancel();
+        }
+      }}
+      className={`border-b border-[var(--glass-border)] ${empty ? "px-4 py-6" : "px-4 py-3"}`}>
       <div className={`glass-card mx-auto space-y-3 rounded-[var(--glass-radius-lg)] p-4 ${empty ? "max-w-2xl" : "max-w-3xl"}`}>
         <div className="flex items-center gap-2">
           <Sparkles size={16} className="text-zinc-300" aria-hidden="true" />
@@ -124,13 +152,13 @@ export default function DescribeBox({
           placeholder={hasCards ? "Describe the change, for example: also save new jobs to a table" : "For example: every morning, search the web for news on my topics and write me a short digest"}
           onChange={(e) => setText(e.target.value)}
           onKeyDown={(e) => {
-            // Enter builds, Shift+Enter adds a line. Cmd/Ctrl+Enter is Run, so it does not reach the editor from here.
-            if (e.key === "Enter" && !e.shiftKey && !e.metaKey && !e.ctrlKey && !e.nativeEvent.isComposing) {
+            // Enter builds, Shift+Enter adds a line. Cmd/Ctrl+Enter is the editor's Run, which means nothing here.
+            if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+              e.preventDefault();
+              e.stopPropagation();
+            } else if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
               e.preventDefault();
               void send();
-            } else if (e.key === "Escape" && busy) {
-              e.stopPropagation();
-              cancel();
             }
           }}
           className="focus-ring glass-input w-full resize-y rounded-[var(--glass-radius-md)] px-3 py-2 text-sm"
@@ -140,7 +168,7 @@ export default function DescribeBox({
           <span className="text-xs text-zinc-400">Enter builds · Shift+Enter adds a line</span>
           <div className="ml-auto flex items-center gap-2">
             {busy && (
-              <span role="status" className="inline-flex items-center gap-1.5 text-xs text-zinc-300">
+              <span className="inline-flex items-center gap-1.5 text-xs text-zinc-300">
                 <Loader2 size={14} className="animate-spin motion-reduce:animate-none" aria-hidden="true" /> Building your flow…
               </span>
             )}
@@ -156,12 +184,12 @@ export default function DescribeBox({
           </div>
         </div>
         {error && (
-          <div role="alert" className="flex flex-wrap items-center gap-2 rounded-[var(--glass-radius-md)] border border-red-900/50 px-3 py-2 text-sm text-zinc-200">
+          <div className="flex flex-wrap items-center gap-2 rounded-[var(--glass-radius-md)] border border-red-900/50 px-3 py-2 text-sm text-zinc-200">
             <TriangleAlert size={14} className="shrink-0 text-red-400" aria-hidden="true" />
-            <span className="min-w-0 flex-1">
+            <span id={errorId} className="min-w-0 flex-1">
               <span className="font-medium">Failed.</span> {error}
             </span>
-            <button ref={retry} type="button" onClick={() => void send()} className="focus-ring glass-button h-7 rounded-[var(--glass-radius-sm)] px-3 text-xs font-medium">
+            <button ref={retry} type="button" aria-describedby={errorId} onClick={() => void send()} className="focus-ring glass-button h-7 rounded-[var(--glass-radius-sm)] px-3 text-xs font-medium">
               Retry
             </button>
           </div>

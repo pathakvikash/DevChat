@@ -287,6 +287,6 @@ export async function generateFlow(o: GenerateOptions): Promise<{ graph: Workflo
 
 export const generateBody = z.object({
   description: z.string().trim().min(1).max(4000),
-  workflowId: z.string().optional(),
-  model: z.string().optional(),
+  workflowId: z.string().max(64).optional(),
+  model: z.string().max(200).optional(),
 });
