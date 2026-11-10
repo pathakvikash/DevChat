@@ -5,11 +5,15 @@ import { requireUserId } from "@/lib/auth";
 /**
  * DELETE /api/conversations/:id/messages
  *
- * Query params:
- *   - (none): wipes every message and resets compression state.
- *   - fromMessageId=<id>: deletes the given message and every message
- *     created after it. The conversation and compression state are
- *     preserved.
+ * Body / query params (one is required; a bare request is a 400, so a
+ * malformed body can never wipe the chat):
+ *   - all=1: wipes every message and resets compression state.
+ *   - body { fromIds: string[] }: the ids of every message the client cut.
+ *     Some may have no row (a send the server rejected, client-only
+ *     results), so the earliest saved one is the pivot: it and every
+ *     message created after it are deleted. If none was saved, nothing
+ *     is deleted. If the pivot is older than `compressedAt`, the summary
+ *     would describe deleted messages, so compression state is reset too.
  *   - afterTimestamp=<ISO string>: deletes every message created after
  *     the given timestamp. Uses the message's `createdAt` field for
  *     comparison (strictly greater than). Useful when client-side IDs
@@ -25,8 +29,8 @@ export async function DELETE(
   try {
     const userId = await requireUserId();
     const { id: conversationId } = await params;
-    const fromMessageId = req.nextUrl.searchParams.get("fromMessageId");
     const afterTimestamp = req.nextUrl.searchParams.get("afterTimestamp");
+    const clearAll = req.nextUrl.searchParams.get("all") === "1";
 
     const conversation = await prisma.conversation.findUnique({
       where: { id: conversationId },
@@ -40,26 +44,51 @@ export async function DELETE(
       );
     }
 
-    if (fromMessageId) {
-      const pivot = await prisma.message.findUnique({
-        where: { id: fromMessageId },
-        select: { createdAt: true },
-      });
-      if (!pivot) {
+    if (!afterTimestamp && !clearAll) {
+      let body: { fromIds?: unknown } | null = null;
+      try {
+        body = JSON.parse(await req.text());
+      } catch {
+        // no body, or not JSON: the 400 below
+      }
+      const fromIds = body?.fromIds;
+      if (!Array.isArray(fromIds) || !fromIds.length || !fromIds.every((x) => typeof x === "string")) {
         return NextResponse.json(
-          { error: "Message not found" },
-          { status: 404 },
+          { error: "Pass ?all=1, afterTimestamp, or a body { fromIds: string[] } (non-empty)" },
+          { status: 400 },
         );
       }
 
-      const { count: deletedMessages } = await prisma.message.deleteMany({
-        where: {
-          conversationId,
-          createdAt: { gte: pivot.createdAt },
-        },
+      const pivot = await prisma.message.findFirst({
+        where: { conversationId, id: { in: fromIds } },
+        orderBy: { createdAt: "asc" },
+        select: { createdAt: true },
       });
+      if (!pivot) {
+        return NextResponse.json({ success: true, deletedMessages: 0 });
+      }
 
-      return NextResponse.json({ success: true, deletedMessages, fromMessageId });
+      // One transaction; the reset only matches when the pivot is older than `compressedAt`.
+      const [{ count: deletedMessages }] = await prisma.$transaction([
+        prisma.message.deleteMany({
+          where: {
+            conversationId,
+            createdAt: { gte: pivot.createdAt },
+          },
+        }),
+        prisma.conversation.updateMany({
+          where: { id: conversationId, compressedAt: { gt: pivot.createdAt } },
+          data: {
+            compressedSummary: null,
+            compressedAt: null,
+            compressedBeforeTokens: null,
+            compressedAfterTokens: null,
+            compressedBeforeMessages: null,
+          },
+        }),
+      ]);
+
+      return NextResponse.json({ success: true, deletedMessages });
     }
 
     if (afterTimestamp) {

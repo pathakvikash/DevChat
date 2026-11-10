@@ -1,6 +1,8 @@
 import { spawn } from "child_process";
 import { requireUserId } from "@/lib/auth";
 import { isRunnableCwd } from "@/lib/claude/sessions";
+import { childEnv } from "@/lib/cliProviders";
+import { canUseHostTools, HOST_TOOLS_REFUSED } from "@/lib/hostAccess";
 
 // Spawning a CLI needs the Node runtime. 60s is the Vercel hobby ceiling; this
 // route only really works locally, where the limit doesn't apply.
@@ -16,39 +18,6 @@ type PermissionMode = (typeof ALLOWED_PERMISSION_MODES)[number];
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-/**
- * Next puts .env into process.env, so the app's ANTHROPIC_API_KEY would leak
- * into the CLI and override the user's claude.ai login ("Invalid API key").
- */
-const INHERITED_AUTH_VARS = [
-  "ANTHROPIC_API_KEY",
-  "ANTHROPIC_AUTH_TOKEN",
-  "ANTHROPIC_BASE_URL",
-  "ANTHROPIC_API_URL",
-  "CLAUDE_CODE_USE_BEDROCK",
-  "CLAUDE_CODE_USE_VERTEX",
-];
-
-/** Start the dev server from inside Claude Code and these leak in, making the
- *  spawned run think it's a nested child instead of a fresh session. */
-function isSessionVar(key: string): boolean {
-  return (
-    key === "CLAUDECODE" ||
-    key === "CLAUDE_PID" ||
-    key.startsWith("CLAUDE_CODE_") ||
-    key.startsWith("CLAUDE_AGENT_")
-  );
-}
-
-function cliEnv(): NodeJS.ProcessEnv {
-  // Copy-then-delete keeps ProcessEnv's required members (NODE_ENV).
-  const env = { ...process.env };
-  for (const key of Object.keys(env)) {
-    if (INHERITED_AUTH_VARS.includes(key) || isSessionVar(key)) delete env[key];
-  }
-  return env;
-}
-
 function bad(error: string, status = 400) {
   return new Response(JSON.stringify({ error }), {
     status,
@@ -57,7 +26,8 @@ function bad(error: string, status = 400) {
 }
 
 export async function POST(req: Request) {
-  await requireUserId();
+  const userId = await requireUserId();
+  if (!(await canUseHostTools(userId))) return bad(HOST_TOOLS_REFUSED, 403);
 
   let body: any;
   try {
@@ -129,7 +99,7 @@ export async function POST(req: Request) {
       // quoting or injection concerns.
       const child = spawn("claude", args, {
         cwd,
-        env: cliEnv(),
+        env: childEnv(undefined, cwd), // strips provider keys and the app's .env values; PWD matches cwd
         stdio: ["ignore", "pipe", "pipe"],
       });
 

@@ -1,7 +1,12 @@
 import { generateText } from "ai";
 import { getModel, initializeOllamaModels } from "@/lib/models";
+import { resolveProviderCreds } from "@/lib/apiKeys";
+import { canUseHostTools } from "@/lib/hostAccess";
 import { prisma } from "@/lib/db";
 import { countTokens } from "@/lib/tokens";
+import { liveSince } from "@/lib/liveSince";
+import { loadParentContext } from "@/lib/chat/loadParentContext";
+import { isSanityMode } from "@/lib/sanityMode";
 
 /**
  * Default model used for compaction. Picked to be a small, fast local model
@@ -44,11 +49,20 @@ export interface CompressionResult {
   beforeMessages: number;
   reductionTokens: number;
   reductionPercent: number;
+  /** Last user message in the snapshot summarized: it and later messages stay live (see `liveSince`). */
+  cutAt: Date | null;
 }
 
+/** `timeoutMs` bounds the model call, with no retries since a retry would only spend the
+ *  deadline twice; without it the call keeps the default retries. `focus` steers the summary. */
 export async function compressConversation(
   conversationId: string,
   modelId: string = DEFAULT_COMPACTION_MODEL,
+  {
+    focus,
+    timeoutMs,
+    abortSignal,
+  }: { focus?: string; timeoutMs?: number; abortSignal?: AbortSignal } = {},
 ): Promise<CompressionResult | null> {
   const conversation = await prisma.conversation.findUnique({
     where: { id: conversationId },
@@ -67,31 +81,47 @@ export async function compressConversation(
   // Initialize Ollama models before getting the model config
   await initializeOllamaModels();
 
-  const modelConfig = getModel(modelId);
-  const isOllama = modelId.startsWith("ollama/");
+  const effectiveModelId = isSanityMode() ? "mock/summary" : modelId; // sanity suite: never a real model
+  const creds = conversation.userId ? await resolveProviderCreds(conversation.userId) : {};
+  const hostTools = !!conversation.userId && (await canUseHostTools(conversation.userId));
+  const modelConfig = getModel(effectiveModelId, creds, hostTools);
+  const isOllama = effectiveModelId.startsWith("ollama/");
 
   const MAX_COMPRESSION_TOKENS = 4000;
 
-  let conversationText = conversation.messages
-    .map((m) => `${m.role.toUpperCase()}: ${m.content}`)
-    .join("\n\n");
+  // Rolling summary: the previous one first, then the messages since it that this round
+  // drops (before the cut). The cut message and later ones stay live, so they are not
+  // summarized too. Over the cap the oldest messages go first, never the summary.
+  const cutAt = conversation.messages.findLast((m) => m.role === "user")?.createdAt ?? null;
+  const sincePrevious = liveSince(conversation.compressedAt).isLive;
+  const keptLive = liveSince(cutAt).isLive;
+  const earlier = conversation.compressedSummary
+    ? `Earlier summary:\n${conversation.compressedSummary}`
+    : "";
+  const lineItems = conversation.messages
+    .filter((m) => sincePrevious(m) && !keptLive(m))
+    .map((m) => `${m.role.toUpperCase()}: ${m.content}`);
+  if (lineItems.length === 0) return null;
+  const joinText = () => [earlier, ...lineItems].filter(Boolean).join("\n\n");
 
+  let conversationText = joinText();
   let beforeTokens = countTokens(conversationText);
-
-  if (beforeTokens > MAX_COMPRESSION_TOKENS) {
-    const lineItems = conversation.messages.map(
-      (m) => `${m.role.toUpperCase()}: ${m.content}`,
-    );
-    while (lineItems.length > 1) {
-      lineItems.shift();
-      conversationText = lineItems.join("\n\n");
-      beforeTokens = countTokens(conversationText);
-      if (beforeTokens <= MAX_COMPRESSION_TOKENS) break;
-    }
+  while (beforeTokens > MAX_COMPRESSION_TOKENS && lineItems.length > 1) {
+    lineItems.shift();
+    conversationText = joinText();
+    beforeTokens = countTokens(conversationText);
   }
 
-  const prompt = `Summarize this conversation for context preservation:\n\n${conversationText}`;
-  const beforeMessages = conversation.messages.length;
+  const focusText = focus?.trim().slice(0, 500);
+  const prompt =
+    `Summarize this conversation for context preservation:\n\n${conversationText}` +
+    (focusText ? `\n\nPay special attention to: ${focusText}` : "");
+  const beforeMessages = lineItems.length;
+  const timeoutSignal = timeoutMs ? AbortSignal.timeout(timeoutMs) : undefined;
+  const signal =
+    timeoutSignal && abortSignal
+      ? AbortSignal.any([timeoutSignal, abortSignal])
+      : (timeoutSignal ?? abortSignal);
 
   try {
     const result = await generateText({
@@ -99,6 +129,8 @@ export async function compressConversation(
       system: COMPRESSION_SYSTEM_PROMPT,
       prompt,
       temperature: 0.3,
+      abortSignal: signal,
+      maxRetries: timeoutMs ? 0 : undefined,
       ...(isOllama ? { providerOptions: { ollama: { num_predict: 2048, temperature: 0.3 } } } : {}),
     });
 
@@ -124,6 +156,7 @@ export async function compressConversation(
       beforeMessages,
       reductionTokens,
       reductionPercent,
+      cutAt,
     };
   } catch (error) {
     console.error("Failed to compress conversation:", error);
@@ -148,49 +181,69 @@ export async function saveCompressedSummary(
     beforeTokens?: number;
     afterTokens?: number;
     beforeMessages?: number;
-  }
+  },
+  cutAt?: Date | null,
 ): Promise<void> {
-  await prisma.conversation.update({
-    where: { id: conversationId },
-    data: {
-      compressedSummary: summary,
-      compressedAt: new Date(),
-      compressedBeforeTokens: stats?.beforeTokens,
-      compressedAfterTokens: stats?.afterTokens,
-      compressedBeforeMessages: stats?.beforeMessages,
+  const data = {
+    compressedSummary: summary,
+    compressedBeforeTokens: stats?.beforeTokens,
+    compressedAfterTokens: stats?.afterTokens,
+    compressedBeforeMessages: stats?.beforeMessages,
+  };
+
+  if (!cutAt) {
+    await prisma.conversation.update({
+      where: { id: conversationId },
+      data: { ...data, compressedAt: new Date() },
+    });
+    return;
+  }
+
+  // The cut point from the summarized snapshot: the last exchange stays visible and in
+  // context, and a save that lands late can't hide messages sent since.
+  await prisma.conversation.updateMany({
+    where: {
+      id: conversationId,
+      OR: [{ compressedAt: null }, { compressedAt: { lte: cutAt } }],
     },
+    data: { ...data, compressedAt: cutAt },
   });
 }
 
 export async function shouldAutoCompress(
   conversationId: string,
-  thresholdPercent: number = 85
+  thresholdPercent: number,
+  contextWindow: number,
 ): Promise<boolean> {
   const conversation = await prisma.conversation.findUnique({
     where: { id: conversationId },
-    select: { model: true, systemPrompt: true },
+    select: { userId: true, model: true, systemPrompt: true, compressedAt: true, compressedSummary: true },
   });
 
   if (!conversation) return false;
 
-  // Use the base dynamic tier (4096) regardless of any inflated contextLength
-  // from dynamic context management. Dynamic increases push contextUsage to
-  // well below the threshold, making auto-compress never fire.
-  const contextLength = 4096;
   const { calculateContextUsage } = await import("@/lib/tokens");
 
+  // After a compression the live prompt is the summary plus messages from compressedAt on.
   const messages = await prisma.message.findMany({
-    where: { conversationId },
+    where: { conversationId, ...liveSince(conversation.compressedAt).where },
     orderBy: { createdAt: "asc" },
     select: { role: true, content: true },
   });
+  // Compressing cuts at the newest user message, so it only helps if an older one exists to drop.
+  if (messages.filter((m) => m.role === "user").length < 2) return false;
+  // A side chat's prompt also carries its main-conversation section.
+  const mainSection = (await loadParentContext(conversationId, conversation.userId ?? "", contextWindow))?.text;
+  const systemPrompt = [conversation.systemPrompt, conversation.compressedSummary, mainSection]
+    .filter(Boolean)
+    .join("\n\n");
 
   const result = await calculateContextUsage(
     conversation.model,
-    conversation.systemPrompt || "",
+    systemPrompt,
     messages,
     "",
-    contextLength
+    contextWindow
   );
 
   return result.contextPercent >= thresholdPercent;

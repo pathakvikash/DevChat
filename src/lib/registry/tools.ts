@@ -2,24 +2,11 @@ import { z } from "zod";
 import type { ToolDefinition } from "./types";
 import { prisma } from "@/lib/db";
 import { embed, scoreDocumentChunks, type ScoredChunk } from "@/lib/rag";
+import { parseDataArtifact } from "@/lib/generativeUi/data";
 import { evaluate } from "mathjs";
-
-function isPrivateUrl(url: string): boolean {
-  const privatePatterns = [
-    "localhost",
-    "127.0.0.1",
-    "0.0.0.0",
-    "[::1]",
-    "[::]",
-    "10.",
-    "172.16.",
-    "172.17.",
-    "192.168.",
-    "169.254.",
-  ];
-  const hostname = url.split("/")[2]?.split(":")[0]?.toLowerCase() || "";
-  return privatePatterns.some((p) => hostname.startsWith(p));
-}
+import { safeFetch } from "@/lib/net/safeFetch";
+import { githubAuthHeaders, httpErrorText } from "@/lib/net/github";
+import { readableText } from "@/lib/net/htmlText";
 
 /**
  * ─────────────────────────────────────────────────────────────────────────
@@ -41,13 +28,13 @@ export const TOOL_REGISTRY: Record<string, ToolDefinition> = {
     mutates: true,
     name: "Create Artifact",
     description:
-      "Create an artifact — a reusable document, code file, report, table, or other structured content that will be shown in a side panel.",
+      "Create an artifact — a reusable document, code file, report, table, dataset, or other structured content that will be shown in a side panel.",
     modelDescription:
-      "Create an artifact — a reusable document, code file, report, table, or other structured content that will be shown in a side panel. Use this INSTEAD of printing large code blocks or documents in chat. The artifact is saved and can be updated later.",
+      'Create an artifact — a reusable document, code file, report, table, dataset, or other structured content that will be shown in a side panel. Use this INSTEAD of printing large code blocks or documents in chat. The artifact is saved and can be updated later. Type `data` is a dataset: content must be a JSON {"columns":[...],"rows":[[...]]} object or CSV, and you then reference it from a Chart or Table component with `dataArtifactId` instead of retyping the rows.',
     category: "Utility",
     internal: true,
     inputSchema: z.object({
-      type: z.enum(["code", "document", "report", "table", "svg", "mermaid", "html"]),
+      type: z.enum(["code", "document", "report", "table", "svg", "mermaid", "html", "data"]),
       title: z.string().min(1).describe("Descriptive title for the artifact"),
       content: z.string().min(1).describe("The full content of the artifact"),
       language: z
@@ -58,6 +45,15 @@ export const TOOL_REGISTRY: Record<string, ToolDefinition> = {
     execute: async ({ type, title, content, language }, ctx) => {
       try {
         if (!ctx.conversationId) return "Error: no active conversation.";
+        // A data artifact only exists to be read back by Chart/Table — reject
+        // an unparseable one now so the model can fix it in the same turn.
+        if (type === "data") {
+          try {
+            parseDataArtifact(content);
+          } catch (e: any) {
+            return `Error creating data artifact: ${e?.message || String(e)}`;
+          }
+        }
         const artifact = await prisma.artifact.create({
           data: { conversationId: ctx.conversationId, type, title, content },
         });
@@ -118,12 +114,18 @@ export const TOOL_REGISTRY: Record<string, ToolDefinition> = {
     name: "Execute Code (sandbox)",
     description: "Run Python (Pyodide) or JavaScript in a browser sandbox.",
     modelDescription:
-      "Execute Python or JavaScript code in a secure browser sandbox. Python runs in Pyodide (numpy/pandas pre-loaded; other PyPI via `import micropip; await micropip.install('pkg')`). JavaScript runs in a sandboxed iframe (5s timeout). Returns stdout/stderr/return value.",
+      "Execute Python or JavaScript code in a secure browser sandbox. Python runs in Pyodide (numpy/pandas pre-loaded; other PyPI via `import micropip; await micropip.install('pkg')`). JavaScript runs in a sandboxed iframe (5s timeout). Returns stdout/stderr/return value. Pass `saveAs: { title }` to store the printed output as a data artifact and get back an id to reference from a Chart or Table via `dataArtifactId` — use it for any dataset you'd otherwise retype into a component spec.",
     category: "Code",
     internal: true,
     inputSchema: z.object({
       language: z.enum(["python", "javascript"]),
       code: z.string().describe("Self-contained code. Use print() / console.log() for visible output."),
+      saveAs: z
+        .object({ title: z.string().min(1) })
+        .optional()
+        .describe(
+          'When set, the code MUST print the dataset as its last statement — print(json.dumps({"columns": [...], "rows": [[...]]})) or CSV. Only stdout is captured: returning, assigning or displaying the data saves nothing and the call comes back with no artifact. It is saved as a data artifact and the tool result returns its id; reference it in Chart/Table with dataArtifactId.',
+        ),
     }),
     // No execute — client-side via onToolCall in app/c/[id]/page.tsx.
     enabledByDefault: true,
@@ -159,44 +161,25 @@ export const TOOL_REGISTRY: Record<string, ToolDefinition> = {
     }),
     execute: async ({ url }) => {
       try {
-        const blockedProtocols = ["file:", "ftp:", "dict:", "gopher:"];
-        if (blockedProtocols.some((p) => url.toLowerCase().startsWith(p))) {
-          return `Error: ${url.split(":")[0]}: protocol is not allowed.`;
-        }
-        if (isPrivateUrl(url)) {
-          return `Error: access to private/internal URLs is not allowed.`;
-        }
-        const u = new URL(url);
-        if (!/^https?:$/.test(u.protocol)) {
-          return `Error: only http/https URLs allowed. Got: ${u.protocol}`;
-        }
-        const res = await fetch(u.toString(), {
+        const auth = await githubAuthHeaders(url);
+        const res = await safeFetch(url, {
           headers: {
+            ...auth,
             "User-Agent":
               "Mozilla/5.0 (compatible; VAS/1.0; +https://github.com/anthropics/claude-code)",
             Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
           },
-          // 10s server-side timeout via AbortSignal
-          signal: AbortSignal.timeout(10000),
+          timeoutMs: 10_000,
+          truncate: true,
         });
-        if (!res.ok) return `HTTP ${res.status} ${res.statusText} for ${url}`;
-        const ctype = res.headers.get("content-type") || "";
-        const raw = await res.text();
+        if (!res.ok) return httpErrorText(res.status, url, res.text, "Authorization" in auth);
+        const ctype = res.contentType;
+        const raw = res.text;
         if (ctype.includes("application/json")) {
-          return raw.slice(0, 8000);
+          return raw.length > 8000 ? raw.slice(0, 8000) + "\n…[truncated]" : raw;
         }
         // strip script/style + tags → readable text
-        const text = raw
-          .replace(/<script[\s\S]*?<\/script>/gi, "")
-          .replace(/<style[\s\S]*?<\/style>/gi, "")
-          .replace(/<!--[\s\S]*?-->/g, "")
-          .replace(/<[^>]+>/g, " ")
-          .replace(/&nbsp;/g, " ")
-          .replace(/&amp;/g, "&")
-          .replace(/&lt;/g, "<")
-          .replace(/&gt;/g, ">")
-          .replace(/\s+/g, " ")
-          .trim();
+        const text = readableText(raw, ctype);
         const truncated = text.length > 8000;
         return (
           (truncated ? text.slice(0, 8000) + "\n…[truncated]" : text) ||
@@ -298,6 +281,23 @@ export const TOOL_REGISTRY: Record<string, ToolDefinition> = {
           ? cur
           : JSON.stringify(cur, null, 2);
     },
+  },
+
+  // ─── PLAN (Plan mode only, see buildTools) ───────────────────────────
+  presentPlan: {
+    id: "presentPlan",
+    name: "Present Plan",
+    description: "Show a plan the user can approve or revise before anything changes.",
+    modelDescription:
+      "Present your plan as a card the user can approve (then it runs in Ask or Agent mode) or revise. Call it once, as your last action, after you have looked around with read-only tools. Keep each step short and concrete, in order. Change nothing before the user approves.",
+    category: "Utility",
+    internal: true,
+    inputSchema: z.object({
+      title: z.string().min(1).describe("Short name for the plan"),
+      steps: z.array(z.string().min(1)).min(1).describe("The steps, in order"),
+      notes: z.string().optional().describe("Assumptions or open questions, if any"),
+    }),
+    builtIn: true,
   },
 
   // ─── CLARIFICATION (always on) ────────────────────────────────────────
@@ -507,6 +507,24 @@ export const TOOL_REGISTRY: Record<string, ToolDefinition> = {
         return `Error creating todos: ${e?.message || String(e)}`;
       }
     },
+    enabledByDefault: true,
+    builtIn: true,
+  },
+
+  // ─── AGENTS (browser-run; buildTools offers it only with another open chat) ─
+  sendToChat: {
+    id: "sendToChat",
+    name: "Send to Chat",
+    description: "Send a message to another open chat or side chat.",
+    modelDescription:
+      "Send a message to another chat that is open in a pane right now. `to` is that chat's id or exact title, from the open chats listed below. The message arrives there labelled as from another chat, not from the user, and that chat may answer by calling sendToChat back. Use it only when the user asks you to pass something to another chat or to answer a message from one. At most 3 agent messages per user message, across all chats.",
+    category: "Agents",
+    internal: true,
+    inputSchema: z.object({
+      to: z.string().min(1).describe("Id or exact title of an open chat."),
+      message: z.string().min(1).describe("The message. The receiving chat shows it as from another chat, not the user."),
+    }),
+    // No execute — the chat pane sends it (like executeCode).
     enabledByDefault: true,
     builtIn: true,
   },

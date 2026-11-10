@@ -1,9 +1,13 @@
 "use client";
 
+import { joinTextParts } from "@/lib/utils/conversation";
 import { memo, useEffect, useRef } from "react";
 import { UIMessage } from "ai";
 import MessageBubble from "./MessageBubble";
 import TypingIndicator from "./TypingIndicator";
+import QuoteReplyPill from "./QuoteReplyPill";
+import { splitAtQueuedMessages } from "@/lib/chat/normalizeToolParts";
+import { settleStaleParts } from "@/lib/utils/messageParts";
 
 interface ChatMessagesProps {
   messages: UIMessage[];
@@ -11,11 +15,37 @@ interface ChatMessagesProps {
   onEditMessage?: (messageId: string, content: string) => Promise<void>;
   onDeleteMessage?: (messageId: string) => Promise<void>;
   onCopyMessage?: (content: string) => void;
+  onForkMessage?: (messageId: string) => Promise<void>;
   onRegenerateMessage?: (messageId: string) => void;
   onOpenArtifact?: (id: string) => void;
   onClarificationAnswer?: (toolCallId: string, answer: string) => void;
-  scrollRef?: React.RefObject<HTMLDivElement | null>;
+  /** Set in Plan mode: offers "Approve plan" under the latest reply when it has no plan card. */
+  onApprovePlan?: () => void;
+  /** The model can't use tools, so the plan is written out and the button says so. */
+  toolsAvailable?: boolean;
+  scrollRef: React.RefObject<HTMLDivElement | null>;
+  /** Shown with the indicator before the assistant bubble exists, e.g. "Waiting for Claude Code…". */
+  statusLabel?: string;
+  /** Shows the Reply pill over a selection inside one message. */
+  onQuote: (text: string, dictate?: boolean) => void;
+  /** Starts a side chat about the selection. Left out where no side chat can open. */
+  onSideChat?: (text: string) => void;
+  /** An overlay is open: hide the Reply pill. */
+  quoteSuppressed?: boolean;
+  /** Side chats: the last reply gets "Send to main", which prefills the main chat's box. */
+  sendToMain?: { title: string; onSend: (text: string) => void };
+  /** Side chats: folded tool lines, the bubble-less reply style and the quieter actions row. */
+  compact?: boolean;
 }
+
+/** Provider-run tools arrive as "dynamic-tool" parts; everything downstream keys on
+ *  `tool-<name>`, so rename once here. */
+function normalizeParts(parts: any[]): any[] {
+  return parts.map((p) =>
+    p?.type === "dynamic-tool" && typeof p.toolName === "string" ? { ...p, type: `tool-${p.toolName}` } : p,
+  );
+}
+
 
 function ChatMessages({
   messages,
@@ -23,10 +53,19 @@ function ChatMessages({
   onEditMessage,
   onDeleteMessage,
   onCopyMessage,
+  onForkMessage,
   onRegenerateMessage,
   onOpenArtifact,
   onClarificationAnswer,
+  onApprovePlan,
+  toolsAvailable = true,
   scrollRef,
+  statusLabel,
+  onQuote,
+  onSideChat,
+  quoteSuppressed,
+  sendToMain,
+  compact = false,
 }: ChatMessagesProps) {
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -36,7 +75,7 @@ function ChatMessages({
 
   return (
     <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 scrollbar-none">
-      <div className="mx-auto max-w-4xl space-y-6">
+      <div className={`mx-auto max-w-4xl ${compact ? "space-y-4" : "space-y-6"}`}>
         {(() => {
           const seen = new Set<string>();
           const unique: typeof messages = [];
@@ -45,55 +84,85 @@ function ChatMessages({
             seen.add(m.id);
             unique.push(m);
           }
-          return unique.map((message, idx) => {
-            const parts = (message.parts || []) as any[];
-            const content = parts
-              .filter((p) => p.type === "text")
-              .map((p) => p.text)
-              .join("");
-            const reasoning = parts
-              .filter((p) => p.type === "reasoning")
-              .map((p) => p.text || p.reasoning || "")
-              .join("\n\n");
-            const fileParts = parts.filter(
-              (p) => p.type === "file" || p.type === "image"
-            );
-            const toolParts = parts.filter(
-              (p) => typeof p.type === "string" && p.type.startsWith("tool-")
-            );
-            return (
-              <div key={message.id} data-message-id={message.id} data-message-index={idx}>
-                <MessageBubble key={message.id}
-                  role={message.role as "user" | "assistant" | "system" | "compression"}
-                  content={content}
-                  messageId={message.id}
-                  feedback={(message as any).feedback ?? null}
-                  reasoning={reasoning}
-                  fileParts={fileParts}
-                  toolParts={toolParts}
-                  allParts={parts}
-                  createdAt={(message as any).createdAt}
-                  isStreaming={message.role === "assistant" && isLoading}
-                  onEdit={onEditMessage}
-                  onDelete={onDeleteMessage}
-                  onCopy={onCopyMessage}
-                  onRegenerateMessage={onRegenerateMessage}
-                  onOpenArtifact={onOpenArtifact}
-                  onClarificationAnswer={onClarificationAnswer}
-                />
-              </div>
-            );
+          return unique.flatMap((message, idx) => {
+            // A reply with queued messages delivered mid-way reads as reply, user bubble, reply.
+            const last = idx === unique.length - 1;
+            // Stale parts settle first, then the reply splits: a reply with queued messages delivered mid-way reads as reply, user bubble, reply.
+            const settled = settleStaleParts(normalizeParts((message.parts || []) as any[]), last);
+            const segments = splitAtQueuedMessages({ ...message, parts: settled });
+            // Edit, copy, regenerate and feedback sit on the last piece of the message's own role.
+            const actionsAt = segments.findLastIndex((seg) => seg.role === message.role);
+            return segments.map((segment, s) => {
+              const parts = segment.parts as any[];
+              const content = parts
+                .filter((p) => p.type === "text")
+                .map((p) => p.text)
+                .join("");
+              const reasoning = parts
+                .filter((p) => p.type === "reasoning")
+                .map((p) => p.text || p.reasoning || "")
+                .join("\n\n");
+              const fileParts = parts.filter(
+                (p) => p.type === "file" || p.type === "image"
+              );
+              const toolParts = parts.filter(
+                (p) => typeof p.type === "string" && p.type.startsWith("tool-")
+              );
+              const sentWhileReplying = segment.role === "user" && message.role !== "user";
+              return (
+                <div key={segment.id} data-message-id={segment.id} data-message-index={idx}>
+                  <MessageBubble
+                    role={segment.role as "user" | "assistant" | "system" | "compression"}
+                    content={content}
+                    messageId={s === actionsAt ? message.id : undefined}
+                    feedback={s === actionsAt ? (message as any).feedback ?? null : null}
+                    reasoning={reasoning}
+                    fileParts={fileParts}
+                    toolParts={toolParts}
+                    allParts={parts}
+                    createdAt={(message as any).createdAt}
+                    isStreaming={segment.role === "assistant" && isLoading && s === segments.length - 1}
+                    onEdit={onEditMessage}
+                    onDelete={onDeleteMessage}
+                    onCopy={onCopyMessage}
+                    compact={compact}
+                    pinActions={compact && last && message.role === "assistant" && s === actionsAt}
+                    sendToMain={
+                      sendToMain && s === actionsAt && message.role === "assistant" && !isLoading
+                        ? { title: sendToMain.title, text: joinTextParts(parts), onSend: sendToMain.onSend }
+                        : undefined
+                    }
+                    onFork={s === actionsAt ? onForkMessage : undefined}
+                    onRegenerateMessage={onRegenerateMessage}
+                    onOpenArtifact={onOpenArtifact}
+                    onClarificationAnswer={onClarificationAnswer}
+                    onApprovePlan={
+                      s === actionsAt && last && message.role === "assistant" && !isLoading &&
+                        !settled.some((p) => p?.type === "tool-presentPlan")
+                        ? onApprovePlan
+                        : undefined
+                    }
+                    planCaption={s === actionsAt && !toolsAvailable ? "This model can't use tools, so it will write out the result." : undefined}
+                  />
+                  {sentWhileReplying && (
+                    <p className="mt-1 text-right text-[11px] text-zinc-400">Sent while replying</p>
+                  )}
+                </div>
+              );
+            });
           });
         })()}
 
         {isLoading &&
           messages.length > 0 &&
           messages[messages.length - 1]?.role === "user" && (
-            <TypingIndicator isVisible={true} />
+            <TypingIndicator isVisible={true} label={statusLabel} />
           )}
       </div>
 
       <div ref={messagesEndRef} />
+      {/* Positions against the transcript wrapper, so it doesn't scroll with the messages. */}
+      <QuoteReplyPill containerRef={scrollRef} onQuote={onQuote} onSideChat={onSideChat} voice={!compact} suppressed={quoteSuppressed} />
     </div>
   );
 }

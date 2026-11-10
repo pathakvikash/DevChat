@@ -3,12 +3,16 @@
 import { memo, useState, useCallback } from "react";
 import FileAttachments from "./FileAttachments";
 import ThinkingBlock from "./ThinkingBlock";
+import TypingIndicator from "./TypingIndicator";
 import MessageContent from "./MessageContent";
 import MessageActions from "./MessageActions";
 import MessageEditor from "./MessageEditor";
 import MarkdownMessage from "./MarkdownMessage";
 import ToolInvocation from "./ToolInvocation";
+import { SideFold } from "./sidechat/SideFold";
 import CompressionEvent from "./CompressionEvent";
+import { AgentBadge } from "./AgentMessageBubble";
+import { parseAgentMessagePart } from "@/lib/chat/agentMessages";
 import { splitThinking } from "@/lib/utils/splitThinking";
 import {
   findCompressionEvent,
@@ -30,10 +34,21 @@ interface MessageBubbleProps {
   onEdit?: (messageId: string, content: string) => Promise<void>;
   onDelete?: (messageId: string) => Promise<void>;
   onCopy?: (content: string) => void;
+  onFork?: (messageId: string) => Promise<void>;
   onRegenerateMessage?: (messageId: string) => void;
   onOpenArtifact?: (id: string) => void;
   onClarificationAnswer?: (toolCallId: string, answer: string) => void;
+  /** Plan mode, last reply with no plan card: offers "Approve plan" under it. */
+  onApprovePlan?: () => void;
+  /** Explains the button for a model without tools. */
+  planCaption?: string;
   feedback?: { id: string; rating: number } | null;
+  /** Side chat: no bubble for replies, a subtle one for the user, and an actions row that folds tools. */
+  compact?: boolean;
+  /** Compact: the actions row stays visible (the last reply). Otherwise it shows on hover. */
+  pinActions?: boolean;
+  /** Compact, assistant replies: "Send to main" in the actions row. */
+  sendToMain?: { title: string; text: string; onSend: (text: string) => void };
 }
 
 function MessageBubble({
@@ -49,10 +64,16 @@ function MessageBubble({
   onEdit,
   onDelete,
   onCopy,
+  onFork,
   onRegenerateMessage,
   onOpenArtifact,
   onClarificationAnswer,
+  onApprovePlan,
+  planCaption,
   feedback,
+  compact = false,
+  pinActions = false,
+  sendToMain,
 }: MessageBubbleProps) {
   const { thinking: inlineThinking, content: cleanContent } =
     splitThinking(content);
@@ -60,6 +81,8 @@ function MessageBubble({
     .filter(Boolean)
     .join("\n\n");
   const isUser = role === "user";
+  // A message another chat sent is a user-role message with an agent part: neutral style, labelled (UX 3.12).
+  const agentSender = isUser ? (allParts ?? []).map((p) => parseAgentMessagePart(p)).find((d) => d !== null) ?? null : null;
 
   const [isEditing, setIsEditing] = useState(false);
   const [editBuffer, setEditBuffer] = useState(content);
@@ -110,23 +133,40 @@ function MessageBubble({
     <div className={`flex ${isUser ? "justify-end" : "justify-start"}`}>
       <div
         className={`
-          relative group flex flex-col max-w-[85%] min-w-0
+          relative group flex flex-col min-w-0
+          ${compact && !isUser ? "w-full max-w-full" : "max-w-[85%]"}
           ${isUser ? "items-end" : "items-start"}
         `}
       >
         <div
-          className={`
+          className={
+            compact
+              ? isUser
+                ? "relative w-fit max-w-full rounded-2xl bg-white/5 px-4 py-2.5 text-[var(--foreground)]"
+                : "relative w-full min-w-0 text-[15px] leading-7 text-[var(--foreground)]"
+              : `
             w-fit max-w-full rounded-[var(--glass-radius-xl)] px-4 py-3 relative
-            ${isUser
+            ${isUser && !agentSender
               ? "glass-button-primary text-white"
               : "glass-card text-[var(--foreground)]"
             }
-          `}
+          `
+          }
         >
+          {agentSender && <AgentBadge sender={agentSender} />}
           <FileAttachments fileParts={fileParts} />
 
           {!isUser && combinedThinking && (
-            <ThinkingBlock text={combinedThinking} />
+            compact ? (
+              <SideFold label="Reasoning">
+                <ThinkingBlock text={combinedThinking} streaming={isStreaming && !cleanContent} />
+              </SideFold>
+            ) : (
+              <ThinkingBlock
+                text={combinedThinking}
+                streaming={isStreaming && !cleanContent}
+              />
+            )
           )}
 
           {showEditor ? (
@@ -144,6 +184,8 @@ function MessageBubble({
               isStreaming={isStreaming}
               onOpenArtifact={onOpenArtifact}
               onClarificationAnswer={onClarificationAnswer}
+              compact={compact}
+              markdown={agentSender?.from === "workflow"}
             />
           ) : (
             <>
@@ -155,7 +197,7 @@ function MessageBubble({
                     </div>
                   ) : (
                     <>
-                      <MarkdownMessage content={cleanContent} />
+                      <MarkdownMessage content={cleanContent} streaming={isStreaming} />
                       {isStreaming && !toolParts.length && (
                         <span className="ml-1 animate-pulse">▊</span>
                       )}
@@ -175,6 +217,7 @@ function MessageBubble({
                       allParts={toolParts}
                       onOpenArtifact={onOpenArtifact}
                       onClarificationAnswer={onClarificationAnswer}
+                      isStreaming={isStreaming}
                     />
                   ))}
                 </div>
@@ -182,14 +225,32 @@ function MessageBubble({
             </>
           )}
 
+          {onApprovePlan && !isStreaming && (
+            <div className="mt-2 flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={onApprovePlan}
+                className="h-8 px-3 text-xs rounded-[var(--glass-radius-sm)] glass-button-primary text-[var(--foreground)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--glass-accent-strong)]"
+              >
+                Approve plan
+              </button>
+              {planCaption && <span className="text-xs text-zinc-400">{planCaption}</span>}
+            </div>
+          )}
           {!content &&
             !combinedThinking &&
             fileParts.length === 0 &&
             toolParts.length === 0 &&
             !showEditor && (
-              <div className="text-zinc-400 italic">
-                {isUser ? "(empty message)" : "..."}
-              </div>
+              // A streaming assistant bubble with nothing to show yet: the model
+              // is still starting or thinking, so say so instead of "...".
+              isStreaming && !isUser ? (
+                <TypingIndicator isVisible compact label="Thinking…" />
+              ) : (
+                <div className="text-zinc-400 italic">
+                  {isUser ? "(empty message)" : "..."}
+                </div>
+              )
             )}
         </div>
 
@@ -203,8 +264,12 @@ function MessageBubble({
           onEdit={onEdit}
           onDelete={onDelete}
           onCopy={onCopy}
+          onFork={onFork}
           onStartEditing={startEditing}
           onRegenerateMessage={onRegenerateMessage}
+          compact={compact}
+          pinned={pinActions}
+          sendToMain={sendToMain && { text: sendToMain.text, parentTitle: sendToMain.title, onSendToMain: sendToMain.onSend }}
         />
       </div>
     </div>
@@ -218,6 +283,8 @@ const MessageBubbleMemo = memo(MessageBubble, (prev, next) => {
   if (prev.reasoning !== next.reasoning) return false;
   if (prev.isStreaming !== next.isStreaming) return false;
   if (prev.createdAt !== next.createdAt) return false;
+  if (prev.compact !== next.compact || prev.pinActions !== next.pinActions) return false;
+  if (prev.sendToMain?.title !== next.sendToMain?.title || prev.sendToMain?.text !== next.sendToMain?.text) return false;
   if ((prev.feedback?.rating ?? null) !== (next.feedback?.rating ?? null)) return false;
   const prevParts = prev.allParts ?? [];
   const nextParts = next.allParts ?? [];
@@ -229,15 +296,22 @@ const MessageBubbleMemo = memo(MessageBubble, (prev, next) => {
     if (a.type === "text" && a.text !== b.text) return false;
     if (a.type === "reasoning" && (a.text ?? a.reasoning) !== (b.text ?? b.reasoning)) return false;
     if (a.type === "file" && (a.url !== b.url || a.name !== b.name)) return false;
-    if (typeof a.type === "string" && a.type.startsWith("tool-") && a.toolCallId !== b.toolCallId) return false;
+    if (typeof a.type === "string" && a.type.startsWith("tool-")) {
+      // Re-render when a tool call finishes (running → done), not only when
+      // a new call appears.
+      if (a.toolCallId !== b.toolCallId || a.state !== b.state || a.output !== b.output || a.errorText !== b.errorText) return false;
+    }
   }
   return (
     prev.onEdit === next.onEdit &&
     prev.onDelete === next.onDelete &&
     prev.onCopy === next.onCopy &&
+    prev.onFork === next.onFork &&
     prev.onRegenerateMessage === next.onRegenerateMessage &&
     prev.onOpenArtifact === next.onOpenArtifact &&
-    prev.onClarificationAnswer === next.onClarificationAnswer
+    prev.onClarificationAnswer === next.onClarificationAnswer &&
+    prev.onApprovePlan === next.onApprovePlan &&
+    prev.planCaption === next.planCaption
   );
 });
 

@@ -42,7 +42,16 @@ next-env.d.ts
 /lib/generated/prisma
 /.prisma/client
 *.db
+*.db-journal
+*.db.bak*
 .agents
+
+# sanity suite (see e2e/README.md)
+/.next-sanity*/
+/e2e/.auth/
+/playwright-report/
+/test-results/
+/prisma/sanity.db-*
 
 # debug
 .pnpm-debug.log*

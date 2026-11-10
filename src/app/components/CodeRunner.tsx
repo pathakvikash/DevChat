@@ -53,7 +53,7 @@ export default function CodeRunner({ code, language }: CodeRunnerProps) {
       </pre>
 
       {canExecute && (
-        <div className="glass-surface border-t-0 rounded-b-[var(--glass-radius-md)] px-3 py-2 flex items-center gap-2">
+        <div className="glass-surface select-none border-t-0 rounded-b-[var(--glass-radius-md)] px-3 py-2 flex items-center gap-2">
           <AsyncButton
             onClick={handleRun}
             loading={executing}
@@ -70,7 +70,7 @@ export default function CodeRunner({ code, language }: CodeRunnerProps) {
 
       {showOutput && (
         <div className="glass-surface border-t border-[var(--glass-border)] rounded-b-[var(--glass-radius-md)] px-4 py-3">
-          <div className="flex items-center justify-between mb-2">
+          <div className="flex select-none items-center justify-between mb-2">
             <div className="text-xs text-zinc-400 font-medium">Output</div>
             <button
               onClick={() => setShowOutput(false)}

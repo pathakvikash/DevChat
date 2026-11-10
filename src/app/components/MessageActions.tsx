@@ -1,7 +1,18 @@
 "use client";
 
-import { Copy, Edit, RotateCcw, ThumbsUp, ThumbsDown, Trash2 } from "lucide-react";
-import { useState, useCallback, useEffect, useRef } from "react";
+import { Copy, Edit, GitFork, Loader2, RotateCcw, Send, ThumbsUp, ThumbsDown, Trash2 } from "lucide-react";
+import { createContext, useState, useCallback, useContext, useEffect, useRef } from "react";
+import SendToMainButton from "@/app/components/sidechat/SendToMainButton";
+import { formatAgo } from "@/lib/chat/sideChatLabels";
+
+export interface AgentSendValue {
+  /** The other open chats. Empty hides the "Send to…" menu. */
+  targets: { id: string; title: string }[];
+  send: (targetId: string, text: string) => void;
+}
+
+/** Set by the pane: tool-less models get a "Send to…" menu on replies (UX 2.14). */
+export const AgentSendContext = createContext<AgentSendValue | null>(null);
 
 interface MessageActionsProps {
   messageId?: string;
@@ -13,8 +24,14 @@ interface MessageActionsProps {
   onEdit?: (messageId: string, content: string) => Promise<void>;
   onDelete?: (messageId: string) => Promise<void>;
   onCopy?: (content: string) => void;
+  onFork?: (messageId: string) => Promise<void>;
   onStartEditing: () => void;
   onRegenerateMessage?: (messageId: string) => void;
+  /** Side chat: only Copy, Send to main and the time, in a quieter row. */
+  compact?: boolean;
+  /** Compact: keep the row visible instead of showing it on hover. */
+  pinned?: boolean;
+  sendToMain?: { text: string; parentTitle: string; onSendToMain: (text: string) => void };
 }
 
 export default function MessageActions({
@@ -27,24 +44,35 @@ export default function MessageActions({
   onEdit,
   onDelete,
   onCopy,
+  onFork,
   onStartEditing,
   onRegenerateMessage,
+  compact = false,
+  pinned = false,
+  sendToMain,
 }: MessageActionsProps) {
   const [feedback, setFeedback] = useState<number | null>(initialFeedback ?? null);
   const [feedbackLoading, setFeedbackLoading] = useState(false);
+  const [forking, setForking] = useState(false);
   const [feedbackMenuOpen, setFeedbackMenuOpen] = useState(false);
   const feedbackMenuRef = useRef<HTMLDivElement>(null);
+  const [sendMenuOpen, setSendMenuOpen] = useState(false);
+  const sendMenuRef = useRef<HTMLDivElement>(null);
+  const agentSend = useContext(AgentSendContext);
 
   useEffect(() => {
-    if (!feedbackMenuOpen) return;
+    if (!feedbackMenuOpen && !sendMenuOpen) return;
     function handleClickOutside(e: MouseEvent) {
       if (feedbackMenuRef.current && !feedbackMenuRef.current.contains(e.target as Node)) {
         setFeedbackMenuOpen(false);
       }
+      if (sendMenuRef.current && !sendMenuRef.current.contains(e.target as Node)) {
+        setSendMenuOpen(false);
+      }
     }
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, [feedbackMenuOpen]);
+  }, [feedbackMenuOpen, sendMenuOpen]);
 
   const handleFeedback = useCallback(async (rating: number) => {
     if (!messageId || feedbackLoading) return;
@@ -74,19 +102,55 @@ export default function MessageActions({
     }
   };
 
+  const handleFork = async () => {
+    if (!messageId || !onFork || forking) return;
+    setForking(true);
+    try {
+      await onFork(messageId);
+    } finally {
+      setForking(false);
+    }
+  };
+
   const handleDelete = async () => {
     if (!messageId || !onDelete) return;
-    if (confirm("Are you sure you want to delete this message?")) {
-      await onDelete(messageId);
-    }
+    await onDelete(messageId);
   };
 
   if (!messageId || (isStreaming && !isUser)) return null;
 
+  if (compact) {
+    if (isUser) return null; // side chats show actions on replies only, like Claude's side panel
+    const ago = createdAt ? formatAgo(createdAt) : "";
+    return (
+      <div
+        className={`
+          mt-1 flex select-none items-center gap-1 transition-opacity duration-150
+          ${isUser ? "justify-end" : "justify-start"}
+          ${pinned ? "opacity-100" : "opacity-0 group-hover:opacity-100 focus-within:opacity-100"}
+        `}
+      >
+        <button
+          type="button"
+          onClick={handleCopy}
+          title="Copy"
+          aria-label="Copy message"
+          className="focus-ring inline-flex h-7 w-7 items-center justify-center rounded-[var(--glass-radius-sm)] text-zinc-500 transition hover:bg-[var(--glass-bg-hover)] hover:text-zinc-200"
+        >
+          <Copy size={16} />
+        </button>
+        {!isUser && sendToMain && (
+          <SendToMainButton text={sendToMain.text} parentTitle={sendToMain.parentTitle} onSendToMain={sendToMain.onSendToMain} />
+        )}
+        {ago && <span className="ml-1 text-xs text-zinc-500">{ago}</span>}
+      </div>
+    );
+  }
+
   return (
     <div
       className={`
-        mt-1.5 flex items-center gap-1
+        mt-1.5 flex select-none items-center gap-1
         ${isUser ? "justify-end" : "justify-start"}
         opacity-100 sm:opacity-0 sm:group-hover:opacity-100 sm:focus-within:opacity-100
         transition-opacity duration-150
@@ -158,6 +222,55 @@ export default function MessageActions({
         <Copy size={12} />
       </button>
 
+      {!isUser && messageId && agentSend && agentSend.targets.length > 0 && (
+        <div className="relative" ref={sendMenuRef}>
+          <button
+            type="button"
+            onClick={() => setSendMenuOpen((v) => !v)}
+            title="Send to…"
+            aria-label="Send to another chat"
+            aria-expanded={sendMenuOpen}
+            className="inline-flex items-center gap-1 px-2 py-1 text-xs text-zinc-400 hover:text-zinc-100 glass-button rounded-[var(--glass-radius-sm)] transition"
+          >
+            <Send size={12} />
+          </button>
+          {sendMenuOpen && (
+            <div
+              className="absolute bottom-full left-0 mb-2 w-56 glass-panel-strong rounded-[var(--glass-radius-md)] shadow-lg border border-[var(--glass-border-strong)] z-[9999] overflow-hidden"
+            >
+              {agentSend.targets.map((t) => (
+                <button
+                  key={t.id}
+                  type="button"
+                  title={t.title}
+                  onClick={() => {
+                    setSendMenuOpen(false);
+                    agentSend.send(t.id, stripThinkTags(content));
+                  }}
+                  className="flex w-full items-center gap-2 px-4 py-2.5 text-left text-sm text-[var(--foreground)] hover:bg-[var(--glass-bg-hover)] transition"
+                >
+                  <Send size={14} className="shrink-0 text-zinc-400" />
+                  <span className="truncate">{`Send to "${t.title}"`}</span>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {onFork && messageId && (
+        <button
+          type="button"
+          onClick={handleFork}
+          disabled={forking}
+          title="Fork from here"
+          aria-label="Fork from here"
+          className="focus-ring inline-flex items-center gap-1 px-2 py-1 text-xs text-zinc-400 hover:text-zinc-100 glass-button rounded-[var(--glass-radius-sm)] transition"
+        >
+          {forking ? <Loader2 size={12} className="animate-spin" /> : <GitFork size={12} />}
+        </button>
+      )}
+
       {!isUser && onRegenerateMessage && messageId && (
         <button
           type="button"
@@ -197,7 +310,7 @@ export default function MessageActions({
   );
 }
 
-function getRelativeTime(date: Date | string): string {
+export function getRelativeTime(date: Date | string): string {
   const now = Date.now();
   const then = new Date(date).getTime();
   const diffMs = now - then;

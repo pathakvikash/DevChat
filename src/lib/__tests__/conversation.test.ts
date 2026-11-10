@@ -3,6 +3,7 @@ import {
   joinTextParts,
   extractLatestCode,
   buildMessagesFromConversation,
+  lastExchange,
 } from "@/lib/utils/conversation";
 
 describe("joinTextParts", () => {
@@ -209,5 +210,54 @@ describe("buildMessagesFromConversation", () => {
     const result = buildMessagesFromConversation(conv);
     const event = result[0].parts[0] as any;
     expect(event.reductionPercent).toBe(80);
+  });
+});
+
+describe("lastExchange", () => {
+  const user = { id: "u1", role: "user", parts: [{ type: "text", text: "how do I run the tests?" }] };
+  const assistant = { id: "a1", role: "assistant", parts: [{ type: "text", text: "Run npx vitest run." }] };
+
+  it("returns the trailing user/assistant pair as text", () => {
+    expect(lastExchange([user, assistant])).toEqual({
+      user: "how do I run the tests?",
+      assistant: "Run npx vitest run.",
+    });
+  });
+
+  it("ignores non-text parts and earlier turns", () => {
+    const result = lastExchange([
+      { id: "u0", role: "user", parts: [{ type: "text", text: "old" }] },
+      { id: "a0", role: "assistant", parts: [{ type: "text", text: "older" }] },
+      user,
+      {
+        id: "a1",
+        role: "assistant",
+        parts: [
+          { type: "reasoning", text: "thinking" },
+          { type: "dynamic-tool", toolName: "Read", output: "secret" },
+          { type: "text", text: "Run npx vitest run." },
+        ],
+      },
+    ]);
+    expect(result).toEqual({ user: "how do I run the tests?", assistant: "Run npx vitest run." });
+  });
+
+  it("returns null when the last message is still the user's", () => {
+    expect(lastExchange([assistant, user])).toBeNull();
+  });
+
+  it("returns null for a tool-only or empty assistant turn", () => {
+    expect(lastExchange([user, { id: "a1", role: "assistant", parts: [{ type: "dynamic-tool", toolName: "Read" }] }])).toBeNull();
+    expect(lastExchange([user, { id: "a1", role: "assistant", parts: [{ type: "text", text: "   " }] }])).toBeNull();
+  });
+
+  it("returns an empty user string when there is no preceding user turn", () => {
+    expect(lastExchange([assistant])).toEqual({ user: "", assistant: "Run npx vitest run." });
+  });
+
+  it("returns null for a missing or empty list", () => {
+    expect(lastExchange([])).toBeNull();
+    expect(lastExchange(undefined)).toBeNull();
+    expect(lastExchange(null)).toBeNull();
   });
 });

@@ -26,19 +26,30 @@ export async function POST(
     console.log(
       `[Manual-compress] Starting compression for ${id} with model ${conversation.model}`,
     );
-    const result = await compressConversation(id, conversation.model);
+    // The body is optional: ContextDetailsPanel's compress button sends none.
+    const { focus } = (await req.json().catch(() => null)) ?? {};
+    const result = await compressConversation(id, conversation.model, {
+      focus: typeof focus === "string" ? focus : undefined,
+      abortSignal: req.signal,
+    });
     if (!result) {
-      return NextResponse.json(
-        { error: "Failed to generate summary" },
-        { status: 500 },
-      );
+      return NextResponse.json({
+        success: false,
+        reason: "nothing-to-compress",
+        message: "Nothing to compress yet",
+      });
     }
 
-    await saveCompressedSummary(id, result.summary, {
-      beforeTokens: result.beforeTokens,
-      afterTokens: result.afterTokens,
-      beforeMessages: result.beforeMessages,
-    });
+    await saveCompressedSummary(
+      id,
+      result.summary,
+      {
+        beforeTokens: result.beforeTokens,
+        afterTokens: result.afterTokens,
+        beforeMessages: result.beforeMessages,
+      },
+      result.cutAt,
+    );
     console.log(`[Manual-compress] Summary saved`);
 
     return NextResponse.json({

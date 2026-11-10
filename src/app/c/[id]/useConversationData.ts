@@ -17,10 +17,12 @@ async function fetchConversationData(
 export interface DataActions {
   fetchConversation: () => Promise<void>;
   refreshConversation: () => Promise<void>;
-  refreshConversationAndMessages: () => Promise<void>;
+  /** `shouldApplyMessages` is asked once the response is in: say no when a turn started meanwhile, so its messages are not replaced. */
+  refreshConversationAndMessages: (shouldApplyMessages?: () => boolean) => Promise<void>;
   fetchContextUsage: () => Promise<void>;
   handleModelSettingsSave: (settings: any) => Promise<void>;
   handleModelChange: (modelId: string) => Promise<void>;
+  handleWorkingFolderChange: (folder: string | null) => Promise<void>;
   handleKbToggle: () => Promise<void>;
 }
 
@@ -85,10 +87,10 @@ export function useConversationData(
     }
   }, [conversationId, applyConversation, toast]);
 
-  const refreshConversationAndMessages = useCallback(async () => {
+  const refreshConversationAndMessages = useCallback(async (shouldApplyMessages?: () => boolean) => {
     try {
       const result = await fetchConversationData(conversationId);
-      if (result.ok) applyConversation(result.conv, true);
+      if (result.ok) applyConversation(result.conv, shouldApplyMessages?.() ?? true);
     } catch (e) {
       console.error("Failed to refresh conversation:", e);
       toast("Failed to refresh conversation", "error");
@@ -147,6 +149,32 @@ export function useConversationData(
     [conversation, conversationId, setConversation, toast],
   );
 
+  const handleWorkingFolderChange = useCallback(
+    async (folder: string | null) => {
+      if (!conversation) return;
+      const previous = conversation.workingFolder ?? null;
+      // A new folder means the chat's "Allow for this chat" choices no longer apply.
+      try { localStorage.removeItem(`vas:allow:${conversationId}`); } catch {}
+      setConversation({ ...conversation, workingFolder: folder });
+      try {
+        const res = await fetch(`/api/conversations/${conversationId}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ workingFolder: folder }),
+        });
+        if (!res.ok) {
+          const body = await res.json().catch(() => ({}));
+          throw new Error(body.error || "Failed to change working folder");
+        }
+        toast(folder ? `Working folder: ${folder}` : "Working folder cleared", "success");
+      } catch (e) {
+        setConversation({ ...conversation, workingFolder: previous });
+        toast(e instanceof Error ? e.message : "Failed to change working folder", "error");
+      }
+    },
+    [conversation, conversationId, setConversation, toast],
+  );
+
   const handleKbToggle = useCallback(async () => {
     if (conversation?.kbId) {
       fetch(`/api/conversations/${conversationId}`, {
@@ -168,6 +196,7 @@ export function useConversationData(
     fetchContextUsage,
     handleModelSettingsSave,
     handleModelChange,
+    handleWorkingFolderChange,
     handleKbToggle,
   };
 }

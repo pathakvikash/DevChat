@@ -5,6 +5,7 @@ import { ToastProvider } from "@/app/components/Toast";
 import CommandPaletteProvider from "@/app/components/CommandPalette";
 import { ThemeProvider } from "@/app/components/ThemeProvider";
 import { SessionProvider } from "@/app/components/SessionProvider";
+import GenerativeUiProviders from "@/app/components/GenerativeUiProviders";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -37,7 +38,7 @@ export default function RootLayout({
           <ThemeProvider>
             <ToastProvider>
               <CommandPaletteProvider>
-                {children}
+                <GenerativeUiProviders>{children}</GenerativeUiProviders>
               </CommandPaletteProvider>
             </ToastProvider>
           </ThemeProvider>

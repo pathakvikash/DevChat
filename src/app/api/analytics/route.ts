@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/db";
 import { NextResponse } from "next/server";
 import { getModel } from "@/lib/models";
+import { resolveProviderCreds } from "@/lib/apiKeys";
 import { requireUserId } from "@/lib/auth";
 
 export async function GET() {
@@ -15,7 +16,8 @@ export async function GET() {
     });
 
     const stats = {
-      totalConversations: conversations.length,
+      // Side chats and sub-agent runs count in tokens and cost, not as conversations.
+      totalConversations: conversations.filter((c) => !c.parentId).length,
       totalMessages: conversations.reduce((sum, c) => sum + c.messages.length, 0),
       totalTokens: conversations.reduce((sum, c) => sum + c.totalTokens, 0),
       modelUsage: {} as Record<string, number>,
@@ -23,6 +25,7 @@ export async function GET() {
     };
 
     // Calculate model usage and costs
+    const creds = await resolveProviderCreds(userId);
     for (const conv of conversations) {
       if (!stats.modelUsage[conv.model]) {
         stats.modelUsage[conv.model] = 0;
@@ -31,7 +34,7 @@ export async function GET() {
 
       // Estimate cost
       try {
-        const modelConfig = getModel(conv.model);
+        const modelConfig = getModel(conv.model, creds);
         const messages = conv.messages;
         const inputTokens = messages.reduce((sum, m) => sum + m.inputTokens, 0);
         const outputTokens = messages.reduce((sum, m) => sum + m.outputTokens, 0);

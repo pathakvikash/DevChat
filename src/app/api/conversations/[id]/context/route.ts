@@ -3,8 +3,12 @@ import { prisma } from "@/lib/db";
 import { calculateDetailedContextUsage } from "@/lib/tokens";
 import { buildSystemPrompt } from "@/lib/chat/buildSystemPrompt";
 import { resolveActiveToolIds } from "@/lib/chat/buildTools";
+import { contextWindowFor } from "@/lib/chat/contextBudget";
 import { getModel } from "@/lib/models";
+import { resolveProviderCreds } from "@/lib/apiKeys";
+import { canUseHostTools } from "@/lib/hostAccess";
 import { requireUserId } from "@/lib/auth";
+import { liveSince } from "@/lib/liveSince";
 
 function parseListParam(raw: string | null): string[] {
   if (!raw) return [];
@@ -37,52 +41,45 @@ export async function GET(
           orderBy: { createdAt: "asc" },
           select: { role: true, content: true, createdAt: true },
         },
+        parent: { select: { userId: true, kbId: true, temporary: true } },
       },
     });
 
-    if (!conversation || conversation.userId !== userId) {
+    if (!conversation || conversation.userId !== userId || (conversation.parent && conversation.parent.userId !== userId)) {
       return NextResponse.json({ error: "Conversation not found" }, { status: 404 });
     }
 
     let modelConfig;
     try {
-      modelConfig = getModel(conversation.model);
+      modelConfig = getModel(conversation.model, await resolveProviderCreds(userId), await canUseHostTools(userId));
     } catch {
       modelConfig = null;
     }
     // `conversation.contextLength` is really Ollama's `num_ctx` override (see
-    // api/chat/route.ts) — it must not shadow a cloud model's real, much
-    // larger context window just because an earlier Ollama session on this
-    // conversation set it.
-    const isOllama = conversation.model.startsWith("ollama/");
-    const contextLength = isOllama
-      ? conversation.contextLength || modelConfig?.contextWindow || 8192
-      : modelConfig?.contextWindow || 8192;
+    // api/chat/route.ts) — contextWindowFor keeps it from shadowing a cloud
+    // model's real, much larger context window.
+    const contextLength = contextWindowFor(conversation.model, modelConfig, conversation.contextLength);
     const systemPrompt = conversation.systemPrompt || "";
     const compressedSummary = conversation.compressedSummary || null;
-    const compressedAt = conversation.compressedAt
-      ? new Date(conversation.compressedAt)
-      : null;
 
     // When a compressed summary exists, the live prompt only sees the summary
     // (not the original history), so we don't need to count the pre-compression
     // messages toward the context window at all.
-    const messagesForUsage = compressedAt
-      ? conversation.messages.filter(
-          (m) => new Date(m.createdAt) >= compressedAt,
-        )
-      : conversation.messages;
+    const messagesForUsage = conversation.messages.filter(liveSince(conversation.compressedAt).isLive);
 
     // Re-build the actual system-prompt sections the model will see on the
     // next request, so the per-category counts reflect reality (tools,
     // skills, KB auto-inject, etc.) — not just the raw persona string.
     const chatOnlyMode = conversation.chatOnlyMode ?? false;
-    const memoryDisabled = conversation.memoryDisabled ?? false;
+    // A side chat runs like the chat route does: its main chat's KB and memory state, chat mode.
+    const side = conversation.kind === "side" ? conversation.parent : null;
+    const kbId = side ? side.kbId || undefined : conversation.kbId || undefined;
+    const memoryDisabled = conversation.memoryDisabled || conversation.temporary || !!side?.temporary;
     const useTools = !!modelConfig?.supportsTools && !chatOnlyMode;
     const activeToolIds = resolveActiveToolIds(
       explicitToolIds,
       skillIds,
-      conversation.kbId,
+      kbId,
     );
 
     // `retrieveKbContext` (called inside buildSystemPrompt) reads the LAST
@@ -96,17 +93,19 @@ export async function GET(
         ]
       : messagesForUsage;
 
-    const { sections } = await buildSystemPrompt({
+    const { sections, mainContext } = await buildSystemPrompt({
       useTools,
       systemPrompt,
       skillIds,
       activeToolIds,
       conversationId: id,
-      kbId: conversation.kbId || undefined,
+      kbId,
       ragContext: undefined,
       messages: panelMessages,
       memoryDisabled,
       userId,
+      contextWindow: contextLength,
+      ...(side ? { mode: "chat" as const } : {}),
     });
 
     const result = calculateDetailedContextUsage(
@@ -122,6 +121,7 @@ export async function GET(
       contextLength,
       systemPrompt: systemPrompt ? systemPrompt.substring(0, 200) : null,
       hasCompressedSummary: !!compressedSummary,
+      mainContext,
       ...result,
     });
   } catch (error) {

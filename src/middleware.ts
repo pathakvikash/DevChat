@@ -27,5 +27,9 @@ export default auth((req) => {
 });
 
 export const config = {
-  matcher: ["/((?!api/auth|login|_next/static|_next/image|favicon.ico).*)"],
+  // pair/redeem and pair/script are called from a terminal with no session; the one-time
+  // pairing code is their auth (see src/lib/providerPair.ts).
+  matcher: [
+    "/((?!api/auth|api/providers/pair/redeem|api/providers/pair/script|login|_next/static|_next/image|favicon.ico).*)",
+  ],
 };

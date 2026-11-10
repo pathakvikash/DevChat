@@ -1,0 +1,64 @@
+import { test, expect, type APIRequestContext, type Page } from "./fixtures";
+import { deleteAllChats } from "./helpers";
+
+// The new workflow screens in both themes. The desktop (1280px) and mobile (400px) projects each run this file.
+const THEMES = ["dark", "light"] as const;
+
+async function seed(request: APIRequestContext, run: boolean): Promise<string> {
+  for (const w of (await (await request.get("/api/workflows")).json()) as Array<{ id: string }>) await request.delete(`/api/workflows/${w.id}`);
+  for (const t of (await (await request.get("/api/tables")).json()) as Array<{ id: string }>) await request.delete(`/api/tables/${t.id}`);
+  await deleteAllChats(request);
+  const made = await request.post("/api/workflows", { data: { template: "news", model: "mock/workflow" } });
+  expect(made.ok(), `creating the workflow: ${made.status()} ${await made.text()}`).toBe(true);
+  const id = (await made.json()).id;
+  if (run) {
+    const started = await request.post(`/api/workflows/${id}/runs`);
+    expect(started.ok(), `starting the run: ${started.status()} ${await started.text()}`).toBe(true);
+    const { runId } = await started.json();
+    await expect.poll(async () => (await (await request.get(`/api/workflow-runs/${runId}`)).json()).state, { timeout: 30_000 }).toBe("succeeded");
+  }
+  return id;
+}
+
+async function settle(page: Page, theme: string) {
+  await expect(page.locator("html")).toHaveAttribute("data-theme", theme);
+  await page.waitForLoadState("networkidle");
+  await page.evaluate(() => document.fonts.ready);
+  await page.mouse.move(2, 2);
+  const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+  expect(overflow, "page scrolls sideways").toBeLessThanOrEqual(0);
+}
+
+const relativeTimes = (page: Page) => [page.getByText(/^(just now|\d+[mhd] ago|\d+mo ago)$/)];
+
+for (const theme of THEMES) {
+  test(`workflows list, ${theme}`, async ({ page, request }) => {
+    await page.addInitScript((t) => localStorage.setItem("vas:theme", t), theme);
+    await seed(request, true);
+    await page.goto("/workflows");
+    // Exact and inside <main>: the run posts a "News digest — <date>" chat that the sidebar lists as a link too.
+    await expect(page.locator("main").getByRole("link", { name: "News digest", exact: true })).toBeVisible();
+    await settle(page, theme);
+    await expect(page).toHaveScreenshot(`workflows-list-${theme}.png`, { mask: relativeTimes(page) });
+  });
+
+  test(`workflow editor with the News template, ${theme}`, async ({ page, request }) => {
+    await page.addInitScript((t) => (localStorage.setItem("vas:theme", t), localStorage.setItem("vas:workflowView", "list")), theme); // the list view; the canvas has its own baselines
+    const id = await seed(request, false);
+    await page.goto(`/workflows/${id}`);
+    await expect(page.getByRole("group", { name: "Write the digest, Agent, Not run" })).toBeVisible();
+    await settle(page, theme);
+    await expect(page).toHaveScreenshot(`workflow-editor-${theme}.png`);
+  });
+
+  test(`workflow editor with a finished run and a card open, ${theme}`, async ({ page, request }) => {
+    await page.addInitScript((t) => (localStorage.setItem("vas:theme", t), localStorage.setItem("vas:workflowView", "list")), theme);
+    const id = await seed(request, true);
+    await page.goto(`/workflows/${id}`);
+    await expect(page.getByRole("group", { name: "Post to a chat, Send to chat, Done" })).toBeVisible();
+    await page.getByRole("button", { name: "Open settings for Write the digest" }).click();
+    await expect(page.getByRole("complementary", { name: "Write the digest settings" })).toBeVisible();
+    await settle(page, theme);
+    await expect(page).toHaveScreenshot(`workflow-run-${theme}.png`, { mask: relativeTimes(page) });
+  });
+}

@@ -154,6 +154,7 @@ export async function consolidateMemory(opts: {
       system: CONSOLIDATION_SYSTEM,
       prompt: `EXISTING MEMORY:\n${existingBlock}\n\nRECENT CONVERSATION:\n${transcript}\n\nReturn the JSON array of memory operations.`,
       temperature: 0.2,
+      abortSignal: AbortSignal.timeout(180_000), // a CLI model has no Stop button here; a slow local model needs the room
     });
 
     const ops = extractJson<ConsolidationOp[]>(text, []);

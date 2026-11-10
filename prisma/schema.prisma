@@ -25,6 +25,9 @@ model User {
   personas       Persona[]
   appSettings    AppSetting[]
   traces         Trace[]
+  workflows      Workflow[]
+  workflowRuns   WorkflowRun[]
+  dataTables     DataTable[]
 }
 
 model Account {
@@ -82,7 +85,11 @@ model Conversation {
   compressedBeforeMessages Int?
   chatOnlyMode             Boolean    @default(false)
   memoryDisabled           Boolean    @default(false)
+  generativeUiEnabled      Boolean    @default(false)
+  temporary                Boolean    @default(false) // hidden from lists, memory off, deleted on leave or after 24h
   maxToolCalls     Int          @default(5)
+  reasoningEffort  String? // low | medium | high | max; honored by reasoning-capable providers (Claude Code --effort, Codex, OpenCode --variant)
+  workingFolder    String? // CLI-backed models only: folder the tool may read (chat mode) or edit (agent mode); null = sandboxed
   fallbackModel    String? // Optional backup model tried when the primary fails (rate limit, outage, auth).
    note                     String?
    pinned                   Boolean    @default(false)
@@ -93,9 +100,33 @@ model Conversation {
   messages                 Message[]
   artifacts                Artifact[]
   todos                    Todo[]
+  forkedFromId             String?
+  forkedFrom               Conversation? @relation("Forks", fields: [forkedFromId], references: [id], onDelete: SetNull)
+  forks                    Conversation[] @relation("Forks")
+  queuedMessages           QueuedMessage[]
+  parentId                 String?
+  kind                     String     @default("main") // main | side | subagent
+  parent                   Conversation?  @relation("Children", fields: [parentId], references: [id], onDelete: Cascade)
+  children                 Conversation[] @relation("Children")
 
   @@index([updatedAt])
   @@index([userId])
+  @@index([parentId])
+}
+
+// Messages typed while a reply runs. Deleted or delivered (deliveredAt set) before the next step.
+model QueuedMessage {
+  id             String       @id
+  conversationId String
+  text           String
+  seq            Int          @default(0) // client order within the chat; claims read rows in this order
+  createdAt      DateTime     @default(now())
+  deliveredAt    DateTime?
+  claimToken     String? // set while one step's claim holds the row; unique per claim
+  agent          String? // JSON of AgentMessageData for a message sent from another chat; null for the user's own
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@index([conversationId, deliveredAt])
 }
 
 model Message {
@@ -303,4 +334,73 @@ model TraceToolCall {
   trace     Trace    @relation(fields: [traceId], references: [id], onDelete: Cascade)
 
   @@index([traceId])
+}
+
+// ─── Workflows: a flow of cards that runs on the server (docs/design/workflows.md) ───
+// JSON is stored as TEXT so both schemas stay identical.
+model Workflow {
+  id        String        @id @default(cuid())
+  userId    String
+  name      String        @default("Untitled workflow")
+  graph     String // JSON WorkflowGraph
+  createdAt DateTime      @default(now())
+  updatedAt DateTime      @updatedAt
+  user      User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  runs      WorkflowRun[]
+
+  @@index([userId, updatedAt])
+}
+
+model WorkflowRun {
+  id           String    @id @default(cuid())
+  workflowId   String
+  userId       String // duplicated for ownership checks and the per-user run cap
+  trigger      String    @default("manual") // manual | schedule (later)
+  state        String // running | waiting | succeeded | failed | cancelled | interrupted
+  graph        String // snapshot at start; edits during a run apply to the next one
+  nodes        String    @default("{}") // JSON Record<cardId, CardRun>
+  error        String?
+  inputTokens  Int       @default(0)
+  outputTokens Int       @default(0)
+  attempt      Int       @default(0) // bumped by Resume; every save of an older loop then matches no row
+  heartbeatAt  DateTime  @default(now())
+  startedAt    DateTime  @default(now())
+  endedAt      DateTime?
+  workflow     Workflow  @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+  user         User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([workflowId, startedAt])
+  @@index([userId, state])
+}
+
+// ─── Data tables (phase 2): a DevChat table that a workflow's Save to table card writes to. ───
+// Named "DataTable" so it is not confused with the generative-UI Table component.
+model DataTable {
+  id        String         @id @default(cuid())
+  userId    String
+  name      String
+  columns   String         @default("[]") // JSON [{ key, label, type: text|longtext|url|number|date }]
+  statuses  String         @default("[\"new\"]") // JSON status options, in order
+  privateFrom String @default("") // kinds of private data it was filled from, comma separated (chats, later mcp and folder); empty = public
+  sheetId     String? // the Google spreadsheet DevChat created for this table (phase 7); null until the first sync
+  createdAt DateTime       @default(now())
+  updatedAt DateTime       @updatedAt
+  user      User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  rows      DataTableRow[]
+
+  @@unique([userId, name])
+}
+
+model DataTableRow {
+  id        String    @id @default(cuid())
+  tableId   String
+  key       String? // dedupe key (a normalised URL for jobs and news)
+  status    String    @default("new")
+  data      String // JSON object: column key → value
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  table     DataTable @relation(fields: [tableId], references: [id], onDelete: Cascade)
+
+  @@unique([tableId, key])
+  @@index([tableId, status])
 }

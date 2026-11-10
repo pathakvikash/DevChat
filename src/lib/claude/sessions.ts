@@ -2,6 +2,7 @@ import { readdirSync, statSync, existsSync, createReadStream } from "fs";
 import { readFile } from "fs/promises";
 import { homedir } from "os";
 import { join } from "path";
+import { isSanityMode } from "@/lib/sanityMode";
 
 export const CLAUDE_DIR = join(homedir(), ".claude");
 export const PROJECTS_DIR = join(CLAUDE_DIR, "projects");
@@ -141,14 +142,32 @@ export async function listProjects(): Promise<ClaudeProject[]> {
     });
   }
 
-  projects.sort((a, b) => (b.lastActive || "").localeCompare(a.lastActive || ""));
-  return projects;
+  return mergeByCwd(projects);
+}
+
+/** One project per working folder, newest first: two project folders can record the same cwd
+ *  (a worktree's sessions often log the main repo), and pickers key their options by cwd. */
+export function mergeByCwd(projects: ClaudeProject[]): ClaudeProject[] {
+  const byCwd = new Map<string, ClaudeProject>();
+  for (const p of projects) {
+    const seen = byCwd.get(p.cwd);
+    if (!seen) {
+      byCwd.set(p.cwd, { ...p });
+      continue;
+    }
+    seen.sessionCount += p.sessionCount;
+    if ((p.lastActive || "") > (seen.lastActive || "")) Object.assign(seen, { slug: p.slug, lastActive: p.lastActive });
+  }
+  return [...byCwd.values()].sort((a, b) => (b.lastActive || "").localeCompare(a.lastActive || ""));
 }
 
 /** Where runs are allowed — only folders Claude Code has already worked in. */
 export async function runnableCwds(): Promise<Set<string>> {
   const projects = await listProjects();
-  return new Set(projects.map((p) => p.cwd));
+  const cwds = new Set(projects.map((p) => p.cwd));
+  // Sanity suite only: a checked-in folder stands in for a Claude Code project (e2e/files.spec.ts).
+  if (isSanityMode() && process.env.SANITY_WORKING_FOLDER) cwds.add(process.env.SANITY_WORKING_FOLDER);
+  return cwds;
 }
 
 export async function isRunnableCwd(cwd: string): Promise<boolean> {

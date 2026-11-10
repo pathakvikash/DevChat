@@ -10,6 +10,7 @@ const TYPE_ICONS: Record<string, typeof FileCode> = {
   svg: Image,
   mermaid: GitBranch,
   html: Globe,
+  data: FileSpreadsheet,
 };
 
 const TYPE_COLORS: Record<string, string> = {
@@ -20,6 +21,7 @@ const TYPE_COLORS: Record<string, string> = {
   svg: "text-cyan-400",
   mermaid: "text-pink-400",
   html: "text-orange-400",
+  data: "text-teal-400",
 };
 
 interface ArtifactReferenceProps {
@@ -43,7 +45,7 @@ export default function ArtifactReference({
   return (
     <button
       onClick={() => onClick(artifactId)}
-      className="flex items-center gap-2.5 glass-button rounded-[var(--glass-radius-md)] px-3 py-2 cursor-pointer text-left w-full"
+      className="flex select-none items-center gap-2.5 glass-button rounded-[var(--glass-radius-md)] px-3 py-2 cursor-pointer text-left w-full"
     >
       <Icon size={16} className={`${colorClass} shrink-0`} />
       <span className="text-sm text-zinc-200 truncate flex-1 min-w-0">

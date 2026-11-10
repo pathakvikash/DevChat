@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { disconnectFromServer } from "@/lib/mcp/client";
-import { getPrismaMcp, findMcpServer, mcpServerNotFoundResponse } from "@/lib/api/mcpServers";
+import { getPrismaMcp, findMcpServer, mcpServerNotFoundResponse, mergeAuthConfig, redactAuthConfig } from "@/lib/api/mcpServers";
 import { requireUserId } from "@/lib/auth";
 
 export async function GET(
@@ -20,7 +20,7 @@ export async function GET(
       name: server.name,
       url: server.url,
       authType: server.authType,
-      authConfig: server.authConfig,
+      ...redactAuthConfig(server.authConfig),
       hasAuthToken: !!server.authToken,
       enabled: server.enabled,
       errorMsg: server.errorMsg,
@@ -50,11 +50,17 @@ export async function PATCH(
     if (body.name !== undefined) data.name = body.name;
     if (body.url !== undefined) data.url = body.url;
     if (body.authType !== undefined) data.authType = body.authType;
-    if (body.authConfig !== undefined) data.authConfig = JSON.stringify(body.authConfig);
+    if (body.authConfig !== undefined || body.authType !== undefined) {
+      data.authConfig = mergeAuthConfig(result.server.authConfig, body.authConfig ?? {}, body.authType ?? result.server.authType);
+    }
     if (body.enabled !== undefined) data.enabled = body.enabled;
     if (body.token !== undefined) data.authToken = JSON.stringify(body.token);
 
+    // The stored OAuth token goes when the server stops using oauth2 or moves to another address.
+    if (body.token === undefined && ((body.authType !== undefined && body.authType !== "oauth2") || (body.url !== undefined && body.url !== result.server.url))) data.authToken = null;
     const server = await getPrismaMcp().update({ where: { id }, data });
+    // A changed address or credentials make the cached connection and tool list stale.
+    if (["url", "authType", "authConfig", "authToken"].some((k) => k in data)) await disconnectFromServer(id).catch(() => {});
 
     if (body.enabled === false) {
       await disconnectFromServer(id).catch(() => {});

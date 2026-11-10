@@ -4,6 +4,7 @@ export interface ConversationSummary {
   id: string;
   title: string;
   model: string;
+  workingFolder?: string | null;
   pinned: boolean;
   archived: boolean;
   createdAt: string;
@@ -17,7 +18,7 @@ export async function fetchConversations(): Promise<ConversationSummary[]> {
   return res.json();
 }
 
-export async function createConversation(payload?: { title?: string; model?: string }): Promise<{ id: string }> {
+export async function createConversation(payload?: { title?: string; model?: string; temporary?: boolean }): Promise<{ id: string }> {
   const res = await fetch("/api/conversations", {
     method: "POST",
     headers: { "Content-Type": "application/json" },

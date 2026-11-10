@@ -1,12 +1,17 @@
 "use client";
 
+import type { ChatMode } from "@/app/components/conversation/types";
 import { useEffect, useRef, useState, useCallback } from "react";
-import { Plus, Upload, Globe, BookOpen, Settings, X, Slash, Mic, MicOff } from "lucide-react";
+import { Plus, Upload, Globe, BookOpen, Settings, X, Slash, Mic, MicOff, ArrowRight, Loader2, Paperclip, AtSign, FileText } from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
 import AttachmentChip from "./AttachmentChip";
+import QuoteCards from "./QuoteCards";
+import QueuedMessages, { type QueuedItem } from "./QueuedMessages";
 import DragOverlay from "./DragOverlay";
 import ContextUsageCircle from "./ContextUsageCircle";
 import ModelSelector from "./conversation/ModelSelector";
+import WorkingFolderPicker from "./conversation/WorkingFolderPicker";
+import { isCliModelId } from "@/lib/providers";
 import VoiceWaveform from "./VoiceWaveform";
 import {
   activeCommandQuery,
@@ -14,7 +19,8 @@ import {
   type SlashCommand,
 } from "@/lib/commands";
 import { useVoiceDictation } from "@/lib/useVoiceDictation";
-import { useChatMode } from "@/app/contexts/ChatModeContext";
+import type { QuoteCard } from "@/lib/utils/quoteReply";
+import { findMentionQuery, formatSize, matchMentionFiles } from "@/lib/utils/fileMentions";
 
 /** Max composer height before it starts scrolling. */
 const MAX_INPUT_HEIGHT = 200;
@@ -22,12 +28,14 @@ const MAX_INPUT_HEIGHT = 200;
 const SINGLE_LINE_HEIGHT = 40;
 
 interface ChatInputProps {
+  /** The pane's mode. The sidebar and header toggles switch it. */
+  mode: ChatMode;
   input: string;
   setInput: (value: string) => void;
   files: File[];
   setFiles: React.Dispatch<React.SetStateAction<File[]>>;
   isLoading: boolean;
-  onSubmit: (e: React.FormEvent<HTMLFormElement>) => void;
+  onSubmit: (e: React.FormEvent<HTMLFormElement>) => void | Promise<void>;
   onStop: () => void;
   kbId?: string;
   contextUsage?: {
@@ -38,15 +46,50 @@ interface ChatInputProps {
   onContextClick?: () => void;
   isCompressed?: boolean;
   isCompressing?: boolean;
+  compressFocus?: string;
   model: string;
   onModelChange: (modelId: string) => void;
   onOpenSettings: () => void;
+  /** CLI-backed models only: folder the tool may read (chat) or edit (agent). */
+  workingFolder?: string | null;
+  onWorkingFolderChange?: (folder: string | null) => void;
   onKbToggle: () => void;
   searchProvider: "duckduckgo" | "tavily";
   onToggleSearchProvider: () => void;
+  /** Suggested next message, shown as the placeholder while the box is empty. */
+  suggestion?: string | null;
+  onAcceptSuggestion?: () => void;
+  quotes: QuoteCard[];
+  onQuoteChange: (id: string, instruction: string) => void;
+  onQuoteRemove: (id: string) => void;
+  /** Cmd/Ctrl+Enter in a quote card: send just that card. */
+  onSendQuote: (id: string) => void;
+  /** A quote card's side-chat button. Left out where no side chat can open. */
+  onQuoteSide?: (id: string) => void;
+  /** The pill's mic added this card: start dictating into its instruction. */
+  dictateQuoteId?: string | null;
+  onDictateStarted?: () => void;
+  /** Temporary chat: dashed composer and its own placeholder. */
+  temporary?: boolean;
+  conversationId: string;
+  /** Working-folder paths picked with `@`; shown as chips. */
+  mentions: string[];
+  setMentions: React.Dispatch<React.SetStateAction<string[]>>;
+  /** Kept and total lines for each `@` file that will be cut on send. */
+  mentionCuts?: Record<string, { kept: number; total: number }>;
+  /** Messages typed during a reply, shown as chips above the input. */
+  queued?: QueuedItem[];
+  /** Enter or Queue during a reply: queue what is typed. */
+  onQueue?: () => void;
+  onQueueEdit?: (id: string, text: string) => void;
+  onQueueRemove?: (id: string) => void;
+  onQueueRetry?: (id: string) => void;
+  /** Queued messages join a running reply only when the model has tools. */
+  toolsAvailable?: boolean;
 }
 
 export default function ChatInput({
+  mode,
   input,
   setInput,
   files,
@@ -59,21 +102,41 @@ export default function ChatInput({
   onContextClick,
   isCompressed,
   isCompressing,
+  compressFocus,
   model,
   onModelChange,
   onOpenSettings,
+  workingFolder,
+  onWorkingFolderChange,
   onKbToggle,
   searchProvider,
   onToggleSearchProvider,
+  suggestion,
+  onAcceptSuggestion,
+  quotes,
+  onQuoteChange,
+  onQuoteRemove,
+  onSendQuote,
+  onQuoteSide,
+  dictateQuoteId,
+  onDictateStarted,
+  temporary,
+  conversationId,
+  mentions,
+  setMentions,
+  mentionCuts = {},
+  queued = [],
+  onQueue = () => {},
+  onQueueEdit = () => {},
+  onQueueRemove = () => {},
+  onQueueRetry = () => {},
+  toolsAvailable = true,
 }: ChatInputProps) {
-  // Read-only here; the sidebar and header toggles do the actual switching.
-  const { mode } = useChatMode();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const [expanded, setExpanded] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
   const [, setDragCounter] = useState(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const submitLockRef = useRef(false);
   const [plusOpen, setPlusOpen] = useState(false);
   const [compressedDismissed, setCompressedDismissed] = useState(false);
   const plusRef = useRef<HTMLDivElement>(null);
@@ -81,16 +144,53 @@ export default function ChatInput({
   const inputRef = useRef(input);
   inputRef.current = input;
 
-  const { isListening, toggle: toggleVoice, isSupported: voiceSupported } =
+  // One dictation runs at a time. `voiceTarget` is where it writes: a quote card's id, or null for the main box.
+  const [voiceTarget, setVoiceTarget] = useState<string | null>(null);
+  const live = useRef({ quotes, onQuoteChange, setInput });
+  useEffect(() => {
+    live.current = { quotes, onQuoteChange, setInput };
+  });
+  const targetRef = useRef<string | null>(null);
+  const { isListening, start: startVoice, stop: stopVoice, isSupported: voiceSupported } =
     useVoiceDictation(
-      useCallback(
-        (text: string) => {
-          const current = inputRef.current;
-          setInput(current + (current && !current.endsWith(" ") ? " " : "") + text);
-        },
-        [setInput],
-      ),
+      useCallback((text: string) => {
+        const add = (current: string) => current + (current && !current.endsWith(" ") ? " " : "") + text;
+        const { quotes, onQuoteChange, setInput } = live.current;
+        const card = quotes.find((q) => q.id === targetRef.current);
+        if (card) onQuoteChange(card.id, add(card.instruction));
+        else if (targetRef.current === null) setInput(add(inputRef.current));
+      }, []),
     );
+
+  /** Mic of the main box (null) or of one card: starts, moves the target, or stops when it is already the target. */
+  function dictateTo(id: string | null) {
+    if (isListening && targetRef.current === id) {
+      stopVoice();
+      return;
+    }
+    const moving = isListening;
+    targetRef.current = id;
+    setVoiceTarget(id);
+    // A restart drops words still in flight, so they don't land in the new target.
+    if (moving) stopVoice();
+    startVoice();
+  }
+
+  // The target card was removed or sent: stop listening.
+  useEffect(() => {
+    if (isListening && voiceTarget !== null && !quotes.some((q) => q.id === voiceTarget)) {
+      stopVoice();
+      targetRef.current = null;
+    }
+  }, [isListening, voiceTarget, quotes, stopVoice]);
+
+  // The selection pill's mic added a card.
+  useEffect(() => {
+    if (!dictateQuoteId || !quotes.some((q) => q.id === dictateQuoteId)) return;
+    onDictateStarted?.();
+    if (voiceSupported) dictateTo(dictateQuoteId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dictateQuoteId, quotes]);
 
   const cmdQuery = activeCommandQuery(input);
   const cmdMatches: SlashCommand[] = cmdQuery !== null ? matchCommands(cmdQuery) : [];
@@ -99,12 +199,58 @@ export default function ChatInput({
   const showCommands =
     cmdQuery !== null &&
     cmdQuery !== cmdDismissed &&
-    cmdMatches.length > 0 &&
-    !isLoading;
+    cmdMatches.length > 0;
 
   useEffect(() => {
     setCmdIndex((i) => (i >= cmdMatches.length ? 0 : i));
   }, [cmdMatches.length]);
+
+  // `@` picks a file from the working folder. Only with a folder; the slash menu wins when both match.
+  const [caret, setCaret] = useState(0);
+  const mentionQuery = workingFolder ? findMentionQuery(input, caret) : null;
+  const mentionKey = mentionQuery ? `${mentionQuery.start}:${mentionQuery.query}` : null;
+  const [mentionDismissed, setMentionDismissed] = useState<string | null>(null);
+  const [mentionIndex, setMentionIndex] = useState(0);
+  const showMentions = mentionQuery !== null && mentionKey !== mentionDismissed && !showCommands;
+  // The list belongs to one chat and folder. It is fetched when the picker first opens, and again after a failure.
+  const listKey = `${conversationId}|${workingFolder ?? ""}`;
+  const [folderList, setFolderList] = useState<{ key: string; status: "ready" | "error"; files: { path: string; size: number }[] } | null>(null);
+  const listingKeyRef = useRef<string | null>(null);
+  const list = folderList?.key === listKey ? folderList : null;
+  const mentionMatches =
+    showMentions && mentionQuery && list?.status === "ready" ? matchMentionFiles(list.files, mentionQuery.query) : [];
+  const activeMention = mentionIndex < mentionMatches.length ? mentionIndex : 0;
+
+  useEffect(() => {
+    if (!showMentions || listingKeyRef.current === listKey) return;
+    listingKeyRef.current = listKey;
+    fetch(`/api/conversations/${conversationId}/files`)
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
+      .then((d) => setFolderList({ key: listKey, status: "ready", files: d.files }))
+      .catch(() => {
+        listingKeyRef.current = null;
+        setFolderList({ key: listKey, status: "error", files: [] });
+      });
+  }, [showMentions, listKey, conversationId]);
+
+  // After a pick the text changes, and React would move the caret to the end. Put it back here.
+  const caretAfterPick = useRef<number | null>(null);
+  useEffect(() => {
+    const el = textareaRef.current;
+    if (caretAfterPick.current === null || !el) return;
+    el.setSelectionRange(caretAfterPick.current, caretAfterPick.current);
+    caretAfterPick.current = null;
+  }, [input]);
+
+  function pickMention(path: string) {
+    if (!mentionQuery) return;
+    const pos = mentionQuery.start;
+    setInput(input.slice(0, pos) + input.slice(caret));
+    setCaret(pos);
+    setMentions((prev) => (prev.includes(path) ? prev : [...prev, path]));
+    caretAfterPick.current = pos;
+    textareaRef.current?.focus();
+  }
 
   const applyCommand = useCallback(
     (cmd: SlashCommand) => {
@@ -199,11 +345,35 @@ export default function ChatInput({
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
-  const canSubmit = input.trim() || files.length > 0;
+  const canSubmit = input.trim() || files.length > 0 || mentions.length > 0 || quotes.length > 0;
+  const showSuggestion = Boolean(suggestion && !input && !isLoading && onAcceptSuggestion);
 
+  // The textarea is disabled while a reply runs, so a focus request made then waits for the reply to end.
+  const wantFocusRef = useRef(false);
   useEffect(() => {
-    if (!isLoading) submitLockRef.current = false;
+    if (isLoading || !wantFocusRef.current) return;
+    wantFocusRef.current = false;
+    if (document.activeElement === document.body) textareaRef.current?.focus();
   }, [isLoading]);
+
+  function focusTextarea() {
+    const el = textareaRef.current;
+    if (el?.disabled) wantFocusRef.current = true;
+    else el?.focus();
+  }
+
+  function submitFromKey(e: React.KeyboardEvent) {
+    e.preventDefault();
+    if (isLoading) {
+      // Holding Enter queues once.
+      if (!e.repeat) onQueue();
+      return;
+    }
+    if (canSubmit) {
+      wantFocusRef.current = true;
+      onSubmit(e as any);
+    }
+  }
 
   // Resize on value change rather than onInput, so it also shrinks back after
   // send and still grows for voice dictation and slash-command completion.
@@ -222,37 +392,12 @@ export default function ChatInput({
       <DragOverlay isVisible={isDragging} fileCount={files.length} />
 
       <div className="glass-nav px-4 py-3">
-        {files.length > 0 && (
-          <div className="mb-3 space-y-2">
-            <div className="flex items-center justify-between">
-              <span className="text-sm font-medium text-zinc-300">
-                Attachments ({files.length})
-              </span>
-              <button
-                onClick={() => setFiles([])}
-                className="text-xs text-zinc-500 hover:text-zinc-300"
-              >
-                Clear all
-              </button>
-            </div>
-            <div className="flex flex-wrap gap-2">
-              {files.map((file, index) => (
-                <AttachmentChip
-                  key={`${file.name}-${file.size}-${index}`}
-                  file={file}
-                  onRemove={() => removeFile(index)}
-                />
-              ))}
-            </div>
-          </div>
-        )}
-
-        {isCompressing && !isCompressed && (
-          <div className="mb-3 p-3 rounded-[var(--glass-radius-md)] glass-card border border-amber-900/50">
-            <div className="flex items-center gap-2 text-amber-300 text-sm">
-              <span className="inline-block w-3.5 h-3.5 border-2 border-amber-400 border-t-transparent rounded-full animate-spin" />
-              <span>Compressing conversation...</span>
-            </div>
+        {isCompressing && (
+          <div className="mb-3 flex items-center gap-2 text-sm text-[var(--foreground)]">
+            <Loader2 size={14} aria-hidden className="animate-spin motion-reduce:animate-none text-amber-400" />
+            {compressFocus
+              ? `Compressing chat, keeping "${compressFocus.length > 40 ? `${compressFocus.slice(0, 40)}…` : compressFocus}"…`
+              : "Compressing chat…"}
           </div>
         )}
 
@@ -272,6 +417,78 @@ export default function ChatInput({
           </div>
         )}
 
+        {/* Composer tray: what stacks above the input. Status rows above stay put; this part scrolls. */}
+        {(queued.length > 0 || quotes.length > 0 || files.length > 0 || mentions.length > 0) && (
+          <div className="mb-3 max-h-[min(30dvh,240px)] space-y-2 overflow-y-auto">
+            <QueuedMessages
+              items={queued}
+              toolsAvailable={toolsAvailable}
+              onEdit={onQueueEdit}
+              onRemove={onQueueRemove}
+              onRetry={onQueueRetry}
+              focusTextarea={focusTextarea}
+            />
+            <QuoteCards
+              quotes={quotes}
+              onChange={onQuoteChange}
+              onRemove={onQuoteRemove}
+              onSendOne={(id) => {
+                wantFocusRef.current = true; // the card leaves, and the textarea is disabled until the reply ends
+                onSendQuote(id);
+              }}
+              onSendAll={submitFromKey}
+              focusTextarea={focusTextarea}
+              busy={isLoading}
+              listeningId={isListening ? voiceTarget : null}
+              onDictate={voiceSupported ? dictateTo : undefined}
+              onSideChat={onQuoteSide}
+            />
+            {(files.length > 0 || mentions.length > 0) && (
+              <div className="space-y-2">
+                <div className="flex items-center gap-1.5 text-[11px] text-zinc-400">
+                  <Paperclip size={11} /> Files ({files.length + mentions.length})
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setFiles([]);
+                      setMentions([]);
+                    }}
+                    className="focus-ring ml-auto rounded-[var(--glass-radius-sm)] px-1 hover:text-[var(--foreground)]"
+                  >
+                    Clear all
+                  </button>
+                </div>
+                <div role="list" aria-label="Files" className="flex flex-wrap gap-2">
+                  {files.map((file, index) => (
+                    <AttachmentChip
+                      key={`${file.name}-${file.size}-${index}`}
+                      file={file}
+                      onRemove={() => removeFile(index)}
+                    />
+                  ))}
+                  {mentions.map((path) => {
+                    const cut = mentionCuts[path];
+                    const modelName = model.split("/").pop() || model;
+                    return (
+                      <AttachmentChip
+                        key={`@${path}`}
+                        file={{ name: path }}
+                        note={
+                          cut && {
+                            text: `Trimmed to fit ${modelName}: ${cut.total === 1 ? "part of the only line" : `${cut.kept} of ${cut.total} lines`} sent`,
+                            title: cut.total === 1 ? "Only part of this line fits this model" : `Only the first ${cut.kept} of ${cut.total} lines fit this model`,
+                          }
+                        }
+                        onRemove={() => setMentions((prev) => prev.filter((p) => p !== path))}
+                      />
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
         <form
           onSubmit={onSubmit}
           onDragEnter={handleDragEnter}
@@ -285,8 +502,45 @@ export default function ChatInput({
                 ? "shadow-[var(--glass-shadow-glow)] border-[var(--glass-accent)]"
                 : ""
             }
+            ${temporary ? "border-dashed! border-[var(--glass-border-strong)]!" : ""}
           `}
         >
+          {showMentions && (
+            <div className="absolute bottom-full left-0 right-0 mb-2 max-h-72 overflow-y-auto rounded-[var(--glass-radius-md)] glass-panel shadow-2xl z-50">
+              <div className="flex items-center gap-1.5 border-b border-[var(--glass-border)] px-3 py-1.5 text-[11px] text-zinc-500">
+                <AtSign size={11} /> Files in {workingFolder?.split("/").pop()} · ↑↓ to navigate · Tab/Enter to select
+              </div>
+              {list?.status === "error" ? (
+                <div className="px-3 py-2 text-xs text-zinc-400">Couldn&apos;t list files</div>
+              ) : list?.status !== "ready" ? (
+                <div className="flex items-center gap-2 px-3 py-2 text-xs text-zinc-400">
+                  <Loader2 size={12} aria-hidden className="animate-spin motion-reduce:animate-none" /> Loading files…
+                </div>
+              ) : mentionMatches.length === 0 ? (
+                <div className="px-3 py-2 text-xs text-zinc-400">No files match &quot;{mentionQuery?.query}&quot;</div>
+              ) : (
+                mentionMatches.map(({ path, size }, i) => (
+                  <button
+                    key={path}
+                    type="button"
+                    onMouseEnter={() => setMentionIndex(i)}
+                    onClick={() => pickMention(path)}
+                    className={`focus-ring flex w-full items-center gap-2 px-3 py-2 text-left text-sm transition ${
+                      i === activeMention ? "bg-[var(--glass-bg-hover)]" : "hover:bg-[var(--glass-bg-hover)]"
+                    }`}
+                  >
+                    <FileText size={14} aria-hidden className="shrink-0 text-zinc-500" />
+                    <span className="truncate text-[var(--foreground)]">{path.slice(path.lastIndexOf("/") + 1)}</span>
+                    {path.includes("/") && (
+                      <span className="min-w-0 truncate text-xs text-zinc-400">{path.slice(0, path.lastIndexOf("/"))}</span>
+                    )}
+                    <span className="ml-auto shrink-0 font-mono text-[11px] text-zinc-400">{formatSize(size)}</span>
+                  </button>
+                ))
+              )}
+            </div>
+          )}
+
           {showCommands && (
             <div className="absolute bottom-full left-0 right-0 mb-2 max-h-72 overflow-y-auto rounded-[var(--glass-radius-md)] glass-panel shadow-2xl z-50">
               <div className="flex items-center gap-1.5 border-b border-[var(--glass-border)] px-3 py-1.5 text-[11px] text-zinc-500">
@@ -319,22 +573,63 @@ export default function ChatInput({
           )}
 
           {/* One row until the text wraps, then the input takes the full width. */}
-          <div className={`min-w-0 flex flex-col ${expanded ? "order-1 w-full" : "order-2 flex-1"}`}>
+          <div className={`relative min-w-0 flex flex-col ${expanded ? "order-1 w-full" : "order-2 flex-1"}`}>
             <textarea
               ref={textareaRef}
+              aria-label="Message"
               value={input}
-              onChange={(e) => setInput(e.target.value)}
-              disabled={isLoading}
+              onChange={(e) => {
+                setInput(e.target.value);
+                setCaret(e.target.selectionStart);
+                setMentionIndex(0);
+              }}
+              onSelect={(e) => setCaret(e.currentTarget.selectionStart)}
               placeholder={
                 isListening
                   ? ""
-                  : mode === "agent"
-                    ? "Agent mode — can write artifacts, todos, memories..."
-                    : "Type a message, / for commands, or drop files..."
+                  : suggestion && !input
+                    ? suggestion
+                  : temporary
+                    ? "Temporary chat. Not saved after you leave."
+                    : mode === "agent"
+                    ? "Agent mode: can make changes without asking"
+                    : mode === "ask"
+                      ? isCliModelId(model) && !model.startsWith("claude-code/") ? "Ask mode: OpenCode and Codex can't ask before editing; read-only here" : "Ask mode: changes need your OK"
+                      : mode === "plan"
+                        ? "Describe the task. You'll get a plan to approve."
+                        : "Type a message, / for commands, or drop files..."
               }
-              className="w-full resize-none bg-transparent text-sm text-[var(--foreground)] outline-none placeholder:text-zinc-500 placeholder:truncate disabled:opacity-50 py-1.5 overflow-y-auto"
+              className={`w-full resize-none bg-transparent text-sm text-[var(--foreground)] outline-none placeholder:text-zinc-500 placeholder:truncate disabled:opacity-50 py-1.5 overflow-y-auto ${showSuggestion ? "pr-7" : ""}`}
               rows={1}
               onKeyDown={(e) => {
+                if (showMentions) {
+                  if (e.key === "ArrowDown" && mentionMatches.length > 0) {
+                    e.preventDefault();
+                    setMentionIndex((i) => (i + 1) % mentionMatches.length);
+                    return;
+                  }
+                  if (e.key === "ArrowUp" && mentionMatches.length > 0) {
+                    e.preventDefault();
+                    setMentionIndex((i) => (i - 1 + mentionMatches.length) % mentionMatches.length);
+                    return;
+                  }
+                  if (e.key === "Tab" && mentionMatches.length > 0) {
+                    e.preventDefault();
+                    pickMention(mentionMatches[activeMention].path);
+                    return;
+                  }
+                  // Enter picks, or does nothing while the list loads or matches nothing. It never sends.
+                  if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
+                    e.preventDefault();
+                    if (mentionMatches.length > 0) pickMention(mentionMatches[activeMention].path);
+                    return;
+                  }
+                  if (e.key === "Escape") {
+                    e.preventDefault();
+                    setMentionDismissed(mentionKey);
+                    return;
+                  }
+                }
                 if (showCommands) {
                   if (e.key === "ArrowDown") {
                     e.preventDefault();
@@ -353,17 +648,17 @@ export default function ChatInput({
                   }
                   if (e.key === "Escape") {
                     e.preventDefault();
-                    e.stopPropagation();
                     setCmdDismissed(cmdQuery);
                     return;
                   }
                 }
-                if (e.key === "Enter" && !e.shiftKey) {
+                if (e.key === "ArrowRight" && !input && suggestion && onAcceptSuggestion) {
                   e.preventDefault();
-                  if (canSubmit && !isLoading && !submitLockRef.current) {
-                    submitLockRef.current = true;
-                    onSubmit(e as any);
-                  }
+                  onAcceptSuggestion();
+                  return;
+                }
+                if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
+                  submitFromKey(e);
                 }
               }}
               style={{
@@ -371,6 +666,23 @@ export default function ChatInput({
                 maxHeight: `${MAX_INPUT_HEIGHT}px`,
               }}
             />
+
+            {/* Suggested next message: fill the box with it (→ key does the same). */}
+            {showSuggestion && (
+              <button
+                type="button"
+                tabIndex={-1}
+                onClick={() => {
+                  onAcceptSuggestion?.();
+                  textareaRef.current?.focus();
+                }}
+                aria-label="Use suggestion"
+                title="Use suggestion (→)"
+                className="absolute right-2 top-2 text-zinc-500 hover:text-zinc-200 transition"
+              >
+                <ArrowRight size={14} />
+              </button>
+            )}
 
             <AnimatePresence>
               {isListening && (
@@ -475,9 +787,13 @@ export default function ChatInput({
 
           <div className="order-3 ml-auto flex items-center gap-1.5">
             {/* Reads like a second placeholder when the box is empty. */}
-            {!isLoading && input.length > 0 && (
-              <span className="text-[11px] text-zinc-600 hidden md:block mr-1 whitespace-nowrap">
-                Enter to send · Shift+Enter for newline
+            {input.length > 0 && (
+              <span className="text-[11px] text-zinc-400 hidden md:block mr-1 whitespace-nowrap">
+                {isLoading
+                  ? toolsAvailable
+                    ? "Enter queues · the model sees it at its next step"
+                    : "Enter queues · sends when the reply finishes"
+                  : "Enter to send · Shift+Enter for newline"}
               </span>
             )}
             {contextUsage && (
@@ -500,20 +816,30 @@ export default function ChatInput({
               />
             </div>
 
+            {isCliModelId(model) && onWorkingFolderChange && (
+              <div className="hidden md:block">
+                <WorkingFolderPicker
+                  value={workingFolder ?? null}
+                  onChange={onWorkingFolderChange}
+                  disabled={isLoading}
+                />
+              </div>
+            )}
+
             {voiceSupported && (
               <button
                 type="button"
-                onClick={toggleVoice}
+                onClick={() => dictateTo(null)}
                 disabled={isLoading}
                 className={`flex h-9 w-9 items-center justify-center rounded-[var(--glass-radius-md)] transition-all ${
-                  isListening
+                  isListening && voiceTarget === null
                     ? "glass-button-primary text-white"
                     : "glass-button text-zinc-400"
                 } disabled:opacity-50`}
-                style={isListening ? { animation: "mic-pulse 2s ease-in-out infinite" } : undefined}
-                title={isListening ? "Stop dictation" : "Voice dictation"}
+                style={isListening && voiceTarget === null ? { animation: "mic-pulse 2s ease-in-out infinite" } : undefined}
+                title={isListening && voiceTarget === null ? "Stop dictation" : "Voice dictation"}
               >
-                {isListening ? (
+                {isListening && voiceTarget === null ? (
                   <Mic size={16} className="animate-pulse" />
                 ) : (
                   <MicOff size={16} />
@@ -522,13 +848,28 @@ export default function ChatInput({
             )}
 
             {isLoading ? (
-              <button
-                type="button"
-                onClick={onStop}
-                className="flex h-9 items-center justify-center rounded-[var(--glass-radius-md)] glass-button-danger px-3 text-sm font-medium text-red-200"
-              >
-                Stop
-              </button>
+              <>
+                {input.trim() && (
+                  <button
+                    type="button"
+                    onClick={onQueue}
+                    className="flex h-9 items-center justify-center rounded-[var(--glass-radius-md)] glass-button px-3 text-sm font-medium text-[var(--foreground)]"
+                  >
+                    Queue
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => {
+                    onStop();
+                    // Stop puts the undelivered text back in the box; the cursor ends up at its end.
+                    textareaRef.current?.focus();
+                  }}
+                  className="flex h-9 items-center justify-center rounded-[var(--glass-radius-md)] glass-button-danger px-3 text-sm font-medium text-red-200"
+                >
+                  Stop
+                </button>
+              </>
             ) : (
               <button
                 type="submit"

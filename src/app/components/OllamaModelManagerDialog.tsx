@@ -190,7 +190,10 @@ export default function OllamaModelManagerDialog({
             placeholder="e.g. llama3.2:3b"
             className="flex-1 glass-input rounded-[var(--glass-radius-md)] px-3 py-2 text-sm"
             onKeyDown={(e) => {
-              if (e.key === "Enter" && !pulling) void handlePull();
+              if (e.key === "Enter") {
+                e.preventDefault();
+                if (!pulling) void handlePull();
+              }
             }}
           />
           <AsyncButton

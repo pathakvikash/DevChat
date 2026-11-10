@@ -1,63 +1,44 @@
-import {
-  initializeOllamaModels,
-  initializeOpenRouterModels,
-  initializeNvidiaNimModels,
-  getAllModels,
-} from "@/lib/models";
-import { resolveOpenRouterKey, resolveNvidiaNimKey } from "@/lib/apiKeys";
+import { initializeOllamaModels, listModels, type ProviderCreds } from "@/lib/models";
+import { providerForModel } from "@/lib/providers";
+import { resolveProviderCreds } from "@/lib/apiKeys";
+import { canUseHostTools } from "@/lib/hostAccess";
 
 export interface ResolveModelCandidatesOptions {
   requestedModel: string | undefined;
   fallbackModel: string | undefined;
-  bodyOpenrouterApiKey: string | undefined;
-  bodyNvidiaNimApiKey: string | undefined;
   userId: string;
 }
 
 export type ResolveModelCandidatesResult =
-  | { ok: true; model: string; candidateModels: string[] }
-  | { ok: false; missingKeyProvider: "OpenRouter" | "NVIDIA NIM" };
+  | { ok: true; model: string; candidateModels: string[]; creds: ProviderCreds }
+  | { ok: false; missingKeyProvider: string };
 
-/**
- * Initializes Ollama/OpenRouter/NVIDIA NIM providers, picks a default model
- * when none was requested, and builds the candidate fallback chain (primary
- * model, conversation fallback, VAS_FALLBACK_MODEL env var).
- */
+/** Resolves this user's creds, defaults the model when unrequested, and builds the fallback
+ *  chain: primary model, conversation fallback, then VAS_FALLBACK_MODEL. */
 export async function resolveModelCandidates(
   opts: ResolveModelCandidatesOptions,
 ): Promise<ResolveModelCandidatesResult> {
-  await initializeOllamaModels();
-  const effectiveOrKey = await resolveOpenRouterKey(opts.userId, opts.bodyOpenrouterApiKey);
-  const effectiveNimKey = await resolveNvidiaNimKey(opts.userId, opts.bodyNvidiaNimApiKey);
-  if (effectiveOrKey) {
-    await initializeOpenRouterModels(effectiveOrKey);
-  }
-  if (effectiveNimKey) {
-    await initializeNvidiaNimModels(effectiveNimKey);
-  }
+  const creds = await resolveProviderCreds(opts.userId);
 
   let model = opts.requestedModel;
   if (!model) {
-    const allModels = getAllModels();
-    const ollamaModels = allModels.filter((m) => m.id.startsWith("ollama/"));
+    const { models } = await listModels(creds, await canUseHostTools(opts.userId));
+    const ollamaModels = models.filter((m) => m.id.startsWith("ollama/"));
     if (ollamaModels.length > 0) {
-      const toolModels = ollamaModels.filter((m) => m.supportsTools);
-      model = (toolModels[0] || ollamaModels[0]).id;
-    } else if (allModels.length > 0) {
-      model = allModels[0].id;
+      model = (ollamaModels.find((m) => m.supportsTools) || ollamaModels[0]).id;
+    } else if (models.length > 0) {
+      model = models[0].id;
     } else {
       throw new Error("No models available");
     }
+  } else {
+    // getModel() for an Ollama id needs the tag cache warm.
+    await initializeOllamaModels();
   }
 
-  if (
-    (model.startsWith("openrouter/") && !effectiveOrKey) ||
-    (model.startsWith("nvidia-nim/") && !effectiveNimKey)
-  ) {
-    return {
-      ok: false,
-      missingKeyProvider: model.startsWith("openrouter/") ? "OpenRouter" : "NVIDIA NIM",
-    };
+  const def = providerForModel(model);
+  if (def && !creds[def.id]) {
+    return { ok: false, missingKeyProvider: def.label };
   }
 
   // ── Candidate model chain (primary + fallback) ─────────────────────────
@@ -72,5 +53,5 @@ export async function resolveModelCandidates(
   pushCandidate(opts.fallbackModel);
   pushCandidate(process.env.VAS_FALLBACK_MODEL);
 
-  return { ok: true, model, candidateModels };
+  return { ok: true, model, candidateModels, creds };
 }

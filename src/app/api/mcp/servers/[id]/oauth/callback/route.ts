@@ -1,5 +1,7 @@
+import crypto from "crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { exchangeCode } from "@/lib/mcp/oauth2";
+import { disconnectFromServer } from "@/lib/mcp/client";
 import { getPrismaMcp, findMcpServer } from "@/lib/api/mcpServers";
 import { requireUserId } from "@/lib/auth";
 
@@ -35,7 +37,6 @@ export async function GET(
       );
     }
 
-    const clientSecret = req.cookies.get("mcp_oauth_client_secret")?.value || "";
     const tokenUrl = req.cookies.get("mcp_oauth_token_url")?.value || "";
 
     // Clear cookies
@@ -43,6 +44,7 @@ export async function GET(
     clearResponse.cookies.set("mcp_oauth_state", "", { maxAge: 0, path: `/api/mcp/servers/${id}/oauth` });
     clearResponse.cookies.set("mcp_oauth_client_secret", "", { maxAge: 0, path: `/api/mcp/servers/${id}/oauth` });
     clearResponse.cookies.set("mcp_oauth_token_url", "", { maxAge: 0, path: `/api/mcp/servers/${id}/oauth` });
+    clearResponse.cookies.set("mcp_oauth_server", "", { maxAge: 0, path: `/api/mcp/servers/${id}/oauth` });
 
     if (!tokenUrl) {
       return clearResponse;
@@ -53,6 +55,15 @@ export async function GET(
       return clearResponse;
     }
     const { server } = result;
+    // The server must still be the one the user authorised: same address, still oauth2.
+    const urlHash = crypto.createHash("sha256").update(server.url).digest("hex");
+    if (server.authType !== "oauth2" || req.cookies.get("mcp_oauth_server")?.value !== urlHash) {
+      const refused = NextResponse.redirect(new URL("/settings/mcp?oauth=error&reason=server_changed", req.url));
+      for (const name of ["mcp_oauth_state", "mcp_oauth_client_secret", "mcp_oauth_token_url", "mcp_oauth_server"]) {
+        refused.cookies.set(name, "", { maxAge: 0, path: `/api/mcp/servers/${id}/oauth` });
+      }
+      return refused;
+    }
 
     let authConfig: Record<string, string> = {};
     if (server.authConfig) {
@@ -60,6 +71,7 @@ export async function GET(
     }
 
     const clientId = authConfig.clientId || "";
+    const clientSecret = authConfig.clientSecret || "";
     const redirectUri = `${req.nextUrl.origin}/api/mcp/servers/${id}/oauth/callback`;
 
     const tokens = await exchangeCode({
@@ -84,6 +96,7 @@ export async function GET(
       },
     });
 
+    await disconnectFromServer(id).catch(() => {});
     return clearResponse;
   } catch (error) {
     console.error("[MCP OAuth] Callback failed:", error);

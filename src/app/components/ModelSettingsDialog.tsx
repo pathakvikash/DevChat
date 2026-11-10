@@ -7,7 +7,9 @@ import ErrorBanner from "./ui/ErrorBanner";
 import SectionHeader from "./ui/SectionHeader";
 import AsyncButton from "./ui/AsyncButton";
 import { useResource } from "@/app/hooks/useResource";
+import { shortenHome, useClaudeProjects } from "@/app/hooks/useClaudeProjects";
 import { fetchModels as apiFetchModels } from "@/app/hooks/useModelsApi";
+import { isCliModelId } from "@/lib/providers";
 import type { ModelInfo } from "@/app/components/conversation/types";
 import { useToast } from "@/app/components/Toast";
 import ModelPicker from "./modelSettings/ModelPicker";
@@ -36,6 +38,8 @@ interface ModelSettingsDialogProps {
   currentMaxToolCalls?: number;
   currentFallbackModel?: string | null;
   currentPersona?: string | null;
+  currentReasoningEffort?: string | null;
+  currentWorkingFolder?: string | null;
   onSave: (settings: {
     model?: string;
     systemPrompt?: string;
@@ -48,6 +52,8 @@ interface ModelSettingsDialogProps {
     maxToolCalls?: number;
     fallbackModel?: string | null;
     persona?: string | null;
+    reasoningEffort?: string | null;
+    workingFolder?: string | null;
   }) => void;
 }
 
@@ -66,6 +72,8 @@ export default function ModelSettingsDialog({
   currentMaxToolCalls,
   currentFallbackModel,
   currentPersona,
+  currentReasoningEffort,
+  currentWorkingFolder,
   onSave,
 }: ModelSettingsDialogProps) {
   const [selectedModel, setSelectedModel] = useState(currentModel);
@@ -82,6 +90,8 @@ export default function ModelSettingsDialog({
   const [chatOnlyMode, setChatOnlyMode] = useState(currentChatOnlyMode);
   const [maxToolCalls, setMaxToolCalls] = useState(currentMaxToolCalls ?? 5);
   const [fallbackModel, setFallbackModel] = useState<string>(currentFallbackModel || "");
+  const [reasoningEffort, setReasoningEffort] = useState<string>(currentReasoningEffort || "");
+  const [workingFolder, setWorkingFolder] = useState<string>(currentWorkingFolder || "");
   const [kbId, setKbId] = useState<string>(currentKbId || "");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -118,9 +128,11 @@ export default function ModelSettingsDialog({
       setFallbackModel(currentFallbackModel || "");
       setKbId(currentKbId || "");
       setPersona(currentPersona || "");
+      setReasoningEffort(currentReasoningEffort || "");
+      setWorkingFolder(currentWorkingFolder || "");
       setError(null);
     }
-  }, [isOpen, currentModel, currentSystemPrompt, currentTemperature, currentContextLength, currentTopP, currentMaxTokens, currentChatOnlyMode, currentKbId, currentMaxToolCalls, currentFallbackModel, currentPersona, models]);
+  }, [isOpen, currentModel, currentSystemPrompt, currentTemperature, currentContextLength, currentTopP, currentMaxTokens, currentChatOnlyMode, currentKbId, currentMaxToolCalls, currentFallbackModel, currentPersona, currentReasoningEffort, currentWorkingFolder, models]);
   const modelInfo = useMemo<ModelInfo | null>(
     () => models.find((m) => m.id === selectedModel) || null,
     [selectedModel, models],
@@ -140,6 +152,11 @@ export default function ModelSettingsDialog({
   );
   const kbs = kbsData ?? [];
   const selectedKb = kbs.find((k) => k.id === kbId) || null;
+
+  // Folders Claude Code has been used in; the only places a CLI-backed model
+  // may read (chat mode) or edit (agent mode). Same guard as the /claude page.
+  const isCliModel = isCliModelId(selectedModel);
+  const { folders: projectFolders } = useClaudeProjects(isOpen && isCliModel);
   // `contextLength` is Ollama's num_ctx override — saving it for cloud
   // providers would shadow their real (much larger) context window.
   const isOllamaModel = selectedModel.startsWith("ollama/");
@@ -163,6 +180,8 @@ export default function ModelSettingsDialog({
           maxToolCalls,
           fallbackModel: fallbackModel || null,
           persona: persona || null,
+          reasoningEffort: reasoningEffort || null,
+          workingFolder: isCliModelId(selectedModel) ? workingFolder || null : null,
         }),
       });
       if (!res.ok) throw new Error("Failed to save settings");
@@ -178,6 +197,8 @@ export default function ModelSettingsDialog({
         maxToolCalls,
         fallbackModel: fallbackModel || null,
         persona: persona || null,
+        reasoningEffort: reasoningEffort || null,
+        workingFolder: isCliModelId(selectedModel) ? workingFolder || null : null,
       });
       toast("Conversation saved", "success");
       onClose();
@@ -334,6 +355,32 @@ export default function ModelSettingsDialog({
             </p>
           </section>
 
+          {isCliModel && (
+            <section>
+              <SectionHeader>Working folder</SectionHeader>
+              <select
+                value={workingFolder}
+                onChange={(e) => setWorkingFolder(e.target.value)}
+                className="w-full glass-input rounded-[var(--glass-radius-md)] px-3 py-2 text-sm"
+              >
+                <option value="">None (sandboxed, no file access)</option>
+                {projectFolders.map((p) => (
+                  <option key={p.cwd} value={p.cwd}>
+                    {shortenHome(p.cwd)}
+                  </option>
+                ))}
+                {workingFolder && !projectFolders.some((p) => p.cwd === workingFolder) && (
+                  <option value={workingFolder}>{workingFolder}</option>
+                )}
+              </select>
+              <p className="text-xs text-zinc-500 mt-1">
+                Lets this tool see a folder you have used Claude Code in. In Chat mode it can
+                read and search there; in Agent mode it can also create and edit files. It
+                never runs shell commands, and other folders stay off limits.
+              </p>
+            </section>
+          )}
+
           <GenerationParams
             temperature={temperature}
             onTemperatureChange={setTemperature}
@@ -349,6 +396,9 @@ export default function ModelSettingsDialog({
             onChatOnlyModeChange={setChatOnlyMode}
             maxToolCalls={maxToolCalls}
             onMaxToolCallsChange={setMaxToolCalls}
+            reasoningEffort={reasoningEffort}
+            onReasoningEffortChange={setReasoningEffort}
+            showReasoningEffort={!!modelInfo?.supportsThinking}
           />
 
           {error && <ErrorBanner>{error}</ErrorBanner>}

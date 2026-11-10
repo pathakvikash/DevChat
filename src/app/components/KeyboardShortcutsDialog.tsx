@@ -1,6 +1,7 @@
 "use client";
 
 import { Keyboard, X } from "lucide-react";
+import { SLASH_COMMANDS } from "@/lib/commands";
 
 interface ShortcutGroup {
   title: string;
@@ -18,8 +19,14 @@ const GROUPS: ShortcutGroup[] = [
     title: "Chat",
     shortcuts: [
       { keys: ["Cmd", "Enter"], description: "Send message (from any focus)" },
+      { keys: ["Cmd", "\\"], description: "Toggle side chat" },
       { keys: ["Enter"], description: "Send message" },
       { keys: ["Shift", "Enter"], description: "Newline" },
+      { keys: ["Cmd", "Enter"], description: "In a quote: send just that quote" },
+      { keys: ["Enter"], description: "In a quote: send everything" },
+      { keys: ["Esc"], description: "In a quote: back to the message box" },
+      { keys: ["Enter"], description: "While a reply runs: queue the message" },
+      { keys: ["Esc"], description: "Editing a queued message: cancel the edit" },
     ],
   },
   {
@@ -79,7 +86,7 @@ export default function KeyboardShortcutsDialog({
               <div className="space-y-1">
                 {group.shortcuts.map((shortcut) => (
                   <div
-                    key={shortcut.keys.join("+")}
+                    key={`${shortcut.description}:${shortcut.keys.join("+")}`}
                     className="flex items-center justify-between py-1.5"
                   >
                     <span className="text-sm text-zinc-300">
@@ -104,6 +111,19 @@ export default function KeyboardShortcutsDialog({
               </div>
             </div>
           ))}
+          <div>
+            <h3 className="text-xs font-semibold uppercase tracking-wider text-zinc-400 mb-2.5">
+              Slash commands
+            </h3>
+            <div className="space-y-1">
+              {SLASH_COMMANDS.map((c) => (
+                <div key={c.name} className="flex items-baseline justify-between gap-4 py-1.5">
+                  <code className="font-mono text-xs text-zinc-200 shrink-0">{c.usage}</code>
+                  <span className="text-sm text-zinc-300 text-right">{c.description}</span>
+                </div>
+              ))}
+            </div>
+          </div>
         </div>
 
         <div className="px-5 py-3 border-t border-[var(--glass-border)] glass">

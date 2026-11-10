@@ -6,7 +6,7 @@ export async function GET() {
   try {
     const userId = await requireUserId();
     const conversations = await prisma.conversation.findMany({
-      where: { userId },
+      where: { userId, parentId: null },
       select: { model: true },
       orderBy: { updatedAt: "desc" },
       take: 500,

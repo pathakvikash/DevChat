@@ -6,6 +6,8 @@
  * layer, and so the helpers can be unit-tested in isolation if needed.
  */
 
+import { liveSince } from "@/lib/liveSince";
+
 interface RawPart {
   type: string;
   text?: string;
@@ -50,6 +52,18 @@ export function joinTextParts(parts: unknown): string {
     .join("");
 }
 
+/** Tail user→assistant pair as plain text. Null unless the list ends in an assistant
+ *  turn with actual text (mid-stream, tool-only and aborted replies don't count). */
+export function lastExchange(messages: unknown): { user: string; assistant: string } | null {
+  if (!Array.isArray(messages) || messages.length === 0) return null;
+  const last = messages[messages.length - 1];
+  if (last?.role !== "assistant") return null;
+  const assistant = joinTextParts(last.parts).trim();
+  if (!assistant) return null;
+  const user = [...messages].reverse().find((m: any) => m?.role === "user");
+  return { user: joinTextParts(user?.parts).trim(), assistant };
+}
+
 /**
  * Find the last fenced code block whose language is python or javascript,
  * and return its code body. Useful for piping a model's last code snippet
@@ -85,9 +99,7 @@ export function buildMessagesFromConversation(
   const rawMessages = Array.isArray(conv.messages) ? conv.messages : [];
   const compressedAt = conv.compressedAt ? new Date(conv.compressedAt) : null;
 
-  const visibleMessages = compressedAt
-    ? rawMessages.filter((m) => new Date(m.createdAt) >= compressedAt)
-    : rawMessages;
+  const visibleMessages = rawMessages.filter(liveSince(compressedAt).isLive);
 
   const mapped: AppMessage[] = visibleMessages.map((m) => {
     let parts: RawPart[];

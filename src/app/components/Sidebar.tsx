@@ -1,13 +1,15 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Plus, Search, Trash2, Edit2, Sparkles, Loader2, Pin, Archive, X, MoreHorizontal, CheckSquare, Square, CheckCheck, User as UserIcon } from "lucide-react";
+import { Plus, Search, Trash2, Edit2, Sparkles, Loader2, Pin, Archive, X, MoreHorizontal, CheckSquare, Square, CheckCheck, User as UserIcon, Columns2, Workflow, Table2 } from "lucide-react";
 import { useSession } from "next-auth/react";
 import { useSidebar } from "@/app/contexts/SidebarContext";
 import { useChatModeOptional } from "@/app/contexts/ChatModeContext";
+import { CHAT_DRAG_TYPE, useSplitViewOptional } from "@/app/c/SplitViewContext";
+import { buildSidebarTree, type TreeRow } from "@/lib/sidebarTree";
 import ModeToggle from "./ModeToggle";
 import { useResource } from "@/app/hooks/useResource";
 import {
@@ -28,9 +30,55 @@ interface ConversationItem {
   updatedAt: string;
   pinned?: boolean;
   archived?: boolean;
+  forkedFromId?: string | null;
   _count: {
     messages: number;
   };
+}
+
+const INDENT_PX = 20;
+const LINE_X = 12; // how far left of a row its own level's line runs
+const LINE = "absolute -top-1 border-[var(--glass-border-strong)]";
+
+/** The tree lines beside a nested row. The wrapper is the row's border box (-inset-px), so each line starts one row gap above it and stays unbroken. */
+function TreeLines({ depth, isLastChild, through }: Omit<TreeRow<ConversationItem>, "item">) {
+  return (
+    <span aria-hidden="true" className="pointer-events-none absolute -inset-px">
+      {through.map((on, i) =>
+        on && (
+          <span
+            key={i}
+            className={`${LINE} bottom-0 border-l`}
+            style={{ left: -(LINE_X + INDENT_PX * (depth - 1 - i)) }}
+          />
+        ),
+      )}
+      {isLastChild ? (
+        <span
+          className={`${LINE} h-[calc(50%+0.25rem)] rounded-bl-lg border-b border-l`}
+          style={{ left: -LINE_X, width: LINE_X }}
+        />
+      ) : (
+        <span className={`${LINE} bottom-0 border-l`} style={{ left: -LINE_X }} />
+      )}
+    </span>
+  );
+}
+
+/** Marks a row that is on screen. It sits over the hover actions' slot, so no row changes size; hovering swaps it for them. */
+function OnScreenMark({ label, focused }: { label: string | null; focused: boolean }) {
+  if (!label) return null;
+  return (
+    <span
+      role="img"
+      aria-label={label}
+      className={`pointer-events-none absolute right-3 top-1/2 flex size-[22px] -translate-y-1/2 items-center justify-center transition group-hover:opacity-0 ${
+        focused ? "text-zinc-200" : "text-zinc-400"
+      }`}
+    >
+      <Columns2 size={14} />
+    </span>
+  );
 }
 
 export default function Sidebar() {
@@ -47,17 +95,37 @@ export default function Sidebar() {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const pathname = usePathname();
   const { toast } = useToast();
+  const split = useSplitViewOptional();
 
   const {
     data: conversationsData,
     loading,
     setData: setConversations,
+    refetch,
   } = useResource<ConversationItem[]>(
     fetchConversations,
     [],
     { onError: (e) => console.error("Failed to fetch conversations:", e) },
   );
   const conversations = conversationsData ?? [];
+
+  // A chat marked temporary drops out of the list at once; un-marking brings it back.
+  useEffect(() => {
+    function onTemporaryChanged(e: Event) {
+      const { id, temporary } = (e as CustomEvent).detail;
+      if (temporary) setConversations((prev) => (prev ?? []).filter((c) => c.id !== id));
+      else void refetch();
+    }
+    window.addEventListener("vas:temporary-changed", onTemporaryChanged);
+    return () => window.removeEventListener("vas:temporary-changed", onTemporaryChanged);
+  }, [setConversations, refetch]);
+
+  // A fork is made on the page, so the list (which stays mounted) has to fetch it.
+  useEffect(() => {
+    const onForked = () => void refetch();
+    window.addEventListener("vas:chat-forked", onForked);
+    return () => window.removeEventListener("vas:chat-forked", onForked);
+  }, [refetch]);
 
   const filteredConversations = conversations.filter((c) => {
     const matchesSearch = c.title.toLowerCase().includes(searchInput.toLowerCase());
@@ -67,9 +135,18 @@ export default function Sidebar() {
     return c.archived !== true;
   });
 
+  // A search shows a flat list; otherwise forks sit under their parent.
+  const rows = buildSidebarTree(filteredConversations, { flat: searchInput !== "" });
+
   async function createNewChat() {
     try {
       const newConv = await createConversation();
+      if (split?.multi) {
+        split.replaceFocused(newConv.id);
+        return;
+      }
+      // A full page load skips React cleanup, so tell an open temporary chat to delete itself.
+      window.dispatchEvent(new Event("vas:leaving-chat"));
       window.location.href = `/c/${newConv.id}`;
     } catch (error) {
       console.error("Failed to create conversation:", error);
@@ -148,6 +225,26 @@ export default function Sidebar() {
   }
 
   const currentConvId = pathname.startsWith("/c/") ? pathname.split("/")[2] : null;
+  // Side chats are not listed, so a focused side pane lights up its main chat's row.
+  const focusedId = split?.ids.length ? (split.parentOf[split.focus] ?? split.focus) : null;
+  const activeConvId = focusedId ?? currentConvId;
+
+  /** The label of the mark on a row that is on screen, or null. Only listed panes count; side chats are not listed. */
+  function onScreenLabel(id: string): string | null {
+    if (!split) return null;
+    const listed = split.ids.filter((open) => !split.parentOf[open]);
+    const pane = listed.indexOf(id);
+    if (pane >= 0 && listed.length > 1) return `Open in split view, pane ${pane + 1} of ${listed.length}`;
+    return split.ids.some((open) => split.parentOf[open] === id) ? "Side chat open" : null;
+  }
+
+  function onChatDragStart(e: React.DragEvent, id: string) {
+    e.dataTransfer.setData(CHAT_DRAG_TYPE, id);
+    e.dataTransfer.setData("text/uri-list", `/c/${id}`);
+    e.dataTransfer.effectAllowed = "move";
+    setMenuOpenId(null);
+    split?.startDrag(id);
+  }
 
   const isSelecting = selectedIds.size > 0;
 
@@ -240,7 +337,7 @@ export default function Sidebar() {
           {/* Null outside a conversation (/kb, /settings, ...). */}
           {chatMode && (
             <div className="ml-auto shrink-0">
-              <ModeToggle mode={chatMode.mode} onModeChange={chatMode.setMode} compact />
+              <ModeToggle mode={chatMode.mode} onModeChange={chatMode.setMode} compact toolsAvailable={chatMode.modelCaps.toolsAvailable} />
             </div>
           )}
         </div>
@@ -253,6 +350,23 @@ export default function Sidebar() {
           <Plus size={18} />
           New Chat
         </motion.button>
+        <div className="mt-2 flex gap-2">
+          {[
+            { href: "/workflows", label: "Workflows", Icon: Workflow },
+            { href: "/tables", label: "Tables", Icon: Table2 },
+          ].map(({ href, label, Icon }) => (
+            <Link
+              key={href}
+              href={href}
+              onClick={close}
+              aria-current={pathname?.startsWith(href) ? "page" : undefined}
+              className="glass-button focus-ring flex h-8 flex-1 items-center justify-center gap-1.5 rounded-[var(--glass-radius-md)] text-xs aria-[current=page]:font-semibold aria-[current=page]:border-[var(--glass-border-strong)]"
+            >
+              <Icon size={14} />
+              {label}
+            </Link>
+          ))}
+        </div>
       </div>
 
       {/* Search */}
@@ -320,15 +434,24 @@ export default function Sidebar() {
           <div className="p-4 text-zinc-400 text-sm">No conversations yet</div>
         ) : (
           <div className="space-y-1 p-2">
-            {filteredConversations.map((conv) => (
+            {rows.map(({ item: conv, depth, isLastChild, through }) => (
               <div
                 key={conv.id}
-                className={`group flex items-center gap-2 px-3 py-2 rounded-[var(--glass-radius-sm)] transition ${
-                  currentConvId === conv.id
+                data-depth={depth}
+                style={depth ? { marginLeft: depth * INDENT_PX } : undefined}
+                draggable={editingId !== conv.id}
+                onDragStart={(e) => onChatDragStart(e, conv.id)}
+                onDragEnd={() => split?.endDrag()}
+                onContextMenu={(e) => { e.preventDefault(); setMenuOpenId(conv.id); }}
+                className={`group relative flex items-center gap-2 px-3 py-2 rounded-[var(--glass-radius-sm)] transition ${
+                  menuOpenId === conv.id ? "z-30" : "" /* its menu paints over the rows below */
+                } ${
+                  activeConvId === conv.id
                     ? "glass-strong text-[var(--foreground)]"
                     : "text-zinc-300 glass-button"
                 }`}
               >
+                {depth > 0 && <TreeLines depth={depth} isLastChild={isLastChild} through={through} />}
                 <button
                   onClick={() => toggleSelect(conv.id)}
                   className={`shrink-0 p-0.5 rounded transition ${
@@ -342,7 +465,15 @@ export default function Sidebar() {
                 </button>
                 <Link
                   href={`/c/${conv.id}`}
-                  onClick={close}
+                  onClick={(e) => {
+                    close();
+                    // With panes open, a plain click opens the chat in the focused pane.
+                    if (split?.multi && !e.metaKey && !e.ctrlKey && !e.shiftKey) {
+                      e.preventDefault();
+                      split.replaceFocused(conv.id);
+                    }
+                  }}
+                  draggable={false}
                   className="flex-1 min-w-0"
                   title={conv.model.split('/').pop()}
                 >
@@ -354,8 +485,8 @@ export default function Sidebar() {
                       onChange={(e) => setEditingTitle(e.target.value)}
                       onBlur={() => updateTitle(conv.id, editingTitle)}
                       onKeyDown={(e) => {
-                        if (e.key === "Enter") updateTitle(conv.id, editingTitle);
-                        if (e.key === "Escape") setEditingId(null);
+                        if (e.key === "Enter") { e.preventDefault(); updateTitle(conv.id, editingTitle); }
+                        if (e.key === "Escape") { e.preventDefault(); setEditingId(null); }
                       }}
                       className="w-full glass-input rounded px-2 py-1"
                       onClick={(e) => e.preventDefault()}
@@ -367,6 +498,7 @@ export default function Sidebar() {
                     </div>
                   )}
                 </Link>
+                <OnScreenMark label={onScreenLabel(conv.id)} focused={focusedId === conv.id} />
                 <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition items-center">
                   {editingId !== conv.id && (
                     <button
@@ -393,6 +525,17 @@ export default function Sidebar() {
                       <>
                         <div className="fixed inset-0 z-10" onClick={() => setMenuOpenId(null)} />
                         <div className="absolute right-0 top-full mt-1 z-20 w-40 glass-panel-strong rounded-[var(--glass-radius-md)] shadow-lg border border-[var(--glass-border)] overflow-hidden">
+                          {split?.sideBySide && (
+                            <button
+                              onClick={() => { split.openSplit(conv.id); setMenuOpenId(null); }}
+                              aria-disabled={split.ids.length >= split.limit && !split.ids.includes(conv.id)}
+                              title={split.ids.length >= split.limit && !split.ids.includes(conv.id) ? `Close a pane first. Up to ${split.limit} fit at this width.` : undefined}
+                              className="flex w-full items-center gap-2 px-3 py-2 text-xs text-[var(--foreground)] hover:bg-[var(--glass-bg-hover)] transition aria-disabled:opacity-50"
+                            >
+                              <Columns2 size={12} />
+                              Open in split view
+                            </button>
+                          )}
                           {editingId !== conv.id && (
                             <>
                               <button

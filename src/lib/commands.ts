@@ -26,18 +26,24 @@ export interface SlashCommand {
   action?: string;
   /** If true and no argument is given, the dispatcher shows the usage hint. */
   requiresArg?: boolean;
+  /** With `requiresArg`: fewer characters than this counts as no argument (default 1). */
+  minArgLength?: number;
+}
+
+/** True when the command needs an argument and `arg` is missing or too short. */
+export function missingArg(command: SlashCommand, arg: string): boolean {
+  return !!command.requiresArg && arg.trim().length < (command.minArgLength ?? 1);
 }
 
 export const SLASH_COMMANDS: SlashCommand[] = [
   // ---- Planning ----
   {
     name: "plan",
-    description: "Get a step-by-step plan only — no execution",
+    description: "Switch to Plan mode and send this task",
     usage: "/plan <task>",
-    kind: "transform",
+    kind: "action",
+    action: "plan",
     requiresArg: true,
-    transform: (arg) =>
-      `Create a detailed, ordered plan to accomplish the task below. Output ONLY a numbered checklist of concrete steps, each with a one-line rationale. Do NOT execute the steps yet — just plan.\n\nTask: ${arg}`,
   },
   {
     name: "loop",
@@ -101,6 +107,13 @@ export const SLASH_COMMANDS: SlashCommand[] = [
 
   // ---- Conversation actions ----
   {
+    name: "side",
+    description: "Open a side chat next to this chat",
+    usage: "/side [question]",
+    kind: "action",
+    action: "side",
+  },
+  {
     name: "remember",
     description: "Save a durable fact to long-term memory",
     usage: "/remember <fact>",
@@ -126,10 +139,26 @@ export const SLASH_COMMANDS: SlashCommand[] = [
   },
   {
     name: "compress",
-    description: "Compress the conversation to save context",
-    usage: "/compress",
+    description: "Compress the chat to save context. Add a focus to keep it in detail.",
+    usage: "/compress [focus]",
     kind: "action",
     action: "compress",
+  },
+  {
+    name: "export",
+    description: "Download this chat as Markdown",
+    usage: "/export",
+    kind: "action",
+    action: "export",
+  },
+  {
+    name: "recall",
+    description: "Search your past chats and use them in the answer",
+    usage: "/recall <query>",
+    kind: "action",
+    action: "recall",
+    requiresArg: true,
+    minArgLength: 2, // what /api/search accepts
   },
   {
     name: "title",
@@ -171,6 +200,11 @@ export const SLASH_COMMANDS: SlashCommand[] = [
     action: "help",
   },
 ];
+
+/** What /plan sends to a model without tools: the same request, as plain text. */
+export function planPrompt(task: string): string {
+  return `Create a detailed, ordered plan to accomplish the task below. Output ONLY a numbered checklist of concrete steps, each with a one-line rationale. Do NOT execute the steps yet — just plan.\n\nTask: ${task}`;
+}
 
 function findByNameOrAlias(name: string): SlashCommand | undefined {
   const lower = name.toLowerCase();

@@ -1,17 +1,23 @@
 "use client";
 
+import { AlertTriangle, FileText } from "lucide-react";
+
 interface AttachmentChipProps {
-  file: File;
+  /** An upload, or an `@` file as just its path. */
+  file: { name: string; size?: number; type?: string };
   onRemove: () => void;
   preview?: string;
+  /** Shown under the name, e.g. "Trimmed" for an `@` file that will be cut on send. */
+  note?: { text: string; title: string };
 }
 
 export default function AttachmentChip({
   file,
   onRemove,
   preview,
+  note,
 }: AttachmentChipProps) {
-  const isImage = file.type.startsWith("image/");
+  const isImage = file.type?.startsWith("image/") ?? false;
 
   const formatFileSize = (bytes: number) => {
     if (bytes === 0) return "0 Bytes";
@@ -22,7 +28,7 @@ export default function AttachmentChip({
   };
 
   return (
-    <div className="group relative flex items-center gap-3 rounded-[var(--glass-radius-md)] glass-card p-3 transition-all hover:border-[var(--glass-border-hover)]">
+    <div role="listitem" className="group relative flex items-center gap-3 rounded-[var(--glass-radius-md)] glass-card p-3 transition-all hover:border-[var(--glass-border-hover)]">
       {isImage && preview ? (
         <img
           src={preview}
@@ -30,8 +36,8 @@ export default function AttachmentChip({
           className="h-10 w-10 rounded-[var(--glass-radius-sm)] object-cover"
         />
       ) : (
-        <div className="flex h-10 w-10 items-center justify-center rounded-[var(--glass-radius-sm)] glass-strong text-lg">
-          📎
+        <div className="flex h-10 w-10 items-center justify-center rounded-[var(--glass-radius-sm)] glass-strong">
+          <FileText size={18} aria-hidden className="text-zinc-400" />
         </div>
       )}
 
@@ -39,13 +45,21 @@ export default function AttachmentChip({
         <p className="truncate text-sm font-medium text-zinc-200">
           {file.name}
         </p>
-        <p className="text-xs text-zinc-500">{formatFileSize(file.size)}</p>
+        {file.size !== undefined && <p className="text-xs text-zinc-500">{formatFileSize(file.size)}</p>}
+        {note && (
+          <p className="flex items-center gap-1 text-xs text-zinc-400" title={note.title}>
+            <AlertTriangle size={12} aria-hidden className="shrink-0 text-amber-400" />
+            {note.text}
+          </p>
+        )}
       </div>
 
       <button
+        type="button"
         onClick={onRemove}
-        className="flex h-6 w-6 items-center justify-center rounded-full glass-strong text-zinc-400 opacity-0 transition-all hover:bg-red-600 hover:text-white group-hover:opacity-100"
-        aria-label="Remove attachment"
+        className="focus-ring flex h-6 w-6 items-center justify-center rounded-full glass-strong text-zinc-400 transition-all hover:bg-red-600 hover:text-white"
+        aria-label={`Remove ${file.name}`}
+        title={`Remove ${file.name}`}
       >
         ×
       </button>

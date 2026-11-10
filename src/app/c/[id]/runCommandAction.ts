@@ -1,20 +1,32 @@
 "use client";
 
+import type { UIMessage } from "ai";
 import type { SlashCommand } from "@/lib/commands";
+import { exportChat } from "@/lib/utils/download";
+import { planPrompt } from "@/lib/commands";
+import type { ChatMode } from "@/lib/chat/modes";
 import { runWebSearch, formatWebSearchResults } from "./webSearch";
 
 export interface RunCommandCtx {
+  openSide: (question: string) => void;
   conversationId: string;
-  conversation: { model?: string } | null;
-  sendMessage: (msg: { parts: Array<{ type: "text"; text: string }> }) => Promise<void>;
+  conversation: { model?: string; temporary?: boolean; memoryDisabled?: boolean } | null;
+  sendMessage: (msg: { parts: UIMessage["parts"] }) => Promise<void>;
   setMessages: (fn: (prev: any[]) => any[]) => void;
   setConversation: (fn: (prev: any) => any) => void;
   setIsCompressing: (v: boolean) => void;
+  setCompressFocus: (v: string) => void;
   setArtifactPanelOpen: (v: boolean) => void;
   setScratchpadOpen: (v: boolean) => void;
   setModelSettingsOpen: (v: boolean) => void;
+  setKeyboardShortcutsOpen: (v: boolean) => void;
   toast: (msg: string, type: "success" | "error" | "info") => void;
   refreshConversationAndMessages: () => Promise<void>;
+  /** Plan mode switch; the request body carries it right away, before the next render. */
+  setMode: (mode: ChatMode) => void;
+  setRequestBody: (patch: { mode?: ChatMode }) => void;
+  /** False for a model without tools: /plan then sends the plain-text plan request. */
+  toolsAvailable: boolean;
 }
 
 export async function runCommandAction(
@@ -22,7 +34,22 @@ export async function runCommandAction(
   arg: string,
   ctx: RunCommandCtx,
 ): Promise<void> {
+  const memoryOff = ctx.conversation?.temporary || ctx.conversation?.memoryDisabled;
+  if (memoryOff && ["remember", "search-memory", "consolidate"].includes(cmd.action ?? "")) {
+    ctx.toast("Memory is off in this chat", "info");
+    return;
+  }
   switch (cmd.action) {
+    case "side": {
+      ctx.openSide(arg);
+      break;
+    }
+    case "plan": {
+      ctx.setMode("plan");
+      ctx.setRequestBody({ mode: "plan" });
+      await ctx.sendMessage({ parts: [{ type: "text", text: ctx.toolsAvailable ? arg : planPrompt(arg) }] });
+      break;
+    }
     case "search": {
       const query = arg.slice(0, 300);
       let text = arg;
@@ -38,18 +65,61 @@ export async function runCommandAction(
       await ctx.sendMessage({ parts: [{ type: "text", text }] });
       break;
     }
+    case "recall": {
+      const query = arg.trim().slice(0, 300);
+      let results: unknown[];
+      try {
+        const res = await fetch(`/api/search?q=${encodeURIComponent(query)}&exclude=${ctx.conversationId}`);
+        if (!res.ok) throw new Error("search failed");
+        results = (await res.json()).chats;
+      } catch {
+        ctx.toast("Couldn't search past chats. Try again.", "error");
+        break;
+      }
+      // The results ride on the message as a searchChats card, so the bubble stays `/recall …`.
+      await ctx.sendMessage({
+        parts: [
+          { type: "text", text: `/recall ${query}` },
+          {
+            type: "tool-searchChats",
+            toolCallId: `recall-${Date.now()}`,
+            state: "output-available",
+            input: { query },
+            output: { results },
+          },
+        ],
+      });
+      break;
+    }
     case "compress":
+      ctx.setCompressFocus(arg.trim());
       ctx.setIsCompressing(true);
       try {
-        const res = await fetch(`/api/conversations/${ctx.conversationId}/compress`, { method: "POST" });
+        const res = await fetch(`/api/conversations/${ctx.conversationId}/compress`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ focus: arg }),
+        });
         if (!res.ok) throw new Error("compress failed");
+        const data = await res.json();
+        if (data?.success === false) {
+          ctx.toast(data.message || "Nothing to compress yet", "info");
+          return;
+        }
         await ctx.refreshConversationAndMessages();
-        ctx.toast("Conversation compressed", "success");
+        ctx.toast("Chat compressed", "success");
       } catch {
-        ctx.toast("Failed to compress conversation", "error");
+        ctx.toast("Couldn't compress the chat", "error");
       } finally {
         ctx.setIsCompressing(false);
+        ctx.setCompressFocus("");
       }
+      break;
+    case "export":
+      await exportChat(ctx.conversationId, "markdown", ctx.toast);
+      break;
+    case "help":
+      ctx.setKeyboardShortcutsOpen(true);
       break;
     case "title":
       try {

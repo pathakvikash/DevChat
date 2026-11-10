@@ -18,6 +18,8 @@ import {
   ExternalLink,
   Check,
   Cable,
+  Table2,
+  Workflow,
 } from "lucide-react";
 import Link from "next/link";
 import { useSession, signOut } from "next-auth/react";
@@ -40,6 +42,8 @@ const WORKSPACE_LINKS: NavLink[] = [
   { label: "Notes", icon: StickyNote, href: "/notes" },
   { label: "Memory", icon: Brain, href: "/memory" },
   { label: "Claude System", icon: HardDrive, href: "/claude" },
+  { label: "Workflows", icon: Workflow, href: "/workflows" },
+  { label: "Tables", icon: Table2, href: "/tables" },
 ];
 
 const TOOL_LINKS: NavLink[] = [

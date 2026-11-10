@@ -39,14 +39,14 @@ export default function CompressionEvent({
           type="button"
           onClick={() => setExpanded((v) => !v)}
           aria-expanded={expanded}
-          className="w-full flex items-center justify-between gap-3 px-4 py-3 text-left hover:bg-[var(--glass-bg-hover)] transition"
+          className="w-full flex select-none items-center justify-between gap-3 px-4 py-3 text-left hover:bg-[var(--glass-bg-hover)] transition"
         >
           <div className="flex items-center gap-3 min-w-0">
             <div className="shrink-0 w-8 h-8 rounded-full glass-strong border-emerald-700/50 flex items-center justify-center">
               <Sparkles size={14} className="text-emerald-300" />
             </div>
             <div className="min-w-0">
-              <div className="text-sm font-semibold text-emerald-200 flex items-center gap-2">
+              <div className="text-sm font-semibold text-[var(--foreground)] flex items-center gap-2">
                 Conversation compressed
                 {typeof reductionPercent === "number" && reductionPercent > 0 && (
                   <span className="inline-flex items-center gap-1 text-xs font-mono text-emerald-300 bg-emerald-900/50 px-1.5 py-0.5 rounded">
@@ -66,7 +66,7 @@ export default function CompressionEvent({
                     · {beforeMessages} {beforeMessages === 1 ? "message" : "messages"} summarized
                   </span>
                 )}
-                {tsLabel && <span className="text-zinc-500">· {tsLabel}</span>}
+                {tsLabel && <span className="text-zinc-500">· before {tsLabel}</span>}
               </div>
             </div>
           </div>

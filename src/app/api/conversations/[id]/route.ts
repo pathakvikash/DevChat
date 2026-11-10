@@ -1,6 +1,10 @@
 import { prisma } from "@/lib/db";
 import { NextRequest, NextResponse } from "next/server";
 import { requireUserId } from "@/lib/auth";
+import { isRunnableCwd } from "@/lib/claude/sessions";
+import { deleteTraces } from "@/lib/temporaryChat";
+import { dropParkedRuns } from "@/lib/cliProviders";
+import { canUseHostTools, HOST_TOOLS_REFUSED } from "@/lib/hostAccess";
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
@@ -14,6 +18,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
           orderBy: { createdAt: "asc" },
           include: { feedback: true },
         },
+        forkedFrom: { select: { id: true, title: true, temporary: true } },
       },
     });
 
@@ -21,7 +26,12 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
       return NextResponse.json({ error: "Conversation not found" }, { status: 404 });
     }
 
-    return NextResponse.json(conversation);
+    // A temporary source is deleted when left, so the link back would be dead.
+    const { forkedFrom, ...rest } = conversation;
+    return NextResponse.json({
+      ...rest,
+      forkedFrom: forkedFrom && !forkedFrom.temporary ? { id: forkedFrom.id, title: forkedFrom.title } : null,
+    });
   } catch (error) {
     console.error("Failed to fetch conversation:", error);
     return NextResponse.json({ error: "Failed to fetch conversation" }, { status: 500 });
@@ -32,8 +42,31 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   try {
     const userId = await requireUserId();
     const { id } = await params;
-    const { title, model, persona, systemPrompt, webSearch, temperature, maxTokens, kbId, contextLength, topP, chatOnlyMode, pinned, archived, note, maxToolCalls, fallbackModel } =
+    const { title, model, persona, systemPrompt, webSearch, temperature, maxTokens, kbId, contextLength, topP, chatOnlyMode, memoryDisabled, temporary, pinned, archived, note, maxToolCalls, fallbackModel, reasoningEffort, workingFolder } =
       await req.json();
+
+    if (temporary !== undefined && typeof temporary !== "boolean") {
+      return NextResponse.json({ error: "temporary must be a boolean" }, { status: 400 });
+    }
+
+    if (memoryDisabled !== undefined && typeof memoryDisabled !== "boolean") {
+      return NextResponse.json({ error: "memoryDisabled must be a boolean" }, { status: 400 });
+    }
+
+    // A working folder lets a CLI-backed model read (or, in agent mode, edit)
+    // files there, so it is confined to folders Claude Code already knows,
+    // and to the server's owner: the folder list is the owner's home directory.
+    if (workingFolder) {
+      if (!(await canUseHostTools(userId))) {
+        return NextResponse.json({ error: HOST_TOOLS_REFUSED }, { status: 403 });
+      }
+      if (!(await isRunnableCwd(workingFolder))) {
+        return NextResponse.json(
+          { error: "Working folder must be one of your Claude Code project folders" },
+          { status: 400 },
+        );
+      }
+    }
 
     if (kbId) {
       const kb = await prisma.knowledgeBase.findUnique({
@@ -45,8 +78,9 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       }
     }
 
+    // A chat can only become temporary before its first message.
     const conversation = await prisma.conversation.updateMany({
-      where: { id, userId },
+      where: { id, userId, ...(temporary === true && { messages: { none: {} } }) },
       data: {
         ...(title !== undefined && { title }),
         ...(model !== undefined && { model }),
@@ -59,16 +93,23 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
         ...(contextLength !== undefined && { contextLength }),
         ...(topP !== undefined && { topP }),
         ...(chatOnlyMode !== undefined && { chatOnlyMode }),
+        ...(memoryDisabled !== undefined && { memoryDisabled }),
+        ...(temporary !== undefined && { temporary }),
         ...(pinned !== undefined && { pinned }),
         ...(archived !== undefined && { archived }),
         ...(note !== undefined && { note }),
         ...(maxToolCalls !== undefined && { maxToolCalls }),
         ...(fallbackModel !== undefined && { fallbackModel: fallbackModel || null }),
+        ...(reasoningEffort !== undefined && { reasoningEffort: reasoningEffort || null }),
+        ...(workingFolder !== undefined && { workingFolder: workingFolder || null }),
       },
     });
 
     if (conversation.count === 0) {
-      return NextResponse.json({ error: "Conversation not found" }, { status: 404 });
+      const exists = temporary === true && (await prisma.conversation.findFirst({ where: { id, userId }, select: { id: true } }));
+      return exists
+        ? NextResponse.json({ error: "Only a chat with no messages can become temporary" }, { status: 409 })
+        : NextResponse.json({ error: "Conversation not found" }, { status: 404 });
     }
 
     const updated = await prisma.conversation.findUnique({ where: { id } });
@@ -84,13 +125,18 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
     const userId = await requireUserId();
     const { id } = await params;
 
-    const result = await prisma.conversation.deleteMany({
-      where: { id, userId },
-    });
+    // ?temporary=1 (the leave path) never deletes a chat that is no longer temporary.
+    const where = { id, userId, ...(new URL(req.url).searchParams.get("temporary") === "1" && { temporary: true }) };
+    const chat = await prisma.conversation.findFirst({ where, select: { temporary: true } });
+    // Traces hold no foreign key, so a temporary chat's have to go explicitly.
+    if (chat?.temporary) await deleteTraces([id]);
+
+    const result = await prisma.conversation.deleteMany({ where });
 
     if (result.count === 0) {
       return NextResponse.json({ error: "Conversation not found" }, { status: 404 });
     }
+    dropParkedRuns(id);
 
     return NextResponse.json({ success: true });
   } catch (error) {

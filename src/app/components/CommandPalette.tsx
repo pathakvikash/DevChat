@@ -4,7 +4,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import * as Dialog from "@radix-ui/react-dialog";
 import { Command } from "cmdk";
 import { useRouter } from "next/navigation";
-import { FilePlus, Settings } from "lucide-react";
+import { FilePlus, MessageSquareDashed, Settings, Table2, Workflow } from "lucide-react";
 import { useToast } from "./Toast";
 import { createConversation } from "@/app/hooks/useConversationsApi";
 
@@ -12,6 +12,7 @@ interface CommandPaletteAction {
   id: string;
   label: string;
   icon: React.ReactNode;
+  shortcut?: string;
   onSelect: () => void;
 }
 
@@ -62,6 +63,7 @@ export default function CommandPaletteProvider({ children }: { children: React.R
         setOpen((v) => !v);
       }
       if (e.key === "Escape" && openRef.current) {
+        e.preventDefault();
         setOpen(false);
       }
     }
@@ -69,9 +71,10 @@ export default function CommandPaletteProvider({ children }: { children: React.R
     return () => document.removeEventListener("keydown", handleKeyDown);
   }, []);
 
-  async function createNewChat() {
+  async function createNewChat(temporary = false) {
+    setOpen(false);
     try {
-      const conv = await createConversation();
+      const conv = await createConversation({ temporary });
       router.push(`/c/${conv.id}`);
     } catch (error) {
       console.error("Failed to create conversation:", error);
@@ -94,9 +97,13 @@ export default function CommandPaletteProvider({ children }: { children: React.R
           <Command.Empty>No results found.</Command.Empty>
 
           <Command.Group heading="Navigation">
-            <Command.Item value="new-chat" onSelect={createNewChat}>
+            <Command.Item value="new-chat" onSelect={() => createNewChat()}>
               <FilePlus size={16} />
               New Chat
+            </Command.Item>
+            <Command.Item value="new-temporary-chat" onSelect={() => createNewChat(true)}>
+              <MessageSquareDashed size={16} />
+              New temporary chat
             </Command.Item>
             <Command.Item
               value="settings-page"
@@ -104,6 +111,20 @@ export default function CommandPaletteProvider({ children }: { children: React.R
             >
               <Settings size={16} />
               Settings Page
+            </Command.Item>
+            <Command.Item
+              value="workflows-page"
+              onSelect={() => { router.push("/workflows"); setOpen(false); }}
+            >
+              <Workflow size={16} />
+              Workflows
+            </Command.Item>
+            <Command.Item
+              value="tables-page"
+              onSelect={() => { router.push("/tables"); setOpen(false); }}
+            >
+              <Table2 size={16} />
+              Tables
             </Command.Item>
           </Command.Group>
 
@@ -118,6 +139,7 @@ export default function CommandPaletteProvider({ children }: { children: React.R
                   >
                     {action.icon}
                     {action.label}
+                    {action.shortcut && <span className="ml-auto text-[11px] text-zinc-400">{action.shortcut}</span>}
                   </Command.Item>
                 ))}
               </Command.Group>

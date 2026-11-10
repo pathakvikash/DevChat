@@ -14,7 +14,7 @@ export async function GET(
     if (!lookup.ok) {
       return mcpServerNotFoundResponse();
     }
-    const tools = await listServerTools(id);
+    const tools = await listServerTools(id, { fresh: true });
     return NextResponse.json({ tools });
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error);

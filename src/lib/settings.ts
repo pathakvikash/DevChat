@@ -53,6 +53,12 @@ export async function setSettingsKey(userId: string, key: string, value: string)
   });
 }
 
+/** Updates a setting that already exists; never creates one. False when there is none (so a racing delete wins). */
+export async function updateSettingsKey(userId: string, key: string, value: string): Promise<boolean> {
+  const r = await prisma.appSetting.updateMany({ where: { userId, key }, data: { value: encryptValue(value) } });
+  return r.count > 0;
+}
+
 export async function deleteSettingsKey(userId: string, key: string): Promise<void> {
   await prisma.appSetting.deleteMany({ where: { userId, key } });
 }
@@ -60,4 +66,18 @@ export async function deleteSettingsKey(userId: string, key: string): Promise<vo
 export function maskKey(key: string): string {
   if (key.length <= 8) return "•".repeat(key.length);
   return key.slice(0, 3) + "•".repeat(key.length - 6) + key.slice(-3);
+}
+
+/** Batch read of several settings in one query. Missing keys are absent. */
+export async function getSettingsKeys(
+  userId: string,
+  keys: string[],
+): Promise<Record<string, string>> {
+  const rows = await prisma.appSetting.findMany({
+    where: { userId, key: { in: keys } },
+    select: { key: true, value: true },
+  });
+  const out: Record<string, string> = {};
+  for (const row of rows) if (row.value) out[row.key] = decryptValue(row.value);
+  return out;
 }

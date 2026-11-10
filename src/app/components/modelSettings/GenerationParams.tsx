@@ -16,6 +16,11 @@ interface GenerationParamsProps {
   onChatOnlyModeChange: (v: boolean) => void;
   maxToolCalls: number;
   onMaxToolCallsChange: (v: number) => void;
+  /** "" = model default; low | medium | high | max. */
+  reasoningEffort: string;
+  onReasoningEffortChange: (v: string) => void;
+  /** Shown for models that report thinking support. */
+  showReasoningEffort: boolean;
 }
 
 export default function GenerationParams({
@@ -33,6 +38,9 @@ export default function GenerationParams({
   onChatOnlyModeChange,
   maxToolCalls,
   onMaxToolCallsChange,
+  reasoningEffort,
+  onReasoningEffortChange,
+  showReasoningEffort,
 }: GenerationParamsProps) {
   return (
     <section>
@@ -139,6 +147,27 @@ export default function GenerationParams({
             Max sequential tool calls per turn. Higher = more steps before answering.
           </p>
         </div>
+
+        {showReasoningEffort && (
+          <div>
+            <label className="block text-xs text-zinc-400 mb-1">Reasoning effort</label>
+            <select
+              value={reasoningEffort}
+              onChange={(e) => onReasoningEffortChange(e.target.value)}
+              className="w-full glass-input rounded-[var(--glass-radius-md)] px-3 py-2 text-sm"
+            >
+              <option value="">Model default</option>
+              <option value="low">Low</option>
+              <option value="medium">Medium</option>
+              <option value="high">High</option>
+              <option value="max">Max</option>
+            </select>
+            <p className="text-xs text-zinc-500 mt-1">
+              How hard the model thinks before answering. Claude Code, Codex and
+              OpenCode honor this; other models ignore it.
+            </p>
+          </div>
+        )}
 
         <div className="sm:col-span-2">
           <label className="flex items-center gap-3 cursor-pointer">

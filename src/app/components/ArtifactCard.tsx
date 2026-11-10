@@ -69,7 +69,7 @@ export default function ArtifactCard({
   return (
     <div className="my-3 glass-card rounded-[var(--glass-radius-lg)] overflow-hidden">
       {/* Header */}
-      <div className="flex items-center justify-between px-4 py-2.5 glass-surface border-b border-[var(--glass-border)]">
+      <div className="flex select-none items-center justify-between px-4 py-2.5 glass-surface border-b border-[var(--glass-border)]">
         <div className="flex items-center gap-2 min-w-0">
           <Code2 size={16} className="text-blue-400 shrink-0" />
           <span className="text-sm font-medium text-zinc-200 truncate">
@@ -104,7 +104,7 @@ export default function ArtifactCard({
       {/* Code toggle */}
       <button
         onClick={() => setCodeExpanded(!codeExpanded)}
-        className="flex items-center gap-1.5 w-full px-4 py-2 text-xs text-zinc-500 hover:text-zinc-300 hover:bg-[var(--glass-bg-hover)] transition-colors border-b border-[var(--glass-border)]"
+        className="flex select-none items-center gap-1.5 w-full px-4 py-2 text-xs text-zinc-500 hover:text-zinc-300 hover:bg-[var(--glass-bg-hover)] transition-colors border-b border-[var(--glass-border)]"
       >
         {codeExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
         {codeExpanded ? "Hide code" : "Show code"}
@@ -126,7 +126,7 @@ export default function ArtifactCard({
       )}
 
       {/* Actions */}
-      <div className="flex items-center gap-2 px-4 py-2 glass-surface">
+      <div className="flex select-none items-center gap-2 px-4 py-2 glass-surface">
         {canExecute && (
           <button
             onClick={handleRun}

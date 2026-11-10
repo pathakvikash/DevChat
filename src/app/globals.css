@@ -431,6 +431,14 @@ body {
   100% { box-shadow: 0 0 0 0 transparent; }
 }
 
+/* ─── Accessibility: focus ring ──────────────────────── */
+
+/* Plain CSS, not Tailwind's ring: the unlayered glass-* box-shadows beat utilities. */
+.focus-ring:focus-visible {
+  outline: 2px solid var(--glass-accent-strong);
+  outline-offset: 0;
+}
+
 /* ─── Accessibility: reduced motion ──────────────────── */
 
 @media (prefers-reduced-motion: reduce) {
@@ -441,4 +449,29 @@ body {
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
   }
+}
+
+/* ─── Light theme: primary button ────────────────────── */
+
+/* Light theme: solid blue so the white label passes WCAG AA (white on #2563eb 5.17:1, #1d4ed8 6.70:1,
+   #1e40af 8.72:1, #1e3a8a 10.36:1). color is set here because some call sites use text-[var(--foreground)]. */
+[data-theme="light"] .glass-button-primary {
+  background: linear-gradient(135deg, #2563eb, #1d4ed8);
+  border-color: #1d4ed8;
+  color: #fff;
+}
+
+[data-theme="light"] .glass-button-primary:hover {
+  background: linear-gradient(135deg, #1d4ed8, #1e40af);
+  border-color: #1e40af;
+}
+
+[data-theme="light"] .glass-button-primary:active {
+  background: linear-gradient(135deg, #1e40af, #1e3a8a);
+  border-color: #1e3a8a;
+}
+
+[data-theme="light"] .glass-button-primary:focus-visible {
+  outline: 2px solid #1d4ed8;
+  outline-offset: 2px;
 }

@@ -1,8 +1,11 @@
+import { quoteSearchResults } from "./quotePastChat";
+import { AGENT_MESSAGE_PART, buildAgentMessagePart, frameAgentMessageParts, parseAgentMessagePart } from "./agentMessages";
+
 /**
- * Collapse duplicate tool parts and fix bogus states so every call has a result.
- * Providers reject dangling calls and drop the whole history along with them.
+ * Collapse duplicate tool parts and fix bogus states so every call has a result. Providers reject
+ * dangling calls. `answerable: false` (an older message) denies approvals nobody answered.
  */
-export function normalizeToolParts(parts: unknown): unknown {
+export function normalizeToolParts(parts: unknown, { answerable = true }: { answerable?: boolean } = {}): unknown {
   if (!Array.isArray(parts)) return parts;
 
   const out: any[] = [];
@@ -36,13 +39,28 @@ export function normalizeToolParts(parts: unknown): unknown {
     out[existingIdx] = merged;
   }
 
-  // A part is only "available" if it really has output.
+  // A part is only "available" if it really has output. Approval states are kept as they are.
   for (const idx of indexByCallId.values()) {
     const part = out[idx];
     const hasOutput = part.output !== undefined && part.output !== null;
     if (hasOutput) {
       part.state = "output-available";
       delete part.errorText;
+    } else if (part.state === "output-denied") {
+      continue;
+    } else if (part.state === "approval-requested" || part.state === "approval-responded") {
+      const approvalId = part.approval?.id;
+      if (answerable) continue;
+      // Not answered (or never run) in an earlier message: a denial the model can read.
+      if (approvalId) {
+        const reason = part.state === "approval-requested" ? "The user did not answer this request." : "The tool did not run.";
+        part.state = "output-denied";
+        part.approval = { id: approvalId, approved: false, reason };
+        delete part.errorText;
+      } else {
+        part.state = "output-error";
+        part.errorText = "No output was recorded for this tool call.";
+      }
     } else if (part.state !== "output-error") {
       part.state = "output-error";
       part.errorText = part.errorText || "No output was recorded for this tool call.";
@@ -52,13 +70,119 @@ export function normalizeToolParts(parts: unknown): unknown {
   return out;
 }
 
-/** Apply {@link normalizeToolParts} across a list of UI messages. */
+/** One RFC-6902 patch line the model wrote inside a ```spec fence. */
+const SPEC_PART = "data-spec";
+/** `/elements/<key>` — a whole element, so `value.type` is its component name. */
+const ELEMENT_PATH_RE = /^\/elements\/[^/]+$/;
+
+/** The component name of each whole-element patch among the `data-spec` parts, in order. */
+export function specElementTypes(parts: any[]): string[] {
+  return parts.flatMap((p) => {
+    if (p?.type !== SPEC_PART) return [];
+    const patch = p.data?.patch ?? p.data;
+    const type = patch?.value?.type;
+    return typeof type === "string" && ELEMENT_PATH_RE.test(String(patch?.path ?? "")) ? [type] : [];
+  });
+}
+
+/** Replace `data-spec` parts with a one-line note: `convertToModelMessages` drops `data-*`
+ *  parts, and re-sending raw JSONL would burn context and invite stale patch streams. */
+export function summarizeSpecParts(parts: unknown): unknown {
+  if (!Array.isArray(parts)) return parts;
+  const at = parts.findIndex((p) => p?.type === SPEC_PART);
+  if (at < 0) return parts;
+
+  const counts = new Map<string, number>();
+  for (const type of specElementTypes(parts)) counts.set(type, (counts.get(type) ?? 0) + 1);
+  const dataIds = new Set<string>();
+  for (const p of parts) {
+    if (p?.type !== SPEC_PART) continue;
+    const patch = p.data?.patch ?? p.data;
+    const path = String(patch?.path ?? "");
+    const value = patch?.value;
+    if (path.endsWith("/props/dataArtifactId") && typeof value === "string") dataIds.add(value);
+    if (value && typeof value === "object" && typeof value.props?.dataArtifactId === "string") {
+      dataIds.add(value.props.dataArtifactId);
+    }
+  }
+
+  const components = [...counts]
+    .map(([name, n]) => (n > 1 ? `${name} ×${n}` : name))
+    .join(", ");
+  const note =
+    `[You rendered a UI here: ${components || "no components"}` +
+    `${dataIds.size ? ` from data artifact ${[...dataIds].join(", ")}` : ""}. ` +
+    "The spec's JSONL is not kept in this transcript — to change what is shown, " +
+    "emit a new complete ```spec block.]";
+
+  const out = parts.filter((p) => p?.type !== SPEC_PART);
+  out.splice(at, 0, { type: "text", text: note });
+  return out;
+}
+
+/**
+ * searchChats results reach the model only as framed text, because titles and snippets come
+ * from other chats. `/recall` puts its part on the user message, where models read only text.
+ */
+export function frameSearchChatsParts(parts: unknown, role?: string): unknown {
+  if (!Array.isArray(parts)) return parts;
+  return parts.map((p) => {
+    if (p?.type !== "tool-searchChats" || !Array.isArray(p.output?.results)) return p;
+    const framed = quoteSearchResults(String(p.input?.query ?? ""), p.output.results);
+    return role === "user"
+      ? { type: "text", text: `${framed}\n\nUse these results to answer the message above.` }
+      : { ...p, output: framed };
+  });
+}
+
+const QUEUED_PART = "data-queued-message";
+
+/**
+ * A queued message delivered mid-reply is stored inside the reply. The model
+ * needs it as its own user message, so the reply is split around each marker.
+ */
+export function splitAtQueuedMessages<T extends { id?: string; role?: string; parts?: unknown }>(
+  message: T,
+): T[] {
+  const parts = message.parts;
+  if (message.role !== "assistant" || !Array.isArray(parts) || !parts.some((p) => p?.type === QUEUED_PART)) {
+    return [message];
+  }
+  const out: T[] = [];
+  let reply: any[] = [];
+  let replyId = message.id;
+  const endReply = () => {
+    if (reply.some((p) => p.type !== "step-start")) out.push({ ...message, id: replyId, parts: reply });
+    reply = [];
+  };
+  for (const part of parts as any[]) {
+    if (part?.type !== QUEUED_PART) {
+      reply.push(part);
+      continue;
+    }
+    endReply();
+    const queuedId = String(part.data?.queuedId ?? part.id ?? "");
+    const text = String(part.data?.text ?? "");
+    const agent = part.data?.agent ? parseAgentMessagePart({ type: AGENT_MESSAGE_PART, data: part.data.agent }) : null;
+    const body = [{ type: "text", text }];
+    out.push({ ...message, id: queuedId, role: "user", parts: agent ? [buildAgentMessagePart(agent), ...body] : body });
+    replyId = `${message.id}:${queuedId}`;
+  }
+  endReply();
+  return out;
+}
+
+/** Prepare UI messages for `convertToModelMessages`. Only the latest message can still be answered. */
 export function normalizeMessageToolParts<T extends { parts?: unknown }>(
   messages: T[],
 ): T[] {
-  return messages.map((m) =>
-    m && Array.isArray((m as any).parts)
-      ? ({ ...m, parts: normalizeToolParts((m as any).parts) } as T)
-      : m,
-  );
+  return messages.flatMap((m, i) => {
+    if (!m || !Array.isArray((m as any).parts)) return [m];
+    const answerable = i === messages.length - 1;
+    // Split first: each piece of a reply that had a queued message delivered mid-way is normalized on its own.
+    return splitAtQueuedMessages(m as any).map((seg: any) => {
+      const parts = summarizeSpecParts(normalizeToolParts(seg.parts, { answerable }));
+      return { ...seg, parts: frameAgentMessageParts(frameSearchChatsParts(parts, seg.role)) } as T;
+    });
+  });
 }

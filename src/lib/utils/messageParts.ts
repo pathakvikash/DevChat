@@ -1,3 +1,5 @@
+import { AGENT_DELIVERED } from "@/lib/utils/agentLink";
+
 /**
  * Shared types and helpers for AI-SDK `parts`. The same `FilePart` /
  * `ToolPart` shape was previously declared inline in five different files
@@ -21,6 +23,8 @@ export interface ToolPart {
   input?: any;
   output?: any;
   errorText?: string;
+  /** Set while a call waits for the user, and after an answer (approval states). */
+  approval?: { id?: string; approved?: boolean; reason?: string };
 }
 
 export interface AnyPart {
@@ -47,8 +51,190 @@ export function extractText(message: unknown): string {
 }
 
 /** Type guard for tool-call parts (type === "tool-<name>"). */
-function isToolPart(part: AnyPart): part is AnyPart & ToolPart {
+export function isToolPart(part: AnyPart): part is AnyPart & ToolPart {
   return typeof part?.type === "string" && part.type.startsWith("tool-");
+}
+
+/** The answer to a `presentPlan` card, sent back to the model as the tool's output. */
+export type PlanDecision =
+  | { action: "approve"; mode: "ask" | "agent" }
+  | { action: "revise"; feedback: string };
+
+/** The id of the plan card still waiting for an answer in the latest message, if any. */
+export function waitingPlanCallId(messages: Array<{ role?: string; parts?: unknown }>): string | undefined {
+  const last = messages[messages.length - 1];
+  if (last?.role !== "assistant" || !Array.isArray(last.parts)) return undefined;
+  const plan = (last.parts as any[]).find((p) => p?.type === "tool-presentPlan" && p.state === "input-available");
+  return typeof plan?.toolCallId === "string" ? plan.toolCallId : undefined;
+}
+
+/** Denial reason for an approval the user never answered (shown as "Not answered"). */
+export const NOT_ANSWERED = "The user did not answer this request.";
+
+/** Only the latest message can still be answered. Older approval cards and plan cards show as
+ *  settled (the model gets the same denial from normalizeToolParts, so nothing here is sent back). */
+export function settleStaleParts<T extends { type?: string; state?: string; approval?: any }>(
+  parts: T[],
+  isLatest: boolean,
+): T[] {
+  if (isLatest) return parts;
+  return parts.map((p) => {
+    if (p?.state === "approval-requested") {
+      return { ...p, state: "output-denied", approval: { id: p.approval?.id, approved: false, reason: NOT_ANSWERED } };
+    }
+    if (p?.type === "tool-presentPlan" && p.state === "input-available") {
+      return { ...p, state: "output-denied", approval: { approved: false, reason: "Replaced by a newer plan" } };
+    }
+    return p;
+  });
+}
+
+/** Claude Code tools that may be allowed for the rest of a chat. Bash and everything else always asks. */
+export const CHAT_ALLOWABLE_TOOLS: ReadonlySet<string> = new Set(["Edit", "Write", "MultiEdit", "NotebookEdit"]);
+
+/** A short preview of an edit: at most `max` removed and `max` added lines, each cut side ends in "…". */
+export function editPreview(input: unknown, max = 6): { minus: string[]; plus: string[] } {
+  const i = (input ?? {}) as Record<string, unknown>;
+  if (typeof i.old_string !== "string" || typeof i.new_string !== "string") return { minus: [], plus: [] };
+  const side = (text: string, mark: string) => {
+    const lines = text.split("\n");
+    const cut = lines.length > max;
+    return [...(cut ? lines.slice(0, max) : lines).map((l) => `${mark} ${l}`), ...(cut ? ["…"] : [])];
+  };
+  return { minus: side(i.old_string, "-"), plus: side(i.new_string, "+") };
+}
+
+// Zero-width, direction and invisible format marks (they reorder or hide text), line/paragraph separators,
+// BOM, tag characters, and control characters but for \n and \t.
+// eslint-disable-next-line no-control-regex
+const HIDDEN = /[\u0000-\u0008\u000B-\u001F\u007F-\u009F\u00AD\u061C\u200B-\u200F\u2028-\u202E\u2060-\u2064\u2066-\u2069\uFEFF\u{E0000}-\u{E007F}]/gu;
+const escapeChar = (c: string) => {
+  const code = c.codePointAt(0) ?? 0;
+  return code > 0xffff ? `\\u{${code.toString(16).toUpperCase()}}` : `\\u${code.toString(16).toUpperCase().padStart(4, "0")}`;
+};
+
+/** Text with its invisible characters written out (`\u202E`), for a place that cannot style them. */
+export function showHidden(text: string): string {
+  return text.replace(HIDDEN, escapeChar);
+}
+
+/** The same, as runs, so a card can style the written-out characters apart from the text. */
+export function hiddenRuns(text: string): Array<{ text: string; hidden: boolean }> {
+  const runs: Array<{ text: string; hidden: boolean }> = [];
+  let at = 0;
+  for (const m of text.matchAll(HIDDEN)) {
+    if (m.index > at) runs.push({ text: text.slice(at, m.index), hidden: false });
+    runs.push({ text: escapeChar(m[0]), hidden: true });
+    at = m.index + m[0].length;
+  }
+  if (at < text.length) runs.push({ text: text.slice(at), hidden: false });
+  return runs;
+}
+
+/** One line (or one text) of an approval card's main block. */
+export interface ApprovalLine {
+  text: string;
+  tone?: "add" | "del" | "muted";
+}
+
+/** Everything an approval card shows about a call. Nothing is cut and no key is dropped. */
+export interface ApprovalDetails {
+  /** What will run: a command, a file's path and content, or every edit as a diff. */
+  block: ApprovalLine[];
+  /** How many lines the block runs to; the card says so above a long one. */
+  lines: number;
+  /** The model's own account of the call. It is the model's claim, so it is shown apart from what runs. */
+  description?: string;
+  /** Every key the block does not show. */
+  rest: Array<[string, string]>;
+}
+
+const asText = (v: unknown) => (typeof v === "string" ? v : (JSON.stringify(v, null, 2) ?? ""));
+
+export function approvalDetails(toolName: string, input: unknown): ApprovalDetails {
+  const i = (input && typeof input === "object" ? input : {}) as Record<string, unknown>;
+  const shown = new Set<string>();
+  const block: ApprovalLine[] = [];
+  const diff = (edit: unknown): ApprovalLine[] => {
+    const d = editPreview(edit, Infinity);
+    return [...d.minus, ...d.plus].map((text) => ({ text, tone: text.startsWith("+") ? "add" : "del" }));
+  };
+  if (toolName === "Bash" && typeof i.command === "string") {
+    shown.add("command");
+    block.push({ text: i.command });
+  } else if (toolName === "Write" && typeof i.content === "string") {
+    shown.add("file_path").add("content");
+    block.push({ text: asText(i.file_path), tone: "muted" }, { text: i.content });
+  } else if (toolName === "MultiEdit" && Array.isArray(i.edits)) {
+    shown.add("edits");
+    i.edits.forEach((edit, n, all) => {
+      if (all.length > 1) block.push({ text: `Edit ${n + 1} of ${all.length}`, tone: "muted" });
+      const lines = diff(edit);
+      block.push(...(lines.length ? lines : [{ text: asText(edit) }]));
+    });
+  } else if (diff(i).length) {
+    shown.add("old_string").add("new_string");
+    block.push(...diff(i));
+  }
+  const description = typeof i.description === "string" && i.description ? i.description : undefined;
+  if (description) shown.add("description");
+  const lines = block.reduce((n, l) => n + l.text.split("\n").length, 0);
+  return { block, lines, description, rest: Object.entries(i).filter(([k]) => !shown.has(k)).map(([k, v]) => [k, asText(v)]) };
+}
+
+/** Approval reasons the page writes: shown as "Allowed for this chat", "Denied", "Stopped". */
+export const ALLOWED_FOR_CHAT = "Allowed for this chat";
+export const DENIED_BY_USER = "The user denied this action.";
+export const STOPPED_REPLY = "The reply was stopped before this ran.";
+
+/** Card title by tool, as UX 3.10 lists them. */
+export function approvalTitle(toolName: string, input: any): string {
+  const i = input ?? {};
+  if (toolName === "createArtifact") return `Create artifact "${i.title ?? "Untitled"}"`;
+  if (toolName === "updateArtifact") return `Update artifact "${i.title ?? i.artifactId ?? ""}"`;
+  if (toolName === "createTodo" || toolName === "createTodos" || toolName === "updateTodo") return "Update the todo list";
+  if (toolName === "rememberFact") return `Save to memory: "${i.key ?? ""}"`;
+  if (toolName === "forgetFact") return `Forget memory: "${i.key ?? ""}"`;
+  // Claude Code's own tools, asked for in Ask mode.
+  if (toolName === "Edit" || toolName === "MultiEdit") return `Edit ${showHidden(String(i.file_path ?? ""))}`;
+  // Write replaces a file that exists, so it is never worded as creating one.
+  if (toolName === "Write") return `Write file ${showHidden(String(i.file_path ?? ""))}`;
+  if (toolName === "Bash") return "Run a command";
+  if (toolName.startsWith("mcp_")) return `Run ${toolName.replace(/^mcp_[^_]*_/, "")} on an MCP server`;
+  return `Run ${toolName}`;
+}
+
+/** A stopped reply: every card still waiting is denied, so nothing runs when it is resumed. */
+export function denyOpenApprovals(parts: any[]): any[] {
+  return parts.map((p) => {
+    if (p?.state !== "approval-requested") return p;
+    if (!p.approval?.id) return { ...p, state: "output-error", errorText: "Stopped before it ran." };
+    return { ...p, state: "output-denied", approval: { id: p.approval.id, approved: false, reason: STOPPED_REPLY } };
+  });
+}
+
+/** Fire a follow-up after `executeCode`, or after a plan card is revised. Trailing reasoning and
+ *  step-start parts don't count as an answer. `askClarification` is excluded: the user's own reply
+ *  sends it. An approved plan sends its own visible message, and a waiting card never resumes. */
+export function shouldAutoContinue(parts: AnyPart[] | undefined): boolean {
+  const list = (parts ?? []).filter((p) => p?.type !== "reasoning" && p?.type !== "step-start");
+  if (list.some((p) => (p as ToolPart).state === "approval-requested")) return false;
+  const tail = list.pop();
+  if (tail?.type === "tool-presentPlan") {
+    const { state, output } = tail as ToolPart;
+    return (state === "output-available" || state === "result") && (output as PlanDecision | undefined)?.action === "revise";
+  }
+  // A delivered sendToChat goes back to the model so it can carry on. The first refusal in a reply also
+  // goes back so the model can answer the user; a second one ends the turn, so retries can't loop.
+  if (tail?.type === "tool-sendToChat") {
+    const { state, output } = tail as ToolPart;
+    if (state !== "output-available" && state !== "result") return false;
+    if (output === AGENT_DELIVERED) return true;
+    return [...list, tail].filter((p) => p.type === "tool-sendToChat" && (p as ToolPart).output !== AGENT_DELIVERED).length === 1;
+  }
+  if (tail?.type !== "tool-executeCode") return false;
+  const { state } = tail as ToolPart;
+  return state === "output-available" || state === "result";
 }
 
 /**
@@ -94,10 +280,15 @@ export type GroupedItem =
 export function groupToolParts(parts: AnyPart[]): GroupedItem[] {
   const groups = new Map<string, Array<AnyPart & ToolPart>>();
   const out: GroupedItem[] = [];
+  // Claude Code's second card is asked in a later step that announces its call again, so the reply holds the call
+  // twice. The earlier one only ever says "input-available": skipped, so the call shows once, where it is answered.
+  const lastAt = new Map<string, number>();
+  parts.forEach((p, i) => isToolPart(p) && p.toolCallId && lastAt.set(p.toolCallId, i));
 
   for (let i = 0; i < parts.length; i++) {
     const p = parts[i];
     if (isToolPart(p)) {
+      if (p.state === "input-available" && p.toolCallId && (lastAt.get(p.toolCallId) ?? i) > i) continue;
       const key = toolKey(p, i);
       if (!groups.has(key)) {
         groups.set(key, []);

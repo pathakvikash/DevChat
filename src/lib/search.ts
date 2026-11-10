@@ -56,9 +56,15 @@ async function duckDuckGoSearch(query: string): Promise<SearchResult[]> {
   }
   const html = await response.text();
 
+  return parseDdgResults(html);
+}
+
+/** The first five results of a DuckDuckGo HTML page. Each pattern stops at the next tag it must not cross, so a page of
+ *  unclosed links stays linear. */
+export function parseDdgResults(html: string): SearchResult[] {
   const results: SearchResult[] = [];
   const blockRe =
-    /<a[^>]*class="result__a"[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>[\s\S]*?<a[^>]*class="result__snippet"[^>]*>([\s\S]*?)<\/a>/g;
+    /<a[^<>]*class="result__a"[^<>]*href="([^"]+)"[^<>]*>((?:(?!<a\b)[\s\S])*?)<\/a>(?:(?!class="result__a")[\s\S])*?<a[^<>]*class="result__snippet"[^<>]*>((?:(?!<a\b)[\s\S])*?)<\/a>/g;
   let m: RegExpExecArray | null;
   while ((m = blockRe.exec(html)) !== null && results.length < 5) {
     const realUrl = extractDdgRedirect(m[1]);

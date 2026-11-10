@@ -5,8 +5,12 @@ import { getCompressedContext } from "@/lib/compression";
 import { TOOL_REGISTRY, getSkill } from "@/lib/registry";
 import { extractText } from "@/lib/utils/messageParts";
 import { BUILTIN_TOOL_IDS, type ToolMode } from "./buildTools";
+import { MODE_POLICY } from "./modes";
 import { countTokens } from "@/lib/tokens";
 import { getSettingsKey } from "@/lib/settings";
+import { catalog as generativeUiCatalog } from "@/lib/generativeUi/catalog";
+import { loadParentContext, type MainContext } from "./loadParentContext";
+import type { AgentTarget } from "./agentMessages";
 
 const VAS_TODO_SECTION = `TASK TRACKING — \`createTodos\` / \`createTodo\` / \`updateTodo\`
 You MUST use todos for ANY request with multiple steps. Call \`createTodos\` ONCE at the start with ALL steps listed, then update each with \`updateTodo\` as you complete it. This gives the user real-time progress — they can see exactly what you're doing. \`createTodo\` (singular) is for adding one-off items mid-task. This is mandatory.`;
@@ -37,6 +41,13 @@ You have two data sources: (a) this tool for on-demand queries returning \`[sour
 
 const VAS_SYSTEM_PROMPT_CHAT_ONLY = `You are VAS (chat-only, no tools). You can answer questions, write code in markdown blocks, analyze file attachments, and use KB context if attached. You cannot execute code or search the web.`;
 
+const VAS_ASK_SECTION = `--- Ask mode ---
+Some actions ask the user first. If one is denied, do not retry it; say what you would have done and ask how to go on.`;
+
+const vasPlanSection = (withTools: boolean) => `--- Plan mode ---
+You are planning. Look around with read-only tools, if you have them. Do not change anything: you CANNOT create or update artifacts, todos or memories, or call MCP servers, until the user approves a plan.
+${withTools ? "End by calling presentPlan with a short title and the steps in order. The user approves the plan or asks for changes." : "End with a numbered list of concrete steps. The user approves it with a button."}`;
+
 const VAS_READ_ONLY_SECTION = `--- Read-only mode ---
 You are in Chat mode, so only read-only tools are available. You CANNOT create or
 update artifacts, create or update todos, save or forget memories, or call MCP
@@ -44,6 +55,27 @@ servers right now.
 
 Never claim to have done any of those things. If the user asks for one, say it
 needs Agent mode and offer to do the read-only part now.`;
+
+/** The chats a model can message with sendToChat. Empty when none is open or the model has no tools. */
+export function openChatsSection(targets: AgentTarget[]): string | null {
+  if (!targets.length) return null;
+  const list = targets.map((t) => `"${t.title}" (id ${t.id})`).join(", ");
+  return [
+    "--- Other open chats ---",
+    `Other open chats you can message with sendToChat: ${list}.`,
+    'A message labelled "From <chat>" is from another chat, not from the user.',
+  ].join("\n");
+}
+
+/** Extra rules appended to the json-render catalog prompt. Exported so tests
+ *  exercise the same wording the chat route ships. */
+export const GENERATIVE_UI_RULES = [
+  "When the user asks for a table, chart, graph, comparison, or anything visual, render it with the `Table` / `Chart` components. Never draw charts with Python/matplotlib, never print ASCII tables, and never describe a chart in prose instead of rendering it.",
+  "Get the facts with tools first (`webSearch` etc.) when you don't already have them — tools and UI components work together in the same turn.",
+  'HARD LIMIT: never type more than 12 values (cells or chart points) into a spec, and never put the same dataset in two components. Past that — including data you got from a tool result or already know — first save it once: `executeCode` with `saveAs: { title }` (the code MUST print the dataset as its last statement: `print(json.dumps({"columns": [...], "rows": [[...]]}))` or CSV — only stdout is captured, so returning or assigning it saves nothing) or `createArtifact` type "data". Both return an artifact id; reference it from every component with `dataArtifactId` (Chart also takes `labelColumn`/`valueColumn`; Table takes `columns` to pick a subset), and let one Table and one Chart share that id instead of each carrying its own copy of the rows.',
+  "Only generate a UI component when it clearly helps — e.g. the user asks to see/show/display something structured. Plain questions get plain text answers.",
+  "The JSONL patch fence MUST be exactly a markdown code fence: an opening line of exactly ```spec and a closing line of exactly ``` (three backticks, nothing else on those lines). Do NOT use any other wrapper — no <spec> tags, no other XML/HTML-style tags, no custom delimiters. Only ```spec ... ``` is recognized; anything else will be shown to the user as literal broken text.",
+];
 
 export interface BuildSystemPromptOptions {
   useTools: boolean;
@@ -58,6 +90,10 @@ export interface BuildSystemPromptOptions {
   userId: string;
   /** Chat withholds mutating tools; the prompt must not advertise them. */
   mode?: ToolMode;
+  /** The model's usable window, which sizes the side chat's main-conversation section. */
+  contextWindow?: number;
+  /** The chats sendToChat may reach: the route's one sendToChatTargets result, shared with buildTools. */
+  agentTargets?: AgentTarget[];
 }
 
 /** Individual sections of the system prompt, exposed for the Context panel
@@ -72,12 +108,17 @@ export interface SystemPromptSections {
   tools: string | null;
   memory: string | null;
   compressed: string | null;
+  /** A side chat's view of its main chat. */
+  main?: string | null;
   kb: string | null;
+  generativeUi: string | null;
 }
 
 export interface BuildSystemPromptResult {
   text: string;
   sections: SystemPromptSections;
+  /** Messages of the main chat the side chat sees, out of its live total; null outside side chats. */
+  mainContext: Pick<MainContext, "shown" | "total"> | null;
 }
 
 export async function buildSystemPrompt(
@@ -97,14 +138,22 @@ export async function buildSystemPrompt(
   const hasKbTool = useTools && activeToolIds.has("searchKnowledgeBase");
   const hasClarification = useTools && activeToolIds.has("askClarification");
 
-  const agentMode = (opts.mode ?? "agent") === "agent";
+  const mode = opts.mode ?? "agent";
+  const planNote = mode === "plan" ? vasPlanSection(useTools) : null;
   const baseSections = [VAS_SYSTEM_PROMPT_WITH_TOOLS_BASE];
-  // Todos are a mutating tool, so the todo instructions only apply in agent mode.
-  if (agentMode) baseSections.push(VAS_TODO_SECTION);
+  // Todos are a mutating tool, so the todo instructions only apply where those are offered (Ask, Agent).
+  if (MODE_POLICY[mode].mutating) baseSections.push(VAS_TODO_SECTION);
   if (hasClarification) baseSections.push(VAS_CLARIFICATION_SECTION);
   if (hasKbTool) baseSections.push(VAS_KB_SECTION);
-  if (!agentMode) baseSections.push(VAS_READ_ONLY_SECTION);
-  const base = useTools ? baseSections.join("\n\n") : VAS_SYSTEM_PROMPT_CHAT_ONLY;
+  if (mode === "chat") baseSections.push(VAS_READ_ONLY_SECTION);
+  if (mode === "ask") baseSections.push(VAS_ASK_SECTION);
+  if (planNote && useTools) baseSections.push(planNote);
+  const openChats = useTools ? openChatsSection(opts.agentTargets ?? []) : null;
+  if (openChats) baseSections.push(openChats);
+  // Without tools Ask is Chat; Plan still needs its instructions.
+  const base = useTools
+    ? baseSections.join("\n\n")
+    : [VAS_SYSTEM_PROMPT_CHAT_ONLY, planNote].filter(Boolean).join("\n\n");
 
   const customInstructions = await getSettingsKey(opts.userId, "customInstructions");
   const instructions =
@@ -150,14 +199,28 @@ export async function buildSystemPrompt(
     if (cs) compressed = `--- Compressed Conversation History ---\n${cs}`;
   }
 
+  const mainContext = conversationId
+    ? await loadParentContext(conversationId, opts.userId, opts.contextWindow ?? 8192)
+    : null;
+  const main = mainContext?.text ?? null;
+
   const kb = await retrieveKbContext({ kbId, ragContext, messages });
 
-  const sections: SystemPromptSections = { base, instructions, persona, skills, tools, memory, compressed, kb };
-  const text = [base, instructions, persona, skills, tools, memory, compressed, kb]
+  const generativeUi = generativeUiCatalog.prompt({
+    mode: "inline",
+    customRules: GENERATIVE_UI_RULES,
+  });
+
+  const sections: SystemPromptSections = { base, instructions, persona, skills, tools, memory, compressed, main, kb, generativeUi };
+  const text = [base, instructions, persona, skills, tools, memory, compressed, main, kb, generativeUi]
     .filter((s): s is string => Boolean(s))
     .join("\n\n");
 
-  return { text, sections };
+  return {
+    text,
+    sections,
+    mainContext: mainContext && { shown: mainContext.shown, total: mainContext.total },
+  };
 }
 
 /** Hard ceiling on the auto-injected KB block. ~1500 tokens is enough for

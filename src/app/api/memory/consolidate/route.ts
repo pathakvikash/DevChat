@@ -21,11 +21,14 @@ export async function POST(req: NextRequest) {
     }
     const conv = await prisma.conversation.findUnique({
       where: { id: conversationId },
-      select: { userId: true },
+      select: { userId: true, temporary: true, memoryDisabled: true, kind: true },
     });
     if (!conv || conv.userId !== userId) {
       return NextResponse.json({ error: "Conversation not found" }, { status: 404 });
     }
+    // Memory is off (temporary chat or the Memory toggle); nothing from this chat may be saved.
+    // Only a main chat consolidates: a side chat's context is someone else's chat, and a sub-agent's is a task brief.
+    if (conv.temporary || conv.memoryDisabled || conv.kind !== "main") return NextResponse.json({ applied: 0, pruned: 0 });
     const result = await consolidateMemory({ conversationId, userId, modelId: model });
     return NextResponse.json(result);
   } catch (e) {

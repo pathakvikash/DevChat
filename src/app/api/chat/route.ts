@@ -1,7 +1,14 @@
-import { convertToModelMessages, streamText, stepCountIs } from "ai";
+import {
+  convertToModelMessages,
+  generateId,
+  streamText,
+  createUIMessageStream,
+  createUIMessageStreamResponse,
+} from "ai";
+import { pipeJsonRender } from "@json-render/core";
 import { prisma } from "@/lib/db";
 import { getModel } from "@/lib/models";
-import { extractText, stripFileParts } from "@/lib/utils/messageParts";
+import { CHAT_ALLOWABLE_TOOLS, denyOpenApprovals, extractText, stripFileParts } from "@/lib/utils/messageParts";
 import {
   buildSystemPrompt,
 } from "@/lib/chat/buildSystemPrompt";
@@ -11,29 +18,59 @@ import {
   type ToolSet,
   type ToolMode,
 } from "@/lib/chat/buildTools";
+import { canStartSubAgents, messageAgentTool, runAgentTool, type SubAgentToolOptions } from "@/lib/chat/buildTools";
+import {
+  agentMessageModelText,
+  agentPartRefused,
+  parseOpenPanes,
+  sendToChatTargets,
+} from "@/lib/chat/agentMessages";
+import { ignoredTextStep, nextStepSettings } from "@/lib/chat/loopGuard";
 import { safePersistAssistantMessage } from "@/lib/chat/persistAssistantMessage";
+import { autoCompress, canAutoCompress } from "@/lib/chat/autoCompress";
+import { liveSince } from "@/lib/liveSince";
 import { normalizeMessageToolParts } from "@/lib/chat/normalizeToolParts";
+import { dropCompressedMessages } from "@/lib/chat/dropCompressedMessages";
+import { saveUserMessage } from "@/lib/chat/saveUserMessage";
 import {
   isTransientProviderError,
   friendlyProviderErrorMessage,
   formatMissingApiKeyMessage,
 } from "@/lib/chat/providerErrors";
+import { contextWindowFor } from "@/lib/chat/contextBudget";
+import {
+  claimQueued,
+  queuedMarkerTransform,
+  releaseUnshown,
+  withInjected,
+  type QueuedInjection,
+  type QueuedMarker,
+} from "@/lib/chat/queue";
 import { resolveChatSettings } from "@/lib/chat/resolveChatSettings";
 import { resolveModelCandidates } from "@/lib/chat/resolveModelCandidates";
+import { cliProviderForModel, dropParkedRuns } from "@/lib/cliProviders";
+import { isRunnableCwd } from "@/lib/claude/sessions";
 import { recordTrace } from "@/lib/observability";
+import { providerOptionsFor } from "@/lib/chat/providerOptions";
 import {
   estimatePromptTokens,
   shouldIncreaseContext,
   getNextContextTier,
 } from "@/lib/contextManager";
 import { requireUserId } from "@/lib/auth";
+import { canUseHostTools, HOST_TOOLS_REFUSED } from "@/lib/hostAccess";
+import { effectiveToolMode, isChatMode, MODE_POLICY, toolsWithAnsweredApproval } from "@/lib/chat/modes";
+
+// A helper run can take minutes. 300 s is the most Vercel Hobby allows (with Fluid compute on), so on Vercel a helper
+// near its own 5-minute limit can be cut off; a local server has no limit.
+export const maxDuration = 300;
 
 export async function POST(req: Request) {
   const requestStartedAt = Date.now();
   let traceRecorded = false;
   const userId = await requireUserId();
   const {
-    messages,
+    messages: bodyMessages,
     conversationId,
     model: bodyModel,
     systemPrompt: bodySystemPrompt,
@@ -48,43 +85,73 @@ export async function POST(req: Request) {
     memoryDisabled: bodyMemoryDisabled,
     autoCompressThreshold: bodyAutoCompressThreshold,
     maxToolCalls: bodyMaxToolCalls,
-    openrouterApiKey: bodyOpenrouterApiKey,
-    nvidiaNimApiKey: bodyNvidiaNimApiKey,
-    messageId: bodyUserMessageId,
-    assistantMessageId: bodyAssistantMessageId,
     mode: bodyMode,
+    allowedTools: bodyAllowedTools,
+    openPanes: bodyOpenPanes,
   } = await req.json();
-  // Anything that isn't "agent" falls back to chat, the safer of the two.
-  const toolMode: ToolMode = bodyMode === "agent" ? "agent" : "chat";
+  let messages = bodyMessages;
+  // A Claude Code card left open is closed when the chat sends anything that does not answer it.
+  const lastParts = Array.isArray(messages) && messages.at(-1)?.role === "assistant" ? (messages.at(-1).parts ?? []) : [];
+  const answeringCli = lastParts.some((p: any) => String(p?.approval?.id ?? "").startsWith("cli-"));
+  // Only once the chat is known to be this user's: anyone can send any conversation id.
+  let ownerVerified = false;
+  const releaseCliRuns = () => {
+    if (conversationId && ownerVerified) dropParkedRuns(conversationId);
+  };
+  // Anything unknown falls back to chat, the safest mode.
+  const requestedMode: ToolMode = isChatMode(bodyMode) ? bodyMode : "chat";
+  // Without AUTH_SECRET the SDK can't sign or verify approvals, so Ask would trust the browser's answers.
+  const authMode = effectiveToolMode(requestedMode, !!process.env.AUTH_SECRET);
+  if (authMode !== requestedMode) console.warn("[chat] AUTH_SECRET is unset: Ask runs as Chat, since approvals can't be verified.");
   let model: string | undefined = bodyModel;
   try {
+    let compressedAt: Date | null = null;
     if (conversationId) {
       const owned = await prisma.conversation.findUnique({
         where: { id: conversationId },
-        select: { userId: true },
+        select: { userId: true, compressedAt: true, parent: { select: { userId: true } } },
       });
-      if (!owned || owned.userId !== userId) {
+      // A side chat is only ever read against a main chat of the same user.
+      if (!owned || owned.userId !== userId || (owned.parent && owned.parent.userId !== userId)) {
         return new Response(JSON.stringify({ error: "Conversation not found" }), {
           status: 404,
           headers: { "Content-Type": "application/json" },
         });
       }
+      compressedAt = owned.compressedAt;
+      ownerVerified = true;
+      if (!answeringCli) releaseCliRuns();
     }
-    const settings = await resolveChatSettings({
-      userId,
-      conversationId,
-      bodyModel,
-      bodySystemPrompt,
-      bodyTemperature,
-      bodyKbId,
-      bodySearchProvider,
-      bodyEnabledTools,
-      bodyEnabledSkills,
-      bodyChatOnlyMode,
-      bodyMemoryDisabled,
-      bodyAutoCompressThreshold,
-      bodyMaxToolCalls,
-    });
+    const [settings, summarized] = await Promise.all([
+      resolveChatSettings({
+        userId,
+        conversationId,
+        bodyModel,
+        bodySystemPrompt,
+        bodyTemperature,
+        bodyKbId,
+        bodySearchProvider,
+        bodyEnabledTools,
+        bodyEnabledSkills,
+        bodyChatOnlyMode,
+        bodyMemoryDisabled,
+        bodyAutoCompressThreshold,
+        bodyMaxToolCalls,
+      }),
+      // A client that missed the refresh after a compress (Stop, a dropped connection) still
+      // holds the summarized messages; keep them out of the prompt next to the summary.
+      compressedAt && Array.isArray(messages)
+        ? prisma.message.findMany({
+            where: {
+              conversationId,
+              ...liveSince(compressedAt).summarizedWhere,
+              id: { in: messages.flatMap((m: { id?: string }) => (m?.id ? [m.id] : [])) },
+            },
+            select: { id: true },
+          })
+        : [],
+    ]);
+    messages = dropCompressedMessages(messages, summarized.map((m) => m.id));
     model = settings.model;
     const {
       searchProvider,
@@ -98,7 +165,31 @@ export async function POST(req: Request) {
       fallbackModel,
       maxToolCalls,
       autoCompressThreshold,
+      reasoningEffort,
+      workingFolder,
     } = settings;
+    if (settings.kind === "subagent") {
+      return new Response(JSON.stringify({ error: "Sub-agent runs cannot be sent to directly" }), {
+        status: 400,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+    const openPanes = parseOpenPanes(bodyOpenPanes);
+    if (!openPanes) {
+      return new Response(JSON.stringify({ error: "openPanes must be up to 3 panes with an id, title and kind" }), {
+        status: 400,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+    // A malformed agent part, or one past the hop cap, is refused rather than dropped (dropping would leave its text unframed).
+    if (Array.isArray(messages) && messages.some(agentPartRefused)) {
+      return new Response(JSON.stringify({ error: "An agent message is malformed or past the limit. Answer the user directly." }), {
+        status: 400,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+    // Side chats are read-only, whatever mode the request asks for.
+    const toolMode: ToolMode = settings.kind === "side" ? "chat" : authMode;
     // `contextLength`/`maxTokens` are reassigned below (Ollama context bump,
     // default maxTokens), so these two stay `let` unlike the rest.
     let { contextLength, maxTokens, kbId } = settings;
@@ -116,11 +207,10 @@ export async function POST(req: Request) {
     const resolution = await resolveModelCandidates({
       requestedModel: model,
       fallbackModel,
-      bodyOpenrouterApiKey,
-      bodyNvidiaNimApiKey,
       userId,
     });
     if (!resolution.ok) {
+      releaseCliRuns();
       return new Response(
         JSON.stringify({ error: formatMissingApiKeyMessage(resolution.missingKeyProvider) }),
         { status: 400, headers: { "Content-Type": "application/json" } },
@@ -128,12 +218,21 @@ export async function POST(req: Request) {
     }
     model = resolution.model;
     const candidateModels = resolution.candidateModels;
+    // CLI models run as the server's OS user; a fallback that is one is skipped below (getModel refuses it).
+    const hostTools = await canUseHostTools(userId);
+    if (!hostTools && cliProviderForModel(model)) {
+      releaseCliRuns();
+      return new Response(
+        JSON.stringify({ error: `${HOST_TOOLS_REFUSED} Pick another model: this one runs on the server's own machine.` }),
+        { status: 403, headers: { "Content-Type": "application/json" } },
+      );
+    }
 
     let lastError: unknown;
     for (const servedModel of candidateModels) {
     let modelConfig: ReturnType<typeof getModel> | null = null;
     try {
-      modelConfig = getModel(servedModel);
+      modelConfig = getModel(servedModel, resolution.creds, hostTools);
     } catch {
       console.error(
         `[chat] model config unavailable for ${servedModel} — skipping fallback candidate`,
@@ -144,6 +243,8 @@ export async function POST(req: Request) {
     const useTools = modelConfig.supportsTools && !chatOnlyMode;
     const activeToolIds = resolveActiveToolIds(explicitToolIds, skillIds, kbId);
 
+    // One result for the prompt's section and the sendToChat tool.
+    const agentTargets = sendToChatTargets(openPanes, conversationId ?? "", useTools);
     const { text: finalSystemPrompt, sections } = await buildSystemPrompt({
       useTools,
       systemPrompt,
@@ -156,6 +257,8 @@ export async function POST(req: Request) {
       memoryDisabled,
       userId,
       mode: toolMode,
+      contextWindow: contextWindowFor(servedModel, modelConfig, contextLength),
+      agentTargets,
     });
 
     console.log(
@@ -165,7 +268,8 @@ export async function POST(req: Request) {
         `tools=${(sections.tools?.length || 0)}ch ` +
         `memory=${(sections.memory?.length || 0)}ch ` +
         `compressed=${(sections.compressed?.length || 0)}ch ` +
-        `kb=${(sections.kb?.length || 0)}ch`,
+        `kb=${(sections.kb?.length || 0)}ch ` +
+        `generativeUi=${(sections.generativeUi?.length || 0)}ch`,
     );
 
     const sanitizedMessages = normalizeMessageToolParts(
@@ -173,38 +277,37 @@ export async function POST(req: Request) {
         (m: any) => m && m.role !== "compression",
       ),
     );
-    const modelMessages = await convertToModelMessages(sanitizedMessages);
-
+    
     if (conversationId) {
       const lastMsg = messages[messages.length - 1];
       if (lastMsg?.role === "user") {
         const userText = extractText(lastMsg);
-        const lastSaved = await prisma.message.findFirst({
-          where: { conversationId, role: "user" },
-          orderBy: { createdAt: "desc" },
+        await saveUserMessage({
+          conversationId,
+          id: typeof lastMsg.id === "string" ? lastMsg.id : undefined,
+          text: userText,
+          parts: stripFileParts(lastMsg.parts || [{ type: "text", text: userText }]),
+          attachments: bodyAttachments,
         });
-        if (!lastSaved || lastSaved.content !== userText) {
-          await prisma.message.create({
-            data: {
-              ...(bodyUserMessageId ? { id: bodyUserMessageId } : {}),
-              conversationId,
-              role: "user",
-              content: userText,
-              parts: JSON.stringify(
-                stripFileParts(lastMsg.parts || [{ type: "text", text: userText }]),
-              ),
-              attachments:
-                Array.isArray(bodyAttachments) && bodyAttachments.length > 0
-                  ? JSON.stringify(bodyAttachments)
-                  : null,
-            },
-          });
-        }
       }
     }
 
+    // A tool answered in this request keeps needing approval for it (see toolsWithAnsweredApproval).
+    const answeredNow = new Set(toolsWithAnsweredApproval(sanitizedMessages));
     const aiTools: ToolSet = useTools
-      ? await buildTools({ activeToolIds, searchProvider, conversationId, userId, mode: toolMode })
+      ? await buildTools({
+          activeToolIds,
+          searchProvider,
+          conversationId,
+          userId,
+          mode: toolMode,
+          memoryDisabled,
+          agentTargets,
+          allowedTools: Array.isArray(bodyAllowedTools)
+            ? bodyAllowedTools.filter((t: unknown): t is string => typeof t === "string" && !answeredNow.has(t))
+            : [],
+          contextWindow: contextWindowFor(servedModel, modelConfig, contextLength),
+        })
       : {};
 
     const isOllama = servedModel.startsWith("ollama/");
@@ -213,7 +316,7 @@ export async function POST(req: Request) {
     // Ollama context window before the request if we're approaching the
     // current tier limit.
     if (isOllama && conversationId) {
-      const currentCtx = contextLength ?? 4096;
+      const currentCtx = contextLength ?? modelConfig.contextWindow;
       const promptTokens = estimatePromptTokens(
         finalSystemPrompt,
         sanitizedMessages,
@@ -236,23 +339,60 @@ export async function POST(req: Request) {
       }
     }
 
-    const ollamaOptions = isOllama
-      ? {
-          num_ctx: contextLength ?? modelConfig.contextWindow,
-          temperature,
-          top_p: topP ?? 0.9,
-          num_predict: maxTokens || -1,
-        }
-      : {};
+    // CLI-backed models take effort/folder/mode as provider options. The folder is
+    // re-checked every turn; chat mode is read-only there, agent mode may edit, and
+    // Ask lets Claude Code ask per change (its allow-for-chat list rides along).
+    const cliProvider = cliProviderForModel(servedModel);
+    if (!cliProvider) releaseCliRuns();
+    const cliCwd = workingFolder && (await isRunnableCwd(workingFolder)) ? workingFolder : "";
+    const providerOptions = providerOptionsFor({
+      modelId: servedModel,
+      numCtx: contextLength ?? modelConfig.contextWindow,
+      temperature,
+      topP,
+      maxTokens,
+      reasoningEffort,
+      cwd: cliCwd,
+      access: MODE_POLICY[toolMode].cli,
+      conversationId: conversationId ?? "",
+      userId,
+      allowedTools: Array.isArray(bodyAllowedTools)
+        ? bodyAllowedTools.filter((t: unknown): t is string => typeof t === "string" && CHAT_ALLOWABLE_TOOLS.has(t))
+        : [],
+    });
+
+    // Only main chats with tools get helpers. A helper runs on this same model, in this mode.
+    if (canStartSubAgents(settings.kind, useTools) && conversationId) {
+      const subAgents: SubAgentToolOptions = {
+        userId,
+        parentId: conversationId,
+        model: modelConfig,
+        mode: toolMode,
+        workingFolder,
+        providerOptions,
+        maxParallel: cliProvider ? 1 : 3,
+        activeChildren: new Set<string>(),
+      };
+      aiTools.runAgent = runAgentTool(aiTools, subAgents);
+      aiTools.messageAgent = messageAgentTool(aiTools, subAgents);
+    }
+
+    // Built after the tools, so a sub-agent's toModelOutput applies to saved history too.
+    const modelMessages = await convertToModelMessages(sanitizedMessages, { tools: aiTools });
 
     // Per-candidate retry loop (transient errors + Ollama context overflow).
     const RETRIES_PER_MODEL = 2;
-    // Tracks partial assistant output so we can persist it if the client
-    // stops the stream mid-generation (onFinish won't fire in that case).
-    let assistantPersisted = false;
+    // A last assistant message means this request continues it (a client-side tool round trip):
+    // the reply must replace that message in the client and update its row, not add a copy.
+    const lastIncoming = messages[messages.length - 1];
+    const continuing = lastIncoming?.role === "assistant" ? lastIncoming : null;
+    // The stream starts under this id and the reply is saved under it, so client and DB match.
+    const assistantMessageId = continuing?.id ?? generateId();
     let traceRecorded = false;
     let partialText = "";
-    const partialParts: any[] = [];
+    // Captured from streamText's onFinish so the later createUIMessageStream onFinish,
+    // which does the persisting, can still record real token usage.
+    let capturedFinishEvent: { steps: any[]; totalUsage?: any } | null = null;
     const partialToolOutputs = new Map<string, { name: string; input: any; start: number }>();
     // Per-tool observations (name/input/output/latency) collected during streaming.
     const toolCallsSeen: { toolName: string; input?: any; output?: any; ok: boolean; latencyMs?: number }[] = [];
@@ -260,113 +400,72 @@ export async function POST(req: Request) {
     for (let attempt = 0; attempt < RETRIES_PER_MODEL; attempt++) {
       try {
         partialText = "";
-        partialParts.length = 0;
         partialToolOutputs.clear();
         toolCallsSeen.length = 0;
         firstTokenAt = null;
+        // Queued messages delivered between steps, and their markers for the reply stream.
+        const injected: QueuedInjection[] = [];
+        const claimedIds: string[] = [];
+        const pendingMarkers: QueuedMarker[] = [];
         const result = streamText({
           model: modelConfig.model,
           system: finalSystemPrompt,
           messages: modelMessages,
           temperature,
           topP,
-          // Break the loop if the model calls the SAME tool with the SAME
-          // arguments twice in a row. llama3.2 in particular will keep
-          // re-issuing a failed tool call up to 3 times; we'd rather have
-          // a one-shot failure than an infinite retry storm.
-          prepareStep: ({ steps, stepNumber }) => {
-            if (steps.length < 2) return undefined;
-            const prev = steps[steps.length - 1] as {
-              toolCalls?: Array<{ toolName: string; input?: unknown; args?: unknown }>;
-            };
-            const prev2 = steps[steps.length - 2] as {
-              toolCalls?: Array<{ toolName: string; input?: unknown; args?: unknown }>;
-            };
-            if (!prev?.toolCalls?.length || !prev2?.toolCalls?.length) return undefined;
-            const a = prev.toolCalls[0];
-            const b = prev2.toolCalls[0];
-            if (a.toolName !== b.toolName) return undefined;
-            const aArgs = JSON.stringify(a.input ?? a.args ?? {});
-            const bArgs = JSON.stringify(b.input ?? b.args ?? {});
-            if (aArgs === bArgs) {
-              console.warn(
-                `[chat] Model called ${a.toolName} with identical args on ` +
-                  `steps ${stepNumber - 1} and ${stepNumber} — breaking loop.`,
-              );
-              throw new Error(
-                `Tool "${a.toolName}" was called twice with identical arguments. ` +
-                  `Stopping to avoid a retry loop.`,
-              );
-            }
-            return undefined;
-          },
-          stopWhen: ({ steps }) => {
-            if (steps.length >= maxToolCalls) return true;
-            const last = steps[steps.length - 1] as
-              | {
-                  text?: string;
-                  content?: Array<{ type: string }>;
-                  toolCalls?: unknown[];
-                  toolResults?: unknown[];
+          // Signs each approval request so a browser cannot change an approved tool's input.
+          experimental_toolApprovalSecret: process.env.AUTH_SECRET || undefined,
+          // Hard cap on response length: without it a looping model streams
+          // indefinitely and leaves the request permanently pending.
+          maxOutputTokens: maxTokens,
+          prepareStep: async ({ steps, stepNumber, messages: stepMessages }) => {
+            // Queued messages join the history before each step after the first. prepareStep's
+            // messages apply to one step only, so the delivered ones are re-added on every step.
+            if (conversationId && stepNumber > 0) {
+              const claimed = await claimQueued(conversationId);
+              // Stop came while the claim ran: no step will show these, so they go back.
+              if (req.signal.aborted) {
+                await releaseUnshown(claimed.map((q) => q.id), []);
+              } else {
+                for (const q of claimed) {
+                  claimedIds.push(q.id);
+                  const content = q.agent ? agentMessageModelText(q.agent, q.text) : q.text;
+                  injected.push({ at: stepMessages.length, message: { role: "user", content } });
+                  pendingMarkers.push({
+                    type: "data-queued-message",
+                    id: q.id,
+                    data: { queuedId: q.id, text: q.text, ...(q.agent ? { agent: q.agent } : {}) },
+                  });
                 }
-              | undefined;
-            if (!last) return true;
-            const text = (last.text ?? "").trim();
-            const hadToolResult =
-              (last.toolResults?.length ?? 0) > 0 ||
-              (last.content ?? []).some(
-                (p) => (p as { type?: string }).type === "tool-result",
-              );
-            // Break tool-only loops: if the model has done 2+ steps in a row
-            // with no text (only tool calls), stop so it doesn't exhaust its
-            // step budget on repeated searches without ever writing an answer.
-            if (steps.length >= 3) {
-              const recent = steps.slice(-3) as Array<{
-                text?: string;
-                toolCalls?: unknown[];
-              }>;
-              const allToolOnly = recent.every(
-                (s) => (s.text ?? "").trim().length < 20 && (s.toolCalls?.length ?? 0) > 0,
-              );
-              if (allToolOnly) {
-                console.warn(
-                  `[chat] 3 consecutive tool-only steps — stopping to avoid ` +
-                    `tool loop. Last text="${text.slice(0, 60).replace(/\n/g, " ")}"`,
-                );
-                return true;
               }
             }
-            // Local models (qwen3.5, llama3.1, etc.) often emit their chat
-            // template's stop token right after tool results, even after we've
-            // told them to "complete your response". The reliable workaround
-            // is to NOT honor that premature stop: keep the loop going, feed
-            // the model's own short text back in on the next step, and let it
-            // continue from where it cut off ("Based" → "Based on the …").
-            if (hadToolResult && text.length < 60) {
-              console.warn(
-                `[chat] Short response (${text.length} chars) after tool ` +
-                  `result — forcing continuation. text="${text.slice(0, 60).replace(/\n/g, " ")}"`,
-              );
-              return false;
-            }
-            // qwen and other small local models sometimes emit just "..." or a
-            // bare stop token with no tool call at all. Force one continuation
-            // on step 0/1 so the SDK can re-prompt; cap at 2 retries.
-            if (!hadToolResult && text.length < 30 && steps.length <= 2) {
-              console.warn(
-                `[chat] Near-empty response (${text.length} chars) with no tool ` +
-                  `call on step ${steps.length} — forcing continuation. ` +
-                  `text="${text.slice(0, 60).replace(/\n/g, " ")}"`,
-              );
-              return false;
-            }
-            return true;
+            // Forces a text-only step on a loop or the last allowed step, so a turn ends with an answer.
+            const guard = nextStepSettings({ steps, stepNumber, maxSteps: maxToolCalls, toolOnlyLimit: 3 });
+            if (!injected.length && !guard) return undefined;
+            return {
+              ...(injected.length ? { messages: withInjected(stepMessages, injected) } : {}),
+              ...guard,
+            };
+          },
+          // Ends at maxToolCalls, or after a step with no tool results (nothing left to read).
+          // The loop guard in prepareStep forces the answer; this stops only if a provider ignored that.
+          stopWhen: ({ steps }) => {
+            if (steps.length >= maxToolCalls) return true;
+            if (ignoredTextStep(steps, 3)) return true;
+            const last = steps[steps.length - 1] as
+              | { toolResults?: unknown[]; content?: Array<{ type: string }> }
+              | undefined;
+            if (!last) return true;
+            const hadToolResult =
+              (last.toolResults?.length ?? 0) > 0 ||
+              (last.content ?? []).some((p) => (p as { type?: string }).type === "tool-result");
+            return !hadToolResult;
           },
           tools: aiTools,
           toolChoice: "auto",
           maxRetries: 0,
           abortSignal: req.signal,
-          ...(isOllama ? { providerOptions: { ollama: ollamaOptions } } : {}),
+          ...(providerOptions ? { providerOptions } : {}),
           onChunk: ({ chunk }) => {
             if (chunk.type === "text-delta") {
               partialText += chunk.text;
@@ -377,14 +476,7 @@ export async function POST(req: Request) {
                 input: chunk.input ?? {},
                 start: Date.now(),
               });
-              partialParts.push({
-                type: `tool-${chunk.toolName}`,
-                toolCallId: chunk.toolCallId,
-                toolName: chunk.toolName,
-                input: chunk.input ?? {},
-                state: "output-available",
-              });
-            } else if (chunk.type === "tool-result") {
+            } else if (chunk.type === "tool-result" && !chunk.preliminary) {
               const meta = partialToolOutputs.get(chunk.toolCallId);
               const latencyMs = meta?.start ? Date.now() - meta.start : undefined;
               toolCallsSeen.push({
@@ -394,22 +486,13 @@ export async function POST(req: Request) {
                 ok: true,
                 latencyMs,
               });
-              const idx = partialParts.findIndex(
-                (p) => p.toolCallId === chunk.toolCallId,
-              );
-              if (idx >= 0 && partialParts[idx]) {
-                partialParts[idx] = {
-                  ...partialParts[idx],
-                  output: chunk.output,
-                  state: "result",
-                };
-              }
             }
           },
           onFinish: (event) => {
             if (!conversationId) return;
-            assistantPersisted = true;
-            safePersistAssistantMessage(event, { conversationId, model: servedModel, autoCompressThreshold, systemPrompt: finalSystemPrompt, messageId: bodyAssistantMessageId });
+            capturedFinishEvent = event;
+            // Persistence happens in createUIMessageStream's onFinish below, on the
+            // post-pipeJsonRender split — this raw text would reload as JSONL lines.
 
             const text = (event as { text?: string }).text ?? "";
             const stepCount =
@@ -473,8 +556,8 @@ export async function POST(req: Request) {
         console.log(
           `[chat] model=${servedModel} tools=${Object.keys(aiTools).join(",")} ` +
             `kbId=${kbId || "none"} activeToolIds=${[...activeToolIds].join(",")} ` +
-            `mode=${toolMode} chatOnlyMode=${chatOnlyMode} supportsTools=${modelConfig.supportsTools} ` +
-            `useTools=${useTools}`,
+            `mode=${toolMode} chatOnlyMode=${chatOnlyMode} ` +
+            `supportsTools=${modelConfig.supportsTools} useTools=${useTools}`,
         );
 
         // The AI SDK swallows stream errors into a generic "An error
@@ -482,48 +565,86 @@ export async function POST(req: Request) {
         // client. Auth failures happen mid-stream (after headers are already
         // sent, so the try/catch below never sees them) — surface a message
         // the user can actually act on instead of a silent/opaque toast.
-        const response = result.toUIMessageStreamResponse({
-          onError: (streamError) => {
-            const rawMsg =
-              streamError instanceof Error ? streamError.message : String(streamError);
-            console.error(`[chat] stream error on ${servedModel}:`, rawMsg);
-            return friendlyProviderErrorMessage(rawMsg, { servedModel, isOllama }) ?? rawMsg;
-          },
+        const onStreamError = (streamError: unknown) => {
+          const rawMsg =
+            streamError instanceof Error ? streamError.message : String(streamError);
+          console.error(`[chat] stream error on ${servedModel}:`, rawMsg);
+          return friendlyProviderErrorMessage(rawMsg, { servedModel, isOllama }) ?? rawMsg;
+        };
+
+        // Generative UI is always on, so every response goes through pipeJsonRender,
+        // which splits prose from JSONL patches into `text`/`data-spec` parts.
+        const response = createUIMessageStreamResponse({
+          stream: createUIMessageStream({
+            execute: ({ writer }) => {
+              // The inner stream's onFinish runs after the inner stream closes, so it can't write
+              // to it: it writes its "compressing" status to this outer one, which is still open.
+              writer.merge(
+                createUIMessageStream({
+                  execute: ({ writer: inner }) => {
+                    // `toUIMessageStream` needs its own onError: it turns `error` parts into
+                    // text itself, so createUIMessageStream's onError never sees them.
+                    inner.merge(
+                      pipeJsonRender(
+                        result
+                          .toUIMessageStream({ onError: onStreamError })
+                          .pipeThrough(queuedMarkerTransform(pendingMarkers)),
+                      ),
+                    );
+                  },
+                  onError: onStreamError,
+                  generateId: () => assistantMessageId,
+                  // Starts the stream under the continued message's id and builds its parts from it.
+                  originalMessages: messages,
+                  // Runs on a normal finish, an error and an abort (Stop). It is the only place the
+                  // reply is saved, and it is awaited: the stream closes only after the save and
+                  // any auto-compress, so the client's refresh sees the new compressedAt.
+                  onFinish: async ({ messages: finishedMessages, isAborted }) => {
+                    if (!conversationId) return;
+                    const last = finishedMessages[finishedMessages.length - 1];
+                    // Stopped before anything streamed: there is no reply to save.
+                    const nothingToSave = isAborted && !last?.parts.some((p) => p.type !== "step-start");
+                    // No captured event means the stream errored before finishing.
+                    const event = { steps: [], ...capturedFinishEvent };
+                    const saved =
+                      !nothingToSave &&
+                      (await safePersistAssistantMessage(event, {
+                        conversationId,
+                        model: servedModel,
+                        systemPrompt: finalSystemPrompt,
+                        messageId: assistantMessageId,
+                        updateExisting: !!continuing,
+                        // A stopped reply saves its open approval cards as denied, so they can't be answered later.
+                        overrideParts: isAborted ? denyOpenApprovals(last?.parts ?? []) : (last?.parts ?? []),
+                      }));
+                    // A claimed message counts as delivered only if the saved reply holds its marker;
+                    // a failed save releases every claim.
+                    await releaseUnshown(claimedIds, saved ? (last?.parts ?? []) : []).catch((e) =>
+                      console.error("[queue] releasing unshown messages failed:", e),
+                    );
+                    if (saved && canAutoCompress(event, isAborted)) {
+                      await autoCompress(
+                        conversationId,
+                        autoCompressThreshold ?? 85,
+                        modelConfig ? contextWindowFor(servedModel, modelConfig, contextLength) : null,
+                        () =>
+                        writer.write({ type: "data-compressing", data: true, transient: true }),
+                      );
+                    }
+                  },
+                }),
+              );
+            },
+            onError: onStreamError,
+          }),
         });
 
-        // If the client stops the generation, onFinish may not fire. Persist
-        // whatever partial content we've accumulated so it isn't lost on refresh.
+        // Stop: onFinish above saves the partial reply. This only records the trace, since
+        // streamText's own onFinish doesn't run on an abort.
         if (conversationId && req.signal) {
           req.signal.addEventListener(
             "abort",
             () => {
-              if (assistantPersisted) return;
-              assistantPersisted = true;
-              const parts =
-                partialParts.length > 0
-                  ? partialParts
-                  : partialText
-                    ? [{ type: "text", text: partialText }]
-                    : [];
-              if (parts.length === 0) return;
-              safePersistAssistantMessage(
-                {
-                  steps: [
-                    {
-                      text: partialText,
-                      toolCalls: partialParts
-                        .filter((p) => p.toolName)
-                        .map((p) => ({ toolCallId: p.toolCallId, toolName: p.toolName, input: p.input })),
-                      toolResults: partialParts
-                        .filter((p) => p.state === "result")
-                        .map((p) => ({ toolCallId: p.toolCallId, toolName: p.toolName, output: p.output })),
-                    },
-                  ],
-                  totalUsage: undefined,
-                },
-                { conversationId, model: servedModel, autoCompressThreshold, systemPrompt: finalSystemPrompt, messageId: bodyAssistantMessageId },
-              );
-
               if (!traceRecorded) {
                 traceRecorded = true;
                 const lastMsg = messages[messages.length - 1];
@@ -580,10 +701,11 @@ export async function POST(req: Request) {
           conversationId &&
           errMsg.includes("available context size")
         ) {
-          const nextCtx = getNextContextTier(contextLength ?? 4096);
+          const nextCtx = getNextContextTier(contextLength ?? modelConfig.contextWindow);
           if (nextCtx) {
             contextLength = nextCtx;
-            ollamaOptions.num_ctx = nextCtx;
+            // The same object the stream's providerOptions holds, so the retry sees the larger window.
+            if (providerOptions && "ollama" in providerOptions && providerOptions.ollama) providerOptions.ollama.num_ctx = nextCtx;
             console.log(
               `[ctx] ${conversationId} context overflow — retrying with ctx=${nextCtx}`,
             );
@@ -618,6 +740,7 @@ export async function POST(req: Request) {
     }
     throw lastError;
   } catch (error) {
+    releaseCliRuns();
     console.error("Chat API error:", error);
     const msg = error instanceof Error ? error.message : "Failed to process chat request";
     if (!traceRecorded) {

@@ -13,7 +13,7 @@ import { useToast } from "@/app/components/Toast";
 
 interface McpServer {
   id: string; name: string; url: string; authType: string;
-  authConfig?: string; hasAuthToken: boolean; enabled: boolean;
+  authConfig?: string; hasApiKey?: boolean; hasClientSecret?: boolean; hasAuthToken: boolean; enabled: boolean;
   errorMsg?: string | null; lastPingAt?: string | null; createdAt: string;
 }
 
@@ -128,9 +128,9 @@ export default function McpSettingsPage() {
     if (server.authConfig) {
       try {
         const cfg = JSON.parse(server.authConfig);
-        apiKey = cfg.apiKey || "";
+        apiKey = "";
         clientId = cfg.clientId || "";
-        clientSecret = cfg.clientSecret || "";
+        clientSecret = "";
         scopes = cfg.scopes || "";
       } catch {}
     }
@@ -151,9 +151,10 @@ export default function McpSettingsPage() {
       const authConfig: Record<string, string> = {};
       if (form.authType === "apikey" && form.apiKey) authConfig.apiKey = form.apiKey;
       if (form.authType === "oauth2") {
-        if (form.clientId) authConfig.clientId = form.clientId;
+        // Sent even when empty, so a cleared client ID or scopes field really clears it. An empty secret keeps the stored one.
+        authConfig.clientId = form.clientId;
         if (form.clientSecret) authConfig.clientSecret = form.clientSecret;
-        if (form.scopes) authConfig.scopes = form.scopes;
+        authConfig.scopes = form.scopes;
       }
       const body: Record<string, unknown> = {
         name: form.name.trim(), url: form.url.trim(), authType: form.authType,
@@ -182,6 +183,19 @@ export default function McpSettingsPage() {
     } catch (e) {
       toast(e instanceof Error ? e.message : "Save failed", "error");
     } finally { setSaving(false); }
+  }
+
+  /** Deletes a saved secret on purpose (an empty field only keeps it). */
+  async function removeSecret(key: "apiKey" | "clientSecret") {
+    if (!editingId) return;
+    const res = await fetch(`/api/mcp/servers/${editingId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ authConfig: { [key]: null } }),
+    });
+    if (res.ok) toast("Saved key removed", "success");
+    else toast("Couldn't remove the saved key", "error");
+    fetchServers();
   }
 
   async function handleAuthorizeAndConnect() {
@@ -393,8 +407,11 @@ export default function McpSettingsPage() {
                 <label className="block text-sm font-medium text-zinc-300 mb-1">Client Secret</label>
                 <input type="password" value={form.clientSecret}
                   onChange={(e) => setForm({ ...form, clientSecret: e.target.value })}
-                  placeholder="from your OAuth app"
+                  placeholder={editingId && servers.find((s) => s.id === editingId)?.hasClientSecret ? "Saved. Leave blank to keep it" : "from your OAuth app"}
                   className="w-full glass-input rounded-[var(--glass-radius-md)] px-3 py-2 text-sm" />
+                {editingId && servers.find((s) => s.id === editingId)?.hasClientSecret && (
+                  <button type="button" onClick={() => removeSecret("clientSecret")} className="mt-1 text-xs text-zinc-400 underline hover:text-zinc-200">Remove saved secret</button>
+                )}
               </div>
               <div>
                 <label className="block text-sm font-medium text-zinc-300 mb-1">Scopes</label>
@@ -490,7 +507,10 @@ export default function McpSettingsPage() {
                   <label className="block text-sm font-medium text-zinc-300 mb-1">API Key</label>
                   <input type="password" value={form.apiKey}
                     onChange={(e) => setForm({ ...form, apiKey: e.target.value })}
-                    placeholder="sk-..." className="w-full glass-input rounded-[var(--glass-radius-md)] px-3 py-2 text-sm" />
+                    placeholder={editingId && servers.find((s) => s.id === editingId)?.hasApiKey ? "Saved. Leave blank to keep it" : "sk-..."} className="w-full glass-input rounded-[var(--glass-radius-md)] px-3 py-2 text-sm" />
+                  {editingId && servers.find((s) => s.id === editingId)?.hasApiKey && (
+                    <button type="button" onClick={() => removeSecret("apiKey")} className="mt-1 text-xs text-zinc-400 underline hover:text-zinc-200">Remove saved key</button>
+                  )}
                 </div>
               )}
 

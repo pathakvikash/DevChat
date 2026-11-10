@@ -1,10 +1,13 @@
-/** Chat gets read-only tools, Agent also gets the ones that write. */
-export type ChatMode = "chat" | "agent";
+import type { ChatMode } from "@/lib/chat/modes";
+
+export type { ChatMode };
 
 export interface Conversation {
   id: string;
   title: string;
   model: string;
+  kind?: "main" | "side" | "subagent";
+  parentId?: string | null;
   persona?: string;
   systemPrompt?: string;
   kbId?: string;
@@ -17,8 +20,13 @@ export interface Conversation {
   note?: string;
   chatOnlyMode?: boolean;
   memoryDisabled?: boolean;
+  generativeUiEnabled?: boolean;
+  temporary?: boolean;
+  forkedFrom?: { id: string; title: string } | null;
   maxToolCalls?: number;
   fallbackModel?: string | null;
+  reasoningEffort?: string | null;
+  workingFolder?: string | null;
   compressedSummary?: string;
   compressedAt?: string;
   compressedBeforeTokens?: number;
