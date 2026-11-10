@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Plus, Search, Trash2, Edit2, Sparkles, Loader2, Pin, Archive, X, MoreHorizontal, CheckSquare, Square, CheckCheck, User as UserIcon, Columns2 } from "lucide-react";
+import { Plus, Search, Trash2, Edit2, Sparkles, Loader2, Pin, Archive, X, MoreHorizontal, CheckSquare, Square, CheckCheck, User as UserIcon, Columns2, Workflow, Table2 } from "lucide-react";
 import { useSession } from "next-auth/react";
 import { useSidebar } from "@/app/contexts/SidebarContext";
 import { useChatModeOptional } from "@/app/contexts/ChatModeContext";
@@ -350,6 +350,23 @@ export default function Sidebar() {
           <Plus size={18} />
           New Chat
         </motion.button>
+        <div className="mt-2 flex gap-2">
+          {[
+            { href: "/workflows", label: "Workflows", Icon: Workflow },
+            { href: "/tables", label: "Tables", Icon: Table2 },
+          ].map(({ href, label, Icon }) => (
+            <Link
+              key={href}
+              href={href}
+              onClick={close}
+              aria-current={pathname?.startsWith(href) ? "page" : undefined}
+              className="glass-button focus-ring flex h-8 flex-1 items-center justify-center gap-1.5 rounded-[var(--glass-radius-md)] text-xs aria-[current=page]:font-semibold aria-[current=page]:border-[var(--glass-border-strong)]"
+            >
+              <Icon size={14} />
+              {label}
+            </Link>
+          ))}
+        </div>
       </div>
 
       {/* Search */}
