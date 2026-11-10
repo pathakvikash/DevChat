@@ -111,6 +111,26 @@ describe("safeFetch", () => {
     await expect(safeFetch("https://example.test/a")).rejects.toThrow(/Too many redirects/);
   });
 
+  it("drops Authorization on a redirect to another origin, keeps it on the same origin", async () => {
+    const headers = { Authorization: "Bearer t", "User-Agent": "x" };
+    reply = (n) => (n === 1 ? { status: 302, headers: { location: "https://other.test/b" } } : n === 2 ? { status: 302, headers: { location: "https://example.test/c" } } : { body: "ok" });
+    await safeFetch("https://example.test/a", { headers });
+    expect(sent[0].opts.headers.Authorization).toBe("Bearer t");
+    expect(sent[1].opts.headers.Authorization).toBeUndefined();
+    expect(sent[2].opts.headers.Authorization).toBeUndefined(); // stays off even when it comes back
+    expect(sent[2].opts.headers["User-Agent"]).toBe("x");
+    sent.length = 0;
+    reply = (n) => (n === 1 ? { status: 302, headers: { location: "/b" } } : { body: "ok" });
+    await safeFetch("https://example.test/a", { headers });
+    expect(sent[1].opts.headers.Authorization).toBe("Bearer t");
+  });
+
+  it("drops Authorization on an https to http redirect of the same host (a different origin)", async () => {
+    reply = (n) => (n === 1 ? { status: 302, headers: { location: "http://example.test/b" } } : { body: "ok" });
+    await safeFetch("https://example.test/a", { headers: { authorization: "Bearer t" } });
+    expect(sent[1].opts.headers.authorization).toBeUndefined();
+  });
+
   it("fails on a body over the cap, or cuts it when asked to truncate", async () => {
     reply = () => ({ body: "x".repeat(5000) });
     await expect(safeFetch("https://example.test/a", { maxBytes: 1000 })).rejects.toThrow(/over/);
