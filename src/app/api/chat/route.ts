@@ -61,8 +61,9 @@ import { requireUserId } from "@/lib/auth";
 import { canUseHostTools, HOST_TOOLS_REFUSED } from "@/lib/hostAccess";
 import { effectiveToolMode, isChatMode, MODE_POLICY, toolsWithAnsweredApproval } from "@/lib/chat/modes";
 
-// A helper run can take minutes: the 5-minute limit plus the parent's own steps.
-export const maxDuration = 600;
+// A helper run can take minutes. 300 s is the most Vercel Hobby allows (with Fluid compute on), so on Vercel a helper
+// near its own 5-minute limit can be cut off; a local server has no limit.
+export const maxDuration = 300;
 
 export async function POST(req: Request) {
   const requestStartedAt = Date.now();
