@@ -3,7 +3,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 const safeFetch = vi.fn();
 vi.mock("@/lib/net/safeFetch", () => ({ safeFetch: (...a: unknown[]) => safeFetch(...a) }));
 
-import { githubAuthHeaders, githubRateLimitHint } from "@/lib/net/github";
+import { githubAuthHeaders, httpErrorText } from "@/lib/net/github";
 
 const API = "https://api.github.com/repos/o/r";
 const repoRes = (body: unknown, status = 200) => ({ status, ok: status === 200, url: API, contentType: "application/json", text: typeof body === "string" ? body : JSON.stringify(body) });
@@ -38,27 +38,35 @@ describe("githubAuthHeaders", () => {
     "https://api.github.com/user",
     "https://api.github.com/search/repositories?q=x",
     "https://api.github.com/repos/o",
+    "https://api.github.com/repos/o/r/actions/variables",
+    "https://api.github.com/repos/o/r/hooks",
+    "https://api.github.com/repos/o/r/collaborators",
+    "https://api.github.com/repos/o/r/contentsx",
     "not a url",
   ])("gives {} for %s without any request", async (url) => {
     expect(await githubAuthHeaders(url)).toEqual({});
     expect(safeFetch).not.toHaveBeenCalled();
   });
 
-  it("sends the trimmed token for a public repo, and caches the verdict", async () => {
+  it("sends the trimmed token for the explainer paths of a public repo", async () => {
     safeFetch.mockResolvedValue(repoRes({ private: false, visibility: "public" }));
     const url = fresh();
-    expect(await githubAuthHeaders(url)).toEqual({ Authorization: "Bearer ghp_secret" });
-    expect(await githubAuthHeaders(`${url}/git/trees/main?recursive=1`)).toEqual({ Authorization: "Bearer ghp_secret" });
-    expect(await githubAuthHeaders(url.toUpperCase().replace("HTTPS://API.GITHUB.COM/REPOS", "https://api.github.com/repos"))).toEqual({ Authorization: "Bearer ghp_secret" });
-    expect(safeFetch).toHaveBeenCalledTimes(1);
+    for (const p of ["", "/git/trees/main?recursive=1", "/contents", "/contents/src/a.ts", "/readme", "/readme/docs"]) {
+      expect(await githubAuthHeaders(url + p)).toEqual({ Authorization: "Bearer ghp_secret" });
+    }
   });
 
-  it("gives {} for a private repo, and caches that too", async () => {
-    safeFetch.mockResolvedValue(repoRes({ private: true, visibility: "private" }));
+  it("checks visibility on every call, so a repo turned private is not served from memory", async () => {
     const url = fresh();
+    safeFetch.mockResolvedValueOnce(repoRes({ private: false })).mockResolvedValueOnce(repoRes({ private: true }));
+    expect(await githubAuthHeaders(url)).toEqual({ Authorization: "Bearer ghp_secret" });
     expect(await githubAuthHeaders(url)).toEqual({});
-    expect(await githubAuthHeaders(url)).toEqual({});
-    expect(safeFetch).toHaveBeenCalledTimes(1);
+    expect(safeFetch).toHaveBeenCalledTimes(2);
+  });
+
+  it("gives {} for a private repo", async () => {
+    safeFetch.mockResolvedValue(repoRes({ private: true, visibility: "private" }));
+    expect(await githubAuthHeaders(fresh())).toEqual({});
   });
 
   it("gives {} unless private is false and visibility, when present, is public", async () => {
@@ -86,23 +94,30 @@ describe("githubAuthHeaders", () => {
   });
 });
 
-describe("githubRateLimitHint", () => {
+describe("httpErrorText", () => {
+  const body = JSON.stringify({ message: "API rate limit exceeded for 1.2.3.4" });
+
   it("points at GITHUB_TOKEN when none is set", () => {
     delete process.env.GITHUB_TOKEN;
-    expect(githubRateLimitHint(403, API, "API rate limit exceeded for 1.2.3.4")).toMatch(/set GITHUB_TOKEN/);
-    expect(githubRateLimitHint(429, API, "secondary Rate Limit")).toMatch(/set GITHUB_TOKEN/);
+    expect(httpErrorText(403, API, body, false)).toMatch(/^HTTP 403: API rate limit exceeded.*set GITHUB_TOKEN.* for https:/);
+    expect(httpErrorText(429, API, JSON.stringify({ message: "secondary Rate Limit" }), false)).toMatch(/set GITHUB_TOKEN/);
   });
 
-  it("says the token's limit is used up when one is set", () => {
-    const h = githubRateLimitHint(403, API, "API rate limit exceeded");
-    expect(h).toMatch(/GITHUB_TOKEN's hourly limit/);
-    expect(h).not.toMatch(/ghp_secret/);
+  it("says the token's limit is used up when the request carried it", () => {
+    const t = httpErrorText(403, API, body, true);
+    expect(t).toMatch(/GITHUB_TOKEN's hourly limit/);
+    expect(t).not.toMatch(/ghp_secret/);
   });
 
-  it("stays empty for other statuses, hosts and messages", () => {
-    expect(githubRateLimitHint(404, API, "rate limit")).toBe("");
-    expect(githubRateLimitHint(403, "https://example.test/x", "rate limit")).toBe("");
-    expect(githubRateLimitHint(403, API, "Forbidden")).toBe("");
-    expect(githubRateLimitHint(403, "nope", "rate limit")).toBe("");
+  it("adds no hint when the token is set but was not used for this request", () => {
+    expect(httpErrorText(403, API, body, false)).toBe(`HTTP 403: API rate limit exceeded for 1.2.3.4 for ${API}`);
+  });
+
+  it("keeps the message for any host, hints only for GitHub rate limits", () => {
+    delete process.env.GITHUB_TOKEN;
+    expect(httpErrorText(404, "https://a.test/x", JSON.stringify({ message: "Not Found" }), false)).toBe("HTTP 404: Not Found for https://a.test/x");
+    expect(httpErrorText(403, "https://a.test/x", body, false)).not.toMatch(/GITHUB_TOKEN/);
+    expect(httpErrorText(404, API, body, false)).not.toMatch(/GITHUB_TOKEN/);
+    expect(httpErrorText(500, API, "<html>", false)).toBe(`HTTP 500 for ${API}`);
   });
 });
