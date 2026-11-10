@@ -5,6 +5,7 @@ import { embed, scoreDocumentChunks, type ScoredChunk } from "@/lib/rag";
 import { parseDataArtifact } from "@/lib/generativeUi/data";
 import { evaluate } from "mathjs";
 import { safeFetch } from "@/lib/net/safeFetch";
+import { githubAuthHeaders, githubRateLimitHint } from "@/lib/net/github";
 import { readableText } from "@/lib/net/htmlText";
 
 /**
@@ -162,6 +163,7 @@ export const TOOL_REGISTRY: Record<string, ToolDefinition> = {
       try {
         const res = await safeFetch(url, {
           headers: {
+            ...(await githubAuthHeaders(url)),
             "User-Agent":
               "Mozilla/5.0 (compatible; VAS/1.0; +https://github.com/anthropics/claude-code)",
             Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
@@ -169,7 +171,16 @@ export const TOOL_REGISTRY: Record<string, ToolDefinition> = {
           timeoutMs: 10_000,
           truncate: true,
         });
-        if (!res.ok) return `HTTP ${res.status} for ${url}`;
+        if (!res.ok) {
+          let why = "";
+          try {
+            const m = JSON.parse(res.text)?.message;
+            if (typeof m === "string") why = `: ${m.slice(0, 200)}${githubRateLimitHint(res.status, url, m)}`;
+          } catch {
+            // not JSON: the status alone
+          }
+          return `HTTP ${res.status}${why} for ${url}`;
+        }
         const ctype = res.contentType;
         const raw = res.text;
         if (ctype.includes("application/json")) {
