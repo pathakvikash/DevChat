@@ -525,7 +525,7 @@ This needs no `instrumentation.ts`. Hot reload in dev keeps the run alive, becau
 - **Provider options.** Move `src/app/api/chat/route.ts:340-369` into `providerOptionsFor(modelId, modelConfig, { cwd, access, userId, … })` in a new `src/lib/chat/providerOptions.ts`. The chat route calls it with no change in behaviour. Workflows get:
   - Ollama: `num_ctx` set to the model's window.
   - CLI: `access: "chat"` and no `cwd`, which means a sandboxed scratch folder.
-  - Phase 6: a card with a folder that passes `isRunnableCwd` (checked at run time) gets that `cwd`, and `access: "agent"` only when `allowEdits` is on.
+  - Phase 6: a card with a folder that passes `isAllowedFolder` (checked at run time) gets that `cwd`, and `access: "agent"` only when `allowEdits` is on.
 - **Tools.**
   - Built with `buildTools({ activeToolIds: new Set(card.tools), mode: "agent", userId, searchProvider, memoryDisabled: true, contextWindow })` (`buildTools.ts:112`).
   - Afterwards, any id that is not in the allowlist, or is in `BLOCKED`, is removed. `BLOCKED` is `executeCode`, `sendToChat`, `askClarification`, `presentPlan`, `runAgent`, `messageAgent`, the artifact tools, the todo tools and the memory tools.
@@ -775,7 +775,7 @@ The existing `/api/models`, `/api/registry` and `/api/mcp/servers/[id]/tools` ro
 ### 10.1 Owner gate
 
 - CLI models and folders run as the server's OS user. `canUseHostTools` is checked at run start and again before each CLI card, so access is refused at run time, not only when the flow is saved.
-- `isRunnableCwd` (`src/lib/claude/sessions.ts:173`) is checked again when a run uses a folder.
+- `isAllowedFolder` (`src/lib/folders.ts`) is checked again when a run uses a folder.
 - Edits need a folder, the `allowEdits` toggle on that card, and owner status.
 - CLI children keep the existing `childEnv` secret stripping.
 
@@ -956,7 +956,7 @@ Sanity mode uses no network and no real model, following the precedent at `src/l
 
 **Files:** `cards/mcpTool.ts`; the agent card's MCP section and warning; `folder` and `allowEdits` for CLI cards, owner-only, with `WorkingFolderPicker`.
 
-**Vitest:** another user's or a disabled server is refused; `isError` fails the item; a folder outside `runnableCwds` fails at run time; `allowEdits` → access `agent`, otherwise `chat`.
+**Vitest:** another user's or a disabled server is refused; `isError` fails the item; a folder outside `isAllowedFolder` fails at run time; `allowEdits` → access `agent`, otherwise `chat`.
 
 **e2e:** the warning text appears when MCP and `fetchUrl` are both ticked. Live-only `@live` check: Codex with a folder.
 

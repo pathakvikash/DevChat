@@ -1,6 +1,6 @@
 import { generateText, type Tool } from "ai";
 import { prisma } from "@/lib/db";
-import { isRunnableCwd } from "@/lib/claude/sessions";
+import { folderGoneMessage, isAllowedFolder } from "@/lib/folders";
 import { listServerTools } from "@/lib/mcp/client";
 import { buildTools, mcpToolId } from "@/lib/chat/buildTools";
 import { requireOwner } from "./mcpTool";
@@ -80,15 +80,15 @@ export async function resolveMcpTools(userId: string, wanted: string[]): Promise
   return wanted;
 }
 
-/** CLI folder and access for a card (6.10, 10.1): a folder only counts when Claude Code has worked in it, and edits need one. */
-export async function cliFolderAccess(config: Record<string, unknown>): Promise<{ cwd: string; access: "chat" | "agent" }> {
+/** CLI folder and access for a card (6.10, 10.1): a folder only counts while it is in the user's folder list, and edits need one. */
+export async function cliFolderAccess(config: Record<string, unknown>, userId: string): Promise<{ cwd: string; access: "chat" | "agent" }> {
   const folder = String(config.folder ?? "");
   const allowEdits = config.allowEdits === true;
   if (!folder) {
     if (allowEdits) throw new Error("Allow edits needs a working folder");
     return { cwd: "", access: "chat" };
   }
-  if (!(await isRunnableCwd(folder))) throw new Error(`${folder} isn't a folder DevChat can use. Pick one Claude Code has worked in`);
+  if (!(await isAllowedFolder(userId, folder))) throw new Error(folderGoneMessage(folder));
   return { cwd: folder, access: allowEdits ? "agent" : "chat" };
 }
 
@@ -209,7 +209,7 @@ export const agentCard: CardImpl = {
       : {};
     const tools = filterTools(built, toolIds, mcpIds);
     // Re-checked on every call: the owner gate (resolveAgentModel) and the folder list can change between cards.
-    const { cwd, access } = cliProviderForModel(model.id) ? await cliFolderAccess(config) : { cwd: "", access: "chat" as const };
+    const { cwd, access } = cliProviderForModel(model.id) ? await cliFolderAccess(config, userId) : { cwd: "", access: "chat" as const };
     const providerOptions = providerOptionsFor({
       modelId: model.id,
       numCtx: model.contextWindow,

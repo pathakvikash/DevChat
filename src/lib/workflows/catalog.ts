@@ -204,7 +204,7 @@ const agent: CardDef = {
     tools: z.array(z.enum(AGENT_TOOL_IDS)).default([]),
     /** Owner only. Ids like mcp_<server>_<tool>, checked at run time against the user's enabled servers. The enum above stays closed. */
     mcpTools: z.array(z.string().regex(/^mcp_.{1,200}$/)).max(20).default([]),
-    /** Owner only, CLI models only: a folder Claude Code has worked in, and whether the model may change files in it. */
+    /** Owner only, CLI models only: a folder from the user's folder list, and whether the model may change files in it. */
     folder: z.string().max(1000).default(""),
     allowEdits: z.boolean().default(false),
     outputFields: z.array(outputFieldSchema).default([]),

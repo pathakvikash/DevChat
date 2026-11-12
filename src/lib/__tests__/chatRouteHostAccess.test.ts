@@ -35,7 +35,7 @@ vi.mock("@/lib/chat/saveUserMessage", () => ({ saveUserMessage: vi.fn() }));
 vi.mock("@/lib/chat/persistAssistantMessage", () => ({ safePersistAssistantMessage: vi.fn() }));
 vi.mock("@/lib/chat/autoCompress", () => ({ autoCompress: vi.fn(), canAutoCompress: vi.fn(() => false) }));
 vi.mock("@/lib/observability", () => ({ recordTrace: vi.fn().mockResolvedValue(undefined) }));
-vi.mock("@/lib/claude/sessions", () => ({ isRunnableCwd: vi.fn(async () => false) }));
+vi.mock("@/lib/folders", () => ({ isAllowedFolder: vi.fn(async () => false), folderGoneMessage: (f: string) => `${f} isn't one of your folders any more.` }));
 vi.mock("@/lib/cliProviders", () => ({
   cliProviderForModel: vi.fn((id: string) => (id.startsWith("claude-code/") ? { id: "claude-code" } : undefined)),
   dropParkedRuns: vi.fn(),
@@ -53,6 +53,7 @@ import { getModel } from "@/lib/models";
 import { buildTools } from "@/lib/chat/buildTools";
 import { dropParkedRuns } from "@/lib/cliProviders";
 import { resetHostAccessCache } from "@/lib/hostAccess";
+import { isAllowedFolder } from "@/lib/folders";
 const db = prisma as any;
 
 const row = (extra: Record<string, unknown> = {}) => ({
@@ -102,6 +103,22 @@ describe("POST /api/chat: CLI models belong to the server's owner", () => {
     const res = await send("claude-code/default");
     expect(res.status).toBe(200);
     expect(db.user.findUnique).not.toHaveBeenCalled();
+  });
+
+  it("a chat whose folder is no longer allowed gets a 400 with the message and no model call", async () => {
+    db.conversation.findUnique.mockResolvedValue(row({ workingFolder: "/work/gone" }));
+    const res = await POST(new Request("http://localhost/api/chat", { method: "POST", body: JSON.stringify({ conversationId: "c1", model: "mock/chat", messages: [userMessage] }) }) as any);
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toMatch(/isn't one of your folders any more/);
+    expect(getModel).not.toHaveBeenCalled();
+  });
+
+  it("a non-owner's leftover folder is ignored on a hosted model: no 400, no folder check", async () => {
+    process.env.OWNER_EMAILS = "owner@example.com";
+    db.conversation.findUnique.mockResolvedValue(row({ workingFolder: "/work/gone" }));
+    const res = await POST(new Request("http://localhost/api/chat", { method: "POST", body: JSON.stringify({ conversationId: "c1", model: "mock/chat", messages: [userMessage] }) }) as any);
+    expect(res.status).toBe(200);
+    expect(isAllowedFolder).not.toHaveBeenCalled();
   });
 
   it("still serves a non-owner on a hosted model, without host tools", async () => {

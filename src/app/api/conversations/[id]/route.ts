@@ -1,7 +1,7 @@
 import { prisma } from "@/lib/db";
 import { NextRequest, NextResponse } from "next/server";
 import { requireUserId } from "@/lib/auth";
-import { isRunnableCwd } from "@/lib/claude/sessions";
+import { addFolder, isAllowedFolder } from "@/lib/folders";
 import { deleteTraces } from "@/lib/temporaryChat";
 import { dropParkedRuns } from "@/lib/cliProviders";
 import { canUseHostTools, HOST_TOOLS_REFUSED } from "@/lib/hostAccess";
@@ -53,19 +53,17 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       return NextResponse.json({ error: "memoryDisabled must be a boolean" }, { status: 400 });
     }
 
-    // A working folder lets a CLI-backed model read (or, in agent mode, edit)
-    // files there, so it is confined to folders Claude Code already knows,
-    // and to the server's owner: the folder list is the owner's home directory.
+    // A working folder lets a model read (or, with a CLI model in agent mode, edit) files there,
+    // so it must be one of the owner's folders (added by them, or known to Claude Code).
     if (workingFolder) {
       if (!(await canUseHostTools(userId))) {
         return NextResponse.json({ error: HOST_TOOLS_REFUSED }, { status: 403 });
       }
-      if (!(await isRunnableCwd(workingFolder))) {
-        return NextResponse.json(
-          { error: "Working folder must be one of your Claude Code project folders" },
-          { status: 400 },
-        );
+      if (!(await isAllowedFolder(userId, workingFolder))) {
+        return NextResponse.json({ error: "Add this folder first: pick Choose folder… in the folder picker." }, { status: 400 });
       }
+      // Remember it: Claude Code prunes old transcripts, which would drop the folder from the list.
+      await addFolder(userId, workingFolder).catch(() => {});
     }
 
     if (kbId) {

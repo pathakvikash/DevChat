@@ -49,7 +49,7 @@ import {
 import { resolveChatSettings } from "@/lib/chat/resolveChatSettings";
 import { resolveModelCandidates } from "@/lib/chat/resolveModelCandidates";
 import { cliProviderForModel, dropParkedRuns } from "@/lib/cliProviders";
-import { isRunnableCwd } from "@/lib/claude/sessions";
+import { folderGoneMessage, isAllowedFolder } from "@/lib/folders";
 import { recordTrace } from "@/lib/observability";
 import { providerOptionsFor } from "@/lib/chat/providerOptions";
 import {
@@ -226,6 +226,16 @@ export async function POST(req: Request) {
         { status: 403, headers: { "Content-Type": "application/json" } },
       );
     }
+    // A user without host access ignores a folder set before they lost it (they can't act on a "pick another" message).
+    // Side chats inherit the parent's folder, so they get this check too.
+    const folder = hostTools ? workingFolder : undefined;
+    if (folder && !(await isAllowedFolder(userId, folder))) {
+      releaseCliRuns();
+      return new Response(JSON.stringify({ error: folderGoneMessage(folder) }), {
+        status: 400,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
 
     let lastError: unknown;
     for (const servedModel of candidateModels) {
@@ -343,7 +353,7 @@ export async function POST(req: Request) {
     // Ask lets Claude Code ask per change (its allow-for-chat list rides along).
     const cliProvider = cliProviderForModel(servedModel);
     if (!cliProvider) releaseCliRuns();
-    const cliCwd = workingFolder && (await isRunnableCwd(workingFolder)) ? workingFolder : "";
+    const cliCwd = folder ?? "";
     const providerOptions = providerOptionsFor({
       modelId: servedModel,
       numCtx: contextLength ?? modelConfig.contextWindow,
@@ -367,7 +377,7 @@ export async function POST(req: Request) {
         parentId: conversationId,
         model: modelConfig,
         mode: toolMode,
-        workingFolder,
+        workingFolder: folder,
         providerOptions,
         maxParallel: cliProvider ? 1 : 3,
         activeChildren: new Set<string>(),

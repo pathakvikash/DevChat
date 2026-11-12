@@ -34,7 +34,7 @@ vi.mock("@/lib/chat/saveUserMessage", () => ({ saveUserMessage: vi.fn() }));
 vi.mock("@/lib/chat/persistAssistantMessage", () => ({ safePersistAssistantMessage: vi.fn() }));
 vi.mock("@/lib/chat/autoCompress", () => ({ autoCompress: vi.fn(), canAutoCompress: vi.fn(() => false) }));
 vi.mock("@/lib/observability", () => ({ recordTrace: vi.fn().mockResolvedValue(undefined) }));
-vi.mock("@/lib/claude/sessions", () => ({ isRunnableCwd: vi.fn(async () => false) }));
+vi.mock("@/lib/folders", () => ({ isAllowedFolder: vi.fn(async () => false), folderGoneMessage: (f: string) => `${f} isn't one of your folders any more.` }));
 vi.mock("@/lib/cliProviders", () => ({ cliProviderForModel: vi.fn(() => undefined), dropParkedRuns: vi.fn() }));
 vi.mock("ai", async (importOriginal) => ({
   ...(await importOriginal<typeof import("ai")>()),

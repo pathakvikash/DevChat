@@ -11,13 +11,8 @@ import {
   RotateCcw,
   Terminal,
 } from "lucide-react";
-
-interface ClaudeProject {
-  slug: string;
-  cwd: string;
-  sessionCount: number;
-  lastActive: string | null;
-}
+import WorkingFolderPicker from "@/app/components/conversation/WorkingFolderPicker";
+import { useFolders } from "@/app/hooks/useFolders";
 
 interface ClaudeSession {
   id: string;
@@ -112,12 +107,14 @@ function eventToLines(ev: any): LogLine[] {
 }
 
 export default function ClaudeRunner() {
-  const [projects, setProjects] = useState<ClaudeProject[]>([]);
+  const { folders, loaded: foldersLoaded } = useFolders();
   const [sessions, setSessions] = useState<ClaudeSession[]>([]);
   const [loadingMeta, setLoadingMeta] = useState(true);
 
   const [prompt, setPrompt] = useState("");
-  const [cwd, setCwd] = useState("");
+  // undefined = not picked yet, so the first folder in the list is the default.
+  const [picked, setPicked] = useState<string | null | undefined>(undefined);
+  const cwd = picked === undefined ? (folders[0]?.path ?? "") : (picked ?? "");
   const [mode, setMode] = useState<PermissionMode>("plan");
   const [resumeId, setResumeId] = useState<string | null>(null);
 
@@ -131,11 +128,9 @@ export default function ClaudeRunner() {
       const res = await fetch("/api/claude-system/sessions?limit=40");
       if (!res.ok) throw new Error("failed");
       const data = await res.json();
-      setProjects(data.projects ?? []);
       setSessions(data.sessions ?? []);
-      setCwd((prev) => prev || data.projects?.[0]?.cwd || "");
     } catch {
-      setProjects([]);
+      setSessions([]);
     } finally {
       setLoadingMeta(false);
     }
@@ -225,10 +220,8 @@ export default function ClaudeRunner() {
         <h2 className="text-lg font-semibold text-[var(--foreground)]">Run Claude Code</h2>
       </div>
 
-      {!loadingMeta && projects.length === 0 && (
-        <div className="text-sm text-zinc-400">
-          No Claude Code projects found under <code>~/.claude/projects</code>.
-        </div>
+      {foldersLoaded && folders.length === 0 && (
+        <div className="text-sm text-zinc-400">No folders yet. Use Choose folder… to add one.</div>
       )}
 
       <textarea
@@ -241,23 +234,18 @@ export default function ClaudeRunner() {
       />
 
       <div className="grid gap-3 sm:grid-cols-2">
-        <label className="block">
+        <div>
           <span className="text-xs text-zinc-400 flex items-center gap-1.5 mb-1">
             <FolderOpen size={12} /> Folder
           </span>
-          <select
-            value={cwd}
-            onChange={(e) => setCwd(e.target.value)}
+          <WorkingFolderPicker
+            label="Folder"
+            value={cwd || null}
+            onChange={setPicked}
             disabled={running}
-            className="w-full glass-surface rounded-[var(--glass-radius-md)] px-3 py-2 text-sm text-[var(--foreground)] outline-none disabled:opacity-50"
-          >
-            {projects.map((p) => (
-              <option key={p.slug} value={p.cwd}>
-                {shortPath(p.cwd)}
-              </option>
-            ))}
-          </select>
-        </label>
+            className="flex items-center gap-2 w-full glass-surface rounded-[var(--glass-radius-md)] px-3 py-2 text-sm text-[var(--foreground)]"
+          />
+        </div>
 
         <label className="block">
           <span className="text-xs text-zinc-400 mb-1 block">Permissions</span>
@@ -318,6 +306,7 @@ export default function ClaudeRunner() {
             <Play size={14} /> Run
           </button>
         )}
+        {!running && !cwd && <span className="text-xs text-zinc-400">Pick a folder to run in.</span>}
         {running && (
           <span className="flex items-center gap-1.5 text-xs text-zinc-400">
             <Loader2 size={12} className="animate-spin" /> working…
@@ -375,7 +364,7 @@ export default function ClaudeRunner() {
                 disabled={running || !s.cwd}
                 onClick={() => {
                   setResumeId(s.id);
-                  if (s.cwd) setCwd(s.cwd);
+                  if (s.cwd) setPicked(s.cwd);
                   window.scrollTo({ top: 0, behavior: "smooth" });
                 }}
                 className="shrink-0 flex items-center gap-1.5 glass-button rounded-[var(--glass-radius-sm)] px-2.5 py-1 text-xs text-[var(--foreground)] disabled:opacity-40 disabled:cursor-not-allowed"

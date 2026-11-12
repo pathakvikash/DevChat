@@ -1,6 +1,6 @@
 import { spawn } from "child_process";
 import { requireUserId } from "@/lib/auth";
-import { isRunnableCwd } from "@/lib/claude/sessions";
+import { isAllowedFolder } from "@/lib/folders";
 import { childEnv } from "@/lib/cliProviders";
 import { canUseHostTools, HOST_TOOLS_REFUSED } from "@/lib/hostAccess";
 
@@ -48,9 +48,9 @@ export async function POST(req: Request) {
   if (!prompt) return bad("prompt is required");
   if (!cwd) return bad("cwd is required");
 
-  // Confined to known project dirs so a crafted path can't run somewhere odd.
-  if (!(await isRunnableCwd(cwd))) {
-    return bad("cwd is not one of the known Claude Code project directories", 403);
+  // Confined to the user's folder list so a crafted path can't run somewhere odd.
+  if (!(await isAllowedFolder(userId, cwd))) {
+    return bad("That folder isn't one of your folders. Add it with Choose folder… first.", 403);
   }
   if (resumeSessionId && !UUID_RE.test(resumeSessionId)) {
     return bad("resumeSessionId must be a session UUID");

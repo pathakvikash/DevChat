@@ -4,6 +4,7 @@ import { useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
 import { Sparkles, MessageSquare, HardDrive, Brain, BookOpen, ArrowUp } from "lucide-react";
+import { useFolders } from "@/app/hooks/useFolders";
 
 const prompts = [
   { icon: MessageSquare, label: "Start a conversation", action: "/c/new" },
@@ -14,6 +15,8 @@ const prompts = [
 
 export default function HomePage() {
   const router = useRouter();
+  const { hostTools, loaded, error } = useFolders();
+  const showClaude = !loaded || !!error || hostTools; // hidden only once we know it is off
   const [input, setInput] = useState("");
 
   const handleSubmit = useCallback(() => {
@@ -89,7 +92,7 @@ export default function HomePage() {
           animate={{ opacity: 1 }}
           transition={{ delay: 0.6, duration: 0.4 }}
         >
-          {prompts.map((p) => (
+          {prompts.filter((p) => showClaude || p.action !== "/claude").map((p) => (
             <motion.button
               key={p.label}
               onClick={() => router.push(p.action)}
