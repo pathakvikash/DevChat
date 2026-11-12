@@ -2,6 +2,7 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { renderTranscript } from "@/lib/chat/renderTranscript";
 import { countTokens, cutTokens } from "@/lib/tokens";
+import { chatsThatReadFiles } from "@/lib/files/readFiles";
 import { quotePastChat, titleForHeader } from "@/lib/chat/quotePastChat";
 
 export interface ChatHit {
@@ -42,7 +43,9 @@ export async function searchUserChats(
   query: string,
   { excludeId }: { excludeId?: string } = {},
 ): Promise<ChatHit[]> {
-  const owned = { userId, ...NOT_TEMPORARY, parentId: null, ...(excludeId ? { id: { not: excludeId } } : {}) };
+  // A chat that read files from a working folder is not searchable: its text would leave through a tool with no card.
+  const unreadable = await chatsThatReadFiles(userId);
+  const owned = { userId, ...NOT_TEMPORARY, parentId: null, id: { notIn: unreadable, ...(excludeId ? { not: excludeId } : {}) } };
   const [byTitle, byMessage] = await Promise.all([
     prisma.conversation.findMany({
       where: { ...owned, title: contains(query) },
@@ -86,6 +89,9 @@ export async function searchUserChats(
  * main chat. The text fits `budgetTokens`, frame included.
  */
 export async function readUserChat(userId: string, id: string, budgetTokens: number): Promise<string | null> {
+  if ((await chatsThatReadFiles(userId)).includes(id)) {
+    return "That chat read files from a working folder, so it can't be quoted here. Open it directly.";
+  }
   const chat = await prisma.conversation.findFirst({
     where: { id, userId, ...NOT_TEMPORARY, parentId: null },
     select: { title: true, compressedSummary: true, compressedAt: true },

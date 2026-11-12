@@ -12,7 +12,10 @@ vi.mock("@/lib/db", () => ({
   },
 }));
 
+vi.mock("@/lib/files/readFiles", () => ({ chatsThatReadFiles: vi.fn().mockResolvedValue([]) }));
+
 import { Prisma } from "@prisma/client";
+import { chatsThatReadFiles } from "@/lib/files/readFiles";
 import { prisma } from "@/lib/db";
 
 const db = prisma as any;
@@ -45,9 +48,17 @@ afterEach(() => {
 describe("searchUserChats", () => {
   it("only looks at the user's own non-temporary chats, minus the excluded one", async () => {
     await searchUserChats("u1", "cache", { excludeId: "current" });
-    const owned = { userId: "u1", temporary: false, parentId: null, id: { not: "current" } };
+    const owned = { userId: "u1", temporary: false, parentId: null, id: { notIn: [], not: "current" } };
     expect(db.conversation.findMany.mock.calls[0][0].where).toMatchObject(owned);
     expect(db.message.findMany.mock.calls[0][0].where.conversation).toEqual(owned);
+  });
+
+  it("leaves out chats that read files from a working folder, in both queries", async () => {
+    vi.mocked(chatsThatReadFiles).mockResolvedValueOnce(["x", "kid", "p"]);
+    await searchUserChats("u1", "cache");
+    expect(chatsThatReadFiles).toHaveBeenCalledWith("u1");
+    expect(db.conversation.findMany.mock.calls[0][0].where.id.notIn).toEqual(["x", "kid", "p"]);
+    expect(db.message.findMany.mock.calls[0][0].where.conversation.id.notIn).toEqual(["x", "kid", "p"]);
   });
 
   it("groups message hits by chat, newest message's snippet first", async () => {
@@ -197,5 +208,14 @@ describe("readUserChat", () => {
     setChat(conv(), [{ role: "user", content: "`".repeat(5000), parts: null }]);
     const read = (await readUserChat("u1", "c1", 1024))!;
     expect(countTokens(read)).toBeLessThanOrEqual(1024);
+  });
+});
+
+describe("readUserChat for a chat that read files", () => {
+  it("returns a short plain message and loads nothing", async () => {
+    vi.mocked(chatsThatReadFiles).mockResolvedValueOnce(["c1"]);
+    expect(await readUserChat("u1", "c1", 4000)).toBe("That chat read files from a working folder, so it can't be quoted here. Open it directly.");
+    expect(db.conversation.findFirst).not.toHaveBeenCalled();
+    expect(db.message.findMany).not.toHaveBeenCalled();
   });
 });

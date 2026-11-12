@@ -182,10 +182,11 @@ describe("isPaneBusy", () => {
 });
 
 describe("writerConflicts", () => {
-  const pane = (id: string, mode: string, workingFolder: string | null = "/repo", kind = "chat") => ({
+  const pane = (id: string, mode: string, workingFolder: string | null = "/repo", kind = "chat", model = "codex/gpt-5") => ({
     id,
     kind,
     mode,
+    model,
     workingFolder,
   });
 
@@ -197,8 +198,16 @@ describe("writerConflicts", () => {
     expect(writerConflicts([pane("A", "agent"), pane("B", "chat")]).size).toBe(0);
   });
 
-  it("counts ask as a writer", () => {
-    expect(writerConflicts([pane("A", "ask"), pane("B", "agent")]).size).toBe(2);
+  it("counts Claude Code in Ask mode as a writer", () => {
+    expect(writerConflicts([pane("A", "ask", "/repo", "chat", "claude-code/sonnet"), pane("B", "agent")]).size).toBe(2);
+  });
+
+  it("does not count Codex in Ask mode as a writer", () => {
+    expect(writerConflicts([pane("A", "ask"), pane("B", "agent")]).size).toBe(0);
+  });
+
+  it("does not count an API pane in Agent mode as a writer", () => {
+    expect(writerConflicts([pane("A", "agent", "/repo", "chat", "openai/gpt-4o"), pane("B", "agent")]).size).toBe(0);
   });
 
   it("never flags null folders", () => {

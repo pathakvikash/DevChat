@@ -5,6 +5,8 @@ import {
   createUIMessageStream,
   createUIMessageStreamResponse,
 } from "ai";
+import { hasFolderToolParts } from "@/lib/files/folderTools";
+import { conversationReadFiles } from "@/lib/files/readFiles";
 import { pipeJsonRender } from "@json-render/core";
 import { prisma } from "@/lib/db";
 import { getModel } from "@/lib/models";
@@ -105,10 +107,11 @@ export async function POST(req: Request) {
   let model: string | undefined = bodyModel;
   try {
     let compressedAt: Date | null = null;
+    let parentId: string | null = null;
     if (conversationId) {
       const owned = await prisma.conversation.findUnique({
         where: { id: conversationId },
-        select: { userId: true, compressedAt: true, parent: { select: { userId: true } } },
+        select: { userId: true, compressedAt: true, parentId: true, parent: { select: { userId: true } } },
       });
       // A side chat is only ever read against a main chat of the same user.
       if (!owned || owned.userId !== userId || (owned.parent && owned.parent.userId !== userId)) {
@@ -118,6 +121,7 @@ export async function POST(req: Request) {
         });
       }
       compressedAt = owned.compressedAt;
+      parentId = owned.parentId;
       ownerVerified = true;
       if (!answeringCli) releaseCliRuns();
     }
@@ -250,10 +254,18 @@ export async function POST(req: Request) {
     }
     if (!maxTokens) maxTokens = 8192;
     const useTools = modelConfig.supportsTools && !chatOnlyMode;
+    const cliProvider = cliProviderForModel(servedModel);
+    // CLI models have their own file access; API models get the read-only folder tools.
+    const fileFolder = useTools && !cliProvider ? folder : undefined;
     const activeToolIds = resolveActiveToolIds(explicitToolIds, skillIds, kbId);
 
-    // One result for the prompt's section and the sendToChat tool.
-    const agentTargets = sendToChatTargets(openPanes, conversationId ?? "", useTools);
+    // Follows the data, not the folder: once the model has read files, clearing the folder does not lift the gate.
+    // A side chat is given its parent's context, so file text the parent read counts too.
+    const sendsOutGate =
+      useTools && (!!fileFolder || hasFolderToolParts(bodyMessages) || (!!parentId && (await conversationReadFiles(parentId))) ||
+        (!!conversationId && (await conversationReadFiles(conversationId))));
+    // One result for the prompt's section and the sendToChat tool. A gated chat gets none: a pane without the gate could carry file text out.
+    const agentTargets = sendToChatTargets(openPanes, conversationId ?? "", useTools && !sendsOutGate);
     const { text: finalSystemPrompt, sections } = await buildSystemPrompt({
       useTools,
       systemPrompt,
@@ -268,6 +280,9 @@ export async function POST(req: Request) {
       mode: toolMode,
       contextWindow: contextWindowFor(servedModel, modelConfig, contextLength),
       agentTargets,
+      fileFolder,
+      sendsOutGate,
+      showFolder: !!folder && !!cliProvider,
     });
 
     console.log(
@@ -316,6 +331,8 @@ export async function POST(req: Request) {
             ? bodyAllowedTools.filter((t: unknown): t is string => typeof t === "string" && !answeredNow.has(t))
             : [],
           contextWindow: contextWindowFor(servedModel, modelConfig, contextLength),
+          workingFolder: fileFolder,
+          askBeforeSendingOut: sendsOutGate,
         })
       : {};
 
@@ -351,7 +368,6 @@ export async function POST(req: Request) {
     // CLI-backed models take effort/folder/mode as provider options. The folder is
     // re-checked every turn; chat mode is read-only there, agent mode may edit, and
     // Ask lets Claude Code ask per change (its allow-for-chat list rides along).
-    const cliProvider = cliProviderForModel(servedModel);
     if (!cliProvider) releaseCliRuns();
     const cliCwd = folder ?? "";
     const providerOptions = providerOptionsFor({

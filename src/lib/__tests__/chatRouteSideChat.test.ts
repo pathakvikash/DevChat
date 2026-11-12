@@ -96,6 +96,20 @@ beforeEach(() => {
 });
 
 describe("POST /api/chat for side chats", () => {
+  it("a side chat of a parent that read files is gated even after the folder is cleared", async () => {
+    db.conversation.findUnique.mockResolvedValue({ ...sideOf(), parentId: "p1" });
+    db.message.findMany.mockImplementation(async ({ where }: any) => (JSON.stringify(where.conversation ?? {}).includes('"id":"p1"') ? [{ id: "m9" }] : []));
+    await send("s1", "chat");
+    expect((buildTools as any).mock.calls[0][0]).toMatchObject({ askBeforeSendingOut: true, agentTargets: [] });
+    expect((buildTools as any).mock.calls[0][0].workingFolder).toBeUndefined();
+    expect((buildSystemPrompt as any).mock.calls[0][0].sendsOutGate).toBe(true);
+
+    vi.clearAllMocks();
+    db.message.findMany.mockResolvedValue([]);
+    await send("s1", "chat");
+    expect((buildTools as any).mock.calls[0][0].askBeforeSendingOut).toBe(false);
+  });
+
   it("forces chat mode on a side chat, whatever mode the request asks for", async () => {
     db.conversation.findUnique.mockResolvedValue(sideOf());
     const res = await send("s1", "agent");

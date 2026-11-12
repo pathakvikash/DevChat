@@ -18,6 +18,20 @@ const nextConfig: NextConfig = {
           { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
         ],
       },
+      // After the entry above, so it wins for this path (the last matching entry does). A model-written page
+      // runs with no origin, no network and no frames.
+      {
+        source: "/api/conversations/:id/artifacts/:artifactId/html",
+        headers: [
+          {
+            key: "Content-Security-Policy",
+            value:
+              "sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline' 'unsafe-eval' https://cdn.jsdelivr.net; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; media-src data: blob:; connect-src 'none'; form-action 'none'; base-uri 'none'; frame-src 'none'; worker-src 'none'; frame-ancestors 'self'",
+          },
+          { key: "X-Content-Type-Options", value: "nosniff" },
+          { key: "Referrer-Policy", value: "no-referrer" },
+        ],
+      },
     ];
   },
 };

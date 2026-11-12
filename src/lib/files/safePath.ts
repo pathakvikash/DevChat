@@ -1,6 +1,6 @@
 import { execFile } from "child_process";
-import { existsSync } from "fs";
-import { lstat, readdir, realpath } from "fs/promises";
+import { constants, existsSync } from "fs";
+import { lstat, open, readdir, realpath, stat } from "fs/promises";
 import { isAbsolute, join, relative, resolve, sep } from "path";
 import { promisify } from "util";
 
@@ -64,22 +64,63 @@ export async function resolveInside(folder: string, rel: string): Promise<string
   }
 }
 
-/** Files under `folder` with their sizes (git-tracked when it is a repo, else a capped walk). Secret and hidden paths are left out. */
+export type ReadInside =
+  | { ok: true; text: string; real: string }
+  | { ok: false; reason: "refused" | "missing" | "too-large" | "binary" };
+
+/** The text of one file inside `folder` (at most `maxBytes`), reached only through resolveInside. */
+export async function readInside(folder: string, rel: string, maxBytes = 1024 * 1024): Promise<ReadInside> {
+  const real = await resolveInside(folder, rel);
+  if (!real) return { ok: false, reason: "refused" };
+  // Opening a FIFO for reading blocks until a writer shows up, so only a regular file is opened.
+  // O_NONBLOCK covers a swap after the stat; the handle is checked again below.
+  // O_NOFOLLOW plus the same dev/inode refuses a swap for a symlink or another file between the checks and the open.
+  const checked = await stat(real).catch(() => null);
+  if (!checked?.isFile()) return { ok: false, reason: "missing" };
+  const handle = await open(real, constants.O_RDONLY | constants.O_NONBLOCK | constants.O_NOFOLLOW).catch(() => null);
+  if (!handle) return { ok: false, reason: "missing" };
+  try {
+    const opened = await handle.stat();
+    if (!opened.isFile() || opened.ino !== checked.ino || opened.dev !== checked.dev) return { ok: false, reason: "missing" };
+    // O_NOFOLLOW covers only the last component: a parent swapped for a symlink after the checks must not be followed.
+    if ((await realpath(real).catch(() => null)) !== real) return { ok: false, reason: "refused" };
+    // And the path must still lead to the handle we hold: a swap back between the open and the check would pass the line above.
+    const now = await stat(real).catch(() => null);
+    if (!now || now.ino !== opened.ino || now.dev !== opened.dev) return { ok: false, reason: "missing" };
+    // One read of at most the cap plus one byte, so a file that grows after a stat is still bounded.
+    const buf = Buffer.alloc(maxBytes + 1);
+    const { bytesRead } = await handle.read(buf, 0, buf.length, 0);
+    if (bytesRead > maxBytes) return { ok: false, reason: "too-large" };
+    const data = buf.subarray(0, bytesRead);
+    if (looksBinary(data)) return { ok: false, reason: "binary" };
+    return { ok: true, text: data.toString("utf8"), real };
+  } finally {
+    await handle.close();
+  }
+}
+
+/**
+ * Files under `folder` with their sizes (git-tracked when it is a repo, else a capped walk). Secret and hidden paths are left out.
+ * `sub` (a path relative to `folder`, already checked by resolveInside) limits the listing to that subfolder before the cap applies.
+ */
 export async function listFolderFiles(
   folder: string,
   cap = LIST_CAP,
+  sub = "",
 ): Promise<{ files: { path: string; size: number }[]; truncated: boolean }> {
-  const tracked = existsSync(join(folder, ".git")) ? await gitFiles(folder) : null;
-  const paths = (tracked ?? (await walkFiles(folder, cap + 1))).filter((rel) => !isSecretPath(rel) && !isHiddenPath(rel));
+  const tracked = existsSync(join(folder, ".git")) ? await gitFiles(folder, sub) : null;
+  const paths = (tracked ?? (await walkFiles(folder, cap + 1, sub))).filter((rel) => !isSecretPath(rel) && !isHiddenPath(rel));
   const files = await Promise.all(
     paths.slice(0, cap).map(async (path) => ({ path, size: (await lstat(join(folder, path)).catch(() => null))?.size ?? 0 })),
   );
   return { files, truncated: paths.length > cap };
 }
 
-async function gitFiles(folder: string): Promise<string[] | null> {
+async function gitFiles(folder: string, sub: string): Promise<string[] | null> {
   try {
-    const { stdout } = await run("git", ["ls-files", "-z"], { cwd: folder, maxBuffer: 64 * 1024 * 1024 });
+    // Literal pathspecs: a folder named like a glob or ":(magic)" is just a name.
+    const args = ["--literal-pathspecs", "ls-files", "-z", ...(sub ? ["--", sub] : [])];
+    const { stdout } = await run("git", args, { cwd: folder, maxBuffer: 64 * 1024 * 1024 });
     return stdout.split("\0").filter(Boolean);
   } catch {
     return null;
@@ -87,9 +128,9 @@ async function gitFiles(folder: string): Promise<string[] | null> {
 }
 
 // Symlinks are not followed, so the walk cannot leave the folder.
-async function walkFiles(folder: string, limit: number): Promise<string[]> {
+async function walkFiles(folder: string, limit: number, sub: string): Promise<string[]> {
   const out: string[] = [];
-  const dirs = [""];
+  const dirs = [sub];
   while (dirs.length > 0 && out.length < limit) {
     const dir = dirs.shift()!;
     const entries = await readdir(join(folder, dir), { withFileTypes: true }).catch(() => []);

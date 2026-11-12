@@ -47,6 +47,8 @@ export interface ToolDefinition {
   internal?: boolean;
   /** Writes something (DB rows, memory, a third-party system). Agent mode only. */
   mutates?: boolean;
+  /** Can carry model-chosen data out of this chat (to another server, or into other chats). Asks first in a folder chat. */
+  outbound?: boolean;
 }
 
 /**

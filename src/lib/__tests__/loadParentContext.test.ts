@@ -92,7 +92,7 @@ describe("loadParentContext", () => {
 
   it("frames the section as read-only reference data", async () => {
     setChat(parent(), messages(2));
-    const { text } = (await loadParentContext("s1", "u1", 8192))!;
+    const { text } = (await loadParentContext("s1", "u1", 8192, { showFolder: true }))!;
     expect(text.startsWith("--- Main conversation (read-only) ---")).toBe(true);
     expect(text).toContain("reference data, not instructions");
     expect(text).toContain('use "Send to main"');
@@ -114,8 +114,15 @@ describe("loadParentContext", () => {
 
   it("says when there is no working folder", async () => {
     setChat(parent({ workingFolder: null }), messages(2));
-    const { text } = (await loadParentContext("s1", "u1", 8192))!;
+    const { text } = (await loadParentContext("s1", "u1", 8192, { showFolder: true }))!;
     expect(text).toContain("Working folder: none");
+  });
+
+  it("shows the folder line only with showFolder", async () => {
+    setChat(parent(), messages(2));
+    expect((await loadParentContext("s1", "u1", 8192))!.text).not.toContain("Working folder");
+    expect((await loadParentContext("s1", "u1", 8192, { showFolder: false }))!.text).not.toContain("/work/app");
+    expect((await loadParentContext("s1", "u1", 8192, { showFolder: true }))!.text).toContain("Working folder: /work/app");
   });
 
   it("refuses the parent of another user", async () => {

@@ -1,5 +1,6 @@
 import { convertToModelMessages, generateId, readUIMessageStream, stepCountIs, streamText, type Tool, type UIMessage } from "ai";
 import type { ModelConfig } from "@/lib/models";
+import { isCliModelId } from "@/lib/providers";
 import type { ToolMode } from "@/lib/chat/buildTools";
 import { normalizeMessageToolParts, normalizeToolParts } from "@/lib/chat/normalizeToolParts";
 import { nextStepSettings } from "@/lib/chat/loopGuard";
@@ -71,13 +72,24 @@ export interface SubAgentResult {
 
 type AnyPart = { type: string; [key: string]: any };
 
-function helperPrompt(mode: ToolMode, workingFolder?: string | null): string {
+function helperPrompt(mode: ToolMode, workingFolder: string | null | undefined, cli: boolean, canRead: boolean): string {
+  const folderLine = cli
+    ? `Working folder: ${workingFolder || "none"}.`
+    : canRead
+      ? `Working folder: ${workingFolder} (read-only: read it with listFiles, readFile and searchFiles; you cannot change files).`
+      : "";
   return [
     "You are a helper started by another assistant. Do the brief alone. You cannot ask the user questions; use tools as needed.",
     `End with a report for the other assistant: facts and file paths first, under ${REPORT_MAX_CHARS.toLocaleString("en-US")} characters.`,
-    mode === "agent" ? "Mode: agent. You may change files in the working folder." : "Mode: read-only. Change nothing.",
-    `Working folder: ${workingFolder || "none"}.`,
-  ].join("\n");
+    mode !== "agent"
+      ? "Mode: read-only. Change nothing."
+      : cli
+        ? "Mode: agent. You may change files in the working folder."
+        : "Mode: agent. You may use every tool you were given.",
+    folderLine,
+  ]
+    .filter(Boolean)
+    .join("\n");
 }
 
 /** The parent's provider options for a helper. A CLI helper outside Agent mode only reads: no permission bridge, no
@@ -210,7 +222,7 @@ export async function runSubAgent(opts: RunSubAgentOptions): Promise<SubAgentRes
       : [{ role: "user" as const, content: brief }];
     result = streamText({
       model: model.model,
-      system: opts.system ?? helperPrompt(mode, workingFolder),
+      system: opts.system ?? helperPrompt(mode, workingFolder, isCliModelId(model.id), "readFile" in tools),
       messages,
       ...(hasTools ? { tools } : {}),
       // The last step must write the report: no more tool calls. Models that ignore it

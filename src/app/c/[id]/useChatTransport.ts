@@ -6,7 +6,7 @@ import { DefaultChatTransport, lastAssistantMessageIsCompleteWithApprovalRespons
 
 import { runCode } from "@/lib/sandbox";
 import { parseDataArtifact } from "@/lib/generativeUi/data";
-import { shouldAutoContinue, type AnyPart } from "@/lib/utils/messageParts";
+import { shouldAutoContinue, waitsForApproval, type AnyPart } from "@/lib/utils/messageParts";
 import type { ChatMode } from "@/lib/chat/modes";
 import type { AgentPane } from "@/lib/chat/agentMessages";
 
@@ -152,6 +152,8 @@ export function useChatTransport(opts: ChatTransportOptions) {
       return last?.role === "assistant" && shouldAutoContinue(last.parts as AnyPart[]);
     },
     onToolCall: async ({ toolCall }) => {
+      // Asks first (see buildTools): the card runs it after Allow, so nothing runs before the user answers.
+      if (waitsForApproval(toolCall as { toolMetadata?: { sendsOut?: boolean } })) return;
       if (toolCall.toolName === "askClarification") return;
       if (toolCall.toolName === "sendToChat") {
         const input = toolCall.input as { to: string; message: string };
@@ -159,23 +161,7 @@ export function useChatTransport(opts: ChatTransportOptions) {
         chat.addToolResult({ tool: "sendToChat", toolCallId: toolCall.toolCallId, output });
         return;
       }
-      if (toolCall.toolName === "executeCode") {
-        const { language, code, saveAs } = toolCall.input as {
-          language: "python" | "javascript";
-          code: string;
-          saveAs?: { title: string };
-        };
-        try {
-          const output = await runCode(language, code);
-          const result =
-            saveAs?.title && !CODE_FAILED_RE.test(output)
-              ? await saveDataArtifact(conversationId, saveAs.title, output)
-              : output;
-          chat.addToolResult({ tool: "executeCode", toolCallId: toolCall.toolCallId, output: result });
-        } catch (e: any) {
-          chat.addToolResult({ tool: "executeCode", toolCallId: toolCall.toolCallId, output: `Error: ${e?.message || String(e)}` });
-        }
-      }
+      if (toolCall.toolName === "executeCode") await runExecuteCode(toolCall.toolCallId, toolCall.input);
     },
     onData: (part) => {
       if (part.type === "data-compressing") setIsCompressing(true);
@@ -185,6 +171,25 @@ export function useChatTransport(opts: ChatTransportOptions) {
     onFinish: (finish) => { onFinishRef.current(finish); },
   });
 
+  /** Runs `executeCode` in the browser and adds its result. Called on arrival, or after Allow on a card. */
+  async function runExecuteCode(toolCallId: string, rawInput: unknown) {
+    const { language, code, saveAs } = rawInput as {
+      language: "python" | "javascript";
+      code: string;
+      saveAs?: { title: string };
+    };
+    try {
+      const output = await runCode(language, code);
+      const result =
+        saveAs?.title && !CODE_FAILED_RE.test(output)
+          ? await saveDataArtifact(conversationId, saveAs.title, output)
+          : output;
+      chat.addToolResult({ tool: "executeCode", toolCallId, output: result });
+    } catch (e: any) {
+      chat.addToolResult({ tool: "executeCode", toolCallId, output: `Error: ${e?.message || String(e)}` });
+    }
+  }
+
   const isLoading = chat.status === "submitted" || chat.status === "streaming";
 
   // The body is read when a request goes out, so a mode or allow-list change made right before
@@ -193,5 +198,5 @@ export function useChatTransport(opts: ChatTransportOptions) {
     Object.assign(transportBodyRef.current, patch);
   }, []);
 
-  return { ...chat, isLoading, setRequestBody };
+  return { ...chat, isLoading, setRequestBody, runExecuteCode };
 }
