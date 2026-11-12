@@ -18,7 +18,7 @@ vi.mock("@/lib/settings", () => ({ getSettingsKey: vi.fn(async () => "") }));
 vi.mock("@/lib/observability", () => ({ recordTrace: vi.fn(async () => {}) }));
 
 import { mcpToolCard } from "@/lib/workflows/cards/mcpTool";
-import { cliFolderAccess, filterTools, resolveMcpTools } from "@/lib/workflows/cards/agent";
+import { cardFolderAccess, filterTools, resolveMcpTools } from "@/lib/workflows/cards/agent";
 import { AGENT_TOOL_IDS, hasToolConflict, parseConfig, reachesWeb } from "@/lib/workflows/catalog";
 import { chatLeaks, checkGraph, emptyGraph, validateStructure, type FlowNode, type WorkflowGraph } from "@/lib/workflows/graph";
 import type { CardCtx } from "@/lib/workflows/cards";
@@ -97,17 +97,17 @@ describe("agent MCP tools", () => {
   });
 });
 
-describe("CLI folder and access", () => {
+describe("card folder and access", () => {
   it("allowEdits gives agent access, otherwise chat", async () => {
-    expect(await cliFolderAccess({ folder: "/work/app", allowEdits: true }, "u1")).toEqual({ cwd: "/work/app", access: "agent" });
-    expect(await cliFolderAccess({ folder: "/work/app", allowEdits: false }, "u1")).toEqual({ cwd: "/work/app", access: "chat" });
-    expect(await cliFolderAccess({}, "u1")).toEqual({ cwd: "", access: "chat" });
+    expect(await cardFolderAccess({ folder: "/work/app", allowEdits: true }, "u1", true)).toEqual({ cwd: "/work/app", access: "agent" });
+    expect(await cardFolderAccess({ folder: "/work/app", allowEdits: false }, "u1", true)).toEqual({ cwd: "/work/app", access: "chat" });
+    expect(await cardFolderAccess({}, "u1", true)).toEqual({ cwd: "", access: "chat" });
   });
 
   it("a folder outside the user's list fails, and edits need a folder", async () => {
     isAllowedFolder.mockResolvedValue(false);
-    await expect(cliFolderAccess({ folder: "/etc", allowEdits: true }, "u1")).rejects.toThrow(/isn't one of your folders/);
-    await expect(cliFolderAccess({ allowEdits: true }, "u1")).rejects.toThrow(/needs a working folder/);
+    await expect(cardFolderAccess({ folder: "/etc", allowEdits: true }, "u1", true)).rejects.toThrow(/isn't one of your folders/);
+    await expect(cardFolderAccess({ allowEdits: true }, "u1", true)).rejects.toThrow(/needs a working folder/);
   });
 });
 

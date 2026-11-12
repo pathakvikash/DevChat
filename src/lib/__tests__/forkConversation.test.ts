@@ -1,7 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { forkConversation, rewriteArtifactIds } from "@/lib/forkConversation";
+import { conversationReadFiles } from "@/lib/files/readFiles";
+import { buildAgentMessagePart } from "@/lib/chat/agentMessages";
 
-vi.mock("@/lib/db", () => ({ prisma: { $transaction: vi.fn() } }));
+vi.mock("@/lib/db", () => ({ prisma: { $transaction: vi.fn(), message: { findMany: vi.fn() } } }));
 
 import { prisma } from "@/lib/db";
 const db = prisma as any;
@@ -285,5 +287,19 @@ describe("rewriteArtifactIds", () => {
       '{"a":"new-1","b":["new-2","new-1"]}',
     );
     expect(rewriteArtifactIds(null, map)).toBeNull();
+  });
+});
+
+describe("forkConversation: folder text posted by a workflow", () => {
+  it("a fork of a marked chat is recognised by conversationReadFiles", async () => {
+    const post = msg("u1", t1, JSON.stringify([buildAgentMessagePart({ from: "workflow", fromConversationId: "wf", fromTitle: "WF", hop: 1, readFiles: true }), { type: "text", text: "x" }]));
+    arrange(source(), post, [post]);
+    await forkConversation("user-1", "src", "u1");
+    const copied = tx.message.createMany.mock.calls[0][0].data as { parts: string }[];
+    // The stored-parts query, run against the rows the fork wrote.
+    db.message.findMany.mockImplementation(async ({ where }: any) => copied.filter((r) => where.OR.some((c: any) => r.parts.includes(c.parts.contains))));
+    expect(await conversationReadFiles("fork-1")).toBe(true);
+    db.message.findMany.mockImplementation(async ({ where }: any) => [{ parts: "[]" }].filter((r) => where.OR.some((c: any) => r.parts.includes(c.parts.contains))));
+    expect(await conversationReadFiles("fork-1")).toBe(false);
   });
 });

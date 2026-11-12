@@ -54,6 +54,8 @@ describe("one card that reads private data and reaches the web", () => {
     ["folder + fetchUrl", { ...folder, tools: ["fetchUrl"] }],
     ["folder + webSearch", { ...folder, tools: ["webSearch"] }],
     ["folder + MCP", { ...folder, mcpTools: MCP }],
+    ["an API model with a folder + fetchUrl", { model: "mock/wf", folder: "/work/app", tools: ["fetchUrl"] }],
+    ["an API model with a folder + MCP", { model: "mock/wf", folder: "/work/app", mcpTools: MCP }],
     ["chat + MCP", { tools: ["readChat"], mcpTools: MCP }],
     ["chat + fetchUrl", { tools: ["readChat", "fetchUrl"] }],
   ])("refuses %s at save and at Run", (_n, config) => {
@@ -68,14 +70,14 @@ describe("one card that reads private data and reaches the web", () => {
     ["a folder alone", folder],
     ["a folder and chat tools (its own web tools are off)", { ...folder, tools: ["readChat"] }],
     ["web tools alone", { tools: ["fetchUrl", "webSearch"] }],
-    ["a folder on an API model with fetchUrl (the folder is ignored)", { model: "mock/wf", folder: "/work/app", tools: ["fetchUrl"] }],
+    ["a folder on an API model alone", { model: "mock/wf", folder: "/work/app" }],
   ])("allows %s", (_n, config) => {
     expect(refused(config)).toBe(false);
   });
 
   it("an mcpTool card alone is fine, and an empty model means the workflow's default", () => {
     expect(validateStructure(graphOf("m", node("m", ["trigger"], "mcpTool", { serverId: "s1", tool: "t" })))).toEqual([]);
-    expect(refused({ folder: "/work/app", tools: ["fetchUrl"] }, "m")).toBe(false);
+    expect(refused({ folder: "/work/app", tools: ["fetchUrl"] }, "m")).toBe(true);
     expect(refused({ folder: "/work/app", tools: ["fetchUrl"] }, CLI)).toBe(true);
   });
 
@@ -178,11 +180,11 @@ describe("agentCard.run", () => {
     expect(calls).toHaveLength(0);
   });
 
-  it("ignores the folder for an API model", async () => {
+  it("gives an API model no CLI folder options, but still checks the folder", async () => {
     const calls = fakeModel("mock/wf");
     await agentCard.run(agentCtx({ folder: "/work/app", allowEdits: true }, "mock/wf"));
     expect(calls[0].providerOptions).toBeUndefined();
-    expect(isAllowedFolder).not.toHaveBeenCalled();
+    expect(isAllowedFolder).toHaveBeenCalledWith("u1", "/work/app");
   });
 
   it("builds tools in agent mode only when MCP tools are ticked, and tells the model to use them only for the instructions", async () => {

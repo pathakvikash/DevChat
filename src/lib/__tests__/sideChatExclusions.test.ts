@@ -102,7 +102,7 @@ describe("memory consolidation runs for a main chat only", () => {
     expect(await res.json()).toEqual({ applied: 0, pruned: 0 });
     expect(consolidateMemory).not.toHaveBeenCalled();
     const where = db.message.findMany.mock.calls[0][0].where;
-    expect(where.OR.map((c: any) => c.parts.contains)).toEqual(['"tool-listFiles"', '"tool-readFile"', '"tool-searchFiles"']);
+    expect(where.OR.map((c: any) => c.parts.contains)).toEqual(['"tool-listFiles"', '"tool-readFile"', '"tool-searchFiles"', '"readFiles":true']);
 
     // A chat with a folder but no folder-tool calls (a CLI model) is not skipped.
     vi.mocked(consolidateMemory).mockResolvedValue({ applied: 1, pruned: 0 } as any);

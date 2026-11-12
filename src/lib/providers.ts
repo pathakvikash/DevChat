@@ -114,7 +114,8 @@ export const ENV_ALIASES: Record<string, string> = {
 export const CLI_PROVIDER_IDS = ["claude-code", "codex", "opencode"] as const;
 
 export function isCliModelId(modelId: string): boolean {
-  const prefix = modelId.slice(0, modelId.indexOf("/"));
+  const slash = modelId.indexOf("/");
+  const prefix = slash < 0 ? "" : modelId.slice(0, slash);
   return (CLI_PROVIDER_IDS as readonly string[]).includes(prefix);
 }
 

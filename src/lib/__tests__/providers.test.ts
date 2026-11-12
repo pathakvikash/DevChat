@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { PROVIDERS, providerForModel, bareModelId, isChatModel } from "@/lib/providers";
+import { PROVIDERS, providerForModel, bareModelId, isChatModel, isCliModelId } from "@/lib/providers";
 
 describe("providers registry", () => {
   it("has unique ids, env keys and setting keys", () => {
@@ -33,5 +33,14 @@ describe("providers registry", () => {
     expect(isChatModel("google", "gemini-2.5-flash-preview-tts")).toBe(false);
     expect(isChatModel("anthropic", "claude-sonnet-4-5")).toBe(true);
     expect(isChatModel("custom", "anything-goes")).toBe(true);
+  });
+});
+
+describe("isCliModelId", () => {
+  it("is false for an id without a slash, true for a CLI provider prefix", () => {
+    expect(isCliModelId("claude-code")).toBe(false);
+    expect(isCliModelId("gpt-4o")).toBe(false);
+    expect(isCliModelId("claude-code/sonnet")).toBe(true);
+    expect(isCliModelId("openai/gpt-4o")).toBe(false);
   });
 });

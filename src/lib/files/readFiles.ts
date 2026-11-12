@@ -1,7 +1,7 @@
 import { prisma } from "@/lib/db";
-import { FOLDER_TOOL_NAMES } from "./folderTools";
+import { FOLDER_TOOL_NAMES, READ_FILES_MARKER } from "./folderTools";
 
-const hasFolderPart = { OR: FOLDER_TOOL_NAMES.map((n) => ({ parts: { contains: `"tool-${n}"` } })) };
+const hasFolderPart = { OR: [...FOLDER_TOOL_NAMES.map((n) => ({ parts: { contains: `"tool-${n}"` } })), { parts: { contains: READ_FILES_MARKER } }] };
 
 /** True when the chat, or a helper it started (a child run saves its own tool calls), has a stored folder-tool call: file text is in its history. */
 export async function conversationReadFiles(conversationId: string): Promise<boolean> {

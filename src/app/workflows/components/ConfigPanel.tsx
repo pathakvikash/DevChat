@@ -2,8 +2,9 @@
 
 import GoogleConnection from "@/app/components/GoogleConnection";
 import { useState } from "react";
+import { isCliModelId } from "@/lib/providers";
 import { AlertTriangle, Bot, Briefcase, Copy, Check, ListChecks, MessageSquare, Funnel, Globe, Plug, Play, Search, Table2, Sheet, Trash2, X, ChevronDown, ChevronRight } from "lucide-react";
-import { CATALOG, isCliModelId, MCP_WEB_WARNING, reachesOpenWeb, type FieldSpec } from "@/lib/workflows/catalog";
+import { CATALOG, MCP_WEB_WARNING, reachesOpenWeb, type FieldSpec } from "@/lib/workflows/catalog";
 import { useToast } from "@/app/components/Toast";
 import { ancestorsOf, connectionError, TRIGGER_ID, type CardRun, type FlowNode, type GraphIssue, type RunState, type WorkflowGraph } from "@/lib/workflows/graph";
 import ConfigField, { type FieldEnv } from "./ConfigField";
@@ -148,8 +149,8 @@ export default function ConfigPanel({
   const visible = (f: FieldSpec) => !f.when || f.when(node.config);
   const setConfig = (key: string, value: unknown) => {
     let config = { ...node.config, [key]: value };
-    // A folder only belongs to a command-line model, and edits only to a folder.
-    if (key === "model" && !isCliModelId(String(value || graph.defaultModel))) config = { ...config, folder: "", allowEdits: false };
+    // Edits only belong to a command-line model with a folder; any model keeps its folder.
+    if (key === "model" && !isCliModelId(String(value || graph.defaultModel))) config = { ...config, allowEdits: false };
     if (key === "folder" && !value) config = { ...config, allowEdits: false };
     onChange({ config });
   };

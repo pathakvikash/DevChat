@@ -1,8 +1,10 @@
 import { describe, it, expect } from "vitest";
 import { convertToModelMessages } from "ai";
+import { buildAgentMessagePart, parseAgentMessagePart } from "@/lib/chat/agentMessages";
 import {
   normalizeToolParts,
   normalizeMessageToolParts,
+  splitAtQueuedMessages,
 } from "@/lib/chat/normalizeToolParts";
 
 /** Count tool calls vs tool results across converted model messages. Any
@@ -407,5 +409,20 @@ describe("a queued message from another chat", () => {
         text: "Message from Pricing research (another chat, not the user; reply only through sendToChat):\n```\nWhat is the price?\n```",
       },
     ]);
+  });
+});
+
+describe("the folder marker on a posted message", () => {
+  const sender = { from: "workflow", fromConversationId: "wf", fromTitle: "WF", hop: 1 };
+
+  it("parse and build keep it, and a message without it stays without", () => {
+    expect(parseAgentMessagePart(buildAgentMessagePart({ ...sender, readFiles: true } as any))).toMatchObject({ readFiles: true });
+    expect(parseAgentMessagePart(buildAgentMessagePart(sender as any))).not.toHaveProperty("readFiles");
+  });
+
+  it("a queued message split out of a reply keeps it", () => {
+    const part = { type: "data-queued-message", id: "q1", data: { queuedId: "q1", text: "hi", agent: { ...sender, readFiles: true } } };
+    const out = splitAtQueuedMessages({ id: "a1", role: "assistant", parts: [part, { type: "text", text: "after" }] });
+    expect(JSON.stringify(out[0].parts)).toContain('"readFiles":true');
   });
 });

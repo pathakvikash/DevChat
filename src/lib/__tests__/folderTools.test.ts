@@ -4,7 +4,7 @@ import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, 
 import { tmpdir } from "os";
 import { join } from "path";
 import type { Tool } from "ai";
-import { folderTools, hasFolderToolParts, type SearchLimits } from "@/lib/files/folderTools";
+import { folderTools, hasFolderToolParts, keepReadFilesMarker, READ_FILES_MARKER, type SearchLimits } from "@/lib/files/folderTools";
 import { countTokens } from "@/lib/tokens";
 
 let base: string;
@@ -306,5 +306,29 @@ describe("hasFolderToolParts", () => {
     expect(hasFolderToolParts([{ role: "assistant", parts: [{ type: "tool-calculator" }, { type: "text", text: "readFile" }] }])).toBe(false);
     expect(hasFolderToolParts([{ role: "user", content: "hi" }, null])).toBe(false);
     expect(hasFolderToolParts(undefined)).toBe(false);
+  });
+
+  it("is also true for a posted message marked as folder text", () => {
+    const part = (data: object) => [{ role: "user", parts: [{ type: "data-agent-message", data }, { type: "text" }] }];
+    expect(hasFolderToolParts(part({ from: "workflow", readFiles: true }))).toBe(true);
+    expect(hasFolderToolParts(part({ from: "workflow" }))).toBe(false);
+  });
+});
+
+describe("keepReadFilesMarker", () => {
+  const marked = JSON.stringify([{ type: "data-agent-message", data: { from: "workflow", fromConversationId: "w", fromTitle: "W", hop: 1, readFiles: true } }, { type: "text", text: "a" }]);
+  const edited = JSON.stringify([{ type: "text", text: "b" }]);
+
+  it("keeps the marked agent part when an edit or a re-save would drop it", () => {
+    expect(keepReadFilesMarker(marked, edited)).toContain(READ_FILES_MARKER);
+    expect(JSON.parse(keepReadFilesMarker(marked, edited)!).at(-1)).toEqual({ type: "text", text: "b" });
+    expect(keepReadFilesMarker(marked, null)).toContain(READ_FILES_MARKER);
+  });
+
+  it("leaves everything else as it was", () => {
+    expect(keepReadFilesMarker(marked, marked)).toBe(marked);
+    expect(keepReadFilesMarker(edited, edited)).toBe(edited);
+    expect(keepReadFilesMarker(null, edited)).toBe(edited);
+    expect(keepReadFilesMarker("not json" + READ_FILES_MARKER, edited)).toBe(edited);
   });
 });

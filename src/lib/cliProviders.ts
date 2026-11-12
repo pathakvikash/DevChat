@@ -420,7 +420,8 @@ export const CLI_PROVIDERS: readonly CliProviderDef[] = [
 ];
 
 export function cliProviderForModel(modelId: string): CliProviderDef | undefined {
-  const prefix = modelId.slice(0, modelId.indexOf("/"));
+  const slash = modelId.indexOf("/");
+  const prefix = slash < 0 ? "" : modelId.slice(0, slash);
   return CLI_PROVIDERS.find((d) => d.id === prefix);
 }
 

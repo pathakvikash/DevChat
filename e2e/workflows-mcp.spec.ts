@@ -42,8 +42,9 @@ test("MCP tools and a web tool on one card are refused at save, and the editor d
   await expect(page.getByText("A page could try to steer it")).toBeVisible();
   await expect(page.getByText("Warning:").first()).toBeVisible();
   await expect(page.getByText("Can change things outside DevChat").first()).toBeVisible();
-  // the mock model is not a command-line model, so there is no folder to pick
-  await expect(page.getByText("Working folder", { exact: true })).toHaveCount(0);
+  // any model can have a folder, but MCP tools on the card lock the picker
+  await expect(page.getByText("Working folder", { exact: true })).toBeVisible();
+  await expect(page.getByText("A folder can't be mixed with web tools or MCP tools")).toBeVisible();
 });
 
 test("the MCP-after-MCP warning shows on the later card", async ({ page, request }) => {

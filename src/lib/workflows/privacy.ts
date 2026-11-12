@@ -1,4 +1,4 @@
-import { hasCliFolder, reachesOpenWeb, reachesWeb, readsChats, usesMcp } from "./catalog";
+import { hasFolder, reachesOpenWeb, reachesWeb, readsChats, usesMcp } from "./catalog";
 import { ancestorsOf, type FlowNode, type WorkflowGraph } from "./graph";
 
 // Which private data a table holds, and who may not send it to the web. All of the kind logic lives here.
@@ -23,7 +23,7 @@ export function privateKindsOf(type: string, config: Record<string, unknown>, de
   const out: PrivateKind[] = [];
   if (readsChats(type, config)) out.push("chats");
   if (usesMcp(type, config)) out.push("mcp");
-  if (hasCliFolder(type, config, defaultModel)) out.push("folder");
+  if (hasFolder(type, config, defaultModel)) out.push("folder");
   return out;
 }
 
@@ -33,6 +33,18 @@ const writesTable = (n: FlowNode): string => (n.type === "table" ? String(n.conf
 export const TABLE_READERS = ["table", "pickRows", "sheetSync"];
 export const readsTable = (n: FlowNode): string => (TABLE_READERS.includes(n.type) ? String(n.config.tableId ?? "") : "");
 
+/** The private kinds the cards before `id` read, directly or from a table (`tableKinds`: what each table holds). */
+export function kindsBefore(graph: WorkflowGraph, id: string, tableKinds: Map<string, Iterable<PrivateKind>>): Set<PrivateKind> {
+  const out = new Set<PrivateKind>();
+  for (const a of ancestorsOf(graph, id)) {
+    const m = graph.nodes.find((x) => x.id === a);
+    if (!m) continue;
+    for (const k of privateKindsOf(m.type, m.config, graph.defaultModel)) out.add(k);
+    for (const k of tableKinds.get(readsTable(m)) ?? []) out.add(k);
+  }
+  return out;
+}
+
 /**
  * The kinds each table would hold once this graph has run its Save cards: what the tables hold now, plus the kinds of
  * every private reader before a Save card, where a card on a private table is itself a reader of that table's kinds
@@ -40,16 +52,7 @@ export const readsTable = (n: FlowNode): string => (TABLE_READERS.includes(n.typ
  */
 export function planKinds(graph: WorkflowGraph, current: Map<string, PrivateKind[]>): Map<string, PrivateKind[]> {
   const kinds = new Map([...current].map(([id, k]) => [id, new Set(k)]));
-  const readsOf = (id: string): Set<PrivateKind> => {
-    const out = new Set<PrivateKind>();
-    for (const a of ancestorsOf(graph, id)) {
-      const m = graph.nodes.find((x) => x.id === a);
-      if (!m) continue;
-      for (const k of privateKindsOf(m.type, m.config, graph.defaultModel)) out.add(k);
-      for (const k of kinds.get(readsTable(m)) ?? []) out.add(k);
-    }
-    return out;
-  };
+  const readsOf = (id: string) => kindsBefore(graph, id, kinds);
   for (let changed = true; changed; ) {
     changed = false;
     for (const n of graph.nodes) {

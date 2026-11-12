@@ -13,7 +13,7 @@ describe("conversationReadFiles", () => {
     find.mockResolvedValue([{ id: "m1" }]);
     expect(await conversationReadFiles("c1")).toBe(true);
     const where = find.mock.calls[0][0].where;
-    expect(where.OR.map((c: any) => c.parts.contains)).toEqual(['"tool-listFiles"', '"tool-readFile"', '"tool-searchFiles"']);
+    expect(where.OR.map((c: any) => c.parts.contains)).toEqual(['"tool-listFiles"', '"tool-readFile"', '"tool-searchFiles"', '"readFiles":true']);
     expect(where.conversation).toEqual({ OR: [{ id: "c1" }, { parentId: "c1" }] });
     find.mockResolvedValue([]);
     expect(await conversationReadFiles("c1")).toBe(false);
@@ -21,6 +21,12 @@ describe("conversationReadFiles", () => {
 });
 
 describe("chatsThatReadFiles", () => {
+  it("also looks for the marker on a workflow's posted message", async () => {
+    find.mockResolvedValue([{ conversationId: "posted", conversation: { parentId: null } }]);
+    expect(await chatsThatReadFiles("u1")).toEqual(["posted"]);
+    expect(find.mock.calls[0][0].where.OR.map((c: any) => c.parts.contains)).toContain('"readFiles":true');
+  });
+
   it("is one query for the user, and adds the parent of a helper run that read files", async () => {
     find.mockResolvedValue([
       { conversationId: "a", conversation: { parentId: null } },

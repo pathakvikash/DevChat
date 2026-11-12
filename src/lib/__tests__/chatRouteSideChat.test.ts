@@ -110,6 +110,14 @@ describe("POST /api/chat for side chats", () => {
     expect((buildTools as any).mock.calls[0][0].askBeforeSendingOut).toBe(false);
   });
 
+  it("a main chat holding a workflow's folder text is gated, though it has no folder-tool call", async () => {
+    db.conversation.findUnique.mockResolvedValue(chat());
+    db.message.findMany.mockImplementation(async ({ where }: any) => (JSON.stringify(where.OR ?? []).includes('readFiles') ? [{ id: "m9" }] : []));
+    await send("c1", "chat");
+    expect((buildTools as any).mock.calls[0][0].askBeforeSendingOut).toBe(true);
+    expect((buildSystemPrompt as any).mock.calls[0][0].sendsOutGate).toBe(true);
+  });
+
   it("forces chat mode on a side chat, whatever mode the request asks for", async () => {
     db.conversation.findUnique.mockResolvedValue(sideOf());
     const res = await send("s1", "agent");
