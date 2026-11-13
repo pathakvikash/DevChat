@@ -1,5 +1,5 @@
 import { prisma } from "@/lib/db";
-import { READ_FILE_PART_TYPES, READ_FILES_MARKER } from "./folderTools";
+import { hasFolderToolParts, READ_FILE_PART_TYPES, READ_FILES_MARKER } from "./folderTools";
 
 const hasFolderPart = {
   OR: [
@@ -28,4 +28,26 @@ export async function chatsThatReadFiles(userId: string): Promise<string[]> {
     distinct: ["conversationId"],
   });
   return [...new Set(rows.flatMap((r) => [r.conversationId, ...(r.conversation.parentId ? [r.conversation.parentId] : [])]))];
+}
+
+/** What a chat's folder gives its prompt and tools this turn; the chat route and the Context panel both call it. */
+export async function chatFolderAccess(o: {
+  useTools: boolean;
+  cli: boolean;
+  folder?: string;
+  messages?: unknown;
+  conversationId?: string;
+  parentId?: string | null;
+}): Promise<{ fileFolder?: string; sendsOutGate: boolean; showFolder: boolean }> {
+  // CLI models have their own file access; API models get the read-only folder tools.
+  const fileFolder = o.useTools && !o.cli ? o.folder : undefined;
+  // Follows the data, not the folder: once the model has read files, clearing the folder does not lift the gate.
+  // A side chat is given its parent's context, so file text the parent read counts too.
+  const sendsOutGate =
+    o.useTools &&
+    (!!fileFolder ||
+      hasFolderToolParts(o.messages) ||
+      (!!o.parentId && (await conversationReadFiles(o.parentId))) ||
+      (!!o.conversationId && (await conversationReadFiles(o.conversationId))));
+  return { fileFolder, sendsOutGate, showFolder: !!o.folder && o.cli };
 }

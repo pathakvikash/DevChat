@@ -5,8 +5,8 @@ import {
   createUIMessageStream,
   createUIMessageStreamResponse,
 } from "ai";
-import { hasFolderToolParts } from "@/lib/files/folderTools";
-import { conversationReadFiles } from "@/lib/files/readFiles";
+import { folderToolSpecs } from "@/lib/files/folderTools";
+import { chatFolderAccess } from "@/lib/files/readFiles";
 import { pipeJsonRender } from "@json-render/core";
 import { prisma } from "@/lib/db";
 import { getModel } from "@/lib/models";
@@ -255,15 +255,16 @@ export async function POST(req: Request) {
     if (!maxTokens) maxTokens = 8192;
     const useTools = modelConfig.supportsTools && !chatOnlyMode;
     const cliProvider = cliProviderForModel(servedModel);
-    // CLI models have their own file access; API models get the read-only folder tools.
-    const fileFolder = useTools && !cliProvider ? folder : undefined;
     const activeToolIds = resolveActiveToolIds(explicitToolIds, skillIds, kbId);
 
-    // Follows the data, not the folder: once the model has read files, clearing the folder does not lift the gate.
-    // A side chat is given its parent's context, so file text the parent read counts too.
-    const sendsOutGate =
-      useTools && (!!fileFolder || hasFolderToolParts(bodyMessages) || (!!parentId && (await conversationReadFiles(parentId))) ||
-        (!!conversationId && (await conversationReadFiles(conversationId))));
+    const { fileFolder, sendsOutGate, showFolder } = await chatFolderAccess({
+      useTools,
+      cli: !!cliProvider,
+      folder,
+      messages: bodyMessages,
+      conversationId,
+      parentId,
+    });
     // One result for the prompt's section and the sendToChat tool. A gated chat gets none: a pane without the gate could carry file text out.
     const agentTargets = sendToChatTargets(openPanes, conversationId ?? "", useTools && !sendsOutGate);
     const { text: finalSystemPrompt, sections } = await buildSystemPrompt({
@@ -282,7 +283,7 @@ export async function POST(req: Request) {
       agentTargets,
       fileFolder,
       sendsOutGate,
-      showFolder: !!folder && !!cliProvider,
+      showFolder,
     });
 
     console.log(
@@ -648,12 +649,15 @@ export async function POST(req: Request) {
                       console.error("[queue] releasing unshown messages failed:", e),
                     );
                     if (saved && canAutoCompress(event, isAborted)) {
+                      const window = modelConfig ? contextWindowFor(servedModel, modelConfig, contextLength) : null;
                       await autoCompress(
                         conversationId,
                         autoCompressThreshold ?? 85,
-                        modelConfig ? contextWindowFor(servedModel, modelConfig, contextLength) : null,
+                        window,
                         () =>
                         writer.write({ type: "data-compressing", data: true, transient: true }),
+                        // What was sent: the whole system prompt, plus the folder tools' specs.
+                        window && fileFolder ? `${finalSystemPrompt}\n${await folderToolSpecs(fileFolder, window)}` : finalSystemPrompt,
                       );
                     }
                   },

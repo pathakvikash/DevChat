@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { calculateDetailedContextUsage } from "@/lib/tokens";
+import { cliProviderForModel } from "@/lib/cliProviders";
+import { chatFolderAccess } from "@/lib/files/readFiles";
+import { folderToolSpecs } from "@/lib/files/folderTools";
 import { buildSystemPrompt } from "@/lib/chat/buildSystemPrompt";
 import { resolveActiveToolIds } from "@/lib/chat/buildTools";
 import { contextWindowFor } from "@/lib/chat/contextBudget";
@@ -41,7 +44,7 @@ export async function GET(
           orderBy: { createdAt: "asc" },
           select: { role: true, content: true, createdAt: true },
         },
-        parent: { select: { userId: true, kbId: true, temporary: true } },
+        parent: { select: { userId: true, kbId: true, temporary: true, workingFolder: true } },
       },
     });
 
@@ -49,9 +52,10 @@ export async function GET(
       return NextResponse.json({ error: "Conversation not found" }, { status: 404 });
     }
 
+    const hostTools = await canUseHostTools(userId);
     let modelConfig;
     try {
-      modelConfig = getModel(conversation.model, await resolveProviderCreds(userId), await canUseHostTools(userId));
+      modelConfig = getModel(conversation.model, await resolveProviderCreds(userId), hostTools);
     } catch {
       modelConfig = null;
     }
@@ -93,6 +97,16 @@ export async function GET(
         ]
       : messagesForUsage;
 
+    // The folder the chat route would use: a side chat takes its main chat's.
+    const folder = hostTools ? (side ? side.workingFolder : conversation.workingFolder) || undefined : undefined;
+    const { fileFolder, sendsOutGate, showFolder } = await chatFolderAccess({
+      useTools,
+      cli: !!cliProviderForModel(conversation.model),
+      folder,
+      conversationId: id,
+      parentId: conversation.parentId,
+    });
+
     const { sections, mainContext } = await buildSystemPrompt({
       useTools,
       systemPrompt,
@@ -105,6 +119,9 @@ export async function GET(
       memoryDisabled,
       userId,
       contextWindow: contextLength,
+      fileFolder,
+      sendsOutGate,
+      showFolder,
       ...(side ? { mode: "chat" as const } : {}),
     });
 
@@ -113,7 +130,8 @@ export async function GET(
       messagesForUsage,
       currentMessage,
       contextLength,
-      compressedSummary
+      compressedSummary,
+      fileFolder ? await folderToolSpecs(fileFolder, contextLength) : "",
     );
 
     return NextResponse.json({
