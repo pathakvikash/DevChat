@@ -308,6 +308,11 @@ describe("hasFolderToolParts", () => {
     expect(hasFolderToolParts(undefined)).toBe(false);
   });
 
+  it("counts a tool a CLI model ran itself", () => {
+    expect(hasFolderToolParts([{ role: "assistant", parts: [{ type: "dynamic-tool", toolName: "Read" }] }])).toBe(true);
+    expect(hasFolderToolParts([{ role: "assistant", parts: [{ type: "tool-webSearch" }] }])).toBe(false);
+  });
+
   it("is also true for a posted message marked as folder text", () => {
     const part = (data: object) => [{ role: "user", parts: [{ type: "data-agent-message", data }, { type: "text" }] }];
     expect(hasFolderToolParts(part({ from: "workflow", readFiles: true }))).toBe(true);

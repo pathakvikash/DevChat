@@ -1,7 +1,14 @@
 import { prisma } from "@/lib/db";
-import { FOLDER_TOOL_NAMES, READ_FILES_MARKER } from "./folderTools";
+import { READ_FILE_PART_TYPES, READ_FILES_MARKER } from "./folderTools";
 
-const hasFolderPart = { OR: [...FOLDER_TOOL_NAMES.map((n) => ({ parts: { contains: `"tool-${n}"` } })), { parts: { contains: READ_FILES_MARKER } }] };
+const hasFolderPart = {
+  OR: [
+    ...READ_FILE_PART_TYPES.map((t) => ({ parts: { contains: `"${t}"` } })),
+    { parts: { contains: READ_FILES_MARKER } },
+    // Codex saves no tool parts but always runs inside a folder.
+    { role: "assistant", model: { startsWith: "codex/" } },
+  ],
+};
 
 /** True when the chat, or a helper it started (a child run saves its own tool calls), has a stored folder-tool call: file text is in its history. */
 export async function conversationReadFiles(conversationId: string): Promise<boolean> {

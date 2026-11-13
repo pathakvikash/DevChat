@@ -43,7 +43,8 @@ async function folderSub(folder: string, path?: string): Promise<string> {
 }
 
 export const FOLDER_TOOL_NAMES = ["listFiles", "readFile", "searchFiles"];
-const FOLDER_TOOL_PART = new RegExp(`^tool-(${FOLDER_TOOL_NAMES.join("|")})$`);
+/** Saved part types that mean files were read: the folder tools, and any tool a CLI model ran itself, which the SDK saves as "dynamic-tool". */
+export const READ_FILE_PART_TYPES = [...FOLDER_TOOL_NAMES.map((n) => `tool-${n}`), "dynamic-tool"];
 /** Set in the data of a workflow's posted message whose text came from a card that read a folder: file text is in that chat. */
 export const READ_FILES_MARKER = '"readFiles":true';
 
@@ -65,7 +66,7 @@ export function hasFolderToolParts(messages: unknown): boolean {
     messages.some(
       (m) =>
         Array.isArray(m?.parts) &&
-        m.parts.some((p: { type?: unknown; data?: { readFiles?: unknown } }) => (typeof p?.type === "string" && FOLDER_TOOL_PART.test(p.type)) || p?.data?.readFiles === true),
+        m.parts.some((p: { type?: unknown; data?: { readFiles?: unknown } }) => (typeof p?.type === "string" && READ_FILE_PART_TYPES.includes(p.type)) || p?.data?.readFiles === true),
     )
   );
 }
