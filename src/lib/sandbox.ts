@@ -10,7 +10,7 @@ export const RUN_CSP = {
 const PYTHON_BODY = `<script src="${PYODIDE}pyodide.js"><\/script><script>
   let ready;
   let queue = Promise.resolve();
-  const start = () => (ready ||= loadPyodide({ indexURL: '${PYODIDE}' }));
+  const start = () => (ready ||= loadPyodide({ indexURL: '${PYODIDE}' }).catch((e) => { ready = null; throw e; }));
   async function run(code) {
     let py;
     try { py = await start(); } catch (e) { return 'Error: ' + (e && e.message ? e.message : String(e)); }
@@ -39,7 +39,7 @@ const PYTHON_BODY = `<script src="${PYODIDE}pyodide.js"><\/script><script>
   window.addEventListener('message', (e) => {
     if (e.source !== parent || !e.data || typeof e.data.code !== 'string') return;
     const { channel, code } = e.data;
-    queue = queue.then(() => run(code)).then((output) => parent.postMessage({ channel, output }, '*'));
+    queue = queue.then(() => run(code)).catch((e) => 'Error: ' + (e && e.message ? e.message : String(e))).then((output) => parent.postMessage({ channel, output }, '*'));
   });
 <\/script>`;
 
@@ -85,19 +85,19 @@ function hiddenFrame(html: string, onLoad?: () => void) {
 }
 
 // Waits for the frame's reply on `channel`; start() sends the work once the listener is in place.
-function reply(channel: string, timeoutMs: number, onTimeout: () => void, start: () => void): Promise<string> {
+function reply(iframe: HTMLIFrameElement, channel: string, timeoutMs: number, start: () => void): Promise<string> {
   return new Promise((resolve) => {
     const timer = setTimeout(() => {
       window.removeEventListener("message", handler);
-      onTimeout();
+      iframe.remove();
       resolve(`Error: execution timed out (${timeoutMs}ms)`);
     }, timeoutMs);
 
     function handler(e: MessageEvent) {
-      if (e.data?.channel !== channel) return;
+      if (e.source !== iframe.contentWindow || e.data?.channel !== channel) return;
       clearTimeout(timer);
       window.removeEventListener("message", handler);
-      resolve(e.data.output || "(no output)");
+      resolve((typeof e.data.output === "string" && e.data.output) || "(no output)");
     }
     window.addEventListener("message", handler);
     start();
@@ -106,25 +106,27 @@ function reply(channel: string, timeoutMs: number, onTimeout: () => void, start:
 
 const newChannel = () => `vas-sandbox-${Math.random().toString(36).slice(2)}`;
 
-// One Python frame for the life of the page: Pyodide loads once and variables persist between Runs.
-let pythonFrame: { iframe: HTMLIFrameElement; loaded: boolean } | null = null;
+// One Python frame for the chat's Runs: Pyodide loads once and variables persist between Runs.
+// ponytail: one Python frame at a time; a Run in another chat replaces it, and a Run still waiting there times out. One frame per chat if split view needs it.
+let pythonFrame: { iframe: HTMLIFrameElement; scope: string; loaded: boolean } | null = null;
 
-function runPython(code: string, timeoutMs = 120_000): Promise<string> {
+function runPython(code: string, scope: string, timeoutMs = 120_000): Promise<string> {
   const channel = newChannel();
+  if (pythonFrame && pythonFrame.scope !== scope) {
+    pythonFrame.iframe.remove();
+    pythonFrame = null;
+  }
   if (!pythonFrame) {
-    const frame = { iframe: hiddenFrame(runDocument("python", "", ""), () => (frame.loaded = true)), loaded: false };
+    const frame = { iframe: hiddenFrame(runDocument("python", "", ""), () => (frame.loaded = true)), scope, loaded: false };
     pythonFrame = frame;
   }
   const frame = pythonFrame;
   const post = () => frame.iframe.contentWindow?.postMessage({ channel, code }, "*");
-  return reply(
-    channel,
-    timeoutMs,
+  return reply(frame.iframe, channel, timeoutMs, () => (frame.loaded ? post() : frame.iframe.addEventListener("load", post, { once: true }))).finally(
     () => {
-      frame.iframe.remove();
-      if (pythonFrame === frame) pythonFrame = null;
+      // A timed-out frame is already removed; forget it so the next Run starts fresh.
+      if (!frame.iframe.isConnected && pythonFrame === frame) pythonFrame = null;
     },
-    () => (frame.loaded ? post() : frame.iframe.addEventListener("load", post, { once: true })),
   );
 }
 
@@ -134,7 +136,7 @@ function runJavaScript(code: string, timeoutMs = 5000): Promise<string> {
   }
   const channel = newChannel();
   const iframe = hiddenFrame(runDocument("javascript", code, channel));
-  return reply(channel, timeoutMs, () => iframe.remove(), () => {}).finally(() => iframe.remove());
+  return reply(iframe, channel, timeoutMs, () => {}).finally(() => iframe.remove());
 }
 
 export function isExecutableLanguage(lang: string): "python" | "javascript" | null {
@@ -144,9 +146,10 @@ export function isExecutableLanguage(lang: string): "python" | "javascript" | nu
   return null;
 }
 
-export async function runCode(language: string, code: string): Promise<string> {
+// `scope` is the conversation id: Python state is kept per chat. No chat shares one frame.
+export async function runCode(language: string, code: string, scope = ""): Promise<string> {
   const lang = isExecutableLanguage(language);
-  if (lang === "python") return runPython(code);
+  if (lang === "python") return runPython(code, scope);
   if (lang === "javascript") return runJavaScript(code);
   throw new Error(`Language not executable: ${language}`);
 }

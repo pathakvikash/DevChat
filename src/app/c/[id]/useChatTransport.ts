@@ -179,7 +179,7 @@ export function useChatTransport(opts: ChatTransportOptions) {
       saveAs?: { title: string };
     };
     try {
-      const output = await runCode(language, code);
+      const output = await runCode(language, code, conversationId);
       const result =
         saveAs?.title && !CODE_FAILED_RE.test(output)
           ? await saveDataArtifact(conversationId, saveAs.title, output)

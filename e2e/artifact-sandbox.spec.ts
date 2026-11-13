@@ -65,8 +65,9 @@ test("in a folder chat an HTML page asks first: nothing is created before Allow,
   await expect(page.frameLocator('iframe[title="Sandbox probe"]').getByText("fetch: blocked")).toBeVisible();
 });
 
+test.beforeEach(({ request }) => deleteAllChats(request));
+
 async function seedFence(page: Page, request: APIRequestContext, lang: string, ...codes: string[]) {
-  await deleteAllChats(request);
   const id = await createChat(request, { title: "Run probe" });
   const content = "Try it.\n\n" + codes.map((c) => "```" + lang + "\n" + c + "\n```").join("\n\n");
   expect((await request.post(`/api/conversations/${id}/messages`, { data: { role: "assistant", content } })).ok()).toBeTruthy();
@@ -98,10 +99,36 @@ test("Run on a JavaScript block prints its output, and its fetch is blocked", as
   expect(attempts).toEqual([]);
 });
 
+test("the Run frame cannot leave for another site", async ({ page, request }) => {
+  const requested: string[] = [];
+  page.on("request", (r) => r.url().includes("devchat-test.invalid") && requested.push(r.url()));
+  await seedFence(page, request, "javascript", "location.href = 'https://devchat-test.invalid/nav';\nconsole.log('went');");
+  await run(page).click();
+  await expect(page.getByText(/^went$/)).toBeVisible();
+  await page.waitForTimeout(1500);
+  expect(requested).toEqual([]);
+});
+
+test("Python runs in a sandboxed frame, not in the app window", async ({ page, request }) => {
+  await page.route("https://cdn.jsdelivr.net/**", (r) => r.abort());
+  await seedFence(page, request, "python", "print(1)");
+  await run(page).click();
+  await expect(page.getByText(/^Error:/)).toBeVisible({ timeout: 30_000 });
+  const frame = page.locator("iframe").first();
+  await expect(frame).toHaveAttribute("sandbox", "allow-scripts");
+  expect(await frame.getAttribute("srcdoc")).toMatch(
+    /^<!doctype html><html><head><meta http-equiv="Content-Security-Policy"/,
+  );
+  expect(await page.evaluate(() => (window as unknown as { __pyodide?: unknown }).__pyodide)).toBeUndefined();
+});
+
 // Needs cdn.jsdelivr.net. Run with LIVE_PYODIDE=1.
 test("Run on a Python block loads numpy, blocks fetch, and keeps state between Runs", async ({ page, request }) => {
   test.skip(!process.env.LIVE_PYODIDE, "set LIVE_PYODIDE=1 (needs cdn.jsdelivr.net)");
   test.setTimeout(240_000);
+  const other = await createChat(request, { title: "Other python chat" });
+  const content = "Check.\n\n```python\nprint('numpy' in dir())\n```";
+  expect((await request.post(`/api/conversations/${other}/messages`, { data: { role: "assistant", content } })).ok()).toBeTruthy();
   await seedFence(
     page,
     request,
@@ -115,4 +142,9 @@ test("Run on a Python block loads numpy, blocks fetch, and keeps state between R
   // A second Run in the same page sees the first one's variables.
   await run(page).nth(1).click();
   await expect(page.getByText("numpy", { exact: true })).toBeVisible({ timeout: 30_000 });
+
+  // Another chat gets a fresh Python: numpy is not defined there.
+  await page.getByRole("link", { name: /Other python chat/ }).first().click();
+  await run(page).first().click();
+  await expect(page.getByText(/^False$/)).toBeVisible({ timeout: 120_000 });
 });

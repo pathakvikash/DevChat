@@ -6,6 +6,7 @@ import SideChatHeader from "@/app/components/sidechat/SideChatHeader";
 import SideComposer from "@/app/components/sidechat/SideComposer";
 import { sideChatTitle } from "@/lib/chat/sideChatLabels";
 import { AgentTalkingRow } from "@/app/components/AgentMessageBubble";
+import { RunScope } from "@/app/components/CodeRunner";
 import { AgentSendContext } from "@/app/components/MessageActions";
 import { createSideChat, listSideChats, type SideChatSummary } from "@/lib/sideChat";
 import { useSplitViewOptional } from "@/app/c/SplitViewContext";
@@ -166,6 +167,7 @@ export default function ConversationPane({ conversationId, focused, initialPromp
 
   return (
     <ChatModeContext.Provider value={{ mode: p.mode, setMode: p.setMode, modelCaps: p.modelCaps, setModelCaps: p.setModelCaps }}>
+    <RunScope.Provider value={conversationId}>
     <div className="flex h-full bg-[var(--background)]">
       <main
         className={
@@ -460,6 +462,7 @@ export default function ConversationPane({ conversationId, focused, initialPromp
         onClose={() => p.setKeyboardShortcutsOpen(false)}
       />
     </div>
+    </RunScope.Provider>
     </ChatModeContext.Provider>
   );
 }
