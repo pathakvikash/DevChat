@@ -25,7 +25,7 @@ vi.mock("@/lib/search", async (importOriginal) => ({
 }));
 
 vi.mock("@/lib/chatSearch", () => ({
-  searchUserChats: vi.fn().mockResolvedValue([]),
+  searchUserChats: vi.fn().mockResolvedValue({ hits: [], leftOut: 0 }),
   readUserChat: vi.fn().mockResolvedValue(null),
 }));
 
@@ -359,7 +359,7 @@ describe("buildTools past-chat tools", () => {
     });
     const out = await tools.searchChats.execute!({ query: "cache" }, {} as any);
     expect(searchUserChats).toHaveBeenCalledWith("test-user", "cache", { excludeId: "current" });
-    expect(out).toEqual({ results: [] });
+    expect(out).toEqual({ results: [], leftOut: 0 });
   });
 
   it("searchChats shows the model its results only as framed data", async () => {

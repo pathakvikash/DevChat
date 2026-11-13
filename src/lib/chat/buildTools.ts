@@ -275,8 +275,8 @@ export async function buildTools({
       }),
       // The card reads the structured results; the model only ever sees them framed as data.
       execute: async ({ query }) => {
-        const hits = await searchUserChats(userId, query, { excludeId: conversationId });
-        return { results: hits.map((h) => ({ ...h, updatedAt: h.updatedAt.toISOString() })) };
+        const { hits, leftOut } = await searchUserChats(userId, query, { excludeId: conversationId });
+        return { results: hits.map((h) => ({ ...h, updatedAt: h.updatedAt.toISOString() })), leftOut };
       },
       toModelOutput: ({ input, output }) => ({
         type: "text",

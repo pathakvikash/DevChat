@@ -11,11 +11,11 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: "Query too short" }, { status: 400 });
     }
 
-    const chats = await searchUserChats(userId, query, {
+    const { hits: chats, leftOut } = await searchUserChats(userId, query, {
       excludeId: req.nextUrl.searchParams.get("exclude") ?? undefined,
     });
 
-    return NextResponse.json({ chats, count: chats.length });
+    return NextResponse.json({ chats, count: chats.length, leftOut });
   } catch (error) {
     console.error("Search error:", error);
     return NextResponse.json({ error: "Search failed" }, { status: 500 });
