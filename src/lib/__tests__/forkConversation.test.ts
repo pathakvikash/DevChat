@@ -297,9 +297,9 @@ describe("forkConversation: folder text posted by a workflow", () => {
     await forkConversation("user-1", "src", "u1");
     const copied = tx.message.createMany.mock.calls[0][0].data as { parts: string }[];
     // The stored-parts query, run against the rows the fork wrote.
-    db.message.findMany.mockImplementation(async ({ where }: any) => copied.filter((r) => where.OR.some((c: any) => r.parts.includes(c.parts.contains))));
+    db.message.findMany.mockImplementation(async ({ where }: any) => copied.filter((r) => where.OR.some((c: any) => c.parts && r.parts.includes(c.parts.contains))));
     expect(await conversationReadFiles("fork-1")).toBe(true);
-    db.message.findMany.mockImplementation(async ({ where }: any) => [{ parts: "[]" }].filter((r) => where.OR.some((c: any) => r.parts.includes(c.parts.contains))));
+    db.message.findMany.mockImplementation(async ({ where }: any) => [{ parts: "[]" }].filter((r) => where.OR.some((c: any) => c.parts && r.parts.includes(c.parts.contains))));
     expect(await conversationReadFiles("fork-1")).toBe(false);
   });
 });
