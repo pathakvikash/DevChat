@@ -41,7 +41,7 @@ export async function chatFolderAccess(o: {
 }): Promise<{ fileFolder?: string; sendsOutGate: boolean; showFolder: boolean }> {
   // CLI models have their own file access; API models get the read-only folder tools.
   const fileFolder = o.useTools && !o.cli ? o.folder : undefined;
-  // A chat with a folder is gated from its first turn, whichever kind of model it runs: a CLI model reads files with
+  // A chat with a folder and tools is gated from its first turn, whichever kind of model it runs: a CLI model reads files with
   // its own tools before anything is saved. After that it follows the data, not the folder: once the model has read
   // files, clearing the folder does not lift the gate. A side chat is given its parent's context, so file text the parent read counts too.
   const sendsOutGate =
