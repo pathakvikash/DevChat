@@ -343,13 +343,19 @@ export async function advanceRun(runId: string, deps: RunnerDeps = defaultDeps):
           continue;
         }
       }
-      // Looked up before the card is marked running: if the lookup fails, the card fails with that error, like any other card failure.
+      // Looked up before the card is marked running: if the lookup fails, the card fails with a plain message, like any other card failure.
       let readsFolder = false;
       if (node.type === "chatMessage") {
         try {
           readsFolder = await readsFolderBefore(run.userId, graph, node.id);
         } catch (e) {
-          nodes[node.id] = { status: "failed", startedAt: new Date().toISOString(), endedAt: new Date().toISOString(), error: message(e) };
+          console.error("[workflows] folder lookup failed:", message(e));
+          nodes[node.id] = {
+            status: "failed",
+            startedAt: new Date().toISOString(),
+            endedAt: new Date().toISOString(),
+            error: "Couldn't check whether this card gets text from a folder. Run it again.",
+          };
           if (!(await save())) return;
           continue;
         }

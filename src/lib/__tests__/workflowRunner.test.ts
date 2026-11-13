@@ -560,8 +560,8 @@ describe("posting what a folder card read", () => {
     const chat: CardImpl = { run: async () => ({ output: {} }) };
     seedRun(graphOf(save, post("p", "s")));
     await advanceRun("run1", { cards: { trigger: { run: async () => ({ output: {} }) }, table, chatMessage: chat } as any });
-    expect(nodesOf().p).toMatchObject({ status: "failed", error: "database is locked" });
-    expect(runs.get("run1")).toMatchObject({ state: "failed", error: expect.stringContaining("database is locked") });
+    expect(nodesOf().p).toMatchObject({ status: "failed", error: "Couldn't check whether this card gets text from a folder. Run it again." });
+    expect(runs.get("run1")).toMatchObject({ state: "failed", error: expect.stringContaining("Couldn't check whether this card gets text from a folder") });
   });
 
   it("does not when no card before it has a folder", async () => {

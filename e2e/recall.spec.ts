@@ -44,6 +44,7 @@ test("/recall says when a chat that read files was left out", async ({ page, req
   await send(page, `what does the notes file export? ${phrase}`);
   await expect(regenerateButtons(page)).toHaveCount(1);
   await expect(messages(page).nth(1).getByRole("button", { name: /Tool: readFile/ })).toBeVisible();
+  await expect.poll(async () => (await storedMessages(request, reader)).length).toBe(2);
 
   await openChat(page, await createChat(request, { title: "Recall asker", model: "mock/notools" }));
   await send(page, `/recall ${phrase}`);

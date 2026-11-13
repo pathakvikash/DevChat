@@ -52,9 +52,10 @@ export async function GET(
       return NextResponse.json({ error: "Conversation not found" }, { status: 404 });
     }
 
-    const hostTools = await canUseHostTools(userId);
+    let hostTools = false;
     let modelConfig;
     try {
+      hostTools = await canUseHostTools(userId);
       modelConfig = getModel(conversation.model, await resolveProviderCreds(userId), hostTools);
     } catch {
       modelConfig = null;

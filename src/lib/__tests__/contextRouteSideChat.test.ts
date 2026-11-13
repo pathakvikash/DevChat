@@ -5,6 +5,7 @@ import { GET } from "@/app/api/conversations/[id]/context/route";
 vi.mock("@/lib/db", () => ({
   prisma: { conversation: { findUnique: vi.fn() }, message: { findMany: vi.fn().mockResolvedValue([]) } },
 }));
+vi.mock("@/lib/hostAccess", () => ({ canUseHostTools: vi.fn(async () => true) }));
 vi.mock("@/lib/cliProviders", () => ({ cliProviderForModel: vi.fn(() => undefined) }));
 vi.mock("@/lib/auth", () => ({ requireUserId: vi.fn().mockResolvedValue("u1") }));
 vi.mock("@/lib/models", () => ({ getModel: vi.fn(() => ({ supportsTools: true, contextWindow: 8192 })) }));
@@ -22,6 +23,7 @@ import { prisma } from "@/lib/db";
 import { buildSystemPrompt } from "@/lib/chat/buildSystemPrompt";
 import { resolveActiveToolIds } from "@/lib/chat/buildTools";
 import { cliProviderForModel } from "@/lib/cliProviders";
+import { canUseHostTools } from "@/lib/hostAccess";
 import { countTokens } from "@/lib/tokens";
 const db = prisma as any;
 
@@ -81,6 +83,13 @@ describe("GET /api/conversations/[id]/context for side chats", () => {
     db.conversation.findUnique.mockResolvedValue(conv({ workingFolder: "/work" }));
     await get("c1");
     expect((buildSystemPrompt as any).mock.calls[0][0]).toMatchObject({ fileFolder: "/work", sendsOutGate: true, showFolder: false });
+  });
+
+  it("a user without host access gets no folder in the panel", async () => {
+    vi.mocked(canUseHostTools).mockResolvedValueOnce(false);
+    db.conversation.findUnique.mockResolvedValue(conv({ workingFolder: "/work" }));
+    await get("c1");
+    expect((buildSystemPrompt as any).mock.calls[0][0]).toMatchObject({ fileFolder: undefined, showFolder: false });
   });
 
   it("a chat that read files stays gated with the folder cleared", async () => {
