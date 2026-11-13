@@ -359,7 +359,15 @@ describe("buildTools past-chat tools", () => {
     });
     const out = await tools.searchChats.execute!({ query: "cache" }, {} as any);
     expect(searchUserChats).toHaveBeenCalledWith("test-user", "cache", { excludeId: "current" });
-    expect(out).toEqual({ results: [], leftOut: 0 });
+    expect(out).toEqual({ results: [] });
+  });
+
+  it("searchChats output never carries the left-out count", async () => {
+    const { searchUserChats } = await import("@/lib/chatSearch");
+    vi.mocked(searchUserChats).mockResolvedValueOnce({ hits: [], leftOut: 2 });
+    const tools = await buildTools({ activeToolIds: ids, searchProvider: "duckduckgo", userId: "test-user", contextWindow: 8192, conversationId: "current", mode: "chat" });
+    const out = await tools.searchChats.execute!({ query: "cache" }, {} as any);
+    expect(out).not.toHaveProperty("leftOut");
   });
 
   it("searchChats shows the model its results only as framed data", async () => {

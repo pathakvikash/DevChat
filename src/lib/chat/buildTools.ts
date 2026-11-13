@@ -275,8 +275,9 @@ export async function buildTools({
       }),
       // The card reads the structured results; the model only ever sees them framed as data.
       execute: async ({ query }) => {
-        const { hits, leftOut } = await searchUserChats(userId, query, { excludeId: conversationId });
-        return { results: hits.map((h) => ({ ...h, updatedAt: h.updatedAt.toISOString() })), leftOut };
+        const { hits } = await searchUserChats(userId, query, { excludeId: conversationId });
+        // No leftOut here: a stored count could be read back, telling a model which guesses match chats it may not see.
+        return { results: hits.map((h) => ({ ...h, updatedAt: h.updatedAt.toISOString() })) };
       },
       toModelOutput: ({ input, output }) => ({
         type: "text",
