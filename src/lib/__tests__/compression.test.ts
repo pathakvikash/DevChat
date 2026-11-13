@@ -86,7 +86,7 @@ describe("shouldAutoCompress", () => {
     expect(result).toBe(true);
   });
 
-  it("measures the prompt the chat sent when given, without rebuilding it", async () => {
+  it("adds the folder text the chat sent to the estimate", async () => {
     (prisma.conversation.findUnique as any).mockResolvedValue({ model: "test-model", systemPrompt: "persona", compressedSummary: "sum" });
     (prisma.message.findMany as any).mockResolvedValue([
       { role: "user", content: "a" },
@@ -95,9 +95,11 @@ describe("shouldAutoCompress", () => {
     ]);
     (calculateContextUsage as any).mockResolvedValue({ contextPercent: 90 });
 
-    expect(await shouldAutoCompress("conv-id", 85, 8192, "the whole sent prompt")).toBe(true);
-    expect((calculateContextUsage as any).mock.calls[0][1]).toBe("the whole sent prompt");
-    expect(loadParentContext).not.toHaveBeenCalled();
+    expect(await shouldAutoCompress("conv-id", 85, 8192, "folder text")).toBe(true);
+    expect((calculateContextUsage as any).mock.calls[0][1]).toBe("persona\n\nsum\n\nfolder text");
+    expect(loadParentContext).toHaveBeenCalled();
+    await shouldAutoCompress("conv-id", 85, 8192);
+    expect((calculateContextUsage as any).mock.calls[1][1]).toBe("persona\n\nsum");
   });
 
   it("returns false for very short conversations", async () => {

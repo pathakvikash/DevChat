@@ -656,8 +656,8 @@ export async function POST(req: Request) {
                         window,
                         () =>
                         writer.write({ type: "data-compressing", data: true, transient: true }),
-                        // What was sent: the whole system prompt, plus the folder tools' specs.
-                        window && fileFolder ? `${finalSystemPrompt}\n${await folderToolSpecs(fileFolder, window)}` : finalSystemPrompt,
+                        // What the folder adds to the sent prompt, which the estimate would miss.
+                        [sections.folder, window && fileFolder ? await folderToolSpecs(fileFolder, window) : ""].filter(Boolean).join("\n") || undefined,
                       );
                     }
                   },

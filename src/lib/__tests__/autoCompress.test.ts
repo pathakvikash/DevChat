@@ -51,10 +51,10 @@ describe("autoCompress", () => {
     );
   });
 
-  it("passes the sent prompt on", async () => {
-    await autoCompress("c1", 85, 8192, undefined, "sent prompt");
+  it("passes the extra prompt text on", async () => {
+    await autoCompress("c1", 85, 8192, undefined, "folder text");
 
-    expect(shouldAutoCompress).toHaveBeenCalledExactlyOnceWith("c1", 85, 8192, "sent prompt");
+    expect(shouldAutoCompress).toHaveBeenCalledExactlyOnceWith("c1", 85, 8192, "folder text");
   });
 
   it("checks the threshold against the context window it is given", async () => {

@@ -214,7 +214,7 @@ export async function shouldAutoCompress(
   conversationId: string,
   thresholdPercent: number,
   contextWindow: number,
-  sentPrompt?: string,
+  extraPrompt?: string,
 ): Promise<boolean> {
   const conversation = await prisma.conversation.findUnique({
     where: { id: conversationId },
@@ -233,16 +233,11 @@ export async function shouldAutoCompress(
   });
   // Compressing cuts at the newest user message, so it only helps if an older one exists to drop.
   if (messages.filter((m) => m.role === "user").length < 2) return false;
-  // The prompt the chat actually sent, when given; else a partial one, with a side chat's main-conversation section.
-  const systemPrompt =
-    sentPrompt ??
-    [
-      conversation.systemPrompt,
-      conversation.compressedSummary,
-      (await loadParentContext(conversationId, conversation.userId ?? "", contextWindow))?.text,
-    ]
-      .filter(Boolean)
-      .join("\n\n");
+  // A side chat's prompt also carries its main-conversation section; extraPrompt is text the chat sent that this misses.
+  const mainSection = (await loadParentContext(conversationId, conversation.userId ?? "", contextWindow))?.text;
+  const systemPrompt = [conversation.systemPrompt, conversation.compressedSummary, mainSection, extraPrompt]
+    .filter(Boolean)
+    .join("\n\n");
 
   const result = await calculateContextUsage(
     conversation.model,

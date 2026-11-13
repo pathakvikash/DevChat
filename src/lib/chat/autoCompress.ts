@@ -48,12 +48,12 @@ export async function autoCompress(
   threshold: number,
   contextWindow: number | null,
   onCompressing?: () => void,
-  systemPrompt?: string,
+  extraPrompt?: string,
 ): Promise<void> {
   // Without a known window there is no percentage to check, so skip rather than guess.
   if (!contextWindow) return;
   try {
-    const needsCompression = await shouldAutoCompress(conversationId, threshold, contextWindow, systemPrompt);
+    const needsCompression = await shouldAutoCompress(conversationId, threshold, contextWindow, extraPrompt);
     console.log(
       `[Auto-compress] Conversation ${conversationId}: needsCompression=${needsCompression}, window=${contextWindow}`,
     );
