@@ -1,7 +1,7 @@
 import path from "node:path";
-import type { Page } from "@playwright/test";
+import type { APIRequestContext, Page } from "@playwright/test";
 import { test, expect } from "./fixtures";
-import { createChat, openChat, regenerateButtons, send } from "./helpers";
+import { createChat, deleteAllChats, openChat, regenerateButtons, send } from "./helpers";
 
 const FOLDER = path.join(__dirname, "fixtures/project");
 const mode = (page: Page, name: "Agent") =>
@@ -63,4 +63,56 @@ test("in a folder chat an HTML page asks first: nothing is created before Allow,
   await card.getByRole("button", { name: "Allow", exact: true }).click();
   await expect(regenerateButtons(page)).toHaveCount(1);
   await expect(page.frameLocator('iframe[title="Sandbox probe"]').getByText("fetch: blocked")).toBeVisible();
+});
+
+async function seedFence(page: Page, request: APIRequestContext, lang: string, ...codes: string[]) {
+  await deleteAllChats(request);
+  const id = await createChat(request, { title: "Run probe" });
+  const content = "Try it.\n\n" + codes.map((c) => "```" + lang + "\n" + c + "\n```").join("\n\n");
+  expect((await request.post(`/api/conversations/${id}/messages`, { data: { role: "assistant", content } })).ok()).toBeTruthy();
+  await openChat(page, id);
+}
+
+const run = (page: Page) => page.getByRole("button", { name: "Run", exact: true });
+
+test("Run on a JavaScript block prints its output, and its fetch is blocked", async ({ page, request }) => {
+  // The host never resolves: a block by the frame's policy happens before any request is made.
+  const attempts: string[] = [];
+  page.on("request", (r) => r.url().includes("devchat-test.invalid") && attempts.push(r.url()));
+  await seedFence(
+    page,
+    request,
+    "javascript",
+    [
+      "let blocked = false;",
+      "document.addEventListener('securitypolicyviolation', () => { blocked = true; });",
+      "try { await fetch('https://devchat-test.invalid/x', { mode: 'no-cors' }); } catch {}",
+      "await new Promise((r) => setTimeout(r, 100));",
+      "console.log('ran: ' + 6 * 7);",
+      "console.log(blocked ? 'fetch: blocked by policy' : 'fetch: allowed by policy');",
+    ].join("\n"),
+  );
+  await run(page).click();
+  // Match the whole output: the code block above it contains these words too.
+  await expect(page.getByText(/^ran: 42\s+fetch: blocked by policy$/)).toBeVisible();
+  expect(attempts).toEqual([]);
+});
+
+// Needs cdn.jsdelivr.net. Run with LIVE_PYODIDE=1.
+test("Run on a Python block loads numpy, blocks fetch, and keeps state between Runs", async ({ page, request }) => {
+  test.skip(!process.env.LIVE_PYODIDE, "set LIVE_PYODIDE=1 (needs cdn.jsdelivr.net)");
+  test.setTimeout(240_000);
+  await seedFence(
+    page,
+    request,
+    "python",
+    "import numpy\nprint('sum:', int(numpy.arange(4).sum()))\nimport asyncio\nfrom js import document, fetch\nfrom pyodide.ffi import create_proxy\nblocked = []\ndocument.addEventListener('securitypolicyviolation', create_proxy(lambda e: blocked.append(1)))\ntry:\n    await fetch('https://devchat-test.invalid/x')\nexcept Exception:\n    pass\nawait asyncio.sleep(0.1)\nprint('fetch: blocked by policy' if blocked else 'fetch: allowed by policy')",
+    "print(numpy.__name__)",
+  );
+  await run(page).first().click();
+  await expect(page.getByText(/^sum: 6\s+fetch: blocked by policy$/)).toBeVisible({ timeout: 120_000 });
+
+  // A second Run in the same page sees the first one's variables.
+  await run(page).nth(1).click();
+  await expect(page.getByText("numpy", { exact: true })).toBeVisible({ timeout: 30_000 });
 });

@@ -115,7 +115,7 @@ export const TOOL_REGISTRY: Record<string, ToolDefinition> = {
     name: "Execute Code (sandbox)",
     description: "Run Python (Pyodide) or JavaScript in a browser sandbox.",
     modelDescription:
-      "Execute Python or JavaScript code in a secure browser sandbox. Python runs in Pyodide (numpy/pandas pre-loaded; other PyPI via `import micropip; await micropip.install('pkg')`). JavaScript runs in a sandboxed iframe (5s timeout). Returns stdout/stderr/return value. Pass `saveAs: { title }` to store the printed output as a data artifact and get back an id to reference from a Chart or Table via `dataArtifactId` — use it for any dataset you'd otherwise retype into a component spec.",
+      "Execute Python or JavaScript code in a secure browser sandbox. Python runs in Pyodide (its bundled packages, such as numpy and pandas, load on import). JavaScript runs in a sandboxed iframe (5s timeout). Neither has network access. Returns stdout/stderr/return value. Pass `saveAs: { title }` to store the printed output as a data artifact and get back an id to reference from a Chart or Table via `dataArtifactId` — use it for any dataset you'd otherwise retype into a component spec.",
     category: "Code",
     internal: true,
     inputSchema: z.object({
