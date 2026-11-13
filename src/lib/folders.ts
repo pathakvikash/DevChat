@@ -50,14 +50,14 @@ type Secret = "inside" | "contains" | null;
 type Ctx = { home: string; homeSt: Stat | null; secrets: { path: string; real: string | null; st: Stat | null }[] };
 
 async function loadCtx(): Promise<Ctx> {
-  const home = await realpath(homedir()).catch(() => homedir());
+  const home = await realpath(/*turbopackIgnore: true*/ homedir()).catch(() => homedir());
   const secrets = await Promise.all(
     SECRET_HOME_DIRS.map(async (d) => {
-      const path = join(home, d);
-      return { path, real: await realpath(path).catch(() => null), st: await stat(path).catch(() => null) };
+      const path = join(/*turbopackIgnore: true*/ home, d);
+      return { path, real: await realpath(/*turbopackIgnore: true*/ path).catch(() => null), st: await stat(/*turbopackIgnore: true*/ path).catch(() => null) };
     }),
   );
-  return { home, homeSt: await stat(home).catch(() => null), secrets };
+  return { home, homeSt: await stat(/*turbopackIgnore: true*/ home).catch(() => null), secrets };
 }
 
 /** Whether `real` is, is inside, or contains a secret home dir; by name, by resolved path and by dev+ino so an alias can't dodge it.
@@ -71,7 +71,7 @@ async function secretKind(real: string, ctx: Ctx, ancestors = true): Promise<Sec
   if (secrets.some((x) => x.path.startsWith(real + sep) || x.real?.startsWith(real + sep))) return "contains";
   // ponytail: a bind-mount alias of a folder that CONTAINS home is not caught on Linux (only the folder's own ancestors are compared).
   for (let p = real; ; p = dirname(p)) {
-    const st = await stat(p).catch(() => null);
+    const st = await stat(/*turbopackIgnore: true*/ p).catch(() => null);
     if (st && secrets.some((x) => x.st && sameFile(x.st, st))) return "inside";
     if (!ancestors || p === dirname(p)) break;
   }
@@ -90,7 +90,7 @@ async function refuseReason(real: string): Promise<string | null> {
   if (real === "/") return "The whole disk can't be a working folder.";
   if (real === "/Volumes") return "Pick a folder on the volume, not the list of volumes.";
   if (real === "/System/Volumes" || real.startsWith("/System/Volumes/")) return "Pick the folder by its normal path (under /Users or /Volumes).";
-  const st = await stat(real).catch(() => null);
+  const st = await stat(/*turbopackIgnore: true*/ real).catch(() => null);
   if (real === home || (st && c.homeSt && sameFile(st, c.homeSt))) return "Your home folder is too broad. Pick a project folder inside it.";
   if (home.startsWith(real + sep)) return `${name} contains your home folder. Pick a project folder inside it.`;
   const k = await secretKind(real, c);
@@ -117,7 +117,7 @@ export async function isAllowedFolder(userId: string, path: string): Promise<boo
   if (!(await canUseHostTools(userId))) return false;
   // An added folder is re-checked: it may since have been deleted, swapped for a symlink or now match a refuse rule.
   if (!openServer() && (await readAdded(userId)).includes(path)) {
-    return (await realpath(path).catch(() => null)) === path && (await refuseReason(path)) === null;
+    return (await realpath(/*turbopackIgnore: true*/ path).catch(() => null)) === path && (await refuseReason(path)) === null;
   }
   return (await withKnown(new Map())).some((f) => f.path === path);
 }
@@ -128,15 +128,15 @@ async function resolveFolder(raw: unknown): Promise<Result<{ real: string }>> {
     return fail(400, "Give the folder's full path, starting with /.");
   }
   let p = raw.trim();
-  if (p === "~" || p.startsWith("~/")) p = join(homedir(), p.slice(1));
+  if (p === "~" || p.startsWith("~/")) p = join(/*turbopackIgnore: true*/ homedir(), p.slice(1));
   if (!isAbsolute(p)) return fail(400, "Give the folder's full path, starting with /.");
   let real: string;
   try {
-    real = await realpath(p);
+    real = await realpath(/*turbopackIgnore: true*/ p);
   } catch (e) {
     return (e as NodeJS.ErrnoException).code === "EACCES" ? fail(403, `DevChat can't read ${p}`) : fail(404, `No folder at ${p}`);
   }
-  const st = await stat(real).catch(() => null);
+  const st = await stat(/*turbopackIgnore: true*/ real).catch(() => null);
   if (!st) return fail(404, `No folder at ${p}`);
   if (!st.isDirectory()) return fail(400, `${p} is a file, not a folder.`);
   return { ok: true, real };
@@ -183,7 +183,7 @@ export async function browseFolder(userId: string, raw: string | null, hidden: b
   // "/" and home may be browsed; only secret folders are refused here.
   const ctx = await loadCtx();
   if ((await secretKind(real, ctx)) === "inside") return fail(403, SECRET_MSG(real));
-  const entries = await readdir(real, { withFileTypes: true }).catch(() => null);
+  const entries = await readdir(/*turbopackIgnore: true*/ real, { withFileTypes: true }).catch(() => null);
   if (!entries) return fail(403, `DevChat can't read ${real}`);
   const names = entries
     .filter((e) => e.isDirectory() && (hidden || !e.name.startsWith(".")) && !isSecretPath(e.name))
@@ -191,12 +191,12 @@ export async function browseFolder(userId: string, raw: string | null, hidden: b
     .sort((a, b) => a.localeCompare(b));
   // Secret children are dropped even with hidden=1 (checked on the 500 shown, so the list can run a little short).
   const shown = names.slice(0, BROWSE_CAP);
-  const kept = await Promise.all(shown.map(async (name) => ((await secretKind(join(real, name), ctx, false)) === "inside" ? null : name)));
+  const kept = await Promise.all(shown.map(async (name) => ((await secretKind(join(/*turbopackIgnore: true*/ real, name), ctx, false)) === "inside" ? null : name)));
   return {
     ok: true,
     path: real,
     parent: real === "/" ? null : dirname(real),
-    dirs: kept.filter((n): n is string => n !== null).map((name) => ({ name, path: join(real, name) })),
+    dirs: kept.filter((n): n is string => n !== null).map((name) => ({ name, path: join(/*turbopackIgnore: true*/ real, name) })),
     truncated: names.length > BROWSE_CAP,
   };
 }

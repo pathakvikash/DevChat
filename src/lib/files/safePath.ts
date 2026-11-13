@@ -54,8 +54,8 @@ export function looksBinary(buf: Buffer): boolean {
 export async function resolveInside(folder: string, rel: string): Promise<string | null> {
   if (!rel || isAbsolute(rel) || rel.includes("\0") || isHiddenPath(rel) || isSecretPath(rel)) return null;
   try {
-    const root = await realpath(folder);
-    const target = await realpath(resolve(root, rel));
+    const root = await realpath(/*turbopackIgnore: true*/ folder);
+    const target = await realpath(/*turbopackIgnore: true*/ resolve(root, rel));
     if (!target.startsWith(root + sep)) return null;
     const inside = relative(root, target);
     return isHiddenPath(inside) || isSecretPath(inside) ? null : target;
@@ -75,17 +75,17 @@ export async function readInside(folder: string, rel: string, maxBytes = 1024 * 
   // Opening a FIFO for reading blocks until a writer shows up, so only a regular file is opened.
   // O_NONBLOCK covers a swap after the stat; the handle is checked again below.
   // O_NOFOLLOW plus the same dev/inode refuses a swap for a symlink or another file between the checks and the open.
-  const checked = await stat(real).catch(() => null);
+  const checked = await stat(/*turbopackIgnore: true*/ real).catch(() => null);
   if (!checked?.isFile()) return { ok: false, reason: "missing" };
-  const handle = await open(real, constants.O_RDONLY | constants.O_NONBLOCK | constants.O_NOFOLLOW).catch(() => null);
+  const handle = await open(/*turbopackIgnore: true*/ real, constants.O_RDONLY | constants.O_NONBLOCK | constants.O_NOFOLLOW).catch(() => null);
   if (!handle) return { ok: false, reason: "missing" };
   try {
     const opened = await handle.stat();
     if (!opened.isFile() || opened.ino !== checked.ino || opened.dev !== checked.dev) return { ok: false, reason: "missing" };
     // O_NOFOLLOW covers only the last component: a parent swapped for a symlink after the checks must not be followed.
-    if ((await realpath(real).catch(() => null)) !== real) return { ok: false, reason: "refused" };
+    if ((await realpath(/*turbopackIgnore: true*/ real).catch(() => null)) !== real) return { ok: false, reason: "refused" };
     // And the path must still lead to the handle we hold: a swap back between the open and the check would pass the line above.
-    const now = await stat(real).catch(() => null);
+    const now = await stat(/*turbopackIgnore: true*/ real).catch(() => null);
     if (!now || now.ino !== opened.ino || now.dev !== opened.dev) return { ok: false, reason: "missing" };
     // One read of at most the cap plus one byte, so a file that grows after a stat is still bounded.
     const buf = Buffer.alloc(maxBytes + 1);
@@ -108,10 +108,10 @@ export async function listFolderFiles(
   cap = LIST_CAP,
   sub = "",
 ): Promise<{ files: { path: string; size: number }[]; truncated: boolean }> {
-  const tracked = existsSync(join(folder, ".git")) ? await gitFiles(folder, sub) : null;
+  const tracked = existsSync(/*turbopackIgnore: true*/ join(folder, ".git")) ? await gitFiles(folder, sub) : null;
   const paths = (tracked ?? (await walkFiles(folder, cap + 1, sub))).filter((rel) => !isSecretPath(rel) && !isHiddenPath(rel));
   const files = await Promise.all(
-    paths.slice(0, cap).map(async (path) => ({ path, size: (await lstat(join(folder, path)).catch(() => null))?.size ?? 0 })),
+    paths.slice(0, cap).map(async (path) => ({ path, size: (await lstat(/*turbopackIgnore: true*/ join(folder, path)).catch(() => null))?.size ?? 0 })),
   );
   return { files, truncated: paths.length > cap };
 }
@@ -133,7 +133,7 @@ async function walkFiles(folder: string, limit: number, sub: string): Promise<st
   const dirs = [sub];
   while (dirs.length > 0 && out.length < limit) {
     const dir = dirs.shift()!;
-    const entries = await readdir(join(folder, dir), { withFileTypes: true }).catch(() => []);
+    const entries = await readdir(/*turbopackIgnore: true*/ join(folder, dir), { withFileTypes: true }).catch(() => []);
     entries.sort((a, b) => a.name.localeCompare(b.name));
     for (const entry of entries) {
       const rel = dir ? `${dir}/${entry.name}` : entry.name;
