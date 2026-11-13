@@ -47,6 +47,8 @@ vi.mock("ai", async (importOriginal) => ({
 import { prisma } from "@/lib/db";
 import { buildTools } from "@/lib/chat/buildTools";
 import { buildSystemPrompt } from "@/lib/chat/buildSystemPrompt";
+import { cliProviderForModel } from "@/lib/cliProviders";
+import { isAllowedFolder } from "@/lib/folders";
 const db = prisma as any;
 
 /** One row serves both the ownership check and resolveChatSettings. */
@@ -124,6 +126,20 @@ describe("POST /api/chat for side chats", () => {
     await send("c1", "chat");
     expect((buildTools as any).mock.calls[0][0].askBeforeSendingOut).toBe(true);
     expect((buildSystemPrompt as any).mock.calls[0][0].sendsOutGate).toBe(true);
+  });
+
+  it("a CLI chat with a folder is gated from its first turn", async () => {
+    vi.mocked(cliProviderForModel).mockReturnValue({} as any);
+    vi.mocked(isAllowedFolder).mockResolvedValueOnce(true);
+    try {
+      db.conversation.findUnique.mockResolvedValue(chat({ workingFolder: "/work" }));
+      db.message.findMany.mockResolvedValue([]);
+      await send("c1", "chat");
+      expect((buildTools as any).mock.calls[0][0].askBeforeSendingOut).toBe(true);
+      expect((buildSystemPrompt as any).mock.calls[0][0]).toMatchObject({ sendsOutGate: true, fileFolder: undefined, showFolder: true });
+    } finally {
+      vi.mocked(cliProviderForModel).mockReturnValue(undefined);
+    }
   });
 
   it("forces chat mode on a side chat, whatever mode the request asks for", async () => {

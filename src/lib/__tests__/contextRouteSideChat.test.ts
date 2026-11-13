@@ -108,7 +108,7 @@ describe("GET /api/conversations/[id]/context for side chats", () => {
       conv({ kind: "side", parentId: "p1", parent: { userId: "u1", kbId: null, temporary: false, workingFolder: "/main" } }),
     );
     await get("s1");
-    expect((buildSystemPrompt as any).mock.calls[0][0]).toMatchObject({ fileFolder: undefined, showFolder: true, sendsOutGate: false });
+    expect((buildSystemPrompt as any).mock.calls[0][0]).toMatchObject({ fileFolder: undefined, showFolder: true, sendsOutGate: true });
   });
 
   it("counts the folder section and folder tools under Tool Descriptions", async () => {
