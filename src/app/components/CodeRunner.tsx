@@ -36,7 +36,7 @@ export default function CodeRunner({ code, language }: CodeRunnerProps) {
     setShowOutput(true);
     setOutput("Running…");
     try {
-      const result = await runCode(language, code, scope);
+      const result = await runCode(language, code, scope ?? "");
       setOutput(result);
     } catch (error: any) {
       setOutput(`Error: ${error?.message || String(error)}`);

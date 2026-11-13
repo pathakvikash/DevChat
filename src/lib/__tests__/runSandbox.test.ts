@@ -73,11 +73,19 @@ describe("Run frames in the page", () => {
     expect(page.frames[1].isConnected).toBe(true);
   });
 
-  it("a reply that is not a string, or not from the frame, is ignored", async () => {
+  it("a Run still waiting when another chat takes the frame ends with a message", async () => {
+    fakePage();
+    const { runCode } = await import("../sandbox");
+    const first = runCode("python", "x = 1", "chat-a");
+    void runCode("python", "x = 2", "chat-b");
+    await expect(first).resolves.toBe("Error: Python was restarted for another chat. Run it again.");
+  });
+
+  it("a reply from elsewhere is ignored, and a reply that is not a string shows (no output)", async () => {
     const page = fakePage();
     const { runCode } = await import("../sandbox");
     const done = vi.fn();
-    void runCode("javascript", "1").then(done);
+    void runCode("javascript", "1", "").then(done);
     const frame = page.frames[0];
     const channel = /channel: '([^']+)'/.exec(frame.srcdoc)![1];
     page.send({ channel, output: "from elsewhere" }, {});

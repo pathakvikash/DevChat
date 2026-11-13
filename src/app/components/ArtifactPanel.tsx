@@ -25,7 +25,7 @@ import SidePanel from "./ui/SidePanel";
 import { renderMermaid } from "@/lib/mermaidRender";
 import { resolveLanguage, highlightCode } from "@/lib/utils/highlight";
 import { parseDataArtifact } from "@/lib/generativeUi/data";
-import CodeRunner, { RunScope } from "./CodeRunner";
+import CodeRunner from "./CodeRunner";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
@@ -330,7 +330,7 @@ export default function ArtifactPanel({
               dangerouslySetInnerHTML={{ __html: html }}
             />
           </pre>
-          <RunScope.Provider value={conversationId}><CodeRunner code={artifact.content} language={artifact.language || ""} /></RunScope.Provider>
+          <CodeRunner code={artifact.content} language={artifact.language || ""} />
         </div>
       );
     }

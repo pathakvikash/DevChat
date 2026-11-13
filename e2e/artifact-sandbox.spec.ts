@@ -99,14 +99,22 @@ test("Run on a JavaScript block prints its output, and its fetch is blocked", as
   expect(attempts).toEqual([]);
 });
 
+// The page's frame-src stops the frame going anywhere: the frame is replaced by a blocked page, so the Run
+// times out, and no request is made.
 test("the Run frame cannot leave for another site", async ({ page, request }) => {
   const requested: string[] = [];
   page.on("request", (r) => r.url().includes("devchat-test.invalid") && requested.push(r.url()));
-  await seedFence(page, request, "javascript", "location.href = 'https://devchat-test.invalid/nav';\nconsole.log('went');");
+  await seedFence(page, request, "javascript", "location.href = 'https://devchat-test.invalid/nav';\nawait new Promise(() => {});");
+  await page.evaluate(() => {
+    const w = window as unknown as { __blocked: string[] };
+    w.__blocked = [];
+    document.addEventListener("securitypolicyviolation", (e) => w.__blocked.push(`${e.effectiveDirective} ${e.blockedURI}`));
+  });
   await run(page).click();
-  await expect(page.getByText(/^went$/)).toBeVisible();
-  await page.waitForTimeout(1500);
+  await expect(page.getByText(/execution timed out/)).toBeVisible({ timeout: 15_000 });
   expect(requested).toEqual([]);
+  const blocked = await page.evaluate(() => (window as unknown as { __blocked: string[] }).__blocked);
+  expect(blocked).toContainEqual(expect.stringMatching(/^frame-src https:\/\/devchat-test\.invalid/));
 });
 
 test("Python runs in a sandboxed frame, not in the app window", async ({ page, request }) => {

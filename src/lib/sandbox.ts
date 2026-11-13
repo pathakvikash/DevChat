@@ -85,7 +85,7 @@ function hiddenFrame(html: string, onLoad?: () => void) {
 }
 
 // Waits for the frame's reply on `channel`; start() sends the work once the listener is in place.
-function reply(iframe: HTMLIFrameElement, channel: string, timeoutMs: number, start: () => void): Promise<string> {
+function reply(iframe: HTMLIFrameElement, channel: string, timeoutMs: number, signal: AbortSignal | undefined, start: () => void): Promise<string> {
   return new Promise((resolve) => {
     const timer = setTimeout(() => {
       window.removeEventListener("message", handler);
@@ -100,6 +100,11 @@ function reply(iframe: HTMLIFrameElement, channel: string, timeoutMs: number, st
       resolve((typeof e.data.output === "string" && e.data.output) || "(no output)");
     }
     window.addEventListener("message", handler);
+    signal?.addEventListener("abort", () => {
+      clearTimeout(timer);
+      window.removeEventListener("message", handler);
+      resolve("Error: Python was restarted for another chat. Run it again.");
+    });
     start();
   });
 }
@@ -107,22 +112,23 @@ function reply(iframe: HTMLIFrameElement, channel: string, timeoutMs: number, st
 const newChannel = () => `vas-sandbox-${Math.random().toString(36).slice(2)}`;
 
 // One Python frame for the chat's Runs: Pyodide loads once and variables persist between Runs.
-// ponytail: one Python frame at a time; a Run in another chat replaces it, and a Run still waiting there times out. One frame per chat if split view needs it.
-let pythonFrame: { iframe: HTMLIFrameElement; scope: string; loaded: boolean } | null = null;
+// ponytail: one Python frame at a time; a Run in another chat replaces it and a Run still waiting there is told to run again. One frame per chat if split view needs it.
+let pythonFrame: { iframe: HTMLIFrameElement; scope: string; loaded: boolean; restart: AbortController } | null = null;
 
 function runPython(code: string, scope: string, timeoutMs = 120_000): Promise<string> {
   const channel = newChannel();
   if (pythonFrame && pythonFrame.scope !== scope) {
+    pythonFrame.restart.abort();
     pythonFrame.iframe.remove();
     pythonFrame = null;
   }
   if (!pythonFrame) {
-    const frame = { iframe: hiddenFrame(runDocument("python", "", ""), () => (frame.loaded = true)), scope, loaded: false };
+    const frame = { iframe: hiddenFrame(runDocument("python", "", ""), () => (frame.loaded = true)), scope, loaded: false, restart: new AbortController() };
     pythonFrame = frame;
   }
   const frame = pythonFrame;
   const post = () => frame.iframe.contentWindow?.postMessage({ channel, code }, "*");
-  return reply(frame.iframe, channel, timeoutMs, () => (frame.loaded ? post() : frame.iframe.addEventListener("load", post, { once: true }))).finally(
+  return reply(frame.iframe, channel, timeoutMs, frame.restart.signal, () => (frame.loaded ? post() : frame.iframe.addEventListener("load", post, { once: true }))).finally(
     () => {
       // A timed-out frame is already removed; forget it so the next Run starts fresh.
       if (!frame.iframe.isConnected && pythonFrame === frame) pythonFrame = null;
@@ -136,7 +142,7 @@ function runJavaScript(code: string, timeoutMs = 5000): Promise<string> {
   }
   const channel = newChannel();
   const iframe = hiddenFrame(runDocument("javascript", code, channel));
-  return reply(iframe, channel, timeoutMs, () => {}).finally(() => iframe.remove());
+  return reply(iframe, channel, timeoutMs, undefined, () => {}).finally(() => iframe.remove());
 }
 
 export function isExecutableLanguage(lang: string): "python" | "javascript" | null {
@@ -147,7 +153,7 @@ export function isExecutableLanguage(lang: string): "python" | "javascript" | nu
 }
 
 // `scope` is the conversation id: Python state is kept per chat. No chat shares one frame.
-export async function runCode(language: string, code: string, scope = ""): Promise<string> {
+export async function runCode(language: string, code: string, scope: string): Promise<string> {
   const lang = isExecutableLanguage(language);
   if (lang === "python") return runPython(code, scope);
   if (lang === "javascript") return runJavaScript(code);

@@ -53,7 +53,7 @@ export default function ArtifactCard({
     setExecuting(true);
     setLocalOutput("Running…");
     try {
-      const result = await runCode(language, code, scope);
+      const result = await runCode(language, code, scope ?? "");
       setLocalOutput(result);
     } catch (error: any) {
       setLocalOutput(`Error: ${error?.message || String(error)}`);
