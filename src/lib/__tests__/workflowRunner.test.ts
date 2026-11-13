@@ -13,6 +13,7 @@ const matches = (r: any, where: Record<string, any>) =>
     return r[k] === v;
   });
 let failProgressSave = false;
+let failTableLookup = false;
 let workflowRow: any = null;
 const chats = new Set<string>();
 const dataTables = new Map<string, { id: string; userId: string; name: string; privateFrom: string; statuses?: string }>();
@@ -47,6 +48,7 @@ vi.mock("@/lib/db", () => {
     conversation: { findFirst: vi.fn(async ({ where }: any) => (chats.has(where.id) ? { id: where.id } : null)) },
     dataTable: {
       findFirst: vi.fn(async ({ where }: any) => {
+        if (failTableLookup) throw new Error("database is locked");
         const t = dataTables.get(where.id);
         return t && t.userId === where.userId ? t : null;
       }),
@@ -154,6 +156,7 @@ beforeEach(() => {
   runs.clear();
   saves.length = 0;
   failProgressSave = false;
+  failTableLookup = false;
   resetShutdownForTests();
   workflowRow = null;
   chats.clear();
@@ -404,6 +407,11 @@ describe("resume after interruption", () => {
     expect(await resumeRun("other", "f")).toMatchObject({ ok: false, status: 404 });
   });
 
+  it("answers with an issue message, not a throw, when the saved graph is damaged", async () => {
+    seedRun(graphOf(), { state: "failed", graph: "{not json" });
+    expect(await resumeRun("u1", "run1")).toMatchObject({ ok: false, status: 400, error: expect.stringContaining("damaged") });
+  });
+
   it("will not resume while another run of the workflow is in progress", async () => {
     const g = graphOf();
     seedRun(g, { state: "interrupted" }, "old");
@@ -542,6 +550,18 @@ describe("posting what a folder card read", () => {
     seedRun(graphOf(read, post("p", "pk")), {}, "run3");
     await advanceRun("run3", { cards: { trigger: plain, table: plain, chatMessage: chat } as any });
     expect(flags.p).toBe(false);
+  });
+
+  it("fails the card with the error when the folder lookup fails, instead of leaving it running", async () => {
+    const save: FlowNode = { id: "s", type: "table", fromIds: ["trigger"], config: { tableId: "t1", list: "{{trigger.items}}" }, ui: { label: "s", position: { x: 2, y: 0 } } };
+    dataTables.set("t1", { id: "t1", userId: "u1", name: "T", privateFrom: "", statuses: "[]" });
+    // The table card passes its own checks, then the database starts failing before the Post card.
+    const table: CardImpl = { run: async () => ((failTableLookup = true), { output: {} }) };
+    const chat: CardImpl = { run: async () => ({ output: {} }) };
+    seedRun(graphOf(save, post("p", "s")));
+    await advanceRun("run1", { cards: { trigger: { run: async () => ({ output: {} }) }, table, chatMessage: chat } as any });
+    expect(nodesOf().p).toMatchObject({ status: "failed", error: "database is locked" });
+    expect(runs.get("run1")).toMatchObject({ state: "failed", error: expect.stringContaining("database is locked") });
   });
 
   it("does not when no card before it has a folder", async () => {

@@ -343,6 +343,17 @@ export async function advanceRun(runId: string, deps: RunnerDeps = defaultDeps):
           continue;
         }
       }
+      // Looked up before the card is marked running: if the lookup fails, the card fails with that error, like any other card failure.
+      let readsFolder = false;
+      if (node.type === "chatMessage") {
+        try {
+          readsFolder = await readsFolderBefore(run.userId, graph, node.id);
+        } catch (e) {
+          nodes[node.id] = { status: "failed", startedAt: new Date().toISOString(), endedAt: new Date().toISOString(), error: message(e) };
+          if (!(await save())) return;
+          continue;
+        }
+      }
       // A card cut off mid-way keeps the items it finished.
       const resume = have?.partial;
       nodes[node.id] = { status: "running", startedAt: new Date().toISOString(), ...(resume ? { partial: resume } : {}) };
@@ -361,7 +372,7 @@ export async function advanceRun(runId: string, deps: RunnerDeps = defaultDeps):
           workflowId: run.workflowId,
           tctx,
           defaultModel: graph.defaultModel,
-          readsFolder: node.type === "chatMessage" && (await readsFolderBefore(run.userId, graph, node.id)),
+          readsFolder,
           signal: ctrl.signal,
         },
         deps,
@@ -569,7 +580,12 @@ export async function startRun(userId: string, workflowId: string): Promise<Star
 
 /** A saved run's graph is checked again before it goes on: it may predate a rule (a folder with a web tool). The first error, or null. */
 function savedGraphIssue(graphJson: string): string | null {
-  const graph = parseGraph(graphJson);
+  let graph: WorkflowGraph;
+  try {
+    graph = parseGraph(graphJson);
+  } catch {
+    return "This run's saved workflow is damaged, so it can't go on. Start a new run.";
+  }
   return validateStructure(graph)[0] ?? checkGraph(graph).find((i) => !i.warning)?.message ?? null;
 }
 
