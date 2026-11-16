@@ -26,7 +26,7 @@ import {
   nextPane,
   openPane,
   parsePanes,
-  replacePane,
+  replaceChat,
   serializePanes,
   writerConflicts,
 } from "@/lib/splitPanes";
@@ -300,12 +300,19 @@ export function SplitViewProvider({ children }: { children: React.ReactNode }) {
     commit({ ids: next, focus: id });
   };
 
-  const replaceFocused = (id: string) => {
-    if (ids.includes(id)) return focusPane(id);
-    if (ids.length && !confirmBusy(focus, "Replace")) return;
-    if (isBusy(focus)) stoppers.current.get(focus)?.();
-    commit(ids.length ? replacePane(ids, focus, id) : { ids: [id], focus: id });
+  // Swap a chat for another. Side chats of the replaced main chat close with it (one confirm covers all busy panes).
+  const swapChat = (oldId: string, id: string) => {
+    const { ids: now, focus: cur, parentOf: parents } = live.current;
+    if (now.includes(id)) return focusPane(id);
+    if (!now.length) return commit({ ids: [id], focus: id });
+    const r = replaceChat(now, cur, oldId, id, parents);
+    const gone = now.filter((x) => !r.ids.includes(x) && isBusy(x));
+    if (gone.length && !window.confirm(`Replace "${titleOf(gone[0])}"? Its reply will stop and unsent text will be lost.`)) return;
+    for (const x of gone) stoppers.current.get(x)?.();
+    commit({ ids: r.ids, focus: r.focus });
   };
+
+  const replaceFocused = (id: string) => swapChat(focus, id);
 
   const insertAt = (id: string, index: number, side: "left" | "right") => {
     const next = openPane(ids, id, { index, side }, limit);
@@ -313,10 +320,7 @@ export function SplitViewProvider({ children }: { children: React.ReactNode }) {
     commit({ ids: next, focus: id });
   };
 
-  const replaceAt = (oldId: string, id: string) => {
-    if (ids.includes(id)) return focusPane(id);
-    commit(replacePane(ids, oldId, id));
-  };
+  const replaceAt = (oldId: string, id: string) => swapChat(oldId, id);
 
   const closeChat = (id: string) => {
     const { ids: now, focus: cur, parentOf: parents } = live.current;

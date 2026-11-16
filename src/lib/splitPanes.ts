@@ -87,6 +87,25 @@ export function replacePane(ids: string[], oldId: string, newId: string): { ids:
   return { ids: next, focus: newId };
 }
 
+/**
+ * Another chat takes `oldId`'s place. A side chat whose main chat is open swaps that main chat instead,
+ * and a main chat's side chats close with it (returned in `closed`). Already-open `newId` just takes focus.
+ */
+export function replaceChat(
+  ids: string[],
+  focus: string,
+  oldId: string,
+  newId: string,
+  parentOf: Record<string, string>,
+): { ids: string[]; focus: string; closed: string[] } {
+  if (ids.includes(newId)) return { ids: [...ids], focus: newId, closed: [] };
+  const parent = parentOf[oldId];
+  const target = parent && ids.includes(parent) ? parent : oldId;
+  const closed = ids.includes(target) ? orphanSides(ids, parentOf, target) : [];
+  const next = replacePane(ids, target, newId);
+  return { ids: next.ids.filter((x) => !closed.includes(x)), focus: next.focus, closed };
+}
+
 /** The next (dir 1) or previous (dir -1) pane, wrapping around. */
 export function nextPane(ids: string[], focus: string, dir: 1 | -1): string {
   if (ids.length === 0) return "";

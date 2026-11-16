@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { orphanSides, sideShares } from "@/lib/splitPanes";
+import { orphanSides, replaceChat, sideShares } from "@/lib/splitPanes";
 import {
   clampWidths,
   closePane,
@@ -239,5 +239,29 @@ describe("sideShares", () => {
   it("gives a wide side chat half the row, and leaves the no-side layout equal", () => {
     expect(sideShares([false, true], [false, true], 1000)).toEqual([0.5, 0.5]);
     expect(sideShares([false, false], [false, false], 1000)).toEqual([0.5, 0.5]);
+  });
+});
+
+describe("replaceChat", () => {
+  const p = { S: "A", S2: "A" };
+  it("replacing a main chat closes its side chat", () => {
+    expect(replaceChat(["A", "S"], "A", "A", "B", p)).toEqual({ ids: ["B"], focus: "B", closed: ["S"] });
+  });
+  it("replacing from the focused side chat swaps the main chat", () => {
+    expect(replaceChat(["A", "S"], "S", "S", "B", p)).toEqual({ ids: ["B"], focus: "B", closed: ["S"] });
+  });
+  it("in a real split, A is replaced in place and its side closes", () => {
+    expect(replaceChat(["A", "S", "C"], "A", "A", "B", p)).toEqual({ ids: ["B", "C"], focus: "B", closed: ["S"] });
+  });
+  it("replacing C keeps A and its side", () => {
+    expect(replaceChat(["A", "S", "C"], "C", "C", "B", p)).toEqual({ ids: ["A", "S", "B"], focus: "B", closed: [] });
+  });
+  it("an already open chat only takes focus", () => {
+    expect(replaceChat(["A", "S", "C"], "A", "A", "C", p)).toEqual({ ids: ["A", "S", "C"], focus: "C", closed: [] });
+  });
+  it("without parents it matches replacePane", () => {
+    const r = replaceChat(["A", "C"], "A", "A", "B", {});
+    expect({ ids: r.ids, focus: r.focus }).toEqual(replacePane(["A", "C"], "A", "B"));
+    expect(r.closed).toEqual([]);
   });
 });
