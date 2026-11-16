@@ -70,3 +70,25 @@ test("Send to main prefills the main message box and sends nothing", async ({ pa
   await expect(composerIn(page, main)).toHaveValue("Mock reply (deterministic). You said: ping 7");
   await expect(pane(page, main).locator("[data-message-id]")).toHaveCount(0);
 });
+
+test("switching to another chat from the sidebar closes the old chat's side chat", async ({ page, request }) => {
+  const a = await createChat(request, { title: "Alpha plan" });
+  const b = await createChat(request, { title: "Beta notes" });
+  await openChat(page, a);
+  await page.keyboard.press("ControlOrMeta+Backslash");
+  const side = await sideIdOf(request, a);
+  await expect(pane(page, side)).toBeVisible();
+
+  await page.getByRole("link", { name: /Beta notes/ }).click();
+  await expect(page).toHaveURL(new RegExp(`/c/${b}$`));
+  await expect(pane(page, b)).toBeVisible();
+  await expect(pane(page, side)).toHaveCount(0);
+
+  await page.getByRole("link", { name: /Alpha plan/ }).click();
+  await expect(page).toHaveURL(new RegExp(`/c/${a}$`));
+  await expect(pane(page, side)).toHaveCount(0);
+
+  await pane(page, a).getByRole("button", { name: "Open side chat" }).click();
+  await expect(pane(page, side)).toBeVisible();
+  expect(await sideIdOf(request, a)).toBe(side);
+});
