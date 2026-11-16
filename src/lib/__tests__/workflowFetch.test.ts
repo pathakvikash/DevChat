@@ -18,6 +18,33 @@ beforeEach(() => {
   safeFetch.mockReset();
 });
 
+describe("the fetch card and GitHub", () => {
+  it("in sanity mode never touches the network or the token for api.github.com", async () => {
+    vi.stubEnv("GITHUB_TOKEN", "ghp_secret");
+    vi.stubEnv("NODE_ENV", "test");
+    vi.stubEnv("SANITY_TEST_AUTH", "1");
+    vi.stubEnv("DATABASE_URL", "file:./sanity.db");
+    try {
+      const r = await run({ url: "https://api.github.com/repos/o/r", as: "json" });
+      expect(r.output).toHaveProperty("data");
+      expect(safeFetch).not.toHaveBeenCalled();
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it("sends the token only after the repo is confirmed public, and words a rate limit from what was sent", async () => {
+    vi.stubEnv("GITHUB_TOKEN", "ghp_secret");
+    try {
+      safeFetch.mockResolvedValueOnce(res({ text: '{"private":false}' })).mockResolvedValueOnce(res({ status: 403, ok: false, text: '{"message":"API rate limit exceeded"}' }));
+      await expect(run({ url: "https://api.github.com/repos/o/r/readme", as: "json" })).rejects.toThrow(/GITHUB_TOKEN's hourly limit/);
+      expect(safeFetch.mock.calls[1][1].headers.Authorization).toBe("Bearer ghp_secret");
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+});
+
 describe("the fetch card", () => {
   it("page: readable text, scripts and tags gone, cut at 8,000 characters with a warning", async () => {
     safeFetch.mockResolvedValue(res({ text: "<html><script>evil()</script><body><h1>Hi</h1><p>there &amp; you</p></body></html>" }));

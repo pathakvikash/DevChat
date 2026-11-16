@@ -2,6 +2,7 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { isSanityMode } from "@/lib/sanityMode";
 import { safeFetch, type SafeFetchResult } from "@/lib/net/safeFetch";
+import { githubAuthHeaders, httpErrorText } from "@/lib/net/github";
 import { readableText } from "@/lib/net/htmlText";
 import { parseFeed } from "../feed";
 import { renderText } from "../template";
@@ -21,23 +22,15 @@ async function get(url: string, signal: AbortSignal): Promise<SafeFetchResult> {
     const file = path.join(process.cwd(), "e2e/fixtures/workflows", url.includes("/git/trees/") ? "repo-tree.json" : "repo-info.json");
     return { status: 200, ok: true, url, contentType: "application/json", text: await readFile(file, "utf8") };
   }
-  let res = await safeFetch(url, { headers: HEADERS, signal });
+  const auth = await githubAuthHeaders(url, signal);
+  const headers = { ...HEADERS, ...auth };
+  let res = await safeFetch(url, { headers, signal });
   if (res.status === 429 || res.status >= 500) {
     await sleep(2000, signal);
     if (signal.aborted) throw new Error("Cancelled");
-    res = await safeFetch(url, { headers: HEADERS, signal });
+    res = await safeFetch(url, { headers, signal });
   }
-  if (!res.ok) {
-    // GitHub explains itself in a JSON "message" (a rate limit, a missing repo).
-    let why = "";
-    try {
-      const m = JSON.parse(res.text)?.message;
-      if (typeof m === "string") why = `: ${m.slice(0, 200)}`;
-    } catch {
-      // not JSON: the status alone
-    }
-    throw new Error(`HTTP ${res.status}${why} for ${url}`);
-  }
+  if (!res.ok) throw new Error(httpErrorText(res.status, url, res.text, "Authorization" in auth));
   return res;
 }
 

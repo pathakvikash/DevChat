@@ -148,15 +148,19 @@ export async function safeFetch(rawUrl: string, opts: SafeFetchOptions = {}): Pr
   } catch {
     throw new SafeFetchError("Not a valid URL");
   }
+  let headers = opts.headers;
   for (let hop = 0; ; hop++) {
     await assertPublicUrl(url);
-    const res = await send(url, opts.headers, signal);
+    const res = await send(url, headers, signal);
     const status = res.statusCode ?? 0;
     const location = res.headers.location;
     if (status >= 300 && status < 400 && location) {
       res.resume();
       if (hop >= MAX_REDIRECTS) throw new SafeFetchError("Too many redirects");
-      url = new URL(location, url);
+      const next = new URL(location, url);
+      // Like the Fetch spec: a login never follows a redirect to another origin.
+      if (next.origin !== url.origin && headers) headers = Object.fromEntries(Object.entries(headers).filter(([k]) => k.toLowerCase() !== "authorization"));
+      url = next;
       continue;
     }
     const chunks: Buffer[] = [];
