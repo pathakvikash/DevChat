@@ -12,6 +12,8 @@ export interface FieldSpec {
   help?: string;
   options?: { value: string; label: string }[];
   rows?: number;
+  /** One-click chips under a textarea: clicking adds the value as a line, or removes it. */
+  suggestions?: { label: string; value: string }[];
   /** Fields that only apply when this returns true (for example Items, only when "Run once per item" is on). */
   when?: (config: Record<string, unknown>) => boolean;
 }
@@ -405,6 +407,17 @@ export const MAX_PICK_LIMIT = 25; // the same as the default of a per-item card 
 /** The status a picked row gets, and the one pickRows offers, unless the card says otherwise. */
 export const DEFAULT_PICK_STATUS = "picked";
 
+const board = (host: string, list: [string, string][]) => list.map(([label, slug]) => ({ label, value: `https://${host}/${slug}` }));
+const words = (list: string[]) => list.map((w) => ({ label: w, value: w }));
+export const CAREERS_SUGGESTIONS = [
+  ...board("job-boards.greenhouse.io", [["Vercel", "vercel"], ["Stripe", "stripe"], ["Figma", "figma"], ["Airbnb", "airbnb"], ["Discord", "discord"], ["Databricks", "databricks"], ["Cloudflare", "cloudflare"], ["GitLab", "gitlab"], ["Dropbox", "dropbox"], ["Razorpay", "razorpaysoftwareprivatelimited"], ["Groww", "groww"]]),
+  ...board("jobs.ashbyhq.com", [["Supabase", "supabase"], ["Linear", "linear"], ["Notion", "notion"], ["Ramp", "ramp"], ["OpenAI", "openai"], ["PostHog", "posthog"]]),
+  ...board("jobs.lever.co", [["Palantir", "palantir"], ["CRED", "cred"], ["Meesho", "meesho"], ["Spotify", "spotify"]]),
+];
+const TITLE_IN = words(["Backend", "Frontend", "Full stack", "Software Engineer", "Data", "DevOps", "Mobile", "Machine Learning", "QA", "Junior", "Graduate", "New Grad", "Entry", "Associate", "Intern"]);
+const TITLE_OUT = words(["Senior", "Staff", "Principal", "Lead", "Manager", "Director", "Intern"]);
+const PLACES = words(["Remote", "India", "Bengaluru", "Bangalore", "Hyderabad", "Pune", "Mumbai", "Delhi", "United States", "United Kingdom", "Europe", "Singapore"]);
+
 const jobBoards: CardDef = {
   type: "jobBoards",
   label: "Job boards",
@@ -421,11 +434,11 @@ const jobBoards: CardDef = {
   }),
   defaults: () => ({ boards: "", titleInclude: "", titleExclude: "", locationAllow: "", locationBlock: "", maxItems: DEFAULT_MAX_JOBS }),
   fields: [
-    { key: "boards", label: "Careers pages", kind: "textarea", rows: 3, help: "One address per line: jobs.ashbyhq.com/<company>, jobs.lever.co/<company> or job-boards.greenhouse.io/<company>." },
-    { key: "titleInclude", label: "Title has any of", kind: "textarea", rows: 2, help: "One word per line. Empty keeps every title." },
-    { key: "titleExclude", label: "Title has none of", kind: "textarea", rows: 2, help: "One word per line." },
-    { key: "locationAllow", label: "Location has any of", kind: "textarea", rows: 2, help: "One word per line. Empty keeps every location. A job with no location is kept." },
-    { key: "locationBlock", label: "Location has none of", kind: "textarea", rows: 2, help: "One word per line. Wins over the list above." },
+    { key: "boards", label: "Careers pages", kind: "textarea", rows: 3, help: "One address per line: jobs.ashbyhq.com/<company>, jobs.lever.co/<company> or job-boards.greenhouse.io/<company>. Pick some below or paste your own.", suggestions: CAREERS_SUGGESTIONS },
+    { key: "titleInclude", label: "Title has any of", kind: "textarea", rows: 2, help: "One word per line; a title with any of them is kept (OR). Empty keeps every title.", suggestions: TITLE_IN },
+    { key: "titleExclude", label: "Title has none of", kind: "textarea", rows: 2, help: "One word per line; a title with any of them is dropped (OR).", suggestions: TITLE_OUT },
+    { key: "locationAllow", label: "Location has any of", kind: "textarea", rows: 2, help: "One word per line; a location with any of them is kept (OR). Empty keeps every location. A job with no location is kept.", suggestions: PLACES },
+    { key: "locationBlock", label: "Location has none of", kind: "textarea", rows: 2, help: "One word per line; a location with any of them is dropped (OR). Wins over the list above.", suggestions: PLACES },
     { key: "maxItems", label: "Most jobs to keep", kind: "number" },
   ],
   perItem: false,

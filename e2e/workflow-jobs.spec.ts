@@ -233,3 +233,37 @@ test("a run that is no longer waiting says so in the table's pick mode", async (
   await expect(page.getByText("That run is not waiting for rows from this table any more.")).toBeVisible();
   await expect(page.getByTestId("pick-banner")).toHaveCount(0);
 });
+
+test("Job boards chips add and remove a line in the settings", async ({ page, request }) => {
+  const id = await createJobs(request, (g) => {
+    g.nodes.find((n) => n.id === "jobs")!.config.titleInclude = "";
+  });
+  await openEditor(page, id);
+  await card(page, "Job boards", "Job boards", "Not run").click();
+  const drawer = page.getByRole("complementary", { name: /settings$/ });
+  const area = drawer.getByRole("textbox", { name: "Title has any of" });
+  const chip = drawer.getByRole("group", { name: "Title has any of suggestions" }).getByRole("button", { name: "Backend", exact: true });
+  await chip.click();
+  await expect(area).toHaveValue("Backend");
+  await expect(chip).toHaveAttribute("aria-pressed", "true");
+  await chip.click();
+  await expect(area).not.toHaveValue(/Backend/);
+  await expect(chip).toHaveAttribute("aria-pressed", "false");
+});
+
+test("the Model picker in a card's settings opens inside the screen and the drawer", async ({ page, request }) => {
+  const id = await createJobs(request);
+  await openEditor(page, id);
+  await card(page, "Draft application", "Agent", "Not run").click();
+  const drawer = page.getByRole("complementary", { name: /settings$/ });
+  await drawer.getByRole("button", { name: /Mock Workflow/ }).click();
+  const list = page.locator(".glass-panel-strong").filter({ hasText: "Models" }).last();
+  await expect(list).toBeVisible();
+  const box = (await list.boundingBox())!;
+  const d = (await drawer.boundingBox())!;
+  const vp = page.viewportSize()!;
+  expect(box.x).toBeGreaterThanOrEqual(d.x);
+  expect(box.y).toBeGreaterThanOrEqual(0);
+  expect(box.x + box.width).toBeLessThanOrEqual(vp.width);
+  expect(box.y + box.height).toBeLessThanOrEqual(vp.height);
+});

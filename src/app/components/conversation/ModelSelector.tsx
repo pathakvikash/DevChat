@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useMemo, useRef, useEffect, useCallback } from "react";
+import { useState, useMemo, useRef, useEffect, useLayoutEffect, useCallback } from "react";
+import { createPortal } from "react-dom";
 import { ChevronDown, RotateCcw, Loader2, Settings, Wrench, Eye, Brain } from "lucide-react";
 import { formatContext } from "@/lib/utils/messageParts";
 import AsyncButton from "../ui/AsyncButton";
@@ -16,7 +17,13 @@ interface ModelSelectorProps {
   size?: "default" | "sm";
   /** Models to leave out of the list. */
   exclude?: (m: ModelInfo) => boolean;
+  /** Opens the list in a portal, fixed to the viewport next to the trigger, so a scrolling or clipping parent (a drawer) cannot cut it off. */
+  floating?: boolean;
 }
+
+const PANEL_W = 288; // w-72
+const EDGE = 8;
+type Place = { left: number; top?: number; bottom?: number; maxHeight: number };
 
 export default function ModelSelector({
   currentModel,
@@ -25,11 +32,14 @@ export default function ModelSelector({
   disabled = false,
   size = "default",
   exclude,
+  floating = false,
 }: ModelSelectorProps) {
   const [showDropdown, setShowDropdown] = useState(false);
   const [selectedProvider, setSelectedProvider] = useState<string | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const selectedRef = useRef<HTMLButtonElement | null>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+  const [place, setPlace] = useState<Place | null>(null);
 
   const scrollToSelected = useCallback(() => {
     requestAnimationFrame(() => {
@@ -44,13 +54,48 @@ export default function ModelSelector({
   useEffect(() => {
     if (!showDropdown) return;
     function handleClick(e: MouseEvent) {
-      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+      const t = e.target as Node;
+      if (containerRef.current && !containerRef.current.contains(t) && !panelRef.current?.contains(t)) {
         setShowDropdown(false);
       }
     }
     document.addEventListener("mousedown", handleClick);
     return () => document.removeEventListener("mousedown", handleClick);
   }, [showDropdown]);
+
+  // Floating: left-aligned to the trigger, kept 8px inside the viewport, below it if the list fits (else the roomier side), height capped to that side.
+  const placePanel = useCallback(() => {
+    const trigger = containerRef.current?.querySelector("button");
+    const panel = panelRef.current;
+    if (!trigger || !panel) return;
+    const r = trigger.getBoundingClientRect();
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    panel.style.maxHeight = "";
+    const natural = panel.offsetHeight;
+    const below = vh - r.bottom - EDGE - 4;
+    const above = r.top - EDGE - 4;
+    const down = below >= natural || below >= above;
+    setPlace({
+      left: Math.max(EDGE, Math.min(r.left, vw - PANEL_W - EDGE)),
+      ...(down ? { top: r.bottom + 4 } : { bottom: vh - r.top + 4 }),
+      maxHeight: Math.max(120, down ? below : above),
+    });
+  }, []);
+
+  useLayoutEffect(() => {
+    if (!floating || !showDropdown) return;
+    placePanel();
+    const onScroll = (e: Event) => {
+      if (!panelRef.current?.contains(e.target as Node)) placePanel();
+    };
+    window.addEventListener("resize", placePanel);
+    window.addEventListener("scroll", onScroll, true);
+    return () => {
+      window.removeEventListener("resize", placePanel);
+      window.removeEventListener("scroll", onScroll, true);
+    };
+  }, [floating, showDropdown, placePanel, selectedProvider]);
 
   const {
     data: modelsData,
@@ -135,10 +180,15 @@ export default function ModelSelector({
         )}
         {size !== "sm" && <ChevronDown size={16} />}
       </button>
-      {showDropdown && (
-        <div className={`absolute right-0 z-50 w-72 glass-panel-strong rounded-[var(--glass-radius-md)] shadow-lg flex flex-col ${
-          size === "sm" ? "bottom-full mb-2" : "mt-2"
-        }`}>
+      {showDropdown && (() => {
+        const panel = (
+        <div
+          ref={panelRef}
+          style={floating ? { left: place?.left, top: place?.top, bottom: place?.bottom, maxHeight: place?.maxHeight, visibility: place ? "visible" : "hidden" } : undefined}
+          className={floating
+            ? "fixed z-[100] w-72 glass-panel-strong rounded-[var(--glass-radius-md)] shadow-lg flex flex-col"
+            : `absolute right-0 z-50 w-72 glass-panel-strong rounded-[var(--glass-radius-md)] shadow-lg flex flex-col ${size === "sm" ? "bottom-full mb-2" : "mt-2"}`}
+        >
           <div className="p-2 border-b border-[var(--glass-border)] flex items-center justify-between">
             <span className="text-xs font-bold text-zinc-300">Models</span>
             <AsyncButton
@@ -221,7 +271,9 @@ export default function ModelSelector({
             </button>
           )}
         </div>
-      )}
+        );
+        return floating ? createPortal(panel, document.body) : panel;
+      })()}
     </div>
   );
 }

@@ -7,6 +7,7 @@ import WorkingFolderPicker from "@/app/components/conversation/WorkingFolderPick
 import type { ModelInfo } from "@/app/components/conversation/types";
 import { AGENT_TOOL_CHOICES, hasToolConflict, isCliModelId, isCodexModelId, MCP_WARNING, MCP_WEB_WARNING, OUTPUT_FIELD_TYPES, type FieldSpec, type OutputField } from "@/lib/workflows/catalog";
 import { FILTER_OP_LABELS, FILTER_OPS, type FilterOp, type FilterRule } from "@/lib/workflows/filterRules";
+import { hasLine, toggleLine } from "@/lib/workflows/toggleLine";
 import FieldPicker, { typedBraces, type PickerRow } from "./FieldPicker";
 
 const NEW_TABLE = "__new__";
@@ -412,7 +413,31 @@ export default function ConfigField({ spec, config, onChange, error, env }: { sp
       control = <input id={id} type={spec.kind === "number" ? "number" : "text"} value={String(value ?? "")} disabled={env.readOnly} onChange={(e) => set(spec.kind === "number" ? Number(e.target.value) : e.target.value)} className={inputClass} />;
       break;
     case "textarea":
-      control = <textarea id={id} rows={spec.rows ?? 3} value={String(value ?? "")} disabled={env.readOnly} onChange={(e) => set(e.target.value)} className={`${inputClass} resize-y`} />;
+      control = (
+        <>
+          <textarea id={id} rows={spec.rows ?? 3} value={String(value ?? "")} disabled={env.readOnly} onChange={(e) => set(e.target.value)} className={`${inputClass} resize-y`} />
+          {spec.suggestions && (
+            <div className="mt-1.5 flex flex-wrap gap-1" role="group" aria-label={`${spec.label} suggestions`}>
+              {spec.suggestions.map((s) => {
+                const on = hasLine(String(value ?? ""), s.value);
+                return (
+                  <button
+                    key={s.value}
+                    type="button"
+                    aria-pressed={on}
+                    disabled={env.readOnly}
+                    title={s.value === s.label ? undefined : s.value}
+                    onClick={() => set(toggleLine(String(value ?? ""), s.value))}
+                    className={`focus-ring rounded-full px-2.5 py-0.5 text-xs disabled:opacity-60 ${on ? "glass-button-primary text-white" : "glass-button text-zinc-300"}`}
+                  >
+                    {s.label}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </>
+      );
       break;
     case "select":
       control = (
@@ -434,7 +459,7 @@ export default function ConfigField({ spec, config, onChange, error, env }: { sp
     case "model":
       control = (
         <div className="flex items-center gap-2">
-          <ModelSelector currentModel={String(value || env.defaultModel)} onModelChange={set} disabled={env.readOnly} size="sm" exclude={(m) => isCodexModelId(m.id)} />
+          <ModelSelector currentModel={String(value || env.defaultModel)} onModelChange={set} disabled={env.readOnly} size="sm" floating exclude={(m) => isCodexModelId(m.id)} />
           {!!value && !env.readOnly && (
             <button type="button" onClick={() => set("")} className="focus-ring glass-button h-7 rounded-[var(--glass-radius-sm)] px-2 text-xs">
               Use default

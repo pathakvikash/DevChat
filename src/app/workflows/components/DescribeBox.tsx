@@ -162,7 +162,7 @@ export default function DescribeBox({
           className="focus-ring glass-input w-full resize-y rounded-[var(--glass-radius-md)] px-3 py-2 text-sm"
         />
         <div className="flex flex-wrap items-center gap-2">
-          <ModelSelector currentModel={model ?? defaultModel} onModelChange={setModel} disabled={busy} size="sm" exclude={(m) => isCodexModelId(m.id)} />
+          <ModelSelector currentModel={model ?? defaultModel} onModelChange={setModel} disabled={busy} size="sm" floating exclude={(m) => isCodexModelId(m.id)} />
           <span className="text-xs text-zinc-400">Enter builds · Shift+Enter adds a line</span>
           <div className="ml-auto flex items-center gap-2">
             {busy && (
