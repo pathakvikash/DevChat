@@ -449,6 +449,12 @@ body {
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
   }
+
+  /* Home page scroll tour: show the final state, no reveals. */
+  [data-motion] {
+    opacity: 1 !important;
+    transform: none !important;
+  }
 }
 
 /* ─── Light theme: primary button ────────────────────── */
