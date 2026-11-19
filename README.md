@@ -33,7 +33,7 @@ The conversation's "Reasoning effort" setting drives all of these.
 | Provider | Env var | Notes |
 |---|---|---|
 | Ollama | `OLLAMA_BASE_URL` | Auto-detected when reachable, no key needed |
-| OpenAI | `OPENAI_API_KEY` | native Responses API; `OPENAI_BASE_URL` to use a proxy |
+| OpenAI | `OPENAI_API_KEY` | native Responses API on api.openai.com (stored off); a custom `OPENAI_BASE_URL` uses Chat Completions |
 | Anthropic | `ANTHROPIC_API_KEY` | native Messages API |
 | Google Gemini | `GOOGLE_API_KEY` | Google AI Studio key |
 | OpenRouter | `OPENROUTER_API_KEY` | free models only by default |

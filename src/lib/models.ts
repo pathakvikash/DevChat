@@ -1,5 +1,5 @@
 import { createHash } from "crypto";
-import type { LanguageModel } from "ai";
+import { defaultSettingsMiddleware, wrapLanguageModel, type LanguageModel } from "ai";
 import { createOpenAI } from "@ai-sdk/openai";
 import { createAnthropic } from "@ai-sdk/anthropic";
 import { createOllama } from "ollama-ai-provider-v2";
@@ -393,7 +393,16 @@ function providerClient(
     name: def.id,
     headers: def.headers?.(cred.apiKey),
   });
-  return def.native === "openai" ? (id) => client.responses(id) : (id) => client.chat(id);
+  // Responses only on OpenAI's own host: a proxy or vLLM behind OPENAI_BASE_URL may speak just Chat Completions.
+  if (def.native === "openai" && new URL(cred.baseUrl).hostname === "api.openai.com") {
+    // store:false keeps OpenAI from retaining every call and makes the SDK send history inline, not as item_reference.
+    return (id) =>
+      wrapLanguageModel({
+        model: client.responses(id),
+        middleware: defaultSettingsMiddleware({ settings: { providerOptions: { openai: { store: false } } } }),
+      });
+  }
+  return (id) => client.chat(id);
 }
 
 function toModelConfig(
