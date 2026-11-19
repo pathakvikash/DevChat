@@ -1,9 +1,9 @@
 import { spawn, execFile, type ChildProcess } from "child_process";
 import { randomUUID } from "crypto";
-import { readFileSync } from "fs";
+import { existsSync, readFileSync } from "fs";
 import { access, constants, mkdir } from "fs/promises";
 import { homedir, tmpdir } from "os";
-import { delimiter, join } from "path";
+import { delimiter, join, resolve } from "path";
 import { createInterface } from "readline";
 import { parseEnv } from "util";
 import type { LanguageModel } from "ai";
@@ -300,9 +300,16 @@ export function codexParser(): (line: string) => CliEvent[] {
   };
 }
 
-// Claude Code expands `@path` mentions in -p input (even with --tools ""), which would
-// let chat text pull in local files; a zero-width space after the @ stops that.
-const defuseMentions = (text: string) => text.replace(/@(?=\S)/g, "@\u200b");
+// Claude Code expands `@path` mentions in -p input (even with --tools ""), which would let chat text pull in local
+// files. A zero-width space after the @ stops that. Only a mention that could be a file is touched: one starting
+// with / ~ ./ ../, or naming something that exists under the folder the CLI runs in. Emails, decorators and scoped
+// packages stay as written, so code the model copies back into a file is not corrupted.
+export const defuseMentions = (text: string, cwd?: string) =>
+  text.replace(/(^|[\s(\["'`])@([^\s@]+)/g, (m, lead: string, path: string) => {
+    const p = path.replace(/[.,;:!?)\]}'"`]+$/, "");
+    const fileLike = /^(\/|~|\.\.?\/)/.test(p) || (!!cwd && !!p && existsSync(resolve(cwd, p)));
+    return fileLike ? `${lead}@\u200b${path}` : m;
+  });
 
 const withSystem = (system: string, user: string) => (system ? `System instructions:\n${system}\n\n${user}` : user);
 
@@ -348,11 +355,11 @@ export const CLI_PROVIDERS: readonly CliProviderDef[] = [
                 ? [...(offline ? [...allow, "--strict-mcp-config"] : ["--tools", "default"]), "--permission-mode", "default", "--permission-prompt-tool", "stdio"]
                 : ["--tools", "Read", "Glob", "Grep", ...(offline ? ["--strict-mcp-config"] : ["WebSearch", "WebFetch"]), ...(access === "plan" ? [] : ["--permission-mode", "manual"])]),
           ...(access === "plan" ? ["--permission-mode", "plan"] : []),
-          ...(system ? ["--system-prompt", system] : []),
+          ...(system ? ["--system-prompt", defuseMentions(system, cwd)] : []),
           ...(model !== "default" ? ["--model", model] : []),
           ...(effort ? ["--effort", effort] : []),
         ],
-        stdin: bridged ? userMessageLine(defuseMentions(user)) : defuseMentions(user),
+        stdin: bridged ? userMessageLine(defuseMentions(user, cwd)) : defuseMentions(user, cwd),
         holdStdin: bridged,
         cwd,
       };

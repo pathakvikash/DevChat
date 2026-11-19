@@ -99,6 +99,6 @@ export function supportsReasoning(modelId: string): boolean {
 }
 
 /** `{ temperature }` for a hosted call, or nothing when the model rejects sampling params (Gemini 3.6+). */
-export function temperatureFor(modelId: string, temperature: number): { temperature?: number } {
-  return reasoningPlan(modelId).allowSampling ? { temperature } : {};
+export function temperatureFor(modelId: string | undefined, temperature: number): { temperature?: number } {
+  return !modelId || reasoningPlan(modelId).allowSampling ? { temperature } : {};
 }
