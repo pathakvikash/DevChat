@@ -23,7 +23,7 @@ export function Reveal({
   const Tag = motion[as];
   return (
     <Tag
-      data-motion
+      data-home-motion
       className={className}
       initial={x ? { opacity: 0, x } : { opacity: 0, y }}
       whileInView={{ opacity: 1, x: 0, y: 0 }}

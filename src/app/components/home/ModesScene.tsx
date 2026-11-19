@@ -12,16 +12,19 @@ import {
 import { Check, ListChecks, Terminal } from "lucide-react";
 import { Reveal } from "./Reveal";
 
-const PINNED_QUERY = "(min-width: 768px) and (prefers-reduced-motion: no-preference)";
+const PINNED_QUERY =
+  "(min-width: 768px) and (min-height: 560px) and (prefers-reduced-motion: no-preference)";
+
+function subscribePinned(cb: () => void) {
+  const mq = window.matchMedia(PINNED_QUERY);
+  mq.addEventListener("change", cb);
+  return () => mq.removeEventListener("change", cb);
+}
 
 /** True on wide screens with motion allowed: the only case where the scene pins. Server and first paint: false. */
 function usePinned() {
   return useSyncExternalStore(
-    (cb) => {
-      const mq = window.matchMedia(PINNED_QUERY);
-      mq.addEventListener("change", cb);
-      return () => mq.removeEventListener("change", cb);
-    },
+    subscribePinned,
     () => window.matchMedia(PINNED_QUERY).matches,
     () => false,
   );
@@ -121,6 +124,12 @@ const heading = (
   </h2>
 );
 
+const ranges = [
+  { at: [0, 0.28, 0.34], o: [1, 1, 0], y: [0, 0, -30] },
+  { at: [0.34, 0.4, 0.62, 0.68], o: [0, 1, 1, 0], y: [30, 0, 0, -30] },
+  { at: [0.68, 0.74], o: [0, 1], y: [30, 0] },
+];
+
 function PinnedStep({
   p,
   at,
@@ -149,12 +158,6 @@ function Pinned() {
   const p = useSpring(scrollYProgress, { stiffness: 120, damping: 24, mass: 0.4 });
   const [active, setActive] = useState(0);
   useMotionValueEvent(p, "change", (v) => setActive(v < 0.34 ? 0 : v < 0.68 ? 1 : 2));
-
-  const ranges = [
-    { at: [0, 0.28, 0.34], o: [1, 1, 0], y: [0, 0, -30] },
-    { at: [0.34, 0.4, 0.62, 0.68], o: [0, 1, 1, 0], y: [30, 0, 0, -30] },
-    { at: [0.68, 0.74], o: [0, 1], y: [30, 0] },
-  ];
 
   return (
     <div ref={ref} className="h-[240vh]">

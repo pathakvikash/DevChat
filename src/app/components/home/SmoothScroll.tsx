@@ -33,7 +33,8 @@ export function SmoothScroll({ children }: { children: React.ReactNode }) {
       autoRaf: true,
       duration: 1.15,
       easing: (t) => 1 - Math.pow(1 - t, 4),
-      anchors: { offset: -80 },
+      // Skip events something else already handled (the ⌘K palette's scroll lock calls preventDefault).
+      virtualScroll: ({ event }) => !event.defaultPrevented,
       allowNestedScroll: true,
     });
     lenisRef.current = lenis;

@@ -451,10 +451,16 @@ body {
   }
 
   /* Home page scroll tour: show the final state, no reveals. */
-  [data-motion] {
+  [data-home-motion] {
     opacity: 1 !important;
     transform: none !important;
+    pointer-events: auto !important;
   }
+}
+
+/* Keep focused controls clear of the fixed bar on the home page (WCAG 2.4.11). */
+html:has(#tour) {
+  scroll-padding-top: 4rem;
 }
 
 /* ─── Light theme: primary button ────────────────────── */

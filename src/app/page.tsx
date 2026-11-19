@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { motion, useScroll, useTransform } from "framer-motion";
 import {
@@ -29,9 +29,9 @@ function ScrollHint() {
   return (
     <motion.button
       type="button"
-      data-motion
+      data-home-motion
       onClick={() => scrollTo("#tour")}
-      className="focus-ring absolute bottom-6 left-1/2 flex -translate-x-1/2 flex-col items-center gap-1 rounded-full px-3 py-2 text-xs text-[var(--foreground)]/50 transition hover:text-[var(--foreground)]"
+      className="focus-ring mx-auto mb-6 mt-auto flex flex-col items-center gap-1 rounded-full px-3 py-2 text-xs text-[var(--foreground)]/50 transition hover:text-[var(--foreground)]"
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       transition={{ delay: 0.9, duration: 0.4 }}
@@ -47,9 +47,12 @@ export default function HomePage() {
   const { hostTools, loaded, error } = useFolders();
   const showClaude = !loaded || !!error || hostTools; // hidden only once we know it is off
   const [input, setInput] = useState("");
-  const { scrollY } = useScroll();
-  const heroOpacity = useTransform(scrollY, [0, 480], [1, 0]);
-  const heroY = useTransform(scrollY, [0, 480], [0, -40]);
+  const heroRef = useRef<HTMLElement>(null);
+  // Fade with the hero's own scroll progress, so tall screens fade as the hero leaves too.
+  const { scrollYProgress } = useScroll({ target: heroRef, offset: ["start start", "end start"] });
+  const heroOpacity = useTransform(scrollYProgress, [0, 0.6], [1, 0]);
+  const heroY = useTransform(scrollYProgress, [0, 0.6], [0, -40]);
+  const heroPointer = useTransform(scrollYProgress, (v) => (v > 0.5 ? "none" : "auto"));
 
   const handleSubmit = useCallback(() => {
     const q = input.trim();
@@ -63,11 +66,11 @@ export default function HomePage() {
   return (
     <SmoothScroll>
       <div className="relative overflow-x-clip bg-[var(--background)] text-[var(--foreground)]">
-        <section className="relative flex min-h-[100svh] flex-col">
+        <section ref={heroRef} className="relative flex min-h-[100svh] flex-col">
           {/* Center Content */}
           <motion.div
-            data-motion
-            style={{ opacity: heroOpacity, y: heroY }}
+            data-home-motion
+            style={{ opacity: heroOpacity, y: heroY, pointerEvents: heroPointer }}
             className="flex-1 flex flex-col items-center justify-center px-4 py-12"
           >
             {/* Hero */}
@@ -117,6 +120,7 @@ export default function HomePage() {
               />
               <button
                 onClick={handleSubmit}
+                aria-label="Send"
                 className="size-13 flex items-center justify-center rounded-[var(--glass-radius-xl)] bg-gradient-to-br from-green-500 to-yellow-500 hover:from-green-400 hover:to-yellow-400 text-white shadow-lg shadow-green-600/25 transition-all"
               >
                 <ArrowUp size={20} />
@@ -148,7 +152,7 @@ export default function HomePage() {
           </motion.div>
           <ScrollHint />
         </section>
-        <HomeTour />
+        <HomeTour hostTools={!!showClaude} />
       </div>
     </SmoothScroll>
   );

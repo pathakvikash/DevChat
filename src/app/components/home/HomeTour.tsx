@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { memo, useCallback, useRef, useState } from "react";
 import Link from "next/link";
 import {
   motion,
@@ -29,23 +29,29 @@ import { EASE_OUT, Reveal } from "./Reveal";
 import { ModesScene } from "./ModesScene";
 import { useScrollTo } from "./SmoothScroll";
 
-const focus = "focus-ring";
 const linkBtn =
   "glass inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm text-[var(--foreground)]/80 transition hover:bg-[var(--glass-bg-hover)] hover:text-[var(--foreground)]";
 
 const PROVIDERS = [
-  "Anthropic",
-  "OpenAI",
-  "Google Gemini",
-  "OpenRouter",
-  "NVIDIA NIM",
-  "Ollama",
-  "Claude Code",
-  "Codex",
-  "OpenCode",
+  { name: "Anthropic" },
+  { name: "OpenAI" },
+  { name: "Google Gemini" },
+  { name: "OpenRouter" },
+  { name: "NVIDIA NIM" },
+  { name: "Ollama" },
+  { name: "Claude Code", host: true },
+  { name: "Codex", host: true },
+  { name: "OpenCode", host: true },
 ];
 
-type Card = { icon: LucideIcon; title: string; line: string; href?: string; wide?: boolean };
+type Card = {
+  icon: LucideIcon;
+  title: string;
+  line: string;
+  href?: string;
+  wide?: boolean;
+  host?: boolean;
+};
 
 const CARDS: Card[] = [
   {
@@ -55,7 +61,12 @@ const CARDS: Card[] = [
     wide: true,
   },
   { icon: Users, title: "Sub-agents", line: "Hand part of a job to a helper." },
-  { icon: FolderOpen, title: "Working folders", line: "Let the chat work inside a folder." },
+  {
+    icon: FolderOpen,
+    title: "Working folders",
+    line: "Let the chat work inside a folder.",
+    host: true,
+  },
   {
     icon: BookOpen,
     title: "Knowledge base",
@@ -76,10 +87,21 @@ const FLOWS = [
 
 const STATEMENT = "Your models, your folders, your memory, in one place.";
 
+/** Scrolls to the top and puts the cursor in the hero prompt. */
+function useToComposer() {
+  const scrollTo = useScrollTo();
+  return useCallback(() => {
+    scrollTo(0);
+    document
+      .querySelector<HTMLInputElement>('input[aria-label="Message"]')
+      ?.focus({ preventScroll: true });
+  }, [scrollTo]);
+}
+
 function StickyBar() {
   const { scrollY } = useScroll();
   const [shown, setShown] = useState(false);
-  const scrollTo = useScrollTo();
+  const toComposer = useToComposer();
   useMotionValueEvent(scrollY, "change", (y) => setShown(y > 0.8 * window.innerHeight));
 
   return (
@@ -92,19 +114,14 @@ function StickyBar() {
     >
       <button
         type="button"
-        className={`${focus} rounded-md px-2 py-1 text-sm font-semibold`}
-        onClick={() => {
-          scrollTo(0);
-          document
-            .querySelector<HTMLInputElement>('input[aria-label="Message"]')
-            ?.focus({ preventScroll: true });
-        }}
+        className={`focus-ring rounded-md px-2 py-1 text-sm font-semibold`}
+        onClick={toComposer}
       >
         <span className="bg-gradient-to-r from-green-400 via-yellow-400 to-green-500 bg-clip-text text-transparent">
           DevChat
         </span>
       </button>
-      <Link href="/c/new" className={`${focus} ${linkBtn} !py-1.5`}>
+      <Link href="/c/new" className={`focus-ring ${linkBtn} !py-1.5`}>
         <MessageSquarePlus size={14} /> New chat
       </Link>
     </motion.div>
@@ -145,7 +162,7 @@ function Word({
 }) {
   const opacity = useTransform(p, [start, end], [0.25, 1]);
   return (
-    <motion.span data-motion aria-hidden="true" style={{ opacity }} className="inline-block">
+    <motion.span data-home-motion aria-hidden="true" style={{ opacity }} className="inline-block">
       {word}&nbsp;
     </motion.span>
   );
@@ -183,7 +200,7 @@ function FeatureCard({ card }: { card: Card }) {
   const body = (
     <motion.div
       className="glass-card h-full rounded-[var(--glass-radius-xl)] p-5"
-      whileHover={{ y: -3 }}
+      whileHover={card.href ? { y: -3 } : undefined}
       transition={{ duration: 0.2, ease: EASE_OUT }}
     >
       <card.icon size={20} className="mb-3 text-green-400" />
@@ -192,7 +209,7 @@ function FeatureCard({ card }: { card: Card }) {
     </motion.div>
   );
   return card.href ? (
-    <Link href={card.href} className={`${focus} block h-full rounded-[var(--glass-radius-xl)]`}>
+    <Link href={card.href} className={`focus-ring block h-full rounded-[var(--glass-radius-xl)]`}>
       {body}
     </Link>
   ) : (
@@ -200,8 +217,10 @@ function FeatureCard({ card }: { card: Card }) {
   );
 }
 
-export function HomeTour() {
-  const scrollTo = useScrollTo();
+export const HomeTour = memo(function HomeTour({ hostTools }: { hostTools: boolean }) {
+  const toComposer = useToComposer();
+  const providers = PROVIDERS.filter((p) => hostTools || !p.host);
+  const cards = CARDS.filter((c) => hostTools || !c.host);
 
   return (
     <>
@@ -224,14 +243,14 @@ export function HomeTour() {
             </p>
           </Reveal>
           <ul className="mt-10 flex flex-wrap justify-center gap-2">
-            {PROVIDERS.map((p, i) => (
+            {providers.map((p, i) => (
               <Reveal
                 as="li"
-                key={p}
+                key={p.name}
                 delay={0.06 * i}
                 className="glass rounded-full px-4 py-2 text-sm text-[var(--foreground)]/70"
               >
-                {p}
+                {p.name}
               </Reveal>
             ))}
           </ul>
@@ -241,7 +260,7 @@ export function HomeTour() {
 
         <Section id="bento-h" title="More than a chat box.">
           <ul className="mt-12 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {CARDS.map((c, i) => (
+            {cards.map((c, i) => (
               <Reveal
                 as="li"
                 key={c.title}
@@ -257,7 +276,7 @@ export function HomeTour() {
         <Section id="repeat-h" title="Put it on repeat.">
           <div className="relative mt-12">
             <motion.div
-              data-motion
+              data-home-motion
               aria-hidden="true"
               className="mb-6 hidden h-px origin-left bg-[var(--glass-border-strong)] md:block"
               initial={{ scaleX: 0 }}
@@ -278,10 +297,10 @@ export function HomeTour() {
             </ul>
           </div>
           <Reveal delay={0.1} className="mt-8 flex flex-wrap justify-center gap-3">
-            <Link href="/workflows" className={`${focus} ${linkBtn}`}>
+            <Link href="/workflows" className={`focus-ring ${linkBtn}`}>
               Workflows <ArrowRight size={14} />
             </Link>
-            <Link href="/tables" className={`${focus} ${linkBtn}`}>
+            <Link href="/tables" className={`focus-ring ${linkBtn}`}>
               Tables <ArrowRight size={14} />
             </Link>
           </Reveal>
@@ -300,15 +319,11 @@ export function HomeTour() {
             <div className="mt-6 flex flex-wrap justify-center gap-3">
               <Link
                 href="/c/new"
-                className={`${focus} bg-gradient-to-br from-green-500 to-yellow-500 text-white shadow-lg shadow-green-600/25 transition hover:from-green-400 hover:to-yellow-400 inline-flex items-center gap-2 rounded-full px-6 py-3 text-sm font-medium`}
+                className={`focus-ring bg-gradient-to-br from-green-500 to-yellow-500 text-white shadow-lg shadow-green-600/25 transition hover:from-green-400 hover:to-yellow-400 inline-flex items-center gap-2 rounded-full px-6 py-3 text-sm font-medium`}
               >
                 <MessageSquarePlus size={16} /> Start a chat
               </Link>
-              <button
-                type="button"
-                onClick={() => scrollTo(0)}
-                className={`${focus} ${linkBtn} !py-3`}
-              >
+              <button type="button" onClick={toComposer} className={`focus-ring ${linkBtn} !py-3`}>
                 <ArrowUp size={14} /> Back to top
               </button>
             </div>
@@ -317,4 +332,4 @@ export function HomeTour() {
       </div>
     </>
   );
-}
+});
