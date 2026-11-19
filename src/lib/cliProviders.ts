@@ -311,7 +311,7 @@ const CLI_SCRATCH = join(tmpdir(), "devchat-cli");
 export const defuseMentions = (text: string, cwd?: string) =>
   text.replace(/(^|[\s。、？！])@("[^"]+"|\S+)/g, (m, lead: string, raw: string) => {
     const p = raw.replace(/^"|"$/g, "").replace(/#.*$/, "").replace(/\W+$/, "");
-    const fileLike = /^[/~.]/.test(p) || p.includes("..") || (!!cwd && !!p && existsSync(resolve(cwd, p)));
+    const fileLike = /^[/~.]/.test(p) || p.includes("..") || (!!cwd && !!p && existsSync(/*turbopackIgnore: true*/ resolve(cwd, p)));
     return fileLike ? `${lead}@\u200b${raw}` : m;
   });
 
