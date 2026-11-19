@@ -7,6 +7,7 @@ import { countTokens } from "@/lib/tokens";
 import { liveSince } from "@/lib/liveSince";
 import { loadParentContext } from "@/lib/chat/loadParentContext";
 import { isSanityMode } from "@/lib/sanityMode";
+import { temperatureFor } from "@/lib/reasoning";
 
 /**
  * Default model used for compaction. Picked to be a small, fast local model
@@ -128,7 +129,7 @@ export async function compressConversation(
       model: modelConfig.model,
       system: COMPRESSION_SYSTEM_PROMPT,
       prompt,
-      temperature: 0.3,
+      ...temperatureFor(effectiveModelId, 0.3),
       abortSignal: signal,
       maxRetries: timeoutMs ? 0 : undefined,
       ...(isOllama ? { providerOptions: { ollama: { num_predict: 2048, temperature: 0.3 } } } : {}),

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { reasoningPlan, supportsReasoning } from "@/lib/reasoning";
+import { reasoningPlan, supportsReasoning, temperatureFor } from "@/lib/reasoning";
 
 describe("reasoningPlan", () => {
   it("OpenAI: summary on reasoning models, effort only when set and accepted", () => {
@@ -65,5 +65,13 @@ describe("reasoningPlan", () => {
     for (const id of ["openrouter/x/y", "nvidia-nim/a/b", "custom/m", "ollama/llama3", "codex/gpt-5"]) {
       expect(reasoningPlan(id, "high")).toEqual({ allowSampling: true });
     }
+  });
+});
+
+describe("temperatureFor", () => {
+  it("leaves temperature out where the model rejects it", () => {
+    expect(temperatureFor("google/gemini-3.6-pro", 0.5)).toEqual({});
+    expect(temperatureFor("google/gemini-2.5-pro", 0.5)).toEqual({ temperature: 0.5 });
+    expect(temperatureFor("ollama/llama3", 0.5)).toEqual({ temperature: 0.5 });
   });
 });

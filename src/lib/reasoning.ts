@@ -97,3 +97,8 @@ export function supportsReasoning(modelId: string): boolean {
   if (def?.id === "google") return googleThinks(bareModelId(modelId));
   return !!reasoningPlan(modelId).providerOptions;
 }
+
+/** `{ temperature }` for a hosted call, or nothing when the model rejects sampling params (Gemini 3.6+). */
+export function temperatureFor(modelId: string, temperature: number): { temperature?: number } {
+  return reasoningPlan(modelId).allowSampling ? { temperature } : {};
+}

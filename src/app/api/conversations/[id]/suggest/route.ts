@@ -3,6 +3,7 @@ import { generateText } from "ai";
 import { requireUserId } from "@/lib/auth";
 import { getConversationOrNull } from "@/lib/api/conversations";
 import { resolveModel } from "@/lib/llm";
+import { temperatureFor } from "@/lib/reasoning";
 
 /** One suggested next user message. The client sends the last exchange so this
  *  doesn't race persistence of the assistant message. */
@@ -26,7 +27,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       system:
         "You write the user's likely next message in a chat. Reply with ONE short follow-up request or question the user would plausibly send next, in the user's voice, under 12 words, no quotes, no trailing punctuation. If nothing useful follows, reply with NONE.",
       prompt: `User: ${user}\n\nAssistant: ${assistant}`,
-      temperature: 0.7,
+      ...temperatureFor(cfg.id, 0.7),
       maxOutputTokens: 40,
       abortSignal: AbortSignal.timeout(60_000), // a CLI model has no Stop button here
     });
