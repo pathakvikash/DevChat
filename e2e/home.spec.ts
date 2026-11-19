@@ -23,6 +23,9 @@ test("a section reveals when scrolled into view", async ({ page }) => {
 
 test("the sticky bar is out of the tab order until the hero is scrolled past", async ({ page }) => {
   await page.goto("/");
+  // Right after load the DOM can briefly hold a second sticky bar; wait for hydration (Lenis mounts in an effect) first.
+  await expect(page.locator("html")).toHaveClass(/lenis/);
+  await expect(page.locator(".glass-nav")).toHaveCount(1);
   await expect(page.locator(".glass-nav")).toHaveJSProperty("inert", true);
   await composer(page).focus();
   for (let i = 0; i < 8; i++) {
@@ -35,11 +38,14 @@ test("the sticky bar is out of the tab order until the hero is scrolled past", a
 
 test("scrolling through the modes scene reaches step 3", async ({ page }) => {
   await page.goto("/");
+  // The scene renders stacked until hydration, then pins; scroll only once Lenis and the pinned layout are live.
+  await expect(page.locator("html")).toHaveClass(/lenis/);
+  await expect(page.locator("section[aria-labelledby='modes-heading'] .sticky")).toBeAttached();
   await page.evaluate(() => {
     const top =
       document.querySelector("#modes-heading")!.closest("section")!.getBoundingClientRect().top +
       scrollY;
-    window.scrollTo(0, top + 0.95 * (2.4 * innerHeight - innerHeight)); // near the end of the 240vh wrapper
+    window.scrollTo({ top: top + 0.95 * (2.4 * innerHeight - innerHeight), behavior: "instant" }); // near the end of the 240vh wrapper
   });
   const step = page.getByRole("heading", { name: /^Agent\. It uses tools/ });
   await expect(step.locator("xpath=ancestor::div[contains(@class,'absolute')][1]")).toHaveCSS(
