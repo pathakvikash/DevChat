@@ -122,7 +122,7 @@ test("Ask mode: a card answered after reload runs, and the reply keeps one id", 
 
   await approvalCard(page).getByRole("button", { name: "Allow", exact: true }).click();
   await expect(page.getByText("Mock write reply")).toBeVisible();
-  await expect(page.getByText("Mock note", { exact: true })).toBeVisible();
+  await expect(messages(page).nth(1).getByText("Mock note", { exact: true })).toBeVisible();
 
   await expect.poll(async () => (await storedMessages(request, id)).length).toBe(2);
   const stored = await storedMessages(request, id);

@@ -735,7 +735,7 @@ export async function POST(req: Request) {
           if (nextCtx) {
             contextLength = nextCtx;
             // The same object the stream's providerOptions holds, so the retry sees the larger window.
-            if (providerOptions && "ollama" in providerOptions && providerOptions.ollama) providerOptions.ollama.num_ctx = nextCtx;
+            if (providerOptions && "ollama" in providerOptions && providerOptions.ollama?.options) providerOptions.ollama.options.num_ctx = nextCtx;
             console.log(
               `[ctx] ${conversationId} context overflow — retrying with ctx=${nextCtx}`,
             );

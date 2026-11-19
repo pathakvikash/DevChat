@@ -26,11 +26,14 @@ export interface ProviderOptionsInput {
 export function providerOptionsFor(i: ProviderOptionsInput) {
   if (i.modelId.startsWith("ollama/")) {
     return {
+      // ollama-ai-provider-v2 reads only `providerOptions.ollama.options.*` (and `think`).
       ollama: {
-        num_ctx: i.numCtx,
-        temperature: i.temperature,
-        top_p: i.topP ?? 0.9,
-        num_predict: i.maxTokens || -1,
+        options: {
+          num_ctx: i.numCtx,
+          temperature: i.temperature,
+          top_p: i.topP ?? 0.9,
+          num_predict: i.maxTokens || -1,
+        },
       },
     };
   }

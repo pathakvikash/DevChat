@@ -196,6 +196,8 @@ export function useChatPane(conversationId: string, { focused, kind, searchProvi
 
   const onFinishRef = useRef<(finish: ChatFinish) => void>(() => {});
   const onErrorRef = useRef<(err: Error) => void>(() => {});
+  // Set when Stop settled an approved running card: the server may have saved the finished result, so reload once the stream closes.
+  const reloadAfterStopRef = useRef(false);
   const onQueuedDeliveredRef = useRef<(queuedId: string) => void>(() => {});
   const onSendToChatRef = useRef<(input: { to: string; message: string }) => Promise<string>>(async () => AGENT_NOT_OPEN);
   // The other open chat panes, sent with each request (the model is told which chats it can message).
@@ -530,6 +532,7 @@ export function useChatPane(conversationId: string, { focused, kind, searchProvi
         if (p?.state === "approval-requested" && p.approval?.id) answeredRef.current.add(p.approval.id);
       }
     }
+    if (messages.some((m) => ((m.parts ?? []) as any[]).some((p) => p?.state === "approval-responded"))) reloadAfterStopRef.current = true;
     setMessages((prev) =>
       prev.map((m) => (m.parts?.some((p: any) => p?.state === "approval-requested" || p?.state === "approval-responded") ? { ...m, parts: denyOpenApprovals(m.parts as any[]) } : m)) as typeof prev,
     );
@@ -571,7 +574,11 @@ export function useChatPane(conversationId: string, { focused, kind, searchProvi
     const all = finish?.messages ?? messages;
     // The status is already ready or error here, though React has not rendered it.
     loadingRef.current = false;
-    const stopped = !!(finish?.isAbort || finish?.isError);
+    if (reloadAfterStopRef.current) {
+      reloadAfterStopRef.current = false;
+      void refreshConversationAndMessages(() => !loadingRef.current);
+    }
+    const stopped =!!(finish?.isAbort || finish?.isError);
     const continues = !!(finish?.message && shouldAutoContinue(finish.message.parts as AnyPart[]));
     // Queued messages still waiting: after a Stop or an error they go back to the input; after a normal end
     // they go out as the next message. A reply that auto-continues keeps them.
@@ -634,7 +641,7 @@ export function useChatPane(conversationId: string, { focused, kind, searchProvi
         else console.warn("[suggest] no suggestion returned");
       })
       .catch((e) => console.warn("[suggest] request failed:", e?.message || e));
-  }, [refreshConversation, fetchContextUsage, messages, setSelectedArtifactId, setArtifactPanelOpen, setIsCompressing, conversationId, conversation?.model, conversation?.temporary, conversation?.memoryDisabled, isSide]);
+  }, [refreshConversation, refreshConversationAndMessages, fetchContextUsage, messages, setSelectedArtifactId, setArtifactPanelOpen, setIsCompressing, conversationId, conversation?.model, conversation?.temporary, conversation?.memoryDisabled, isSide]);
 
   onErrorRef.current = useCallback((err: Error) => {
     const msg = err?.message || String(err);

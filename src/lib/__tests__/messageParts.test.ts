@@ -126,6 +126,8 @@ describe("presentPlan and stale cards", () => {
     expect(hasApprovalCards([{ state: "approval-responded" }])).toBe(true);
     expect(hasApprovalCards([{ state: "output-available" }])).toBe(false);
     expect(hasApprovalCards(undefined)).toBe(false);
+    // executeCode never reaches approval-responded, so it must not suppress the clarification's own send.
+    expect(hasApprovalCards([{ type: "tool-executeCode", state: "approval-requested" }])).toBe(false);
   });
 
   it("titles a card by its tool", () => {

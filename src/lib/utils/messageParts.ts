@@ -222,9 +222,12 @@ export function approvalTitle(toolName: string, input: any, sendsOut = false): s
 /** True for a tool call the server marked to ask first: the browser must not run it when it arrives, the card does. */
 export const waitsForApproval = (call: { toolMetadata?: { sendsOut?: boolean; folder?: string } }): boolean => call.toolMetadata?.sendsOut === true;
 
-/** True when a card still waits for an answer or runs after one: the SDK sends once all are done. */
+/** True when a card still waits for an answer or runs after one: the SDK sends once all are done.
+ *  executeCode is left out: Allow runs it in the browser and adds its result directly, so it never reaches
+ *  `approval-responded` and the SDK auto-send would not fire. */
 export const hasApprovalCards = (parts: unknown): boolean =>
-  Array.isArray(parts) && parts.some((p: any) => p?.state === "approval-requested" || p?.state === "approval-responded");
+  Array.isArray(parts) &&
+  parts.some((p: any) => p?.type !== "tool-executeCode" && (p?.state === "approval-requested" || p?.state === "approval-responded"));
 
 /** A stopped reply: every card still waiting is denied, so nothing runs when it is resumed. */
 export function denyOpenApprovals(parts: any[]): any[] {
