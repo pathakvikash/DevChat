@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect } from "react";
 import { Keyboard, X } from "lucide-react";
 import { SLASH_COMMANDS } from "@/lib/commands";
 
@@ -30,6 +31,23 @@ const GROUPS: ShortcutGroup[] = [
     ],
   },
   {
+    title: "Panel",
+    shortcuts: [
+      { keys: ["Alt", "A"], description: "Open Activity" },
+      { keys: ["Alt", "P"], description: "Toggle the side panel (reopens the last view)" },
+      { keys: ["Alt", "1"], description: "Side chat" },
+      { keys: ["Alt", "2"], description: "Files" },
+      { keys: ["Alt", "3"], description: "Outputs" },
+      { keys: ["Alt", "4"], description: "Background tasks" },
+      { keys: ["Alt", "5"], description: "Context" },
+      { keys: ["Alt", "6"], description: "Connectors" },
+      { keys: ["Alt", "7"], description: "Notes" },
+      { keys: ["Alt", "8"], description: "Todos" },
+      { keys: ["Alt", "M"], description: "Open the model picker" },
+      { keys: ["Escape"], description: "Close the panel or popover" },
+    ],
+  },
+  {
     title: "Commands",
     shortcuts: [
       { keys: ["Cmd", "/"], description: "Toggle keyboard shortcuts" },
@@ -54,33 +72,44 @@ export default function KeyboardShortcutsDialog({
   isOpen,
   onClose,
 }: KeyboardShortcutsDialogProps) {
+  useEffect(() => {
+    if (!isOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      e.preventDefault();
+      onClose();
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [isOpen, onClose]);
+
   if (!isOpen) return null;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center">
       <div className="absolute inset-0 bg-black/60" onClick={onClose} />
-      <div className="relative w-full max-w-lg glass-strong rounded-xl shadow-2xl p-0 overflow-hidden">
+      <div role="dialog" aria-modal="true" aria-label="Keyboard Shortcuts" className="relative w-full max-w-lg glass-strong rounded-xl shadow-2xl p-0 overflow-hidden">
         <div className="flex items-center justify-between px-5 py-4 border-b border-[var(--glass-border)]">
           <div className="flex items-center gap-2.5">
             <div className="w-8 h-8 rounded-lg glass-strong flex items-center justify-center">
-              <Keyboard size={16} className="text-zinc-300" />
+              <Keyboard size={16} className="text-[var(--foreground)]/80" />
             </div>
-            <h2 className="text-base font-semibold text-white">
+            <h2 className="text-base font-semibold text-[var(--foreground)]">
               Keyboard Shortcuts
             </h2>
           </div>
           <button
             onClick={onClose}
-            className="text-zinc-500 hover:text-zinc-300 transition p-1 rounded glass-button"
+            className="text-[var(--foreground)]/60 hover:text-[var(--foreground)] transition p-1 rounded glass-button"
           >
-            <X size={18} />
+            <X size={18} aria-label="Close" />
           </button>
         </div>
 
         <div className="max-h-[60vh] overflow-y-auto px-5 py-4 space-y-5">
           {GROUPS.map((group) => (
             <div key={group.title}>
-              <h3 className="text-xs font-semibold uppercase tracking-wider text-zinc-500 mb-2.5">
+              <h3 className="text-xs font-semibold uppercase tracking-wider text-[var(--foreground)]/60 mb-2.5">
                 {group.title}
               </h3>
               <div className="space-y-1">
@@ -89,17 +118,17 @@ export default function KeyboardShortcutsDialog({
                     key={`${shortcut.description}:${shortcut.keys.join("+")}`}
                     className="flex items-center justify-between py-1.5"
                   >
-                    <span className="text-sm text-zinc-300">
+                    <span className="text-sm text-[var(--foreground)]/85">
                       {shortcut.description}
                     </span>
                     <div className="flex items-center gap-1">
                       {shortcut.keys.map((key, i) => (
-                        <span key={key}>
-                          <kbd className="inline-flex items-center justify-center min-w-[24px] h-6 px-1.5 text-xs font-medium text-zinc-200 glass-strong border border-[var(--glass-border)] rounded">
+                        <span key={`${i}-${key}`}>
+                          <kbd className="inline-flex items-center justify-center min-w-[24px] h-6 px-1.5 text-xs font-medium text-[var(--foreground)] glass-strong border border-[var(--glass-border)] rounded">
                             {key}
                           </kbd>
                           {i < shortcut.keys.length - 1 && (
-                            <span className="text-zinc-600 mx-0.5 text-xs">
+                            <span className="text-[var(--foreground)]/40 mx-0.5 text-xs">
                               +
                             </span>
                           )}
@@ -112,14 +141,14 @@ export default function KeyboardShortcutsDialog({
             </div>
           ))}
           <div>
-            <h3 className="text-xs font-semibold uppercase tracking-wider text-zinc-400 mb-2.5">
+            <h3 className="text-xs font-semibold uppercase tracking-wider text-[var(--foreground)]/60 mb-2.5">
               Slash commands
             </h3>
             <div className="space-y-1">
               {SLASH_COMMANDS.map((c) => (
                 <div key={c.name} className="flex items-baseline justify-between gap-4 py-1.5">
-                  <code className="font-mono text-xs text-zinc-200 shrink-0">{c.usage}</code>
-                  <span className="text-sm text-zinc-300 text-right">{c.description}</span>
+                  <code className="font-mono text-xs text-[var(--foreground)] shrink-0">{c.usage}</code>
+                  <span className="text-sm text-[var(--foreground)]/85 text-right">{c.description}</span>
                 </div>
               ))}
             </div>
@@ -127,8 +156,8 @@ export default function KeyboardShortcutsDialog({
         </div>
 
         <div className="px-5 py-3 border-t border-[var(--glass-border)] glass">
-          <p className="text-xs text-zinc-500">
-            Press <kbd className="inline-flex items-center justify-center h-5 px-1 text-xs font-medium text-zinc-300 glass-strong border border-[var(--glass-border)] rounded">Cmd</kbd> + <kbd className="inline-flex items-center justify-center h-5 px-1 text-xs font-medium text-zinc-300 glass-strong border border-[var(--glass-border)] rounded">/</kbd> to toggle this dialog at any time
+          <p className="text-xs text-[var(--foreground)]/60">
+            Press <kbd className="inline-flex items-center justify-center h-5 px-1 text-xs font-medium text-[var(--foreground)] glass-strong border border-[var(--glass-border)] rounded">Cmd</kbd> + <kbd className="inline-flex items-center justify-center h-5 px-1 text-xs font-medium text-[var(--foreground)] glass-strong border border-[var(--glass-border)] rounded">/</kbd> to toggle this dialog at any time
           </p>
         </div>
       </div>

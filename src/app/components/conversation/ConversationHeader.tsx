@@ -1,12 +1,11 @@
 "use client";
 
-import { Code2, Settings2, AlertCircle, Download, FileCode, GitFork, Menu, Keyboard, Brain, MoreHorizontal, MessageSquareDashed, ShieldCheck, PanelRight } from "lucide-react";
+import { AlertCircle, Download, GitFork, Keyboard, MoreHorizontal, MessageSquareDashed, PanelLeft, PanelLeftClose, Settings2, ShieldCheck } from "lucide-react";
 import Link from "next/link";
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, type KeyboardEvent, type ReactNode } from "react";
 import { useSidebar } from "@/app/contexts/SidebarContext";
 import { useChatMode } from "@/app/contexts/ChatModeContext";
 import ModeToggle from "../ModeToggle";
-import { formatContext } from "@/lib/utils/messageParts";
 import { exportChat } from "@/lib/utils/download";
 import { useToast } from "@/app/components/Toast";
 
@@ -14,45 +13,31 @@ interface ConversationHeaderProps {
   conversation: {
     id: string;
     title: string;
-    model: string;
-    systemPrompt?: string;
-    temperature: number;
-    contextLength?: number;
-    topP?: number;
-    maxTokens?: number;
-    memoryDisabled?: boolean;
     temporary?: boolean;
     forkedFrom?: { id: string; title: string } | null;
   };
   messagesCount: number;
-  scratchpadOpen: boolean;
-  onToggleScratchpad: () => void;
-  artifactsOpen: boolean;
-  onToggleArtifacts: () => void;
-  /** Main chats only: opens or closes this chat's side chat (same as ⌘\). */
-  sideOpen?: boolean;
-  onToggleSide?: () => void;
   enabledToolsCount: number;
   enabledSkillsCount: number;
   onOpenAdvanced: () => void;
   onOpenKeyboardShortcuts?: () => void;
   error?: { message?: string } | null;
-  onToggleMemory?: () => void;
   onToggleTemporary?: () => void;
   /** Tools allowed for this chat in Ask mode; the reset item shows only when there are some. */
   allowedToolCount?: number;
   onResetAllowedTools?: () => void;
+  /** The Activity and Panel buttons (each owns its popover); the pane builds them. */
+  activity?: ReactNode;
+  launcher?: ReactNode;
+  /** The sidebar toggle shows in the first pane only. */
+  showSidebarToggle?: boolean;
 }
+
+const MENU_ITEM = "focus-ring flex w-full items-center gap-3 px-4 py-3 text-sm text-[var(--foreground)] hover:bg-[var(--glass-bg-hover)] transition";
 
 export default function ConversationHeader({
   conversation,
   messagesCount,
-  scratchpadOpen,
-  onToggleScratchpad,
-  artifactsOpen,
-  onToggleArtifacts,
-  sideOpen = false,
-  onToggleSide,
   enabledToolsCount,
   enabledSkillsCount,
   onOpenAdvanced,
@@ -60,14 +45,17 @@ export default function ConversationHeader({
   onResetAllowedTools,
   onOpenKeyboardShortcuts,
   error,
-  onToggleMemory,
   onToggleTemporary,
+  activity,
+  launcher,
+  showSidebarToggle = true,
 }: ConversationHeaderProps) {
-  const { toggle } = useSidebar();
+  const { toggle, toggleCollapsed, collapsed } = useSidebar();
   const { toast } = useToast();
   const { mode, setMode, modelCaps } = useChatMode();
   const [moreOpen, setMoreOpen] = useState(false);
   const moreRef = useRef<HTMLDivElement>(null);
+  const moreButton = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
@@ -79,189 +67,136 @@ export default function ConversationHeader({
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
+  useEffect(() => {
+    if (moreOpen) moreRef.current?.querySelector<HTMLElement>('[role="menuitem"]')?.focus();
+  }, [moreOpen]);
+
+  function onMenuKey(e: KeyboardEvent<HTMLDivElement>) {
+    const items = [...(moreRef.current?.querySelectorAll<HTMLElement>('[role="menuitem"]') ?? [])];
+    const i = items.indexOf(document.activeElement as HTMLElement);
+    if (e.key === "Escape") {
+      e.preventDefault();
+      e.stopPropagation();
+      setMoreOpen(false);
+      moreButton.current?.focus();
+      return;
+    }
+    const next = { ArrowDown: i + 1, ArrowUp: i - 1, Home: 0, End: items.length - 1 }[e.key];
+    if (next === undefined) {
+      if (e.key === "Tab") setMoreOpen(false);
+      return;
+    }
+    e.preventDefault();
+    items[(next + items.length) % items.length]?.focus();
+  }
+
+  const run = (fn?: () => void) => () => {
+    setMoreOpen(false);
+    fn?.();
+  };
+
   return (
     <div className="glass-nav relative z-20">
-      <div className="px-4 py-3">
+      <div className="px-3 py-2.5 @lg:px-4">
         <div className="flex items-center gap-2">
-          <button onClick={toggle} className="md:hidden p-1.5 glass-button rounded transition shrink-0" title="Toggle sidebar">
-            <Menu size={18} />
-          </button>
+          {showSidebarToggle && (
+            <>
+              {/* Below md the sidebar is a drawer; from md up it collapses. */}
+              <button onClick={toggle} className="focus-ring md:hidden flex size-8 shrink-0 items-center justify-center glass-button rounded-[var(--glass-radius-md)]" title="Toggle sidebar" aria-label="Toggle sidebar">
+                <PanelLeft size={16} aria-hidden />
+              </button>
+              <button
+                onClick={toggleCollapsed}
+                className="focus-ring hidden md:flex size-8 shrink-0 items-center justify-center glass-button rounded-[var(--glass-radius-md)]"
+                title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+                aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+                aria-expanded={!collapsed}
+              >
+                {collapsed ? <PanelLeft size={16} aria-hidden /> : <PanelLeftClose size={16} aria-hidden />}
+              </button>
+            </>
+          )}
           {/* min-w-0 or the title refuses to truncate and squeezes the actions. */}
           <h1 className="min-w-0 flex-1 text-lg font-bold truncate text-[var(--foreground)]">
             {conversation.temporary && conversation.title === "New Chat" ? "Temporary chat" : conversation.title}
           </h1>
-          <div className="flex items-center gap-2 shrink-0">
-            {onToggleTemporary && messagesCount === 0 && (
-              <button
-                type="button"
-                onClick={onToggleTemporary}
-                aria-pressed={!!conversation.temporary}
-                aria-label="Temporary chat"
-                title="Temporary chat: not saved in your history, no memory. Deleted when you leave or after 24 hours."
-                className={`focus-ring flex h-7 items-center justify-center gap-1.5 rounded-[var(--glass-radius-md)] px-1.5 text-xs font-medium text-[var(--foreground)] transition shrink-0 sm:px-2.5 ${
-                  conversation.temporary
-                    ? "glass-strong border-dashed!"
-                    : "glass-button"
-                }`}
-              >
-                <MessageSquareDashed size={16} />
-                <span className="hidden sm:inline">Temporary</span>
-              </button>
-            )}
-            <ModeToggle mode={mode} onModeChange={setMode} toolsAvailable={modelCaps.toolsAvailable} />
-            {onToggleSide && (
-              <button
-                type="button"
-                onClick={onToggleSide}
-                aria-pressed={sideOpen}
-                aria-label={sideOpen ? "Close side chat" : "Open side chat"}
-                title={`${sideOpen ? "Close" : "Open"} side chat: ask about this chat without adding to it (⌘\\)`}
-                className={`focus-ring flex h-7 items-center justify-center gap-1.5 rounded-[var(--glass-radius-md)] px-1.5 text-xs font-medium transition shrink-0 sm:px-2.5 ${
-                  sideOpen ? "glass-button-primary text-white" : "glass-button text-[var(--foreground)]"
-                }`}
-              >
-                <PanelRight size={16} aria-hidden />
-                <span className="hidden sm:inline">Side chat</span>
-              </button>
-            )}
-            {/* These move into the More menu on small screens. */}
-            <div className="hidden sm:flex items-center gap-2">
-              <button
-                onClick={onToggleScratchpad}
-                className={`flex items-center justify-center rounded-[var(--glass-radius-md)] p-1.5 transition shrink-0 ${
-                  scratchpadOpen
-                    ? "glass-button-primary text-white"
-                    : "glass-button text-[var(--foreground)]"
-                }`}
-                title="Toggle scratchpad"
-              >
-                <Code2 size={16} />
-              </button>
-              <button
-                onClick={onToggleArtifacts}
-                className={`flex items-center justify-center rounded-[var(--glass-radius-md)] p-1.5 transition shrink-0 ${
-                  artifactsOpen
-                    ? "glass-button-primary text-white"
-                    : "glass-button text-[var(--foreground)]"
-                }`}
-                title="Toggle artifacts"
-              >
-                <FileCode size={16} />
-              </button>
-            </div>
-            <div ref={moreRef} className="relative">
-              <button
-                onClick={() => setMoreOpen((v) => !v)}
-                className="flex items-center justify-center rounded-[var(--glass-radius-md)] px-2 py-1.5 text-xs transition glass-button text-[var(--foreground)] shrink-0"
-                title="More actions"
-              >
-                <MoreHorizontal size={16} />
-              </button>
-              {moreOpen && (
-                <div className="absolute right-0 top-full mt-1 w-44 glass-panel-strong rounded-[var(--glass-radius-md)] shadow-lg border border-[var(--glass-border-strong)] z-[9999] overflow-hidden">
-                  {/* Mirrors the header toggles that are hidden on small screens. */}
-                  <button
-                    onClick={() => { setMoreOpen(false); onToggleScratchpad(); }}
-                    className="sm:hidden flex w-full items-center gap-3 px-4 py-3 text-sm text-[var(--foreground)] hover:bg-[var(--glass-bg-hover)] transition"
-                  >
-                    <Code2 size={14} />
-                    <span>Scratchpad {scratchpadOpen ? "(open)" : ""}</span>
-                  </button>
-                  <button
-                    onClick={() => { setMoreOpen(false); onToggleArtifacts(); }}
-                    className="sm:hidden flex w-full items-center gap-3 px-4 py-3 text-sm text-[var(--foreground)] hover:bg-[var(--glass-bg-hover)] transition"
-                  >
-                    <FileCode size={14} />
-                    <span>Artifacts {artifactsOpen ? "(open)" : ""}</span>
-                  </button>
-                  <div className="sm:hidden border-t border-[var(--glass-border)]" />
-                  {onToggleMemory && (
-                    <button
-                      // aria-disabled, not disabled, so the label stays readable and focusable.
-                      aria-disabled={conversation.temporary || undefined}
-                      onClick={() => { if (conversation.temporary) return; setMoreOpen(false); onToggleMemory(); }}
-                      className={`flex w-full items-center gap-3 px-4 py-3 text-sm transition ${
-                        conversation.memoryDisabled || conversation.temporary
-                          ? "text-[var(--foreground)]/50 hover:bg-[var(--glass-bg-hover)]"
-                          : "text-[var(--foreground)] hover:bg-[var(--glass-bg-hover)]"
-                      }`}
-                    >
-                      <Brain size={14} />
-                      <span>
-                        {conversation.temporary
-                          ? "Memory (off in temporary chats)"
-                          : `Memory ${conversation.memoryDisabled ? "(off)" : "(on)"}`}
-                      </span>
-                    </button>
-                  )}
-                  <button
-                    onClick={() => { setMoreOpen(false); onOpenAdvanced(); }}
-                    className="flex w-full items-center gap-3 px-4 py-3 text-sm text-[var(--foreground)] hover:bg-[var(--glass-bg-hover)] transition"
-                  >
-                    <Settings2 size={14} />
-                    <span>Advanced</span>
-                    {enabledToolsCount + enabledSkillsCount > 0 && (
-                      <span className="ml-auto text-[10px] bg-[var(--glass-bg)] px-1.5 py-0.5 rounded text-[var(--foreground)]">
-                        {enabledToolsCount + enabledSkillsCount}
-                      </span>
-                    )}
-                  </button>
-                  {allowedToolCount > 0 && onResetAllowedTools && (
-                    <button
-                      onClick={() => { setMoreOpen(false); onResetAllowedTools(); }}
-                      className="flex w-full items-center gap-3 px-4 py-3 text-sm text-[var(--foreground)] hover:bg-[var(--glass-bg-hover)] transition"
-                    >
-                      <ShieldCheck size={14} />
-                      <span>Reset allowed tools</span>
-                    </button>
-                  )}
-                  <button
-                    onClick={() => { setMoreOpen(false); onOpenKeyboardShortcuts?.(); }}
-                    className="flex w-full items-center gap-3 px-4 py-3 text-sm text-[var(--foreground)] hover:bg-[var(--glass-bg-hover)] transition"
-                  >
-                    <Keyboard size={14} />
-                    <span>Shortcuts</span>
-                  </button>
-                  <div className="border-t border-[var(--glass-border)]" />
-                  <button
-                    onClick={() => { setMoreOpen(false); exportChat(conversation.id, "markdown", toast); }}
-                    className="flex w-full items-center gap-3 px-4 py-3 text-sm text-[var(--foreground)] hover:bg-[var(--glass-bg-hover)] transition"
-                  >
-                    <Download size={14} />
-                    <span>Export Markdown</span>
-                  </button>
-                  <button
-                    onClick={() => { setMoreOpen(false); exportChat(conversation.id, "json", toast); }}
-                    className="flex w-full items-center gap-3 px-4 py-3 text-sm text-[var(--foreground)] hover:bg-[var(--glass-bg-hover)] transition"
-                  >
-                    <Download size={14} />
-                    <span>Export JSON</span>
-                  </button>
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-        <div className="flex items-center gap-3 mt-1">
           {conversation.forkedFrom && (
-            <span className="inline-flex min-w-0 items-center gap-1 text-xs text-zinc-400">
+            <span className="hidden min-w-0 items-center gap-1 text-xs text-zinc-400 @2xl:inline-flex">
               <GitFork size={12} className="shrink-0" /> Forked from
-              <Link href={`/c/${conversation.forkedFrom.id}`} className="focus-ring max-w-[200px] truncate rounded-sm hover:text-[var(--foreground)] hover:underline">
+              <Link href={`/c/${conversation.forkedFrom.id}`} className="focus-ring max-w-[160px] truncate rounded-sm hover:text-[var(--foreground)] hover:underline">
                 {conversation.forkedFrom.title}
               </Link>
             </span>
           )}
           {conversation.temporary && (
-            <span className="inline-flex items-center gap-1 text-xs text-zinc-400">
+            <span className="hidden shrink-0 items-center gap-1 text-xs text-zinc-400 @3xl:inline-flex">
               <MessageSquareDashed size={12} /> Temporary chat · deleted when you leave
             </span>
           )}
-          <p className="text-xs text-[var(--foreground)]/50">{messagesCount} messages</p>
-          {conversation.contextLength && (
-            <span className="text-xs text-[var(--foreground)]/40">
-              Context: {formatContext(conversation.contextLength)}
-            </span>
+          <p className="hidden shrink-0 text-xs text-[var(--foreground)]/50 @lg:block">{messagesCount} messages</p>
+          {onToggleTemporary && messagesCount === 0 && (
+            <button
+              type="button"
+              onClick={onToggleTemporary}
+              aria-pressed={!!conversation.temporary}
+              aria-label="Temporary chat"
+              title="Temporary chat: not saved in your history, no memory. Deleted when you leave or after 24 hours."
+              className={`focus-ring flex h-7 items-center justify-center gap-1.5 rounded-[var(--glass-radius-md)] px-1.5 text-xs font-medium text-[var(--foreground)] transition shrink-0 @lg:px-2.5 ${
+                conversation.temporary ? "glass-strong border-dashed!" : "glass-button"
+              }`}
+            >
+              <MessageSquareDashed size={16} />
+              <span className="hidden @lg:inline">Temporary</span>
+            </button>
           )}
+          <ModeToggle mode={mode} onModeChange={setMode} toolsAvailable={modelCaps.toolsAvailable} />
+          {activity}
+          {launcher}
+          <div ref={moreRef} className="relative">
+            <button
+              ref={moreButton}
+              onClick={() => setMoreOpen((v) => !v)}
+              aria-haspopup="menu"
+              aria-expanded={moreOpen}
+              className="focus-ring flex size-8 items-center justify-center rounded-[var(--glass-radius-md)] text-xs transition glass-button text-[var(--foreground)] shrink-0"
+              title="More actions"
+              aria-label="More actions"
+            >
+              <MoreHorizontal size={16} aria-hidden />
+            </button>
+            {moreOpen && (
+              <div role="menu" aria-label="More actions" onKeyDown={onMenuKey} className="absolute right-0 top-full mt-1 w-48 glass-panel-strong rounded-[var(--glass-radius-md)] shadow-lg border border-[var(--glass-border-strong)] z-[9999] overflow-hidden">
+                <button role="menuitem" tabIndex={-1} onClick={run(onOpenAdvanced)} className={MENU_ITEM}>
+                  <Settings2 size={14} aria-hidden />
+                  <span>Advanced tools</span>
+                  {enabledToolsCount + enabledSkillsCount > 0 && (
+                    <span className="ml-auto text-[10px] bg-[var(--glass-bg)] px-1.5 py-0.5 rounded text-[var(--foreground)]">
+                      {enabledToolsCount + enabledSkillsCount}
+                    </span>
+                  )}
+                </button>
+                {allowedToolCount > 0 && onResetAllowedTools && (
+                  <button role="menuitem" tabIndex={-1} onClick={run(onResetAllowedTools)} className={MENU_ITEM}>
+                    <ShieldCheck size={14} aria-hidden />
+                    <span>Reset allowed tools</span>
+                  </button>
+                )}
+                <button role="menuitem" tabIndex={-1} onClick={run(onOpenKeyboardShortcuts)} className={MENU_ITEM}>
+                  <Keyboard size={14} aria-hidden />
+                  <span>Shortcuts</span>
+                </button>
+                <div role="separator" className="border-t border-[var(--glass-border)]" />
+                <button role="menuitem" tabIndex={-1} onClick={run(() => exportChat(conversation.id, "markdown", toast))} className={MENU_ITEM}>
+                  <Download size={14} aria-hidden />
+                  <span>Export Markdown</span>
+                </button>
+                <button role="menuitem" tabIndex={-1} onClick={run(() => exportChat(conversation.id, "json", toast))} className={MENU_ITEM}>
+                  <Download size={14} aria-hidden />
+                  <span>Export JSON</span>
+                </button>
+              </div>
+            )}
+          </div>
         </div>
 
         {error && (

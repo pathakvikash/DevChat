@@ -18,7 +18,6 @@ import ChatInput from "@/app/components/chatInput";
 import Scratchpad from "@/app/components/Scratchpad";
 import ArtifactPanel from "@/app/components/ArtifactPanel";
 import TodoPanel from "@/app/components/TodoPanel";
-import TodoIndicator from "@/app/components/TodoIndicator";
 import AdvancedSettings from "@/app/components/AdvancedSettings";
 import ModelSettingsDialog from "@/app/components/ModelSettingsDialog";
 import ContextDetailsPanel from "@/app/components/ContextDetailsPanel";
@@ -32,7 +31,21 @@ import { ToolAnswersProvider } from "@/app/components/ToolAnswers";
 import { ChatModeContext } from "@/app/contexts/ChatModeContext";
 import { joinTextParts } from "@/lib/utils/conversation";
 import { exportChat } from "@/lib/utils/download";
-import { StickyNote, FileCode, SlidersHorizontal, Settings, BarChart3, Target, Download, History, Minimize2, Columns2 } from "lucide-react";
+import { Activity, SlidersHorizontal, Settings, Download, History, Minimize2, Columns2 } from "lucide-react";
+import ActivityPopover, { ActivityButton } from "@/app/components/conversation/ActivityPopover";
+import PanelLauncher from "@/app/components/conversation/PanelLauncher";
+import ChatSidePanel from "@/app/components/panel/ChatSidePanel";
+import TasksView from "@/app/components/panel/TasksView";
+import ConnectorsView from "@/app/components/panel/ConnectorsView";
+import FilesView from "@/app/components/panel/FilesView";
+import { VIEW_META, VIEW_ORDER } from "@/app/components/panel/panelViews";
+import { usePanel } from "@/app/components/panel/usePanel";
+import { useTodoSummary } from "@/app/components/panel/useTodoSummary";
+import { useAltShortcuts } from "@/app/hooks/useKeyboardShortcuts";
+import { useFolders } from "@/app/hooks/useFolders";
+import { runningCount, tasksFrom } from "@/lib/chat/backgroundTasks";
+import { markTabTitle } from "@/lib/tabTitle";
+import type { PanelView } from "@/lib/chatPanel";
 
 import { useChatPane } from "./useChatPane";
 
@@ -111,12 +124,118 @@ export default function ConversationPane({ conversationId, focused, initialPromp
     return () => setPaneParent?.(conversationId, null);
   }, [conversationId, isSide, parentId, setPaneParent]);
 
+  const panel = usePanel(conversationId);
+  const { hostTools } = useFolders();
+  const canPanel = !isSub && !isSide;
+  const hasFiles = canPanel && hostTools && !!p.conversation?.workingFolder;
+  const [activityOpen, setActivityOpen] = useState(false);
+  // Set when the bridge opens the panel by itself, so the panel does not take focus from the composer mid-reply.
+  const quietOpen = useRef(false);
+
+  // ponytail: bridge; fold into useChatPane once the tool-approval branch lands
+  // The old open-flags (slash commands, artifact cards, the context ring, a new artifact) now open a panel view and reset.
+  const { artifactPanelOpen, contextPanelOpen, scratchpadOpen, todoPanelOpen, selectedArtifactId } = p;
+  const { setArtifactPanelOpen, setContextPanelOpen, setScratchpadOpen, setTodoPanelOpen } = p;
+  const openView = panel.open;
+  const panelOpen = !!panel.panel;
+  // The flag lasts until the panel closes, so a user's next open takes focus.
+  useEffect(() => {
+    if (!panelOpen) quietOpen.current = false;
+  }, [panelOpen]);
+  useEffect(() => {
+    const view: PanelView | null = artifactPanelOpen ? "outputs" : contextPanelOpen ? "context" : scratchpadOpen ? "notes" : todoPanelOpen ? "todos" : null;
+    if (!view) return;
+    if (canPanel) {
+      quietOpen.current = true;
+      openView(view, view === "outputs" ? selectedArtifactId : null);
+    }
+    setArtifactPanelOpen(false);
+    setContextPanelOpen(false);
+    setScratchpadOpen(false);
+    setTodoPanelOpen(false);
+  }, [artifactPanelOpen, contextPanelOpen, scratchpadOpen, todoPanelOpen, selectedArtifactId, canPanel, openView, setArtifactPanelOpen, setContextPanelOpen, setScratchpadOpen, setTodoPanelOpen]);
+
+  // Background tasks: the reply's start time is not in the messages, so note it when the reply begins.
+  const [replyStartedAt, setReplyStartedAt] = useState<number | null>(null);
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- records when a reply starts
+    setReplyStartedAt(p.isLoading ? Date.now() : null);
+  }, [p.isLoading]);
+  const talkTitle = talk ? split?.info[talk.withId]?.title ?? "" : "";
+  const tasks = useMemo(
+    () => tasksFrom(p.messages, p.isLoading, p.queued.filter((q) => q.status !== "claimed"), talk ? { withTitle: talkTitle, hop: talk.hop } : undefined, replyStartedAt),
+    [p.messages, p.isLoading, p.queued, talk, talkTitle, replyStartedAt],
+  );
+  const todos = useTodoSummary(conversationId, canPanel);
+  const activeCount = runningCount(tasks) + todos.open;
+
+  // A tab in the background learns that a reply finished.
+  const wasLoading = useRef(false);
+  useEffect(() => {
+    if (wasLoading.current && !p.isLoading && document.hidden) markTabTitle();
+    wasLoading.current = p.isLoading;
+  }, [p.isLoading]);
+
+  const toggleMemory = async () => {
+    try {
+      const next = !p.conversation?.memoryDisabled;
+      const res = await fetch(`/api/conversations/${conversationId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ memoryDisabled: next }),
+      });
+      if (res.ok) {
+        p.setConversation((prev: any) => (prev ? { ...prev, memoryDisabled: next } : null));
+      }
+    } catch (e) {
+      console.error("Failed to toggle memory:", e);
+      p.toast("Failed to toggle memory", "error");
+    }
+  };
+
+  // The composer's pickers, found by their data attributes; without them (small screens) Model Settings opens instead.
+  const pickerIn = (attr: string) => {
+    const el = document.querySelector<HTMLElement>(`[data-pane-id="${conversationId}"] [${attr}]`);
+    return el && el.offsetParent ? el : null;
+  };
+  const focusModel = (open = false) => {
+    const el = pickerIn("data-model-picker");
+    if (!el) return p.setModelSettingsOpen(true);
+    el.focus();
+    if (open) el.click();
+  };
+  const focusFolder = () => {
+    const el = pickerIn("data-folder-picker");
+    if (el) el.focus();
+    else p.setModelSettingsOpen(true);
+  };
+
+  const sideToggle = isSub || !split ? undefined : p.toggleSidePane;
+  const viewKey = (v: PanelView) => (hasFiles || v !== "files" ? () => openView(v) : undefined);
+  useAltShortcuts(
+    focused && canPanel
+      ? {
+          A: () => setActivityOpen((v) => !v),
+          P: panel.toggle,
+          M: () => focusModel(true),
+          "1": sideToggle,
+          ...Object.fromEntries(VIEW_ORDER.map((v, i) => [String(i + 2), viewKey(v)])),
+        }
+      : undefined,
+  );
+
   const panelActions = [
-    { id: "scratchpad", label: "Open Scratchpad", icon: <StickyNote size={16} />, onSelect: () => p.setScratchpadOpen(true) },
-    { id: "artifacts", label: "Open Artifacts", icon: <FileCode size={16} />, onSelect: () => p.setArtifactPanelOpen(true) },
+    ...(canPanel
+      ? [
+          { id: "activity", label: "Open Activity", icon: <Activity size={16} />, onSelect: () => setActivityOpen(true) },
+          ...VIEW_ORDER.filter((v) => v !== "files" || hasFiles).map((v) => {
+            const { icon: Icon, palette } = VIEW_META[v];
+            return { id: `panel-${v}`, label: palette, icon: <Icon size={16} />, onSelect: () => openView(v) };
+          }),
+        ]
+      : []),
     { id: "advanced-settings", label: "Advanced Settings", icon: <SlidersHorizontal size={16} />, onSelect: () => p.setAdvancedOpen(true) },
     { id: "model-settings", label: "Model Settings", icon: <Settings size={16} />, onSelect: () => p.setModelSettingsOpen(true) },
-    { id: "context", label: "Context Usage", icon: <BarChart3 size={16} />, onSelect: () => p.setContextPanelOpen(true) },
   ];
   useCommandPaletteActions(focused ? "Panels" : "Panels (idle)", focused ? panelActions : []);
 
@@ -164,6 +283,54 @@ export default function ConversationPane({ conversationId, focused, initialPromp
       </div>
     );
   }
+
+  // The panel shows Files only with a folder and host tools; a stale ?panel=files falls back to Outputs.
+  const view: PanelView = panel.panel?.view === "files" && !hasFiles ? "outputs" : (panel.panel?.view ?? "outputs");
+  const panelItem = panel.panel?.item ?? null;
+  const panelBody = (() => {
+    switch (view) {
+      case "context":
+        return (
+          <ContextDetailsPanel
+            isOpen
+            onClose={panel.close}
+            conversationId={conversationId}
+            model={p.conversation.model}
+            contextLength={p.conversation.contextLength || 8192}
+            currentMessage={p.input}
+            messages={p.messages.map((m: any) => ({ role: m.role, content: joinTextParts(m.parts) }))}
+            enabledTools={p.enabledTools}
+            enabledSkills={p.enabledSkills}
+            kbId={p.selectedKbId}
+            hasCompressedSummary={!!p.conversation.compressedSummary}
+            onCompressed={async () => { await p.refreshConversationAndMessages(); }}
+            onCleared={async () => { await p.refreshConversationAndMessages(); }}
+          />
+        );
+      case "outputs":
+        return <ArtifactPanel conversationId={conversationId} isOpen onClose={panel.close} selectedId={panelItem} onSelect={(id: string | null) => openView("outputs", id)} />;
+      case "notes":
+        return <Scratchpad isOpen onClose={panel.close} conversationId={conversationId} />;
+      case "todos":
+        return <TodoPanel isOpen onClose={panel.close} conversationId={conversationId} />;
+      case "tasks":
+        return (
+          <TasksView
+            tasks={tasks}
+            messages={p.messages}
+            isLoading={p.isLoading}
+            item={panelItem}
+            onStopReply={p.stop}
+            onRemoveQueued={(id) => void p.removeQueued(id)}
+            onStopAgents={() => split?.stopAgents()}
+          />
+        );
+      case "connectors":
+        return <ConnectorsView />;
+      case "files":
+        return <FilesView conversationId={conversationId} onMention={(path) => p.setMentions((prev: string[]) => (prev.includes(path) ? prev : [...prev, path]))} />;
+    }
+  })();
 
   return (
     <ChatModeContext.Provider value={{ mode: p.mode, setMode: p.setMode, modelCaps: p.modelCaps, setModelCaps: p.setModelCaps }}>
@@ -214,36 +381,49 @@ export default function ConversationPane({ conversationId, focused, initialPromp
           onResetAllowedTools={p.resetAllowedTools}
           conversation={p.conversation}
           messagesCount={p.messages.length}
-          scratchpadOpen={p.scratchpadOpen}
-          onToggleScratchpad={() => p.setScratchpadOpen((v: boolean) => !v)}
-          artifactsOpen={p.artifactPanelOpen}
-          onToggleArtifacts={() => p.setArtifactPanelOpen((v: boolean) => !v)}
-          sideOpen={!!split?.ids.some((id) => split.parentOf[id] === conversationId)}
-          onToggleSide={isSub || !split ? undefined : p.toggleSidePane}
           enabledToolsCount={p.enabledTools.length}
           enabledSkillsCount={p.enabledSkills.length}
           onOpenAdvanced={() => p.setAdvancedOpen(true)}
           onOpenKeyboardShortcuts={() => p.setKeyboardShortcutsOpen(true)}
           error={p.error}
           onToggleTemporary={p.toggleTemporary}
-          onToggleMemory={async () => {
-            try {
-              const next = !p.conversation?.memoryDisabled;
-              const res = await fetch(`/api/conversations/${conversationId}`, {
-                method: "PATCH",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ memoryDisabled: next }),
-              });
-              if (res.ok) {
-                p.setConversation((prev: any) =>
-                  prev ? { ...prev, memoryDisabled: next } : null,
-                );
-              }
-            } catch (e) {
-              console.error("Failed to toggle memory:", e);
-              p.toast("Failed to toggle memory", "error");
-            }
-          }}
+          showSidebarToggle={!split?.multi || split.ids[0] === conversationId || !split.sideBySide}
+          activity={
+            <div className="sm:relative">
+              <ActivityButton open={activityOpen} count={activeCount} onClick={() => setActivityOpen((v) => !v)} />
+              {activityOpen && (
+                <ActivityPopover
+                  conversationId={conversationId}
+                  modelName={p.currentModelName ?? ""}
+                  folder={p.conversation.workingFolder ?? null}
+                  hostTools={hostTools}
+                  temporary={!!p.conversation.temporary}
+                  memoryOn={!p.conversation.memoryDisabled}
+                  onToggleMemory={toggleMemory}
+                  context={p.contextData}
+                  tasks={tasks}
+                  todosOpen={todos.open}
+                  onOpenView={(view, item) => openView(view, item)}
+                  onFocusModel={() => focusModel()}
+                  onFocusFolder={focusFolder}
+                  onStopReply={p.stop}
+                  onRemoveQueued={(id) => void p.removeQueued(id)}
+                  onStopAgents={() => split?.stopAgents()}
+                  onClose={() => setActivityOpen(false)}
+                />
+              )}
+            </div>
+          }
+          launcher={
+            <PanelLauncher
+              onToggleSide={sideToggle}
+              sideOpen={!!split?.ids.some((id) => split.parentOf[id] === conversationId)}
+              hasFiles={hasFiles}
+              runningTasks={runningCount(tasks)}
+              activeView={panel.panel?.view ?? null}
+              onOpenView={(v) => openView(v)}
+            />
+          }
         />
         )}
 
@@ -286,12 +466,6 @@ export default function ConversationPane({ conversationId, focused, initialPromp
             />
           )}
 
-          {!isSide && (
-            <TodoIndicator
-              conversationId={conversationId}
-              onOpen={() => p.setTodoPanelOpen(true)}
-            />
-          )}
           {/* Overlaid on the top of the list, so the list does not move when agents start or stop talking. */}
           {talk && (
             <div className="glass-card absolute inset-x-0 top-0 z-10 mx-4 mt-2 rounded-[var(--glass-radius-md)] px-3 py-2">
@@ -368,23 +542,17 @@ export default function ConversationPane({ conversationId, focused, initialPromp
         />
         )}
       </main>
-      <ArtifactPanel
-        conversationId={conversationId}
-        isOpen={p.artifactPanelOpen}
-        onClose={() => p.setArtifactPanelOpen(false)}
-        selectedId={p.selectedArtifactId}
-        onSelect={(id: string | null) => p.setSelectedArtifactId(id)}
-      />
-      <Scratchpad
-        isOpen={p.scratchpadOpen}
-        onClose={() => p.setScratchpadOpen(false)}
-        conversationId={conversationId}
-      />
-      <TodoPanel
-        isOpen={p.todoPanelOpen}
-        onClose={() => p.setTodoPanelOpen(false)}
-        conversationId={conversationId}
-      />
+      {panel.panel && canPanel && (
+        <ChatSidePanel
+          view={view}
+          hasFiles={hasFiles}
+          quietOpen={quietOpen}
+          onView={(v) => openView(v)}
+          onClose={panel.close}
+        >
+          {panelBody}
+        </ChatSidePanel>
+      )}
       <AdvancedSettings
         isOpen={p.advancedOpen}
         onClose={() => p.setAdvancedOpen(false)}
@@ -410,24 +578,6 @@ export default function ConversationPane({ conversationId, focused, initialPromp
         currentReasoningEffort={p.conversation.reasoningEffort ?? null}
         currentWorkingFolder={p.conversation.workingFolder ?? null}
         onSave={p.handleModelSettingsSave}
-      />
-      <ContextDetailsPanel
-        isOpen={p.contextPanelOpen}
-        onClose={() => p.setContextPanelOpen(false)}
-        conversationId={conversationId}
-        model={p.conversation.model}
-        contextLength={p.conversation.contextLength || 8192}
-        currentMessage={p.input}
-        messages={p.messages.map((m: any) => ({
-          role: m.role,
-          content: joinTextParts(m.parts),
-        }))}
-        enabledTools={p.enabledTools}
-        enabledSkills={p.enabledSkills}
-        kbId={p.selectedKbId}
-        hasCompressedSummary={!!p.conversation.compressedSummary}
-        onCompressed={async () => { await p.refreshConversationAndMessages(); }}
-        onCleared={async () => { await p.refreshConversationAndMessages(); }}
       />
       <ToolErrorDialog
         isOpen={p.toolErrorDialogOpen}
