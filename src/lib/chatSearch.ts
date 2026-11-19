@@ -2,6 +2,7 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { renderTranscript } from "@/lib/chat/renderTranscript";
 import { countTokens, cutTokens } from "@/lib/tokens";
+import { chatsThatReadFiles } from "@/lib/files/readFiles";
 import { quotePastChat, titleForHeader } from "@/lib/chat/quotePastChat";
 
 export interface ChatHit {
@@ -36,14 +37,16 @@ function snippetAround(text: string, query: string): string {
   return `${start > 0 ? "…" : ""}${flat.slice(start, end)}${end < flat.length ? "…" : ""}`;
 }
 
-/** The user's own main chats whose title or messages match, newest first, one hit per chat. */
+/** The user's own main chats whose title or messages match, newest first, one hit per chat; `leftOut` counts matching chats withheld because they read files. */
 export async function searchUserChats(
   userId: string,
   query: string,
   { excludeId }: { excludeId?: string } = {},
-): Promise<ChatHit[]> {
-  const owned = { userId, ...NOT_TEMPORARY, parentId: null, ...(excludeId ? { id: { not: excludeId } } : {}) };
-  const [byTitle, byMessage] = await Promise.all([
+): Promise<{ hits: ChatHit[]; leftOut: number }> {
+  // A chat that read files from a working folder is not searchable: its text would leave through a tool with no card.
+  const unreadable = await chatsThatReadFiles(userId);
+  const owned = { userId, ...NOT_TEMPORARY, parentId: null, id: { notIn: unreadable, ...(excludeId ? { not: excludeId } : {}) } };
+  const [byTitle, byMessage, leftOut] = await Promise.all([
     prisma.conversation.findMany({
       where: { ...owned, title: contains(query) },
       select: CHAT_SELECT,
@@ -57,6 +60,18 @@ export async function searchUserChats(
       orderBy: { createdAt: "desc" },
       take: 100,
     }),
+    // Counted, never read.
+    unreadable.length
+      ? prisma.conversation.count({
+          where: {
+            userId,
+            ...NOT_TEMPORARY,
+            parentId: null,
+            id: { in: unreadable, ...(excludeId ? { not: excludeId } : {}) },
+            OR: [{ title: contains(query) }, { messages: { some: { content: contains(query) } } }],
+          },
+        })
+      : 0,
   ]);
 
   // One hit per chat; the newest matching message is the one that supplies the snippet.
@@ -75,10 +90,11 @@ export async function searchUserChats(
     ? await prisma.message.findMany({ where: { id: { in: ids } }, select: { id: true, content: true } })
     : [];
   const contentById = new Map(rows.map((r) => [r.id, r.content]));
-  return winners.map(({ chat, messageId }) => ({
+  const hitList = winners.map(({ chat, messageId }) => ({
     ...chat,
     snippet: messageId ? snippetAround(contentById.get(messageId) ?? "", query) : "",
   }));
+  return { hits: hitList, leftOut };
 }
 
 /**
@@ -86,6 +102,9 @@ export async function searchUserChats(
  * main chat. The text fits `budgetTokens`, frame included.
  */
 export async function readUserChat(userId: string, id: string, budgetTokens: number): Promise<string | null> {
+  if ((await chatsThatReadFiles(userId)).includes(id)) {
+    return "That chat read files from a working folder, so it can't be quoted here. Open it directly.";
+  }
   const chat = await prisma.conversation.findFirst({
     where: { id, userId, ...NOT_TEMPORARY, parentId: null },
     select: { title: true, compressedSummary: true, compressedAt: true },

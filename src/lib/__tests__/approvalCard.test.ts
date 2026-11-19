@@ -149,3 +149,24 @@ describe("showHidden, wider set", () => {
     expect(showHidden(`rm­ -rf؜ x⁠y z${tag}`)).toBe("rm\\u00AD -rf\\u061C x\\u2060y\\u2028z\\u{E0041}");
   });
 });
+
+describe("the card for a call that sends data out", () => {
+  const card = (sendsOut?: { sendsOut?: boolean; folder?: string }) =>
+    text(renderToStaticMarkup(createElement(ApprovalCard, { toolName: "fetchUrl", approvalId: "ap1", input: { url: "https://a.test" }, sendsOut })));
+
+  it("says Sends data out, gives the reason with the folder name, and has no Allow for this chat", () => {
+    const out = card({ sendsOut: true, folder: "project" });
+    expect(out).toContain("Sends data out");
+    expect(out).toContain("This chat can read project. Check what is being sent before you allow it.");
+    expect(out).not.toContain("Allow for this chat");
+    expect(out).not.toContain("Ask mode");
+    expect(card({ sendsOut: true })).toContain("This chat has read files from a working folder. Check what is being sent before you allow it.");
+  });
+
+  it("an ordinary Ask card is unchanged", () => {
+    const out = card();
+    expect(out).toContain("Ask mode");
+    expect(out).toContain("Allow for this chat");
+    expect(out).not.toContain("Check what is being sent");
+  });
+});

@@ -7,6 +7,7 @@ import { countTokens } from "@/lib/tokens";
 import { liveSince } from "@/lib/liveSince";
 import { loadParentContext } from "@/lib/chat/loadParentContext";
 import { isSanityMode } from "@/lib/sanityMode";
+import { temperatureFor } from "@/lib/reasoning";
 
 /**
  * Default model used for compaction. Picked to be a small, fast local model
@@ -128,10 +129,10 @@ export async function compressConversation(
       model: modelConfig.model,
       system: COMPRESSION_SYSTEM_PROMPT,
       prompt,
-      temperature: 0.3,
+      ...temperatureFor(effectiveModelId, 0.3),
       abortSignal: signal,
       maxRetries: timeoutMs ? 0 : undefined,
-      ...(isOllama ? { providerOptions: { ollama: { num_predict: 2048, temperature: 0.3 } } } : {}),
+      ...(isOllama ? { providerOptions: { ollama: { options: { num_predict: 2048, temperature: 0.3 } } } } : {}),
     });
 
     if (!result.text || result.text.trim().length === 0) {
@@ -214,6 +215,7 @@ export async function shouldAutoCompress(
   conversationId: string,
   thresholdPercent: number,
   contextWindow: number,
+  extraPrompt?: string,
 ): Promise<boolean> {
   const conversation = await prisma.conversation.findUnique({
     where: { id: conversationId },
@@ -232,9 +234,9 @@ export async function shouldAutoCompress(
   });
   // Compressing cuts at the newest user message, so it only helps if an older one exists to drop.
   if (messages.filter((m) => m.role === "user").length < 2) return false;
-  // A side chat's prompt also carries its main-conversation section.
+  // A side chat's prompt also carries its main-conversation section; extraPrompt is text the chat sent that this misses.
   const mainSection = (await loadParentContext(conversationId, conversation.userId ?? "", contextWindow))?.text;
-  const systemPrompt = [conversation.systemPrompt, conversation.compressedSummary, mainSection]
+  const systemPrompt = [conversation.systemPrompt, conversation.compressedSummary, mainSection, extraPrompt]
     .filter(Boolean)
     .join("\n\n");
 

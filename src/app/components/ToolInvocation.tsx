@@ -29,7 +29,7 @@ export default function ToolInvocation(props: ToolInvocationProps) {
   if (toolName === "presentPlan") return <PlanCard part={part} />;
   if (toolName === "runAgent") return <SubAgentCard part={part} isStreaming={props.isStreaming} />;
   if (part.state === "approval-requested" && part.approval?.id) {
-    return <ApprovalCard toolName={toolName} approvalId={part.approval.id} input={part.input} />;
+    return <ApprovalCard toolName={toolName} approvalId={part.approval.id} toolCallId={part.toolCallId} input={part.input} sendsOut={part.toolMetadata} />;
   }
   if (part.state === "output-denied") {
     const notAnswered = part.approval?.reason === NOT_ANSWERED;
@@ -207,7 +207,7 @@ function ToolCall({
           {hasResult && (
             <div className="px-3 py-2 bg-[var(--glass-bg)]">
               <div className="text-xs text-zinc-400 mb-1">Output</div>
-              <pre className="text-xs font-mono text-zinc-200 whitespace-pre-wrap break-all overflow-x-auto">
+              <pre className="text-xs font-mono text-zinc-200 whitespace-pre-wrap break-all overflow-x-auto max-h-80 overflow-y-auto">
                 {resultErrored ? resultPart.errorText || "Error" : typeof resultPart.output === 'object' ? JSON.stringify(resultPart.output, null, 2) : String(resultPart.output ?? "")}
               </pre>
             </div>
@@ -216,7 +216,7 @@ function ToolCall({
           {!hasResult && done && (
             <div className="px-3 py-2 bg-[var(--glass-bg)]">
               <div className="text-xs text-zinc-400 mb-1">Output</div>
-              <pre className="text-xs font-mono text-zinc-200 whitespace-pre-wrap break-all overflow-x-auto">
+              <pre className="text-xs font-mono text-zinc-200 whitespace-pre-wrap break-all overflow-x-auto max-h-80 overflow-y-auto">
                 {errored ? part.errorText || "Error" : String(part.output ?? "")}
               </pre>
             </div>

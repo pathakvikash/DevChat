@@ -39,7 +39,7 @@ describe("autoCompress", () => {
 
     await autoCompress("c1", 85, 8192);
 
-    expect(shouldAutoCompress).toHaveBeenCalledExactlyOnceWith("c1", 85, 8192);
+    expect(shouldAutoCompress).toHaveBeenCalledExactlyOnceWith("c1", 85, 8192, undefined);
     expect(compressConversation).toHaveBeenCalledExactlyOnceWith("c1", "compact-model", {
       timeoutMs: AUTO_COMPRESS_TIMEOUT_MS,
     });
@@ -51,10 +51,16 @@ describe("autoCompress", () => {
     );
   });
 
+  it("passes the extra prompt text on", async () => {
+    await autoCompress("c1", 85, 8192, undefined, "folder text");
+
+    expect(shouldAutoCompress).toHaveBeenCalledExactlyOnceWith("c1", 85, 8192, "folder text");
+  });
+
   it("checks the threshold against the context window it is given", async () => {
     await autoCompress("c1", 85, 32768);
 
-    expect(shouldAutoCompress).toHaveBeenCalledWith("c1", 85, 32768);
+    expect(shouldAutoCompress).toHaveBeenCalledWith("c1", 85, 32768, undefined);
   });
 
   it("skips the check and the compression when the window is unknown", async () => {

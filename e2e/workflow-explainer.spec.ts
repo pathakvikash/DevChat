@@ -74,40 +74,50 @@ test("Explain a GitHub repo runs on the stubbed GitHub API and posts a chat with
   await page.screenshot({ path: test.info().outputPath("explainer-reply-in-chat.png") });
 });
 
-test("Explain a project folder asks for a model and a folder until both are picked", async ({ page, request }) => {
+test("Explain a project folder asks only for a folder; an API model shows the folder field but not Allow edits", async ({ page, request }) => {
   const id = await createFromMenu(page, "Explain a project folder");
   await edit(request, id, () => {});
-  const open = async () => {
-    await page.goto(`/workflows/${id}`);
-    await page.getByRole("button", { name: "Open settings for Explain it" }).click();
-    return page.getByRole("complementary", { name: "Explain it settings" });
-  };
-  const pickModel = "Pick a Claude Code or OpenCode model";
-  const pickFolder = "Pick the project folder";
+  await page.goto(`/workflows/${id}`);
+  await page.getByRole("button", { name: "Open settings for Explain it" }).click();
+  const panel = page.getByRole("complementary", { name: "Explain it settings" });
+  const allowEdits = panel.getByRole("checkbox", { name: "Allow edits in the folder" });
 
-  // The folder field only appears once a command-line model is picked, so the panel asks for the model first.
-  let panel = await open();
-  await expect(panel.getByText(pickModel)).toBeVisible();
+  await expect(panel.getByText("Pick the project folder")).toBeVisible();
+  await expect(panel.getByText("Working folder", { exact: true })).toBeVisible();
+  await expect(allowEdits).toHaveCount(0);
 
-  // Run is refused with both messages.
+  // Run is refused until a folder is picked.
   const refused = await request.post(`/api/workflows/${id}/runs`);
   expect(refused.ok()).toBe(false);
-  const text = await refused.text();
-  expect(text).toContain(pickModel);
-  expect(text).toContain(pickFolder);
+  expect(await refused.text()).toContain("Pick the project folder");
 
+  // Only a command-line model can edit files.
   await edit(request, id, (g) => {
     g.nodes.find((n) => n.id === "explain")!.config.model = "claude-code/sonnet";
   });
-  panel = await open();
-  await expect(panel.getByText(pickFolder)).toBeVisible();
-  await expect(panel.getByText(pickModel)).toHaveCount(0);
+  await page.goto(`/workflows/${id}`);
+  await page.getByRole("button", { name: "Open settings for Explain it" }).click();
+  await expect(allowEdits).toBeVisible();
+});
 
+test("Explain a project folder runs on an API model and posts what it read from the folder", async ({ page, request }) => {
+  const id = await createFromMenu(page, "Explain a project folder");
   await edit(request, id, (g) => {
-    g.nodes.find((n) => n.id === "explain")!.config.folder = FOLDER;
+    const explain = g.nodes.find((n) => n.id === "explain")!;
+    explain.config.model = "mock/files";
+    explain.config.folder = FOLDER;
   });
-  panel = await open();
-  await expect(panel.getByText("Working folder", { exact: true })).toBeVisible();
-  await expect(page.getByText(pickFolder)).toHaveCount(0);
-  await expect(page.getByText(pickModel)).toHaveCount(0);
+
+  const started = await request.post(`/api/workflows/${id}/runs`);
+  expect(started.status(), await started.text()).toBe(202);
+  const { runId } = await started.json();
+  await expect.poll(async () => (await (await request.get(`/api/workflow-runs/${runId}`)).json()).state, { timeout: 30_000 }).toBe("succeeded");
+
+  const read = "export function greet(name: string)";
+  const explain = await (await request.get(`/api/workflow-runs/${runId}?node=explain`)).json();
+  expect(explain.output.text).toContain(read);
+
+  const post = await (await request.get(`/api/workflow-runs/${runId}?node=post`)).json();
+  await openChat(page, post.output.conversationId);
+  await expect(page.getByText(read, { exact: false }).first()).toBeVisible();
 });

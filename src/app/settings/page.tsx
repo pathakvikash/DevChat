@@ -3,7 +3,7 @@
 import GoogleConnection from "@/app/components/GoogleConnection";
 import { useEffect, useState, useMemo, useRef } from "react";
 import { useSearchParams } from "next/navigation";
-import { Trash2, Save, RotateCcw, Loader2, Cable, Database, ExternalLink, Search, Terminal, Copy, Check } from "lucide-react";
+import { Trash2, Save, RotateCcw, Loader2, Cable, Database, ExternalLink, Search, Terminal, Copy, Check, FolderPlus } from "lucide-react";
 import Link from "next/link";
 import AppShell, { SidebarToggleButton } from "@/app/components/AppShell";
 import {
@@ -21,6 +21,9 @@ import { fetchModelCatalog } from "@/app/hooks/useModelsApi";
 import { PROVIDERS, type ProviderDef } from "@/lib/providers";
 import type { ProviderStatus } from "@/lib/models";
 import { downloadBlob } from "@/lib/utils/download";
+import FolderBrowserDialog from "@/app/components/conversation/FolderBrowserDialog";
+import { useToast } from "@/app/components/Toast";
+import { shortenHome, useFolders } from "@/app/hooks/useFolders";
 import { groupModelsByProvider, type ModelInfo } from "@/app/components/conversation/types";
 
 interface Analytics {
@@ -571,6 +574,15 @@ export default function SettingsPage() {
               </div>
             </div>
 
+            {/* Folders */}
+            <div className="glass-card rounded-[var(--glass-radius-xl)] p-6">
+              <h2 className="text-xl font-bold mb-1">Folders</h2>
+              <p className="text-sm text-zinc-400 mb-3">
+                Folders models may read (or edit in Agent mode). Folders Claude Code has worked in are included automatically.
+              </p>
+              <FoldersSection />
+            </div>
+
             {/* Google Sheets */}
             <div className="glass-card rounded-[var(--glass-radius-xl)] p-6">
               <h2 className="text-xl font-bold mb-1">Google Sheets</h2>
@@ -793,6 +805,111 @@ function ProviderKeyRow({
           Get a key <ExternalLink size={10} />
         </a>
       )}
+    </div>
+  );
+}
+
+function FoldersSection() {
+  const { folders, hostTools, reason, loaded, error, refetch } = useFolders();
+  const { toast } = useToast();
+  const [browsing, setBrowsing] = useState(false);
+  const [removing, setRemoving] = useState<string | null>(null);
+  const listRef = useRef<HTMLUListElement>(null);
+  const addRef = useRef<HTMLButtonElement>(null);
+  const added = folders.filter((f) => f.source === "added");
+  const fromClaude = folders.filter((f) => f.source === "claude-code");
+
+  async function remove(path: string, index: number) {
+    setRemoving(path);
+    const res = await fetch("/api/folders", {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ path }),
+    });
+    if (!res.ok) {
+      toast((await res.json().catch(() => ({}))).error || "Couldn't remove the folder", "error");
+      setRemoving(null);
+      return;
+    }
+    const fresh = await refetch();
+    setRemoving(null);
+    toast(
+      fresh?.folders.some((f) => f.path === path)
+        ? "Removed from your list. It stays available because Claude Code has used it."
+        : "Folder removed. Chats using it will ask you to pick another.",
+      "success",
+    );
+    // The removed row's button is gone: move focus on instead of dropping it to <body>.
+    requestAnimationFrame(() => {
+      const buttons = listRef.current?.querySelectorAll("button");
+      (buttons?.[Math.min(index, buttons.length - 1)] ?? addRef.current)?.focus();
+    });
+  }
+
+  if (!loaded) return <p className="text-sm text-zinc-400">Loading…</p>;
+  if (error && !hostTools) {
+    return (
+      <div className="flex flex-wrap items-center gap-3">
+        <p className="text-sm text-zinc-400">Couldn&apos;t load folders. Try again.</p>
+        <button type="button" onClick={() => void refetch()} className="focus-ring h-8 px-3 text-sm font-medium text-zinc-300 glass-button rounded-[var(--glass-radius-md)]">
+          Try again
+        </button>
+      </div>
+    );
+  }
+  if (!hostTools) return <p className="text-sm text-zinc-400">{reason ?? "Folders aren't available for your account."}</p>;
+
+  return (
+    <div className="space-y-3">
+      {added.length === 0 ? (
+        <p className="text-sm text-zinc-400">No folders added yet.</p>
+      ) : (
+        <ul ref={listRef} role="list" className="space-y-1">
+          {added.map((f, i) => (
+            <li key={f.path} className="flex items-center justify-between gap-2">
+              <span className="min-w-0 truncate font-mono text-sm text-zinc-200" title={f.path}>
+                {shortenHome(f.path)}
+              </span>
+              <button
+                type="button"
+                onClick={() => void remove(f.path, i)}
+                disabled={removing === f.path}
+                aria-label={`Remove ${shortenHome(f.path)}`}
+                title={`Remove ${shortenHome(f.path)}`}
+                className="focus-ring flex h-8 w-8 shrink-0 items-center justify-center glass-button rounded-[var(--glass-radius-md)] text-zinc-400 disabled:opacity-50"
+              >
+                <Trash2 size={14} />
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+      {fromClaude.length > 0 && (
+        <details className="text-sm">
+          <summary className="focus-ring cursor-pointer text-zinc-400">
+            Also available: {fromClaude.length} folder{fromClaude.length === 1 ? "" : "s"} Claude Code has worked in
+          </summary>
+          <ul role="list" className="mt-2 space-y-1">
+            {fromClaude.map((f) => (
+              <li key={f.path} className="truncate font-mono text-sm text-zinc-300" title={f.path}>
+                {shortenHome(f.path)}
+              </li>
+            ))}
+          </ul>
+        </details>
+      )}
+      {reason && <p className="text-sm text-zinc-400">{reason}</p>}
+      <button
+        ref={addRef}
+        type="button"
+        onClick={() => setBrowsing(true)}
+        disabled={!!reason}
+        className="focus-ring flex h-8 items-center gap-2 px-3 text-sm font-medium text-zinc-300 glass-button rounded-[var(--glass-radius-md)] disabled:opacity-50"
+      >
+        <FolderPlus size={14} />
+        Add folder
+      </button>
+      <FolderBrowserDialog isOpen={browsing} onClose={() => setBrowsing(false)} onPicked={() => void refetch()} />
     </div>
   );
 }

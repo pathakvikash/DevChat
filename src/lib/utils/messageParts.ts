@@ -25,6 +25,8 @@ export interface ToolPart {
   errorText?: string;
   /** Set while a call waits for the user, and after an answer (approval states). */
   approval?: { id?: string; approved?: boolean; reason?: string };
+  /** Set by the server on a call that can send data out of a chat with a working folder. */
+  toolMetadata?: { sendsOut?: boolean; folder?: string };
 }
 
 export interface AnyPart {
@@ -176,6 +178,12 @@ export function approvalDetails(toolName: string, input: unknown): ApprovalDetai
     shown.add("old_string").add("new_string");
     block.push(...diff(i));
   }
+  // What leaves the computer is shown in full, in the block, never only in the rows.
+  const out = { executeCode: "code", fetchUrl: "url", webSearch: "query", rememberFact: "value", createArtifact: "content", updateArtifact: "content" }[toolName];
+  if (out && typeof i[out] === "string") {
+    shown.add(out);
+    block.push({ text: i[out] as string });
+  }
   const description = typeof i.description === "string" && i.description ? i.description : undefined;
   if (description) shown.add("description");
   const lines = block.reduce((n, l) => n + l.text.split("\n").length, 0);
@@ -186,14 +194,21 @@ export function approvalDetails(toolName: string, input: unknown): ApprovalDetai
 export const ALLOWED_FOR_CHAT = "Allowed for this chat";
 export const DENIED_BY_USER = "The user denied this action.";
 export const STOPPED_REPLY = "The reply was stopped before this ran.";
+export const STOPPED_WHILE_RUNNING = "Stopped while it was running; it may have finished.";
 
 /** Card title by tool, as UX 3.10 lists them. */
-export function approvalTitle(toolName: string, input: any): string {
+export function approvalTitle(toolName: string, input: any, sendsOut = false): string {
   const i = input ?? {};
+  // In a chat that asks before sending data out, an artifact only asks when it is a page that runs script.
+  // An update carries no type, so it keeps the general title below.
+  if (sendsOut && toolName === "createArtifact" && i.type === "html") return "Create an HTML page";
   if (toolName === "createArtifact") return `Create artifact "${i.title ?? "Untitled"}"`;
   if (toolName === "updateArtifact") return `Update artifact "${i.title ?? i.artifactId ?? ""}"`;
   if (toolName === "createTodo" || toolName === "createTodos" || toolName === "updateTodo") return "Update the todo list";
-  if (toolName === "rememberFact") return `Save to memory: "${i.key ?? ""}"`;
+  if (toolName === "rememberFact") return "Remember a fact for other chats";
+  if (toolName === "executeCode") return i.language === "python" ? "Run Python code" : "Run JavaScript code";
+  if (toolName === "fetchUrl") return `Fetch ${showHidden(String(i.url ?? ""))}`;
+  if (toolName === "webSearch") return `Search the web for "${showHidden(String(i.query ?? ""))}"`;
   if (toolName === "forgetFact") return `Forget memory: "${i.key ?? ""}"`;
   // Claude Code's own tools, asked for in Ask mode.
   if (toolName === "Edit" || toolName === "MultiEdit") return `Edit ${showHidden(String(i.file_path ?? ""))}`;
@@ -204,9 +219,24 @@ export function approvalTitle(toolName: string, input: any): string {
   return `Run ${toolName}`;
 }
 
+/** True for a tool call the server marked to ask first: the browser must not run it when it arrives, the card does. */
+export const waitsForApproval = (call: { toolMetadata?: { sendsOut?: boolean; folder?: string } }): boolean => call.toolMetadata?.sendsOut === true;
+
+/** True when a card still waits for an answer or runs after one: the SDK sends once all are done.
+ *  A waiting executeCode card is left out: Allow runs it in the browser and adds its result directly, so it never
+ *  reaches `approval-responded` and the SDK auto-send would not fire. A Deny does reach it. */
+export const hasApprovalCards = (parts: unknown): boolean =>
+  Array.isArray(parts) &&
+  parts.some((p: any) => p?.state === "approval-responded" || (p?.state === "approval-requested" && p?.type !== "tool-executeCode"));
+
 /** A stopped reply: every card still waiting is denied, so nothing runs when it is resumed. */
 export function denyOpenApprovals(parts: any[]): any[] {
   return parts.map((p) => {
+    if (p?.state === "approval-responded") {
+      if (p.approval?.approved === false) return { ...p, state: "output-denied" };
+      const { approval: _approval, ...rest } = p;
+      return { ...rest, state: "output-error", errorText: STOPPED_WHILE_RUNNING };
+    }
     if (p?.state !== "approval-requested") return p;
     if (!p.approval?.id) return { ...p, state: "output-error", errorText: "Stopped before it ran." };
     return { ...p, state: "output-denied", approval: { id: p.approval.id, approved: false, reason: STOPPED_REPLY } };

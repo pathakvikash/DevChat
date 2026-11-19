@@ -658,7 +658,7 @@ export default function WorkflowEditor({ id }: { id: string }) {
         <section className="space-y-2">
           <h3 className="text-sm font-medium text-zinc-200">Default model</h3>
           <p className="text-xs text-zinc-400">Agent cards with no model of their own use this one.</p>
-          <ModelSelector currentModel={wf.graph.defaultModel} onModelChange={(m) => editGraph((g) => ({ ...g, defaultModel: m }))} exclude={(m) => isCodexModelId(m.id)} />
+          <ModelSelector currentModel={wf.graph.defaultModel} onModelChange={(m) => editGraph((g) => ({ ...g, defaultModel: m }))} floating exclude={(m) => isCodexModelId(m.id)} />
         </section>
         <section className="space-y-2">
           <h3 className="text-sm font-medium text-zinc-200">Token limit per run</h3>

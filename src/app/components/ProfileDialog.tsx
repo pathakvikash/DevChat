@@ -27,6 +27,7 @@ import { useTheme } from "@/app/components/ThemeProvider";
 import CenteredDialog from "@/app/components/ui/CenteredDialog";
 import OllamaModelManagerDialog from "@/app/components/OllamaModelManagerDialog";
 import { fetchSettings, saveSettings } from "@/app/hooks/useSettingsApi";
+import { useFolders } from "@/app/hooks/useFolders";
 
 const MEMORY_KEY = "vas:settings:memory_enabled";
 
@@ -64,6 +65,11 @@ export default function ProfileDialog({
 }) {
   const { theme, setTheme } = useTheme();
   const { data: session } = useSession();
+  const { hostTools, loaded, error } = useFolders(isOpen);
+  const workspaceNav = useMemo(
+    () => (!loaded || error || hostTools ? WORKSPACE_LINKS : WORKSPACE_LINKS.filter((l) => l.href !== "/claude")),
+    [hostTools, loaded, error],
+  );
   const [memoryEnabled, setMemoryEnabled] = useState(true);
   const [query, setQuery] = useState("");
   const [showModelManager, setShowModelManager] = useState(false);
@@ -109,8 +115,8 @@ export default function ProfileDialog({
 
   const q = query.trim().toLowerCase();
   const workspaceLinks = useMemo(
-    () => WORKSPACE_LINKS.filter((l) => l.label.toLowerCase().includes(q)),
-    [q],
+    () => workspaceNav.filter((l) => l.label.toLowerCase().includes(q)),
+    [q, workspaceNav],
   );
   const toolLinks = useMemo(
     () => TOOL_LINKS.filter((l) => l.label.toLowerCase().includes(q)),
@@ -152,7 +158,7 @@ export default function ProfileDialog({
         <div className="md:hidden border-b border-[var(--glass-border)] overflow-x-auto shrink-0">
           <div className="flex gap-1 p-2 w-max">
             {navRow({ label: "Profile", icon: User, href: "profile" }, "tab")}
-            {WORKSPACE_LINKS.map((l) => navRow(l, "tab"))}
+            {workspaceNav.map((l) => navRow(l, "tab"))}
             {TOOL_LINKS.map((l) => navRow(l, "tab"))}
           </div>
         </div>

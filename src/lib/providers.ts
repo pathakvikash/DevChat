@@ -1,4 +1,5 @@
-// Hosted providers, all speaking OpenAI Chat Completions, so one code path serves them all.
+// Hosted providers. OpenAI and Anthropic use their native SDKs (Responses / Messages API);
+// the rest speak OpenAI Chat Completions through one shared path.
 // Pure data, client-safe; model ids are `<provider.id>/<upstream id>`.
 
 export interface ProviderDef {
@@ -10,6 +11,8 @@ export interface ProviderDef {
   envKey: string;
   /** Per-user AppSetting key holding the API key. */
   settingKey: string;
+  /** Chat goes through this provider's native SDK; /models listing stays OpenAI-style. */
+  native?: "openai" | "anthropic";
   /** OpenAI-compatible base URL. Omitted for `custom`, which is user-supplied. */
   baseUrl?: string;
   /** Env var overriding `baseUrl`. */
@@ -37,6 +40,7 @@ export const PROVIDERS: readonly ProviderDef[] = [
     envKey: "OPENAI_API_KEY",
     envBaseUrl: "OPENAI_BASE_URL",
     settingKey: "openaiApiKey",
+    native: "openai",
     baseUrl: "https://api.openai.com/v1",
     defaultContextWindow: 128_000,
     vision: true,
@@ -48,8 +52,8 @@ export const PROVIDERS: readonly ProviderDef[] = [
     label: "Anthropic",
     envKey: "ANTHROPIC_API_KEY",
     settingKey: "anthropicApiKey",
-    // Anthropic's OpenAI compat layer: `/v1/models` is native and needs x-api-key plus
-    // anthropic-version, while the compat chat endpoint ignores those extras.
+    native: "anthropic",
+    // `/v1/models` needs x-api-key plus anthropic-version; chat uses the native SDK.
     baseUrl: "https://api.anthropic.com/v1",
     defaultContextWindow: 200_000,
     vision: true,
@@ -114,7 +118,8 @@ export const ENV_ALIASES: Record<string, string> = {
 export const CLI_PROVIDER_IDS = ["claude-code", "codex", "opencode"] as const;
 
 export function isCliModelId(modelId: string): boolean {
-  const prefix = modelId.slice(0, modelId.indexOf("/"));
+  const slash = modelId.indexOf("/");
+  const prefix = slash < 0 ? "" : modelId.slice(0, slash);
   return (CLI_PROVIDER_IDS as readonly string[]).includes(prefix);
 }
 

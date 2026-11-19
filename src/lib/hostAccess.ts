@@ -1,6 +1,4 @@
 import { prisma } from "@/lib/db";
-import { findCliBins } from "@/lib/cliProviders";
-import { isSanityMode } from "@/lib/sanityMode";
 
 /** Tools that run on the server's own machine (Claude Code and the other CLIs, its folders, its home
  *  directory) belong to the server's owner. OWNER_EMAILS (comma-separated) lists who that is; unset means
@@ -33,18 +31,8 @@ export async function canUseHostTools(userId: string): Promise<boolean> {
   return ok;
 }
 
-/** Why this user can't use a Claude Code or OpenCode model with a folder here, or null when they can: not the server's owner, or
- *  no CLI installed. Sanity mode counts as installed (the tests have none). */
-export async function hostToolsReason(userId: string): Promise<string | null> {
-  if (!(await canUseHostTools(userId))) return HOST_TOOLS_REFUSED;
-  if (isSanityMode()) return null;
-  const bins = await findCliBins();
-  return bins.has("claude-code") || bins.has("opencode") ? null : FOLDER_TEMPLATE_REFUSED;
-}
-
-export const hostToolsHere = async (userId: string): Promise<boolean> => (await hostToolsReason(userId)) === null;
-
-export const FOLDER_TEMPLATE_REFUSED = "Explaining a folder needs Claude Code or OpenCode on this server.";
+/** Why this user can't use this server's folders and CLI models, or null when they can. */
+export const hostToolsReason = async (userId: string): Promise<string | null> => ((await canUseHostTools(userId)) ? null : HOST_TOOLS_REFUSED);
 
 /** For tests: forget cached answers and the one-time warning. */
 export function resetHostAccessCache() {

@@ -7,14 +7,15 @@ import ErrorBanner from "./ui/ErrorBanner";
 import SectionHeader from "./ui/SectionHeader";
 import AsyncButton from "./ui/AsyncButton";
 import { useResource } from "@/app/hooks/useResource";
-import { shortenHome, useClaudeProjects } from "@/app/hooks/useClaudeProjects";
 import { fetchModels as apiFetchModels } from "@/app/hooks/useModelsApi";
 import { isCliModelId } from "@/lib/providers";
 import type { ModelInfo } from "@/app/components/conversation/types";
 import { useToast } from "@/app/components/Toast";
 import ModelPicker from "./modelSettings/ModelPicker";
 import GenerationParams from "./modelSettings/GenerationParams";
+import { useFolders } from "@/app/hooks/useFolders";
 import PersonaSelector from "./PersonaSelector";
+import WorkingFolderPicker from "./conversation/WorkingFolderPicker";
 
 interface KbInfo {
   id: string;
@@ -153,10 +154,8 @@ export default function ModelSettingsDialog({
   const kbs = kbsData ?? [];
   const selectedKb = kbs.find((k) => k.id === kbId) || null;
 
-  // Folders Claude Code has been used in; the only places a CLI-backed model
-  // may read (chat mode) or edit (agent mode). Same guard as the /claude page.
   const isCliModel = isCliModelId(selectedModel);
-  const { folders: projectFolders } = useClaudeProjects(isOpen && isCliModel);
+  const { hostTools, loaded: foldersLoaded } = useFolders(isOpen);
   // `contextLength` is Ollama's num_ctx override — saving it for cloud
   // providers would shadow their real (much larger) context window.
   const isOllamaModel = selectedModel.startsWith("ollama/");
@@ -164,6 +163,7 @@ export default function ModelSettingsDialog({
   async function handleSave() {
     setSaving(true);
     setError(null);
+    const folderChanged = workingFolder !== (currentWorkingFolder || "");
     try {
       const res = await fetch(`/api/conversations/${conversationId}`, {
         method: "PATCH",
@@ -181,7 +181,8 @@ export default function ModelSettingsDialog({
           fallbackModel: fallbackModel || null,
           persona: persona || null,
           reasoningEffort: reasoningEffort || null,
-          workingFolder: isCliModelId(selectedModel) ? workingFolder || null : null,
+          // Only when changed: a stale folder would otherwise block saving the other settings.
+          ...(folderChanged && { workingFolder: workingFolder || null }),
         }),
       });
       if (!res.ok) throw new Error("Failed to save settings");
@@ -198,7 +199,7 @@ export default function ModelSettingsDialog({
         fallbackModel: fallbackModel || null,
         persona: persona || null,
         reasoningEffort: reasoningEffort || null,
-        workingFolder: isCliModelId(selectedModel) ? workingFolder || null : null,
+        ...(folderChanged && { workingFolder: workingFolder || null }),
       });
       toast("Conversation saved", "success");
       onClose();
@@ -355,30 +356,20 @@ export default function ModelSettingsDialog({
             </p>
           </section>
 
-          {isCliModel && (
-            <section>
-              <SectionHeader>Working folder</SectionHeader>
-              <select
-                value={workingFolder}
-                onChange={(e) => setWorkingFolder(e.target.value)}
-                className="w-full glass-input rounded-[var(--glass-radius-md)] px-3 py-2 text-sm"
-              >
-                <option value="">None (sandboxed, no file access)</option>
-                {projectFolders.map((p) => (
-                  <option key={p.cwd} value={p.cwd}>
-                    {shortenHome(p.cwd)}
-                  </option>
-                ))}
-                {workingFolder && !projectFolders.some((p) => p.cwd === workingFolder) && (
-                  <option value={workingFolder}>{workingFolder}</option>
-                )}
-              </select>
-              <p className="text-xs text-zinc-500 mt-1">
-                Lets this tool see a folder you have used Claude Code in. In Chat mode it can
-                read and search there; in Agent mode it can also create and edit files. It
-                never runs shell commands, and other folders stay off limits.
-              </p>
-            </section>
+          {foldersLoaded && (hostTools || workingFolder) && (
+          <section>
+            <SectionHeader>Working folder</SectionHeader>
+            <WorkingFolderPicker
+              value={workingFolder || null}
+              onChange={(f) => setWorkingFolder(f ?? "")}
+              className="flex items-center gap-2 w-full glass-input rounded-[var(--glass-radius-md)] px-3 py-2 text-sm"
+            />
+            <p className="text-xs text-zinc-400 mt-1">
+              {isCliModel
+                ? "In Chat mode it can read and search this folder; in Agent mode it can also edit files. It never runs shell commands."
+                : "Used for @ file mentions. The model only sees files you attach."}
+            </p>
+          </section>
           )}
 
           <GenerationParams

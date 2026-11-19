@@ -9,12 +9,16 @@ vi.mock("@/lib/models", () => ({ getModel: (...a: unknown[]) => getModel(...a), 
 vi.mock("@/lib/apiKeys", () => ({ resolveProviderCreds: vi.fn(async () => ({})) }));
 const canUseHostTools = vi.fn(async () => true);
 vi.mock("@/lib/hostAccess", () => ({ canUseHostTools: () => canUseHostTools(), HOST_TOOLS_REFUSED: "This is only available to the server's owner." }));
+const isAllowedFolder = vi.fn(async (_u: string, _f: string) => true);
+vi.mock("@/lib/folders", () => ({ isAllowedFolder: (u: string, f: string) => isAllowedFolder(u, f), folderGoneMessage: (f: string) => `${f} isn't one of your folders any more.` }));
 vi.mock("@/lib/settings", () => ({ getSettingsKey: vi.fn(async () => "") }));
 const recordTrace = vi.fn(async (_obs: unknown) => {});
 vi.mock("@/lib/observability", () => ({ recordTrace: (obs: unknown) => recordTrace(obs) }));
 
 import { BLOCKED_TOOLS, agentCard, filterTools, parseCardOutput, resolveAgentModel, workflowSystemPrompt } from "@/lib/workflows/cards/agent";
 import { AGENT_TOOL_IDS, parseConfig, type OutputField } from "@/lib/workflows/catalog";
+import { emptyGraph, validateStructure } from "@/lib/workflows/graph";
+import { folderPrompt } from "@/lib/files/folderTools";
 import { buildTools } from "@/lib/chat/buildTools";
 import { TOOL_REGISTRY } from "@/lib/registry";
 import type { CardCtx } from "@/lib/workflows/cards";
@@ -25,11 +29,11 @@ const usage = {
 };
 
 /** A model that answers each call from `replies` in turn (stream and generate share the counter). */
-function scripted(replies: string[]) {
+function scripted(replies: string[], id = "mock/wf") {
   let n = 0;
-  const calls: { system?: string; prompt: unknown }[] = [];
+  const calls: { system?: string; prompt: unknown; tools: string[]; providerOptions: any }[] = [];
   const next = (o: any) => {
-    calls.push({ system: o.prompt.find((m: any) => m.role === "system")?.content, prompt: o.prompt });
+    calls.push({ system: o.prompt.find((m: any) => m.role === "system")?.content, prompt: o.prompt, tools: (o.tools ?? []).map((t: any) => t.name), providerOptions: o.providerOptions });
     return replies[Math.min(n++, replies.length - 1)];
   };
   const mock = new MockLanguageModelV3({
@@ -41,7 +45,7 @@ function scripted(replies: string[]) {
     },
     doGenerate: async (o) => ({ content: [{ type: "text", text: next(o) }], finishReason: { unified: "stop", raw: undefined }, usage, warnings: [] }),
   });
-  getModel.mockReturnValue({ id: "mock/wf", name: "wf", provider: "Mock", model: mock, costPer1kInputTokens: 0, costPer1kOutputTokens: 0, maxTokens: 1000, contextWindow: 8192, supportsTools: true });
+  getModel.mockReturnValue({ id, name: "wf", provider: "Mock", model: mock, costPer1kInputTokens: 0, costPer1kOutputTokens: 0, maxTokens: 1000, contextWindow: 8192, supportsTools: true });
   return { calls };
 }
 
@@ -65,6 +69,11 @@ function ctx(config: Record<string, unknown>): CardCtx {
     signal: new AbortController().signal,
   };
 }
+
+const graphOf = (_id: string, cfg: Record<string, unknown>) => ({
+  ...emptyGraph("m"),
+  nodes: [emptyGraph().nodes[0], { id: "a", type: "agent" as const, fromIds: ["trigger"], config: { instructions: "x", folder: "/work/app", ...cfg }, ui: { label: "A", position: { x: 1, y: 0 } } }],
+});
 
 const block = (o: unknown) => "Here you go.\n```json\n" + JSON.stringify(o) + "\n```";
 
@@ -154,6 +163,82 @@ describe("agent card", () => {
     expect(agentCard.concurrency!({ ...ctx({}), defaultModel: "gpt-4o" })).toBe(3);
     expect(agentCard.concurrency!({ ...ctx({}), defaultModel: "ollama/llama3" })).toBe(1);
     expect(agentCard.concurrency!({ ...ctx({}), defaultModel: "claude-code/sonnet" })).toBe(1);
+  });
+});
+
+describe("agent card with a folder", () => {
+  const dir = "/work/app";
+  const run = (config: Record<string, unknown>) => agentCard.run(ctx({ instructions: "Explain it", ...config }));
+  const FOLDER_TOOLS = ["listFiles", "readFile", "searchFiles"];
+
+  beforeEach(() => isAllowedFolder.mockReset().mockResolvedValue(true));
+
+  it("an API model with a folder is offered listFiles, readFile, searchFiles and told about the folder", async () => {
+    const { calls } = scripted(["done"]);
+    await run({ folder: dir });
+    expect([...calls[0].tools].sort()).toEqual([...FOLDER_TOOLS].sort());
+    expect(calls[0].system).toContain(folderPrompt(dir));
+    expect(calls[0].system).not.toContain("wait for the user's OK");
+    expect(isAllowedFolder).toHaveBeenCalledWith("u1", dir);
+  });
+
+  it("no folder, no folder tools and no folder section", async () => {
+    const { calls } = scripted(["done"]);
+    await run({});
+    expect(calls[0].tools).toEqual([]);
+    expect(calls[0].system).not.toContain("working folder");
+    expect(isAllowedFolder).not.toHaveBeenCalled();
+  });
+
+  it("a folder not in the list fails with folderGoneMessage", async () => {
+    scripted(["done"]);
+    isAllowedFolder.mockResolvedValue(false);
+    await expect(run({ folder: "/etc" })).rejects.toThrow("/etc isn't one of your folders any more.");
+  });
+
+  it("a user who is not the owner is refused", async () => {
+    scripted(["done"]);
+    canUseHostTools.mockResolvedValue(false);
+    await expect(run({ folder: dir })).rejects.toThrow("only available to the server's owner");
+    expect(isAllowedFolder).not.toHaveBeenCalled();
+  });
+
+  it("allowEdits is ignored for an API model, and its tools stay read-only", async () => {
+    const { calls } = scripted(["done"]);
+    await run({ allowEdits: true }); // no folder: an API model does not throw
+    await run({ folder: dir, allowEdits: true });
+    expect(calls[1].tools.sort()).toEqual([...FOLDER_TOOLS].sort());
+  });
+
+  it("a CLI model keeps cwd and agent access and gets no folder tools", async () => {
+    const { calls } = scripted(["done"], "claude-code/sonnet");
+    await run({ folder: dir, allowEdits: true });
+    expect(calls[0].tools).toEqual([]);
+    expect(calls[0].system).not.toContain(folderPrompt(dir));
+    expect(JSON.stringify(calls[0].providerOptions)).toContain(dir);
+    expect(calls[0].providerOptions["claude-code"]).toMatchObject({ cwd: dir, access: "agent" });
+  });
+
+  it("a card with a folder and fetchUrl throws at run time, even when graph validation is bypassed", async () => {
+    const { calls } = scripted(["done"]);
+    await expect(run({ folder: dir, tools: ["fetchUrl"] })).rejects.toThrow("reads a folder, so it can't also use web or MCP tools");
+    expect(calls).toHaveLength(0);
+    await expect(run({ folder: dir, tools: ["calculator"] })).resolves.toBeDefined();
+  });
+
+  it("a card with a folder can never run with a tool that carries data out", () => {
+    // Registry-driven: a new outbound tool fails here until it is blocked or refused next to a folder.
+    const outbound = [...Object.keys(TOOL_REGISTRY).filter((id) => TOOL_REGISTRY[id].outbound), "rememberFact", "createArtifact", "updateArtifact", "mcp_srv_tool"];
+    for (const id of outbound) {
+      const refused = BLOCKED_TOOLS.has(id) || !(AGENT_TOOL_IDS as readonly string[]).includes(id);
+      if (id.startsWith("mcp_")) {
+        expect(validateStructure(graphOf(id, { mcpTools: [id] })).join(), id).toMatch(/reaches the web itself/);
+      } else if (!refused) {
+        expect(validateStructure(graphOf(id, { tools: [id] })).join(), id).toMatch(/reaches the web itself/);
+      }
+    }
+    // The walk is not vacuous: the two web tools are the ones the graph check has to refuse.
+    expect(AGENT_TOOL_IDS.filter((id) => !BLOCKED_TOOLS.has(id) && TOOL_REGISTRY[id]?.outbound)).toEqual(["webSearch", "fetchUrl"]);
   });
 });
 

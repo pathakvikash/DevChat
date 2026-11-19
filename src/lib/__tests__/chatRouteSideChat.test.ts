@@ -34,7 +34,7 @@ vi.mock("@/lib/chat/saveUserMessage", () => ({ saveUserMessage: vi.fn() }));
 vi.mock("@/lib/chat/persistAssistantMessage", () => ({ safePersistAssistantMessage: vi.fn() }));
 vi.mock("@/lib/chat/autoCompress", () => ({ autoCompress: vi.fn(), canAutoCompress: vi.fn(() => false) }));
 vi.mock("@/lib/observability", () => ({ recordTrace: vi.fn().mockResolvedValue(undefined) }));
-vi.mock("@/lib/claude/sessions", () => ({ isRunnableCwd: vi.fn(async () => false) }));
+vi.mock("@/lib/folders", () => ({ isAllowedFolder: vi.fn(async () => false), folderGoneMessage: (f: string) => `${f} isn't one of your folders any more.` }));
 vi.mock("@/lib/cliProviders", () => ({ cliProviderForModel: vi.fn(() => undefined), dropParkedRuns: vi.fn() }));
 vi.mock("ai", async (importOriginal) => ({
   ...(await importOriginal<typeof import("ai")>()),
@@ -47,6 +47,8 @@ vi.mock("ai", async (importOriginal) => ({
 import { prisma } from "@/lib/db";
 import { buildTools } from "@/lib/chat/buildTools";
 import { buildSystemPrompt } from "@/lib/chat/buildSystemPrompt";
+import { cliProviderForModel } from "@/lib/cliProviders";
+import { isAllowedFolder } from "@/lib/folders";
 const db = prisma as any;
 
 /** One row serves both the ownership check and resolveChatSettings. */
@@ -96,6 +98,50 @@ beforeEach(() => {
 });
 
 describe("POST /api/chat for side chats", () => {
+  it("a side chat of a parent that read files is gated even after the folder is cleared", async () => {
+    db.conversation.findUnique.mockResolvedValue({ ...sideOf(), parentId: "p1" });
+    db.message.findMany.mockImplementation(async ({ where }: any) => (JSON.stringify(where.conversation ?? {}).includes('"id":"p1"') ? [{ id: "m9" }] : []));
+    await send("s1", "chat");
+    expect((buildTools as any).mock.calls[0][0]).toMatchObject({ askBeforeSendingOut: true, agentTargets: [] });
+    expect((buildTools as any).mock.calls[0][0].workingFolder).toBeUndefined();
+    expect((buildSystemPrompt as any).mock.calls[0][0].sendsOutGate).toBe(true);
+
+    vi.clearAllMocks();
+    db.message.findMany.mockResolvedValue([]);
+    await send("s1", "chat");
+    expect((buildTools as any).mock.calls[0][0].askBeforeSendingOut).toBe(false);
+  });
+
+  it("a main chat holding a workflow's folder text is gated, though it has no folder-tool call", async () => {
+    db.conversation.findUnique.mockResolvedValue(chat());
+    db.message.findMany.mockImplementation(async ({ where }: any) => (JSON.stringify(where.OR ?? []).includes('readFiles') ? [{ id: "m9" }] : []));
+    await send("c1", "chat");
+    expect((buildTools as any).mock.calls[0][0].askBeforeSendingOut).toBe(true);
+    expect((buildSystemPrompt as any).mock.calls[0][0].sendsOutGate).toBe(true);
+  });
+
+  it("a chat a CLI model read files in stays gated after switching to an API model with the folder cleared", async () => {
+    db.conversation.findUnique.mockResolvedValue(chat());
+    db.message.findMany.mockImplementation(async ({ where }: any) => (JSON.stringify(where.OR ?? []).includes("dynamic-tool") ? [{ id: "m9" }] : []));
+    await send("c1", "chat");
+    expect((buildTools as any).mock.calls[0][0].askBeforeSendingOut).toBe(true);
+    expect((buildSystemPrompt as any).mock.calls[0][0].sendsOutGate).toBe(true);
+  });
+
+  it("a CLI chat with a folder is gated from its first turn", async () => {
+    vi.mocked(cliProviderForModel).mockReturnValue({} as any);
+    vi.mocked(isAllowedFolder).mockResolvedValueOnce(true);
+    try {
+      db.conversation.findUnique.mockResolvedValue(chat({ workingFolder: "/work" }));
+      db.message.findMany.mockResolvedValue([]);
+      await send("c1", "chat");
+      expect((buildTools as any).mock.calls[0][0].askBeforeSendingOut).toBe(true);
+      expect((buildSystemPrompt as any).mock.calls[0][0]).toMatchObject({ sendsOutGate: true, fileFolder: undefined, showFolder: true });
+    } finally {
+      vi.mocked(cliProviderForModel).mockReturnValue(undefined);
+    }
+  });
+
   it("forces chat mode on a side chat, whatever mode the request asks for", async () => {
     db.conversation.findUnique.mockResolvedValue(sideOf());
     const res = await send("s1", "agent");

@@ -197,6 +197,18 @@ describe("calculateDetailedContextUsage", () => {
     expect(result.breakdown.total).toBe(result.breakdown.base);
   });
 
+  it("counts the folder section and tool specs in tools", () => {
+    const folder = "--- Working folder ---\nYour working folder is /work.";
+    const specs = '[{"name":"readFile","description":"Read a file","parameters":{}}]';
+    const only = (extra: object, toolSpecs?: string) =>
+      calculateDetailedContextUsage({ ...emptySections, base: "base", ...extra }, [], "", 8192, null, toolSpecs).breakdown;
+    expect(only({}).tools).toBe(0);
+    expect(only({ folder }).tools).toBe(countTokens(folder));
+    const both = only({ tools: "T", folder }, specs);
+    expect(both.tools).toBeGreaterThan(only({ folder }).tools);
+    expect(both.total).toBe(both.base + both.tools);
+  });
+
   it("counts persona section tokens when present", () => {
     const sections = {
       ...emptySections,

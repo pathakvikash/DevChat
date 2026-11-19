@@ -53,6 +53,8 @@ export interface ChatPaneState extends DataActions {
   setModelSettingsOpen: React.Dispatch<React.SetStateAction<boolean>>;
   artifactPanelOpen: boolean;
   setArtifactPanelOpen: React.Dispatch<React.SetStateAction<boolean>>;
+  /** Returns true once if a finished reply opened Outputs by itself (not a card click or /artifacts); clears the mark. */
+  takeArtifactFromReply: () => boolean;
   selectedArtifactId: string | null;
   setSelectedArtifactId: React.Dispatch<React.SetStateAction<string | null>>;
   contextPanelOpen: boolean;

@@ -129,12 +129,14 @@ export function calculateDetailedContextUsage(
   currentMessage: string,
   contextLength: number,
   compressedSummary?: string | null,
+  toolSpecs = "",
 ): TokenCountResult & { breakdown: DetailedTokenBreakdown } {
   const base = countTokens(sections.base);
   const instructions = sections.instructions ? countTokens(sections.instructions) : 0;
   const persona = sections.persona ? countTokens(sections.persona) : 0;
   const skills = sections.skills ? countTokens(sections.skills) : 0;
-  const tools = sections.tools ? countTokens(sections.tools) : 0;
+  // The working-folder (or "sending data out") section and the folder tools' specs show under the tools figure.
+  const tools = countTokens([sections.tools, sections.folder, toolSpecs].filter(Boolean).join("\n\n"));
   const memory = sections.memory ? countTokens(sections.memory) : 0;
   const compressed =
     sections.compressed && sections.compressed.trim().length > 0

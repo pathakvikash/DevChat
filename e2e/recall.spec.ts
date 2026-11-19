@@ -1,3 +1,4 @@
+import path from "node:path";
 import { test, expect } from "./fixtures";
 import { composer, createChat, messages, openChat, regenerateButtons, send, storedMessages } from "./helpers";
 
@@ -32,4 +33,24 @@ test('the palette\'s "Search past chats" fills /recall for you to finish', async
 
   await expect(palette).toBeHidden();
   await expect(composer(page)).toHaveValue("/recall ");
+});
+
+test("/recall says when a chat that read files was left out", async ({ page, request }) => {
+  const phrase = `quincefile-${Date.now()}`;
+  const reader = await createChat(request, { title: "Recall folder reader", model: "mock/files" });
+  const set = await request.patch(`/api/conversations/${reader}`, { data: { workingFolder: path.join(__dirname, "fixtures/project") } });
+  expect(set.ok()).toBeTruthy();
+  await openChat(page, reader);
+  await send(page, `what does the notes file export? ${phrase}`);
+  await expect(regenerateButtons(page)).toHaveCount(1);
+  await expect(messages(page).nth(1).getByRole("button", { name: /Tool: readFile/ })).toBeVisible();
+  await expect.poll(async () => (await storedMessages(request, reader)).length).toBe(2);
+
+  await openChat(page, await createChat(request, { title: "Recall asker", model: "mock/notools" }));
+  await send(page, `/recall ${phrase}`);
+
+  const card = messages(page).first().getByRole("group", { name: "Past chat search" });
+  await expect(card).toContainText("No past chats matched");
+  await expect(card).toContainText("1 matching chat is not shown because it read files from a folder.");
+  await expect(card.getByRole("link")).toHaveCount(0);
 });

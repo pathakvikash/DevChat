@@ -1,5 +1,7 @@
 /** Split view state: which chats are open, their order, and the focused one. Pure, no React. */
 
+import { isCliModelId } from "@/lib/providers";
+
 export const SPLIT_MIN_PX = 360;
 export const SPLIT_DIVIDER_PX = 6;
 
@@ -29,6 +31,13 @@ export function serializePanes(ids: string[], focus: string, keep?: URLSearchPar
     parts.push(`${encodeURIComponent(key)}=${encodeURIComponent(value)}`);
   });
   return `/c/${first}${parts.length ? `?${parts.join("&")}` : ""}`;
+}
+
+/** The query params to keep when the panes change. `?q=` and the panel's params belong to the first chat, so they go when it is replaced. */
+export function keepParamsForPanes(params: URLSearchParams, firstBefore: string | undefined, firstAfter: string | undefined): URLSearchParams {
+  const keep = new URLSearchParams(params.toString());
+  if (firstAfter !== firstBefore) for (const key of ["q", "panel", "item", "panelOf"]) keep.delete(key);
+  return keep;
 }
 
 /** Opening limit by window width: 3 from 1440px, 2 from 768px, else 1. */
@@ -85,6 +94,25 @@ export function replacePane(ids: string[], oldId: string, newId: string): { ids:
   const next = [...ids];
   next[idx] = newId;
   return { ids: next, focus: newId };
+}
+
+/**
+ * Another chat takes `oldId`'s place. A side chat whose main chat is open swaps that main chat instead,
+ * and a main chat's side chats close with it (returned in `closed`). Already-open `newId` just takes focus.
+ */
+export function replaceChat(
+  ids: string[],
+  focus: string,
+  oldId: string,
+  newId: string,
+  parentOf: Record<string, string>,
+): { ids: string[]; focus: string; closed: string[] } {
+  if (ids.includes(newId)) return { ids: [...ids], focus: newId, closed: [] };
+  const parent = parentOf[oldId];
+  const target = parent && ids.includes(parent) ? parent : oldId;
+  const closed = ids.includes(target) ? orphanSides(ids, parentOf, target) : [];
+  const next = replacePane(ids, target, newId);
+  return { ids: next.ids.filter((x) => !closed.includes(x)), focus: next.focus, closed };
 }
 
 /** The next (dir 1) or previous (dir -1) pane, wrapping around. */
@@ -176,14 +204,19 @@ export interface PaneWriter {
   id: string;
   kind: string;
   mode: string;
+  model: string;
   workingFolder: string | null;
 }
 
-const WRITER_MODES = new Set(["agent", "ask"]);
+/** Only a CLI model writes files: in Agent mode any of them, in Ask mode only Claude Code. API models read only. */
+function canWrite(p: PaneWriter): boolean {
+  if (!isCliModelId(p.model)) return false;
+  return p.mode === "agent" || (p.mode === "ask" && p.model.startsWith("claude-code/"));
+}
 
-/** Panes in Agent or Ask mode that share a working folder with another such pane. Side chats never count. */
+/** Panes that can write and share a working folder with another such pane. Side chats never count. */
 export function writerConflicts(panes: PaneWriter[]): Set<string> {
-  const writers = panes.filter((p) => p.kind !== "side" && WRITER_MODES.has(p.mode) && p.workingFolder);
+  const writers = panes.filter((p) => p.kind !== "side" && canWrite(p) && p.workingFolder);
   const perFolder = new Map<string, number>();
   for (const p of writers) perFolder.set(p.workingFolder!, (perFolder.get(p.workingFolder!) ?? 0) + 1);
   return new Set(writers.filter((p) => perFolder.get(p.workingFolder!)! > 1).map((p) => p.id));

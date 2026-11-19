@@ -69,11 +69,14 @@ test("the artifact viewer draws a mermaid artifact without forms or javascript: 
   const res = await request.post(`/api/conversations/${id}/artifacts`, { data: { type: "mermaid", title: "Evil flow", content: EVIL_LABEL } });
   expect(res.status()).toBe(201);
   await page.reload();
-  await page.getByRole("button", { name: /artifacts/i }).first().click();
-  await page.getByText("Evil flow", { exact: true }).click();
-  const svg = page.locator("svg[id^='mermaid-']");
+  // Outputs now live in the Activity popover; a row opens the artifact in the docked side panel.
+  await page.getByRole("button", { name: /^Activity/ }).click();
+  await page.getByRole("dialog", { name: "Activity" }).getByRole("region", { name: "Outputs" }).getByRole("button", { name: /Evil flow/ }).click();
+  const panel = page.locator('aside[aria-label="Chat panel"]');
+  await expect(panel).toBeVisible();
+  const svg = panel.locator("svg[id^='mermaid-']");
   await expect(svg.first()).toBeVisible();
-  const html = await page.locator("[role='dialog'], aside, main").evaluateAll((els) => els.map((e) => e.innerHTML).join("\n"));
+  const html = await panel.evaluateAll((els) => els.map((e) => e.innerHTML).join("\n"));
   expect(html).not.toContain("javascript:");
   expect(html).not.toContain("evil.example");
   await expect(svg.first().locator("form, input, a")).toHaveCount(0);

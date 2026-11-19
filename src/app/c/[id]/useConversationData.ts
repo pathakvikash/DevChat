@@ -18,7 +18,7 @@ export interface DataActions {
   fetchConversation: () => Promise<void>;
   refreshConversation: () => Promise<void>;
   /** `shouldApplyMessages` is asked once the response is in: say no when a turn started meanwhile, so its messages are not replaced. */
-  refreshConversationAndMessages: (shouldApplyMessages?: () => boolean) => Promise<void>;
+  refreshConversationAndMessages: (shouldApplyMessages?: (conv: any) => boolean) => Promise<void>;
   fetchContextUsage: () => Promise<void>;
   handleModelSettingsSave: (settings: any) => Promise<void>;
   handleModelChange: (modelId: string) => Promise<void>;
@@ -87,10 +87,10 @@ export function useConversationData(
     }
   }, [conversationId, applyConversation, toast]);
 
-  const refreshConversationAndMessages = useCallback(async (shouldApplyMessages?: () => boolean) => {
+  const refreshConversationAndMessages = useCallback(async (shouldApplyMessages?: (conv: any) => boolean) => {
     try {
       const result = await fetchConversationData(conversationId);
-      if (result.ok) applyConversation(result.conv, shouldApplyMessages?.() ?? true);
+      if (result.ok) applyConversation(result.conv, shouldApplyMessages?.(result.conv) ?? true);
     } catch (e) {
       console.error("Failed to refresh conversation:", e);
       toast("Failed to refresh conversation", "error");
@@ -127,6 +127,8 @@ export function useConversationData(
       if (conversation) {
         setConversation({ ...conversation, ...settings });
       }
+      // The dialog has already saved; the split view re-reads the pane's model and folder.
+      window.dispatchEvent(new Event("vas:pane-info-changed"));
     },
     [conversation, setConversation, setSelectedKbId],
   );
@@ -136,11 +138,12 @@ export function useConversationData(
       if (!conversation) return;
       setConversation({ ...conversation, model: modelId });
       try {
-        await fetch(`/api/conversations/${conversationId}`, {
+        const res = await fetch(`/api/conversations/${conversationId}`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ model: modelId }),
         });
+        if (res.ok) window.dispatchEvent(new Event("vas:pane-info-changed"));
       } catch (e) {
         console.error("Failed to persist model change:", e);
         toast("Failed to change model", "error");
@@ -166,6 +169,7 @@ export function useConversationData(
           const body = await res.json().catch(() => ({}));
           throw new Error(body.error || "Failed to change working folder");
         }
+        window.dispatchEvent(new Event("vas:pane-info-changed"));
         toast(folder ? `Working folder: ${folder}` : "Working folder cleared", "success");
       } catch (e) {
         setConversation({ ...conversation, workingFolder: previous });

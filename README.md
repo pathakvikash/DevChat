@@ -20,15 +20,21 @@ This project uses [`next/font`](https://nextjs.org/docs/basic-features/font-opti
 
 ## LLM providers
 
-DevChat is bring-your-own-key. It talks to any provider that speaks the OpenAI
-Chat Completions format, discovers which ones you have access to, and fetches
-their live model lists.
+DevChat is bring-your-own-key. It discovers which providers you have access to
+and fetches their live model lists.
+
+OpenAI (Responses API, via `@ai-sdk/openai`) and Anthropic (Messages API, via
+`@ai-sdk/anthropic`) use their native SDKs, because the OpenAI-compatible
+endpoints hide what DevChat needs: reasoning summaries, effort levels, and tool
+calls on the newest models (Anthropic's compat layer also hides adaptive
+thinking). Every other provider goes through the OpenAI Chat Completions format.
+The conversation's "Reasoning effort" setting drives all of these.
 
 | Provider | Env var | Notes |
 |---|---|---|
 | Ollama | `OLLAMA_BASE_URL` | Auto-detected when reachable, no key needed |
-| OpenAI | `OPENAI_API_KEY` | `OPENAI_BASE_URL` to use a proxy |
-| Anthropic | `ANTHROPIC_API_KEY` | via Anthropic's OpenAI-compatible endpoint |
+| OpenAI | `OPENAI_API_KEY` | native Responses API on api.openai.com (stored off); a custom `OPENAI_BASE_URL` uses Chat Completions |
+| Anthropic | `ANTHROPIC_API_KEY` | native Messages API |
 | Google Gemini | `GOOGLE_API_KEY` | Google AI Studio key |
 | OpenRouter | `OPENROUTER_API_KEY` | free models only by default |
 | NVIDIA NIM | `NVIDIA_NIM_API_KEY` | `NVIDIA_NIM_BASE_URL` for self-hosted NIMs |

@@ -29,22 +29,27 @@ function Visible({ text }: { text: string }) {
 export default function ApprovalCard({
   toolName,
   approvalId,
+  toolCallId,
   input,
+  sendsOut,
 }: {
   toolName: string;
   approvalId: string;
+  toolCallId?: string;
   input: unknown;
+  /** Set on a call that can send data out of a folder chat: it asks every time. */
+  sendsOut?: { sendsOut?: boolean; folder?: string };
 }) {
   const answers = useToolAnswers();
   const [showAll, setShowAll] = useState(false);
   // One answer per card: a double click, or a second click while the reply resumes, does nothing.
   const [answered, setAnswered] = useState(false);
-  const title = approvalTitle(toolName, input);
+  const title = approvalTitle(toolName, input, !!sendsOut?.sendsOut);
   const { block, lines, description, rest } = approvalDetails(toolName, input);
   const answer = (approved: boolean, allowForChat = false) => {
     if (answered) return;
     setAnswered(true);
-    answers?.answerApproval({ approvalId, toolName, approved, allowForChat });
+    answers?.answerApproval({ approvalId, toolName, approved, allowForChat, toolCallId, input });
   };
   const focus = "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--glass-accent-strong)]";
 
@@ -57,10 +62,15 @@ export default function ApprovalCard({
       <div className="flex items-center gap-2 px-3 py-2 bg-[var(--glass-bg-elevated)] text-xs">
         <ShieldQuestion size={14} className="text-amber-400 shrink-0" />
         <span className="font-medium text-zinc-200 truncate">Needs your OK</span>
-        <span className="ml-auto text-zinc-400 shrink-0">Ask mode</span>
+        <span className="ml-auto text-zinc-400 shrink-0">{sendsOut?.sendsOut ? "Sends data out" : "Ask mode"}</span>
       </div>
       <div className="px-3 py-2">
         <p className="text-sm font-medium text-[var(--foreground)] break-words">{title}</p>
+        {sendsOut?.sendsOut && (
+          <p className="mt-0.5 text-xs text-zinc-400">
+            {sendsOut.folder ? `This chat can read ${sendsOut.folder}.` : "This chat has read files from a working folder."} Check what is being sent before you allow it.
+          </p>
+        )}
         {block.length > 0 && lines > LONG_BLOCK && <p className="mt-1.5 text-xs text-zinc-400">{lines} lines</p>}
         {block.length > 0 && (
           <pre className="mt-1.5 max-h-64 overflow-auto rounded-sm text-xs font-mono text-zinc-200 whitespace-pre-wrap break-all">
@@ -109,7 +119,7 @@ export default function ApprovalCard({
         <button type="button" disabled={answered} onClick={() => answer(false)} className={`h-8 px-3 text-xs rounded-[var(--glass-radius-sm)] glass-button ${focus}`}>
           Deny
         </button>
-        {(!approvalId.startsWith("cli-") || CHAT_ALLOWABLE_TOOLS.has(toolName)) && (
+        {!sendsOut?.sendsOut && (!approvalId.startsWith("cli-") || CHAT_ALLOWABLE_TOOLS.has(toolName)) && (
           <button
             type="button"
             disabled={answered}

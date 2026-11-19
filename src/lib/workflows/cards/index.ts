@@ -23,6 +23,8 @@ export interface CardCtx {
   tctx: TemplateContext;
   /** The graph's default model, for agent cards that name none. */
   defaultModel: string;
+  /** A card that reads a folder is an ancestor of this card: its text may hold file text. */
+  readsFolder?: boolean;
   signal: AbortSignal;
 }
 

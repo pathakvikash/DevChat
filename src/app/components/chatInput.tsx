@@ -816,12 +816,19 @@ export default function ChatInput({
               />
             </div>
 
-            {isCliModelId(model) && onWorkingFolderChange && (
+            {onWorkingFolderChange && (
               <div className="hidden md:block">
                 <WorkingFolderPicker
                   value={workingFolder ?? null}
                   onChange={onWorkingFolderChange}
                   disabled={isLoading}
+                  hint={
+                    isCliModelId(model)
+                      ? undefined
+                      : workingFolder
+                        ? `Working folder: ${workingFolder}. Type @ to attach a file from it.`
+                        : "No working folder"
+                  }
                 />
               </div>
             )}

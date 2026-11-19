@@ -37,11 +37,15 @@ describe("Explain a project folder (local only)", () => {
     return g;
   };
 
-  it("asks for a model and a folder until both are picked", () => {
-    const msgs = errors(buildTemplate("explain-folder", "mock/workflow").graph).map((i) => i.message);
-    expect(msgs).toEqual(["Explain it: Pick a Claude Code or OpenCode model", "Explain it: Pick the project folder"]);
+  it("asks only for a folder", () => {
+    expect(errors(buildTemplate("explain-folder", "mock/workflow").graph).map((i) => i.message)).toEqual(["Explain it: Pick the project folder"]);
     expect(errors(folder("claude-code/sonnet", "")).map((i) => i.message)).toEqual(["Explain it: Pick the project folder"]);
-    expect(errors(folder("mock/workflow", "/tmp/p")).map((i) => i.message)).toEqual(["Explain it: Pick a Claude Code or OpenCode model"]);
+  });
+
+  it("passes with an API model and a folder, no leak warning", () => {
+    const g = folder("mock/workflow", "/tmp/p");
+    expect(validateStructure(g)).toEqual([]);
+    expect(checkGraph(g)).toEqual([]);
   });
 
   it("passes with a Claude Code or OpenCode model and a folder, with no leak warning, and is read-only", () => {
