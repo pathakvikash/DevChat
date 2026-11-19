@@ -97,4 +97,16 @@ for (const theme of THEMES) {
       mask: [dialog.getByLabel("Folder path"), dialog.getByRole("navigation", { name: "Breadcrumb" })],
     });
   });
+
+  // Reduced motion shows every section in its final state and skips Lenis, so the long page is stable.
+  test(`home, ${theme}`, async ({ page }) => {
+    await prepare(page, theme);
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    await page.goto("/");
+    await expect(page.getByRole("textbox", { name: "Message", exact: true })).toBeVisible();
+    await settle(page, theme);
+    await expectNoHorizontalScroll(page);
+    await expect(page).toHaveScreenshot(`home-hero-${theme}.png`);
+    await expect(page).toHaveScreenshot(`home-tour-${theme}.png`, { fullPage: true });
+  });
 }
