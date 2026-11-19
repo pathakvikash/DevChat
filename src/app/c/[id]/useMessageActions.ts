@@ -3,6 +3,7 @@
 import { useState, useCallback } from "react";
 import { runWebSearch, formatWebSearchResults } from "./webSearch";
 import type { ToastAction } from "@/app/components/Toast";
+import { hasApprovalCards } from "@/lib/utils/messageParts";
 
 interface UseMessageActionsOptions {
   conversationId: string;
@@ -50,6 +51,8 @@ export function useMessageActions({
         toolCallId,
         output: answer,
       });
+      // Approval cards next to it: the SDK auto-send fires once every card and this answer are in.
+      if (hasApprovalCards(messages.at(-1)?.parts)) return;
       const msgCount = messages.length;
       try {
         await sendMessage({ parts: [{ type: "text" as const, text: answer }] });

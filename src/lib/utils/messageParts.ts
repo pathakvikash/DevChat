@@ -194,6 +194,7 @@ export function approvalDetails(toolName: string, input: unknown): ApprovalDetai
 export const ALLOWED_FOR_CHAT = "Allowed for this chat";
 export const DENIED_BY_USER = "The user denied this action.";
 export const STOPPED_REPLY = "The reply was stopped before this ran.";
+export const STOPPED_WHILE_RUNNING = "Stopped while it was running; it may have finished.";
 
 /** Card title by tool, as UX 3.10 lists them. */
 export function approvalTitle(toolName: string, input: any, sendsOut = false): string {
@@ -221,9 +222,18 @@ export function approvalTitle(toolName: string, input: any, sendsOut = false): s
 /** True for a tool call the server marked to ask first: the browser must not run it when it arrives, the card does. */
 export const waitsForApproval = (call: { toolMetadata?: { sendsOut?: boolean; folder?: string } }): boolean => call.toolMetadata?.sendsOut === true;
 
+/** True when a card still waits for an answer or runs after one: the SDK sends once all are done. */
+export const hasApprovalCards = (parts: unknown): boolean =>
+  Array.isArray(parts) && parts.some((p: any) => p?.state === "approval-requested" || p?.state === "approval-responded");
+
 /** A stopped reply: every card still waiting is denied, so nothing runs when it is resumed. */
 export function denyOpenApprovals(parts: any[]): any[] {
   return parts.map((p) => {
+    if (p?.state === "approval-responded") {
+      if (p.approval?.approved === false) return { ...p, state: "output-denied" };
+      const { approval: _approval, ...rest } = p;
+      return { ...rest, state: "output-error", errorText: STOPPED_WHILE_RUNNING };
+    }
     if (p?.state !== "approval-requested") return p;
     if (!p.approval?.id) return { ...p, state: "output-error", errorText: "Stopped before it ran." };
     return { ...p, state: "output-denied", approval: { id: p.approval.id, approved: false, reason: STOPPED_REPLY } };

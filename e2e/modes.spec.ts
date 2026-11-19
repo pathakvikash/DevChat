@@ -1,5 +1,5 @@
 import { test, expect, type Page } from "./fixtures";
-import { createChat, messages, openChat, regenerateButtons, send } from "./helpers";
+import { createChat, messages, openChat, regenerateButtons, send, storedMessages } from "./helpers";
 
 /** The header's mode switch (the sidebar has a compact copy of the same radio group). */
 const mode = (page: Page, name: "Chat" | "Plan" | "Ask" | "Agent") =>
@@ -108,4 +108,23 @@ test("a model without tools shows Ask disabled, and the tap says why", async ({ 
   await ask.click({ force: true });
   await expect(ask).toHaveAttribute("aria-checked", "false");
   await expect(page.getByText("Needs a model that can use tools. Pick one with the wrench icon.")).toBeVisible();
+});
+
+test("Ask mode: a card answered after reload runs, and the reply keeps one id", async ({ page, request }) => {
+  const id = await createChat(request, { title: "Ask reload", model: "mock/write" });
+  await openChat(page, id);
+  await mode(page, "Ask").click();
+
+  await send(page, "first note");
+  await expect(approvalCard(page)).toBeVisible();
+  await page.reload();
+  await page.waitForLoadState("networkidle");
+
+  await approvalCard(page).getByRole("button", { name: "Allow", exact: true }).click();
+  await expect(page.getByText("Mock write reply")).toBeVisible();
+  await expect(page.getByText("Mock note", { exact: true })).toBeVisible();
+
+  await expect.poll(async () => (await storedMessages(request, id)).length).toBe(2);
+  const stored = await storedMessages(request, id);
+  await expect(messages(page).nth(1)).toHaveAttribute("data-message-id", stored[1].id);
 });

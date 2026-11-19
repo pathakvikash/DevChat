@@ -9,6 +9,8 @@ import {
   approvalDetails,
   waitsForApproval,
   STOPPED_REPLY,
+  STOPPED_WHILE_RUNNING,
+  hasApprovalCards,
 } from "@/lib/utils/messageParts";
 import { AGENT_DELIVERED } from "@/lib/utils/agentLink";
 
@@ -108,6 +110,22 @@ describe("presentPlan and stale cards", () => {
     ]);
     expect(card).toEqual({ type: "tool-createArtifact", state: "output-denied", approval: { id: "a1", approved: false, reason: STOPPED_REPLY } });
     expect(other).toBe(text);
+  });
+
+  it("stops an approved running card as an error and a denied one as denied", () => {
+    const [ran, denied] = denyOpenApprovals([
+      { type: "tool-Bash", state: "approval-responded", approval: { id: "a", approved: true } },
+      { type: "tool-Bash", state: "approval-responded", approval: { id: "b", approved: false, reason: "no" } },
+    ]);
+    expect(ran).toEqual({ type: "tool-Bash", state: "output-error", errorText: STOPPED_WHILE_RUNNING });
+    expect(denied).toEqual({ type: "tool-Bash", state: "output-denied", approval: { id: "b", approved: false, reason: "no" } });
+  });
+
+  it("sees approval cards that wait or run", () => {
+    expect(hasApprovalCards([{ state: "approval-requested" }])).toBe(true);
+    expect(hasApprovalCards([{ state: "approval-responded" }])).toBe(true);
+    expect(hasApprovalCards([{ state: "output-available" }])).toBe(false);
+    expect(hasApprovalCards(undefined)).toBe(false);
   });
 
   it("titles a card by its tool", () => {

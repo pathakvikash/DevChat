@@ -531,7 +531,7 @@ export function useChatPane(conversationId: string, { focused, kind, searchProvi
       }
     }
     setMessages((prev) =>
-      prev.map((m) => (m.parts?.some((p: any) => p?.state === "approval-requested") ? { ...m, parts: denyOpenApprovals(m.parts as any[]) } : m)) as typeof prev,
+      prev.map((m) => (m.parts?.some((p: any) => p?.state === "approval-requested" || p?.state === "approval-responded") ? { ...m, parts: denyOpenApprovals(m.parts as any[]) } : m)) as typeof prev,
     );
     stop();
   }
