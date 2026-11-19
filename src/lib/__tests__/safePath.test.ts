@@ -3,7 +3,7 @@ import { execFileSync } from "child_process";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
-import { isHiddenPath, isSecretPath, listFolderFiles, looksBinary, resolveInside } from "@/lib/files/safePath";
+import { isHiddenPath, isSecretPath, listFolderFiles, looksBinary, readInside, resolveInside } from "@/lib/files/safePath";
 
 let base: string;
 let folder: string;
@@ -215,5 +215,26 @@ describe("listFolderFiles", () => {
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+});
+
+describe("readInside", () => {
+  it("readInside reports refused/missing/too-large/binary", async () => {
+    writeFileSync(join(folder, "text.txt"), "hello");
+    writeFileSync(join(folder, "bin.dat"), Buffer.from([1, 0, 2]));
+    writeFileSync(join(folder, "five.txt"), "12345");
+    expect(await readInside(folder, "text.txt")).toEqual({ ok: true, text: "hello", real: join(folder, "text.txt") });
+    expect(await readInside(folder, "linked-file.txt")).toEqual({ ok: false, reason: "refused" });
+    expect(await readInside(folder, "../outside/secret.txt")).toEqual({ ok: false, reason: "refused" });
+    expect(await readInside(folder, "nope.txt")).toEqual({ ok: false, reason: "refused" });
+    expect(await readInside(folder, "inner")).toEqual({ ok: false, reason: "missing" });
+    expect(await readInside(folder, "bin.dat")).toEqual({ ok: false, reason: "binary" });
+    expect(await readInside(folder, "five.txt", 4)).toEqual({ ok: false, reason: "too-large" });
+    expect((await readInside(folder, "five.txt", 5)).ok).toBe(true);
+  });
+
+  it("readInside refuses a FIFO without blocking", async () => {
+    execFileSync("mkfifo", [join(folder, "pipe")]);
+    expect(await readInside(folder, "pipe")).toEqual({ ok: false, reason: "missing" });
   });
 });

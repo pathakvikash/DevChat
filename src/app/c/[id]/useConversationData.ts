@@ -127,6 +127,8 @@ export function useConversationData(
       if (conversation) {
         setConversation({ ...conversation, ...settings });
       }
+      // The dialog has already saved; the split view re-reads the pane's model and folder.
+      window.dispatchEvent(new Event("vas:pane-info-changed"));
     },
     [conversation, setConversation, setSelectedKbId],
   );
@@ -136,11 +138,12 @@ export function useConversationData(
       if (!conversation) return;
       setConversation({ ...conversation, model: modelId });
       try {
-        await fetch(`/api/conversations/${conversationId}`, {
+        const res = await fetch(`/api/conversations/${conversationId}`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ model: modelId }),
         });
+        if (res.ok) window.dispatchEvent(new Event("vas:pane-info-changed"));
       } catch (e) {
         console.error("Failed to persist model change:", e);
         toast("Failed to change model", "error");
@@ -166,6 +169,7 @@ export function useConversationData(
           const body = await res.json().catch(() => ({}));
           throw new Error(body.error || "Failed to change working folder");
         }
+        window.dispatchEvent(new Event("vas:pane-info-changed"));
         toast(folder ? `Working folder: ${folder}` : "Working folder cleared", "success");
       } catch (e) {
         setConversation({ ...conversation, workingFolder: previous });

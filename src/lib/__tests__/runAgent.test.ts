@@ -23,7 +23,9 @@ const model = { id: "mock/subagent", supportsTools: true } as unknown as ModelCo
 const fakeTool = () => tool({ description: "x", inputSchema: z.object({}) }) as Tool;
 const parentTools = (): Record<string, Tool> => ({
   webSearch: fakeTool(),
+  listFiles: fakeTool(),
   readFile: fakeTool(),
+  searchFiles: fakeTool(),
   createArtifact: fakeTool(),
   rememberFact: fakeTool(),
   mcp_docs_search: fakeTool(),
@@ -96,6 +98,31 @@ describe("runAgentTool", () => {
     const names = Object.keys(run.mock.calls[0][0].tools);
     expect(names).toEqual(expect.arrayContaining(["webSearch", "readFile"]));
     expect(names).not.toEqual(expect.arrayContaining(["createArtifact", "rememberFact", "mcp_docs_search"]));
+  });
+
+  it("helpers keep folder tools in ask mode", async () => {
+    run.mockResolvedValue(doneResult());
+    await collect(runAgentTool(parentTools(), options({ mode: "ask" })), { task: "Read the notes" });
+    expect(Object.keys(run.mock.calls[0][0].tools)).toEqual(expect.arrayContaining(["listFiles", "readFile", "searchFiles"]));
+  });
+
+  it("in a folder chat helpers get readFile but no sendsOut tools", async () => {
+    run.mockResolvedValue(doneResult());
+    const sends = (t: Tool) => ({ ...t, metadata: { sendsOut: true, folder: "work" } }) as Tool;
+    const parent = { ...parentTools(), webSearch: sends(fakeTool()), fetchUrl: sends(fakeTool()), mcp_docs_search: sends(fakeTool()), rememberFact: sends(fakeTool()) };
+    for (const mode of ["agent", "ask"] as const) {
+      run.mockClear();
+      await collect(runAgentTool(parent, options({ mode })), { task: "Read the notes" });
+      const names = Object.keys(run.mock.calls[0][0].tools);
+      expect(names, mode).toContain("readFile");
+      for (const id of ["webSearch", "fetchUrl", "mcp_docs_search", "rememberFact"]) expect(names, `${mode} ${id}`).not.toContain(id);
+    }
+  });
+
+  it("without a folder agent-mode helpers keep webSearch and MCP", async () => {
+    run.mockResolvedValue(doneResult());
+    await collect(runAgentTool(parentTools(), options({ mode: "agent", workingFolder: null })), { task: "Read the notes" });
+    expect(Object.keys(run.mock.calls[0][0].tools)).toEqual(expect.arrayContaining(["webSearch", "mcp_docs_search"]));
   });
 
   it("runs the helper on the parent's model, mode and working folder", async () => {

@@ -1,3 +1,4 @@
+import path from "node:path";
 import { generateId, tool, type Tool, type UIMessage } from "ai";
 import { z } from "zod";
 import { TOOL_REGISTRY, getSkill } from "@/lib/registry";
@@ -23,6 +24,7 @@ import {
   type SubAgentProgress,
   type SubAgentResult,
 } from "@/lib/chat/subAgent";
+import { folderTools } from "@/lib/files/folderTools";
 import { saveUserMessage } from "@/lib/chat/saveUserMessage";
 import type { ModelConfig } from "@/lib/models";
 
@@ -78,6 +80,10 @@ export interface BuildToolsOptions {
   agentTargets?: AgentTarget[];
   /** Tools the user allowed for this chat in Ask mode ("Allow for this chat"). */
   allowedTools?: readonly string[];
+  /** The chat's working folder, for a model without its own file access: adds read-only listFiles, readFile, searchFiles. */
+  workingFolder?: string;
+  /** The chat has folder file text in play (a folder now, or folder tool calls in its history): outbound tools ask on every call. */
+  askBeforeSendingOut?: boolean;
 }
 
 /** Convert a JSON Schema object to a Zod schema (supports basic types). */
@@ -119,6 +125,8 @@ export async function buildTools({
   memoryDisabled = false,
   agentTargets = [],
   allowedTools = [],
+  workingFolder,
+  askBeforeSendingOut = false,
 }: BuildToolsOptions): Promise<Record<string, Tool>> {
   const ctx: ToolExecutionContext = { conversationId };
   const aiTools: Record<string, Tool> = {};
@@ -257,6 +265,7 @@ export async function buildTools({
   }
 
   // Read-only, so offered in every mode.
+  if (workingFolder) Object.assign(aiTools, folderTools(workingFolder, contextWindow));
   if (activeToolIds.has("searchChats")) {
     aiTools.searchChats = tool({
       description:
@@ -266,7 +275,8 @@ export async function buildTools({
       }),
       // The card reads the structured results; the model only ever sees them framed as data.
       execute: async ({ query }) => {
-        const hits = await searchUserChats(userId, query, { excludeId: conversationId });
+        const { hits } = await searchUserChats(userId, query, { excludeId: conversationId });
+        // No leftOut here: a stored count could be read back, telling a model which guesses match chats it may not see.
         return { results: hits.map((h) => ({ ...h, updatedAt: h.updatedAt.toISOString() })) };
       },
       toModelOutput: ({ input, output }) => ({
@@ -294,6 +304,31 @@ export async function buildTools({
       description: TOOL_REGISTRY.presentPlan.modelDescription,
       inputSchema: TOOL_REGISTRY.presentPlan.inputSchema as any,
     });
+  }
+
+  // A chat with folder text in play: anything that can send data out asks every time, in every mode. No "allow for this chat".
+  const sendsOut = { sendsOut: true, ...(workingFolder && { folder: path.basename(workingFolder) }) };
+  if (askBeforeSendingOut) {
+    for (const [id, t] of Object.entries(aiTools))
+      if (id.startsWith("mcp_") || id === "rememberFact" || TOOL_REGISTRY[id]?.outbound)
+        aiTools[id] = { ...t, needsApproval: true, metadata: sendsOut } as Tool;
+    // An HTML page auto-opens a preview, and even an isolated page can leak through DNS prefetch or WebRTC, which CSP
+    // does not cover: it asks too. Other artifact types keep the mode's rule.
+    for (const id of ["createArtifact", "updateArtifact"]) {
+      const t = aiTools[id];
+      if (!t) continue;
+      const base = t.needsApproval;
+      const isHtml = async (input: { type?: string; artifactId?: string }) =>
+        id === "createArtifact"
+          ? input.type === "html"
+          : !!input.artifactId &&
+            (await prisma.artifact.findFirst({ where: { id: input.artifactId, conversationId }, select: { type: true } }))?.type === "html";
+      aiTools[id] = {
+        ...t,
+        needsApproval: async (input: any, o: any) => (await isHtml(input)) || (typeof base === "function" ? await base(input, o) : !!base),
+        metadata: sendsOut,
+      } as Tool;
+    }
   }
 
   return aiTools;
@@ -383,7 +418,11 @@ async function finishSubAgentChild(childId: string, modelId: string, result: Sub
 
 /** The helpers' tool set: the parent's, minus the mutating tools in a read-only mode. */
 function helperToolSet(parentTools: Record<string, Tool>, mode: ToolMode): Record<string, Tool> {
-  return Object.fromEntries(Object.entries(parentTools).filter(([id]) => mode === "agent" || !isMutatingTool(id)));
+  return Object.fromEntries(
+    Object.entries(parentTools).filter(
+      ([id, t]) => !(t as { metadata?: { sendsOut?: boolean } }).metadata?.sendsOut && (mode === "agent" || !isMutatingTool(id)),
+    ),
+  );
 }
 
 /** The agent part a saved user message carries (a follow-up from the parent), or null. */

@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useContext, useState, useMemo } from "react";
+import { RunScope } from "./CodeRunner";
 import {
   ChevronDown,
   ChevronRight,
@@ -28,6 +29,7 @@ export default function ArtifactCard({
   output,
   isStreaming,
 }: ArtifactCardProps) {
+  const scope = useContext(RunScope);
   const [codeExpanded, setCodeExpanded] = useState(false);
   const [copied, setCopied] = useState(false);
   const [executing, setExecuting] = useState(false);
@@ -51,7 +53,7 @@ export default function ArtifactCard({
     setExecuting(true);
     setLocalOutput("Running…");
     try {
-      const result = await runCode(language, code);
+      const result = await runCode(language, code, scope ?? "");
       setLocalOutput(result);
     } catch (error: any) {
       setLocalOutput(`Error: ${error?.message || String(error)}`);

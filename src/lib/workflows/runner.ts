@@ -6,7 +6,7 @@ import { ownedEnabledServer } from "./cards/mcpTool";
 import { canUseHostTools, HOST_TOOLS_REFUSED } from "@/lib/hostAccess";
 import { CATALOG, DEFAULT_MAX_ITEMS, MAX_ITEMS_LIMIT, OUTPUT_CAP_BYTES, parseConfig } from "./catalog";
 import { connectionState } from "@/lib/google/sheets";
-import { parseKinds, joinKinds, planKinds, privateTableMessage, readsTable, TABLE_READERS, webAfter, type PrivateKind } from "./privacy";
+import { parseKinds, joinKinds, kindsBefore, planKinds, privateTableMessage, readsTable, TABLE_READERS, webAfter, type PrivateKind } from "./privacy";
 import {
   checkGraph,
   parseGraph,
@@ -343,6 +343,23 @@ export async function advanceRun(runId: string, deps: RunnerDeps = defaultDeps):
           continue;
         }
       }
+      // Looked up before the card is marked running: if the lookup fails, the card fails with a plain message, like any other card failure.
+      let readsFolder = false;
+      if (node.type === "chatMessage") {
+        try {
+          readsFolder = await readsFolderBefore(run.userId, graph, node.id);
+        } catch (e) {
+          console.error("[workflows] folder lookup failed:", message(e));
+          nodes[node.id] = {
+            status: "failed",
+            startedAt: new Date().toISOString(),
+            endedAt: new Date().toISOString(),
+            error: "Couldn't check whether this card gets text from a folder. Run it again.",
+          };
+          if (!(await save())) return;
+          continue;
+        }
+      }
       // A card cut off mid-way keeps the items it finished.
       const resume = have?.partial;
       nodes[node.id] = { status: "running", startedAt: new Date().toISOString(), ...(resume ? { partial: resume } : {}) };
@@ -356,7 +373,14 @@ export async function advanceRun(runId: string, deps: RunnerDeps = defaultDeps):
       };
       const result = await execCard(
         node,
-        { userId: run.userId, workflowId: run.workflowId, tctx, defaultModel: graph.defaultModel, signal: ctrl.signal },
+        {
+          userId: run.userId,
+          workflowId: run.workflowId,
+          tctx,
+          defaultModel: graph.defaultModel,
+          readsFolder,
+          signal: ctrl.signal,
+        },
         deps,
         (patch) => {
           // Item progress, at most every 2 s.
@@ -444,6 +468,9 @@ export async function preflight(userId: string, graph: WorkflowGraph): Promise<{
         if (((Array.isArray(n.config.tools) && n.config.tools.length > 0) || mcpTools.length > 0) && !model.supportsTools) {
           add(n.id, `${label}: ${model.name} can't use tools. Untick the tools or pick another model.`);
         }
+        if (n.config.folder && !cliProviderForModel(modelId) && !model.supportsTools) {
+          add(n.id, `${label}: ${model.name} can't read a folder. Pick a model that can use tools, or clear the folder.`);
+        }
       } catch (e) {
         add(n.id, `${label}: ${message(e)}`);
       }
@@ -462,6 +489,7 @@ export async function preflight(userId: string, graph: WorkflowGraph): Promise<{
       const g = await connectionState(userId);
       if (!g.connected) add(n.id, `${label}: ${g.reconnect ? "Reconnect" : "Connect"} Google in Settings first`);
     }
+    if (n.type === "agent" && n.config.folder && !(await canUseHostTools(userId))) add(n.id, `${label}: ${HOST_TOOLS_REFUSED}`);
     const usesMcp = n.type === "mcpTool" || (n.type === "agent" && Array.isArray(n.config.mcpTools) && n.config.mcpTools.length > 0);
     if (usesMcp && !(await canUseHostTools(userId))) add(n.id, `${label}: ${HOST_TOOLS_REFUSED}`);
     else if (n.type === "agent" && usesMcp) {
@@ -477,6 +505,13 @@ export async function preflight(userId: string, graph: WorkflowGraph): Promise<{
     }
   }
   return errors;
+}
+
+/** Whether text from a folder can reach this card: the same private kinds the leak rules use, with what each table holds now and what this graph saves into it. */
+async function readsFolderBefore(userId: string, graph: WorkflowGraph, id: string): Promise<boolean> {
+  const tables = await tableKinds(userId, graph);
+  const plan = planKinds(graph, new Map([...tables].map(([tid, t]) => [tid, t.kinds])));
+  return kindsBefore(graph, id, plan).has("folder");
 }
 
 /** The user's tables that the graph's Save cards point at: name and the kinds of private data each holds now. */
@@ -549,6 +584,17 @@ export async function startRun(userId: string, workflowId: string): Promise<Star
   return { ok: true, runId: run.id };
 }
 
+/** A saved run's graph is checked again before it goes on: it may predate a rule (a folder with a web tool). The first error, or null. */
+function savedGraphIssue(graphJson: string): string | null {
+  let graph: WorkflowGraph;
+  try {
+    graph = parseGraph(graphJson);
+  } catch {
+    return "This run's saved workflow is damaged, so it can't go on. Start a new run.";
+  }
+  return validateStructure(graph)[0] ?? checkGraph(graph).find((i) => !i.warning)?.message ?? null;
+}
+
 /** Resume (6.5): a failed or interrupted run goes back to `running` from its first card that did not succeed. */
 export async function resumeRun(userId: string, runId: string): Promise<StartResult> {
   const run = await prisma.workflowRun.findFirst({ where: { id: runId, userId } });
@@ -556,6 +602,8 @@ export async function resumeRun(userId: string, runId: string): Promise<StartRes
   if (run.state !== "failed" && run.state !== "interrupted") return { ok: false, status: 409, error: "Only a failed or interrupted run can be resumed." };
   const capped = await checkCaps(userId, run.workflowId, runId);
   if (capped) return capped;
+  const unsafe = savedGraphIssue(run.graph);
+  if (unsafe) return { ok: false, status: 400, error: unsafe };
   // Cards that already succeeded keep their outputs; the failed or interrupted card and what it skipped start over.
   const nodes: Record<string, CardRun> = JSON.parse(run.nodes || "{}");
   // A per-item card keeps the items it finished (its `partial`) and runs only the rest.
@@ -588,6 +636,8 @@ export async function continueRun(userId: string, runId: string, nodeId: string,
   if (run.state !== "waiting") return { ok: false, status: 409, error: "This run is not waiting for you." };
   const capped = await checkCaps(userId, run.workflowId, runId);
   if (capped) return capped;
+  const unsafe = savedGraphIssue(run.graph);
+  if (unsafe) return { ok: false, status: 400, error: unsafe };
   const nodes: Record<string, CardRun> = JSON.parse(run.nodes || "{}");
   const waiting = nodes[nodeId];
   if (waiting?.status !== "waiting" || !waiting.waiting) return { ok: false, status: 409, error: "That card is not the one waiting." };

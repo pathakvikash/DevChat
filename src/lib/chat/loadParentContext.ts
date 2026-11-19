@@ -37,6 +37,7 @@ export async function loadParentContext(
   sideId: string,
   userId: string,
   contextWindow: number,
+  opts?: { showFolder?: boolean },
 ): Promise<MainContext | null> {
   const side = await prisma.conversation.findUnique({
     where: { id: sideId },
@@ -78,7 +79,8 @@ export async function loadParentContext(
   // The fence and framing cost tokens too. What is left is shared: the summary first, whole
   // unless it alone exceeds that room; then the folder and lists; the newest messages get the rest.
   const room = Math.max(budget - countTokens(section("")) - NOTE_RESERVE, 0);
-  const folderLine = `Working folder: ${parent.workingFolder || "none"}`;
+  // Only a CLI side chat can use the folder, so only it is told about it.
+  const folderLine = opts?.showFolder ? `Working folder: ${parent.workingFolder || "none"}` : "";
   const summaryRoom = Math.max(room - countTokens(`${folderLine}\n${SUMMARY_LABEL}`), 0);
   const summary = parent.compressedSummary ? SUMMARY_LABEL + cutTokens(parent.compressedSummary, summaryRoom) : "";
   const metaRoom = Math.max(room - countTokens(`${folderLine}\n${summary}`), 0);

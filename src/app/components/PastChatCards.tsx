@@ -52,6 +52,7 @@ export function SearchChatsCard({ part, result }: PastChatCardProps) {
   const [open, setOpen] = useState(true);
   const query: string = part.input?.query ?? "";
   const hits: Hit[] | null = Array.isArray(result?.output?.results) ? result.output.results : null;
+  const leftOut = Number(result?.output?.leftOut) || 0;
   const status: Status = !result ? "running" : result.errorText || !hits ? "failed" : "done";
   const Chevron = open ? ChevronDown : ChevronRight;
   const meta =
@@ -99,6 +100,13 @@ export function SearchChatsCard({ part, result }: PastChatCardProps) {
                 )}
               </Link>
             ))
+          )}
+          {status === "done" && leftOut > 0 && (
+            <p className="px-2 pt-1 text-xs text-zinc-400">
+              {leftOut === 1
+                ? "1 matching chat is not shown because it read files from a folder."
+                : `${leftOut} matching chats are not shown because they read files from a folder.`}
+            </p>
           )}
         </div>
       )}

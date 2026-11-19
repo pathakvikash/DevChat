@@ -11,8 +11,8 @@ const listServerTools = vi.fn();
 vi.mock("@/lib/mcp/client", () => ({ listServerTools: (...a: unknown[]) => listServerTools(...a), callServerTool: vi.fn() }));
 const canUseHostTools = vi.fn(async () => true);
 vi.mock("@/lib/hostAccess", () => ({ canUseHostTools: () => canUseHostTools(), HOST_TOOLS_REFUSED: "This is only available to the server's owner." }));
-const isRunnableCwd = vi.fn(async (_f: string) => true);
-vi.mock("@/lib/claude/sessions", () => ({ isRunnableCwd: (f: string) => isRunnableCwd(f) }));
+const isAllowedFolder = vi.fn(async (_u: string, _f: string) => true);
+vi.mock("@/lib/folders", () => ({ isAllowedFolder: (u: string, f: string) => isAllowedFolder(u, f), folderGoneMessage: (f: string) => `${f} isn't one of your folders any more.` }));
 const getModel = vi.fn();
 vi.mock("@/lib/models", () => ({ getModel: (...a: unknown[]) => getModel(...a), initializeOllamaModels: vi.fn(async () => {}) }));
 vi.mock("@/lib/apiKeys", () => ({ resolveProviderCreds: vi.fn(async () => ({})) }));
@@ -36,9 +36,9 @@ const graphOf = (defaultModel: string, ...nodes: FlowNode[]): WorkflowGraph => (
 const reader = node("reader", ["trigger"], "agent", { instructions: "x", tools: ["readChat"] });
 
 beforeEach(() => {
-  for (const m of [findFirst, findMany, listServerTools, isRunnableCwd, getModel, buildToolsSpy]) m.mockReset();
+  for (const m of [findFirst, findMany, listServerTools, isAllowedFolder, getModel, buildToolsSpy]) m.mockReset();
   canUseHostTools.mockResolvedValue(true);
-  isRunnableCwd.mockResolvedValue(true);
+  isAllowedFolder.mockResolvedValue(true);
   findFirst.mockResolvedValue({ id: "s1", name: "gh" });
 });
 
@@ -54,6 +54,8 @@ describe("one card that reads private data and reaches the web", () => {
     ["folder + fetchUrl", { ...folder, tools: ["fetchUrl"] }],
     ["folder + webSearch", { ...folder, tools: ["webSearch"] }],
     ["folder + MCP", { ...folder, mcpTools: MCP }],
+    ["an API model with a folder + fetchUrl", { model: "mock/wf", folder: "/work/app", tools: ["fetchUrl"] }],
+    ["an API model with a folder + MCP", { model: "mock/wf", folder: "/work/app", mcpTools: MCP }],
     ["chat + MCP", { tools: ["readChat"], mcpTools: MCP }],
     ["chat + fetchUrl", { tools: ["readChat", "fetchUrl"] }],
   ])("refuses %s at save and at Run", (_n, config) => {
@@ -68,14 +70,14 @@ describe("one card that reads private data and reaches the web", () => {
     ["a folder alone", folder],
     ["a folder and chat tools (its own web tools are off)", { ...folder, tools: ["readChat"] }],
     ["web tools alone", { tools: ["fetchUrl", "webSearch"] }],
-    ["a folder on an API model with fetchUrl (the folder is ignored)", { model: "mock/wf", folder: "/work/app", tools: ["fetchUrl"] }],
+    ["a folder on an API model alone", { model: "mock/wf", folder: "/work/app" }],
   ])("allows %s", (_n, config) => {
     expect(refused(config)).toBe(false);
   });
 
   it("an mcpTool card alone is fine, and an empty model means the workflow's default", () => {
     expect(validateStructure(graphOf("m", node("m", ["trigger"], "mcpTool", { serverId: "s1", tool: "t" })))).toEqual([]);
-    expect(refused({ folder: "/work/app", tools: ["fetchUrl"] }, "m")).toBe(false);
+    expect(refused({ folder: "/work/app", tools: ["fetchUrl"] }, "m")).toBe(true);
     expect(refused({ folder: "/work/app", tools: ["fetchUrl"] }, CLI)).toBe(true);
   });
 
@@ -171,18 +173,18 @@ describe("agentCard.run", () => {
     expect((calls.repairs![0] as any)["claude-code"]).toMatchObject({ cwd: "/work/app", access: "chat", web: false });
   });
 
-  it("fails a folder outside the runnable list before calling the model", async () => {
+  it("fails a folder outside the user's list before calling the model", async () => {
     const calls = fakeModel(CLI);
-    isRunnableCwd.mockResolvedValue(false);
-    await expect(agentCard.run(agentCtx({ folder: "/etc" }, CLI))).rejects.toThrow(/isn't a folder/);
+    isAllowedFolder.mockResolvedValue(false);
+    await expect(agentCard.run(agentCtx({ folder: "/etc" }, CLI))).rejects.toThrow(/isn't one of your folders/);
     expect(calls).toHaveLength(0);
   });
 
-  it("ignores the folder for an API model", async () => {
+  it("gives an API model no CLI folder options, but still checks the folder", async () => {
     const calls = fakeModel("mock/wf");
     await agentCard.run(agentCtx({ folder: "/work/app", allowEdits: true }, "mock/wf"));
     expect(calls[0].providerOptions).toBeUndefined();
-    expect(isRunnableCwd).not.toHaveBeenCalled();
+    expect(isAllowedFolder).toHaveBeenCalledWith("u1", "/work/app");
   });
 
   it("builds tools in agent mode only when MCP tools are ticked, and tells the model to use them only for the instructions", async () => {

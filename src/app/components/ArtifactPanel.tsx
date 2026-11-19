@@ -137,8 +137,7 @@ export default function ArtifactPanel({
   const [viewModes, setViewModes] = useState<Record<string, "preview" | "code">>({});
 
   const openPreview = useCallback((artifactId: string) => {
-    const url = `/api/conversations/${conversationId}/artifacts/${artifactId}/html`;
-    const win = window.open(url, `html-preview-${artifactId}`, "width=1200,height=800");
+    const win = window.open(`/artifact-preview/${conversationId}/${artifactId}`, `html-preview-${artifactId}`, "width=1200,height=800");
     if (win) {
       previewWindows.current.set(artifactId, win);
       setOpenPreviewIds(prev => new Set(prev).add(artifactId));
@@ -349,6 +348,7 @@ export default function ArtifactPanel({
     if (artifact.type === "html") {
       const isOpen = openPreviewIds.has(artifact.id);
       const htmlUrl = `/api/conversations/${conversationId}/artifacts/${artifact.id}/html`;
+      const pageUrl = `/artifact-preview/${conversationId}/${artifact.id}`;
       const mode = viewModes[artifact.id] || "preview";
       return (
         <div className="space-y-3">
@@ -361,12 +361,12 @@ export default function ArtifactPanel({
                   title={artifact.title}
                   className="w-full border-0"
                   style={{ height: "50vh", minHeight: "250px" }}
-                  sandbox="allow-scripts allow-same-origin"
+                  sandbox="allow-scripts"
                 />
               </div>
               <div className="flex gap-2 items-center flex-wrap">
                 <a
-                  href={htmlUrl}
+                  href={pageUrl}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded bg-orange-600 hover:bg-orange-500 text-white transition"
@@ -402,11 +402,14 @@ export default function ArtifactPanel({
         <div className="space-y-3">
           <ViewModeTabs artifactId={artifact.id} />
           {mode === "preview" ? (
+            // An image: script and external loads in a model-written SVG do not run there, as they would inline.
             <div
               className="rounded-[var(--glass-radius-md)] overflow-auto border border-[var(--glass-border)] bg-white flex items-center justify-center p-4"
               style={{ minHeight: "200px" }}
-              dangerouslySetInnerHTML={{ __html: artifact.content }}
-            />
+            >
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img alt={artifact.title} src={`data:image/svg+xml;charset=utf-8,${encodeURIComponent(artifact.content)}`} className="max-w-full h-auto" />
+            </div>
           ) : (
             <pre className="overflow-x-auto rounded-[var(--glass-radius-md)] glass-card px-4 py-3 text-sm text-zinc-200 font-mono whitespace-pre-wrap break-all">
               {artifact.content}

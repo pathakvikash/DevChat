@@ -2,10 +2,11 @@
 
 import { useEffect, useId, useRef, useState } from "react";
 import { AlertTriangle, Plus, Trash2, Wrench, XCircle } from "lucide-react";
+import { isCliModelId } from "@/lib/providers";
 import ModelSelector from "@/app/components/conversation/ModelSelector";
 import WorkingFolderPicker from "@/app/components/conversation/WorkingFolderPicker";
 import type { ModelInfo } from "@/app/components/conversation/types";
-import { AGENT_TOOL_CHOICES, hasToolConflict, isCliModelId, isCodexModelId, MCP_WARNING, MCP_WEB_WARNING, OUTPUT_FIELD_TYPES, type FieldSpec, type OutputField } from "@/lib/workflows/catalog";
+import { AGENT_TOOL_CHOICES, hasToolConflict, isCodexModelId, MCP_WARNING, MCP_WEB_WARNING, OUTPUT_FIELD_TYPES, type FieldSpec, type OutputField } from "@/lib/workflows/catalog";
 import { FILTER_OP_LABELS, FILTER_OPS, type FilterOp, type FilterRule } from "@/lib/workflows/filterRules";
 import { hasLine, toggleLine } from "@/lib/workflows/toggleLine";
 import FieldPicker, { typedBraces, type PickerRow } from "./FieldPicker";
@@ -399,9 +400,10 @@ export default function ConfigField({ spec, config, onChange, error, env }: { sp
   const modelHasTools = env.models.find((m) => m.id === cardModel)?.supportsTools !== false;
   const webOn = ((config.tools as string[]) ?? []).some((t) => t === "fetchUrl" || t === "webSearch");
   const mcpOn = ((config.mcpTools as string[]) ?? []).length > 0;
-  const folderOn = !!config.folder && isCliModelId(cardModel);
-  // A folder and edits only mean something to a command-line model.
-  if ((spec.kind === "folder" || spec.kind === "allowEdits") && !isCliModelId(cardModel)) return null;
+  const cli = isCliModelId(cardModel);
+  const folderOn = !!config.folder;
+  // Only a command-line model can edit files; any model can read a folder.
+  if (spec.kind === "allowEdits" && !cli) return null;
 
   let control: React.ReactNode;
   switch (spec.kind) {
@@ -509,7 +511,7 @@ export default function ConfigField({ spec, config, onChange, error, env }: { sp
         <div className="space-y-1">
           <WorkingFolderPicker
             label={spec.label}
-            hint={!value && (webOn || mcpOn) ? "Turn off the web tools and MCP tools on this card to pick a folder" : "The folder this command-line model can read in this card. Its own web tools are off in workflows."}
+            hint={!value && (webOn || mcpOn) ? "Turn off the web tools and MCP tools on this card to pick a folder" : cli ? "The folder this command-line model can read in this card. Its own web tools are off in workflows." : modelHasTools ? "The model can list, read and search files here. It can't change them." : "This model can't use tools, so it can't read a folder. Pick another model."}
             value={String(value ?? "") || null}
             onChange={(f) => set(f ?? "")}
             disabled={env.readOnly || (!value && (webOn || mcpOn))}

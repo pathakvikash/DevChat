@@ -10,15 +10,15 @@ const callServerTool = vi.fn();
 vi.mock("@/lib/mcp/client", () => ({ listServerTools: (...a: unknown[]) => listServerTools(...a), callServerTool: (...a: unknown[]) => callServerTool(...a) }));
 const canUseHostTools = vi.fn(async () => true);
 vi.mock("@/lib/hostAccess", () => ({ canUseHostTools: () => canUseHostTools(), HOST_TOOLS_REFUSED: "This is only available to the server's owner." }));
-const isRunnableCwd = vi.fn(async (_f: string) => true);
-vi.mock("@/lib/claude/sessions", () => ({ isRunnableCwd: (f: string) => isRunnableCwd(f) }));
+const isAllowedFolder = vi.fn(async (_u: string, _f: string) => true);
+vi.mock("@/lib/folders", () => ({ isAllowedFolder: (u: string, f: string) => isAllowedFolder(u, f), folderGoneMessage: (f: string) => `${f} isn't one of your folders any more.` }));
 vi.mock("@/lib/models", () => ({ getModel: vi.fn(), initializeOllamaModels: vi.fn(async () => {}) }));
 vi.mock("@/lib/apiKeys", () => ({ resolveProviderCreds: vi.fn(async () => ({})) }));
 vi.mock("@/lib/settings", () => ({ getSettingsKey: vi.fn(async () => "") }));
 vi.mock("@/lib/observability", () => ({ recordTrace: vi.fn(async () => {}) }));
 
 import { mcpToolCard } from "@/lib/workflows/cards/mcpTool";
-import { cliFolderAccess, filterTools, resolveMcpTools } from "@/lib/workflows/cards/agent";
+import { cardFolderAccess, filterTools, resolveMcpTools } from "@/lib/workflows/cards/agent";
 import { AGENT_TOOL_IDS, hasToolConflict, parseConfig, reachesWeb } from "@/lib/workflows/catalog";
 import { chatLeaks, checkGraph, emptyGraph, validateStructure, type FlowNode, type WorkflowGraph } from "@/lib/workflows/graph";
 import type { CardCtx } from "@/lib/workflows/cards";
@@ -35,9 +35,9 @@ const cardCtx = (config: Record<string, unknown>): CardCtx => ({
 const cfg = { serverId: "s1", tool: "create_issue", args: { title: "Hi {{item.url}}", n: "{{index}}" } };
 
 beforeEach(() => {
-  for (const m of [findFirst, findMany, listServerTools, callServerTool, isRunnableCwd]) m.mockReset();
+  for (const m of [findFirst, findMany, listServerTools, callServerTool, isAllowedFolder]) m.mockReset();
   canUseHostTools.mockResolvedValue(true);
-  isRunnableCwd.mockResolvedValue(true);
+  isAllowedFolder.mockResolvedValue(true);
   findFirst.mockResolvedValue({ id: "s1", name: "gh" });
   listServerTools.mockResolvedValue([{ name: "create_issue" }]);
 });
@@ -97,17 +97,17 @@ describe("agent MCP tools", () => {
   });
 });
 
-describe("CLI folder and access", () => {
+describe("card folder and access", () => {
   it("allowEdits gives agent access, otherwise chat", async () => {
-    expect(await cliFolderAccess({ folder: "/work/app", allowEdits: true })).toEqual({ cwd: "/work/app", access: "agent" });
-    expect(await cliFolderAccess({ folder: "/work/app", allowEdits: false })).toEqual({ cwd: "/work/app", access: "chat" });
-    expect(await cliFolderAccess({})).toEqual({ cwd: "", access: "chat" });
+    expect(await cardFolderAccess({ folder: "/work/app", allowEdits: true }, "u1", true)).toEqual({ cwd: "/work/app", access: "agent" });
+    expect(await cardFolderAccess({ folder: "/work/app", allowEdits: false }, "u1", true)).toEqual({ cwd: "/work/app", access: "chat" });
+    expect(await cardFolderAccess({}, "u1", true)).toEqual({ cwd: "", access: "chat" });
   });
 
-  it("a folder outside the runnable list fails, and edits need a folder", async () => {
-    isRunnableCwd.mockResolvedValue(false);
-    await expect(cliFolderAccess({ folder: "/etc", allowEdits: true })).rejects.toThrow(/isn't a folder/);
-    await expect(cliFolderAccess({ allowEdits: true })).rejects.toThrow(/needs a working folder/);
+  it("a folder outside the user's list fails, and edits need a folder", async () => {
+    isAllowedFolder.mockResolvedValue(false);
+    await expect(cardFolderAccess({ folder: "/etc", allowEdits: true }, "u1", true)).rejects.toThrow(/isn't one of your folders/);
+    await expect(cardFolderAccess({ allowEdits: true }, "u1", true)).rejects.toThrow(/needs a working folder/);
   });
 });
 

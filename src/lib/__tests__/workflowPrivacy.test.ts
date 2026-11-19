@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { emptyGraph, type FlowNode, type WorkflowGraph } from "@/lib/workflows/graph";
+import { emptyGraph, validateStructure, type FlowNode, type WorkflowGraph } from "@/lib/workflows/graph";
 import { privateKindsOf, PRIVATE_KINDS, joinKinds, kindsText, parseKinds, planKinds, readsTable, webAfter } from "@/lib/workflows/privacy";
 
 const node = (id: string, type: FlowNode["type"], fromIds: string[], x: number, config: Record<string, unknown> = {}): FlowNode => ({ id, type, fromIds, config, ui: { label: id, position: { x, y: 0 } } });
@@ -102,14 +102,15 @@ describe("kinds from phase 6 readers", () => {
     expect(privateKindsOf("agent", { mcpTools: ["mcp__s1__x"] })).toEqual(["mcp"]);
     expect(privateKindsOf("agent", { folder: "/p", model: "claude-code/default" })).toEqual(["folder"]);
     expect(privateKindsOf("agent", { folder: "/p", model: "" }, "claude-code/default")).toEqual(["folder"]); // the workflow's default model
-    expect(privateKindsOf("agent", { folder: "/p", model: "openai/gpt" })).toEqual([]);
+    expect(privateKindsOf("agent", { folder: "/p", model: "openai/gpt" })).toEqual(["folder"]); // any model that has a folder reads it
+    expect(privateKindsOf("agent", { model: "openai/gpt" })).toEqual([]);
     expect(privateKindsOf("agent", { tools: ["readChat"], mcpTools: ["mcp__s1__x"] }).sort()).toEqual(["chats", "mcp"]);
   });
 
-  it("a CLI-folder agent on the workflow default model marks a table folder", () => {
+  it("an agent with a folder marks a table folder, on any default model", () => {
     const g = { ...graphOf(node("cli", "agent", ["trigger"], 1, { instructions: "x", folder: "/p", model: "" }), save("keep", ["cli"], 2, "t1")), defaultModel: "claude-code/default" };
     expect(planKinds(g, new Map([["t1", []]])).get("t1")).toEqual(["folder"]);
-    expect(planKinds({ ...g, defaultModel: "openai/gpt" }, new Map([["t1", []]])).get("t1")).toEqual([]);
+    expect(planKinds({ ...g, defaultModel: "openai/gpt" }, new Map([["t1", []]])).get("t1")).toEqual(["folder"]);
   });
 
   it("a table filled from MCP only: an MCP card may follow it, Fetch and Web search may not", () => {
@@ -121,5 +122,23 @@ describe("kinds from phase 6 readers", () => {
   it("a table filled from chats or a folder, or from MCP and chats: no MCP card may follow either", () => {
     const g = graphOf(save("keep", ["trigger"], 2, "t1"), mcp("post", ["keep"], 3), page("page", ["keep"], 4));
     for (const kinds of [["chats"], ["folder"], ["chats", "mcp"], ["folder", "mcp"]]) expect(webAfter(g, "keep", kinds).map((n) => n.id).sort()).toEqual(["page", "post"]);
+  });
+});
+
+describe("an API agent with a folder", () => {
+  const folderAgent = node("read", "agent", ["trigger"], 1, { instructions: "x", model: "gpt-4o", folder: "/work/app" });
+
+  it("is a private reader of kind folder", () => {
+    expect(privateKindsOf("agent", folderAgent.config, "m")).toEqual(["folder"]);
+  });
+
+  it("before a Web search card is a leak", () => {
+    const g = graphOf(folderAgent, node("search", "webSearch", ["read"], 2, { queries: "x" }));
+    expect(validateStructure(g).join()).toContain("read reads private data");
+  });
+
+  it("with Fetch URL ticked is refused on the card", () => {
+    const g = graphOf(node("read", "agent", ["trigger"], 1, { instructions: "x", model: "gpt-4o", folder: "/work/app", tools: ["fetchUrl"] }));
+    expect(validateStructure(g).join()).toContain("reads private data (chats, MCP or a folder) and reaches the web itself");
   });
 });

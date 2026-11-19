@@ -68,10 +68,11 @@ export async function runCommandAction(
     case "recall": {
       const query = arg.trim().slice(0, 300);
       let results: unknown[];
+      let leftOut = 0;
       try {
         const res = await fetch(`/api/search?q=${encodeURIComponent(query)}&exclude=${ctx.conversationId}`);
         if (!res.ok) throw new Error("search failed");
-        results = (await res.json()).chats;
+        ({ chats: results, leftOut = 0 } = await res.json());
       } catch {
         ctx.toast("Couldn't search past chats. Try again.", "error");
         break;
@@ -85,7 +86,7 @@ export async function runCommandAction(
             toolCallId: `recall-${Date.now()}`,
             state: "output-available",
             input: { query },
-            output: { results },
+            output: { results, leftOut },
           },
         ],
       });

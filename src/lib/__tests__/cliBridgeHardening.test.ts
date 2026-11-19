@@ -253,7 +253,7 @@ describe("helpers in Ask and Plan only read", () => {
     const ac = new AbortController();
     const run = runSubAgent({
       brief: "look around", mode: "ask", workingFolder: "/w", tools: {}, abortSignal: ac.signal, timeoutMs: 20000,
-      model: { model: createCliModel(claude(), "default"), supportsTools: true, maxTokens: 1000 } as any,
+      model: { id: "claude-code/default", model: createCliModel(claude(), "default"), supportsTools: true, maxTokens: 1000 } as any,
       providerOptions: parent,
     });
     await until(() => spawned.length === 1);

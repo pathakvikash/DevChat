@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { consolidateMemory } from "@/lib/memory";
+import { conversationReadFiles } from "@/lib/files/readFiles";
 import { prisma } from "@/lib/db";
 import { requireUserId } from "@/lib/auth";
 
@@ -29,6 +30,8 @@ export async function POST(req: NextRequest) {
     // Memory is off (temporary chat or the Memory toggle); nothing from this chat may be saved.
     // Only a main chat consolidates: a side chat's context is someone else's chat, and a sub-agent's is a task brief.
     if (conv.temporary || conv.memoryDisabled || conv.kind !== "main") return NextResponse.json({ applied: 0, pruned: 0 });
+    // File text from a working folder must not reach the memory every other chat sees, with nobody approving it.
+    if (await conversationReadFiles(conversationId)) return NextResponse.json({ applied: 0, pruned: 0 });
     const result = await consolidateMemory({ conversationId, userId, modelId: model });
     return NextResponse.json(result);
   } catch (e) {

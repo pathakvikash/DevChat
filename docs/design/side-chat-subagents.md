@@ -681,7 +681,7 @@ The cost: readers of `Message.content` would miss the queued text, so `content` 
 | `src/app/api/conversations/[id]/route.ts` | 1, 3 | `PATCH` accepts `temporary`. `DELETE` of a temporary chat also deletes its traces. Phase 3: `GET` includes `forkedFrom { id, title }`. |
 | `src/app/api/search/route.ts` | 1 | Uses the shared `searchUserChats`, which drops temporary chats (and children from phase 3). It also fixes SQLite: the route passes `mode: "insensitive"`, which the generated SQLite client does not have (`StringFilter`, `node_modules/.prisma/client/index.d.ts`); the helper adds it only on Postgres. |
 | `src/app/api/conversations/[id]/queue/route.ts` (new) | 2 | `GET` undelivered. `POST { id, text }`. `PATCH { id, text }` and `DELETE ?qid=` only touch rows with `deliveredAt: null`, else 409 `{ delivered: true }`. All check ownership (`getConversationOrNull`, `src/lib/api/conversations.ts`). |
-| `src/app/api/conversations/[id]/files/route.ts` (new) | 2 | `GET` lists files; `GET ?path=&maxChars=` reads one. Needs a working folder that passes `isRunnableCwd`; path, secret and binary checks in 3.11. |
+| `src/app/api/conversations/[id]/files/route.ts` (new) | 2 | `GET` lists files; `GET ?path=&maxChars=` reads one. Needs a working folder that passes `isAllowedFolder`; path, secret and binary checks in 3.11. |
 | `src/app/api/chat/route.ts` | 2-6 | Queue delivery; side-chat path; refuse `kind: "subagent"` (400); modes and approvals; `runAgent` / `messageAgent`; `convertToModelMessages` with `tools` and `convertDataPart`; reject `hop > 3`; `export const maxDuration`. |
 | `src/app/api/conversations/[id]/children/route.ts` (new) | 3 | `POST { model? }` creates a side chat (reuses the newest if empty). `GET ?kind=side` lists side chats newest first. |
 | `src/app/api/conversations/[id]/fork/route.ts` (new) | 3 | `POST { messageId }` → `{ id }` of the new chat. |
@@ -992,7 +992,7 @@ writerConflicts(panes: { id: string; kind: string; mode: string; workingFolder: 
 ### 3.13 Permissions and safety
 
 - **Ownership**: `/api/chat` keeps its owner check (~67-78). `loadParentContext`, `readUserChat`, `messageAgent`, the children, fork, queue and files routes all filter by `userId`. Queue `PATCH`/`DELETE` also require `deliveredAt: null`. A browser-made queue id that collides fails the insert (409).
-- **Files**: real-path containment, secret-name and binary refusal, folder must pass `isRunnableCwd` (Claude Code's known project folders; also checked on every `PATCH` today).
+- **Files**: real-path containment, secret-name and binary refusal, folder must pass `isAllowedFolder` (Claude Code's known project folders; also checked on every `PATCH` today).
 - **Modes**: side chats forced to chat on the server; `kind: "subagent"` cannot receive sends; helpers take the mode the server resolved, never input from the model; Ask/Plan helpers are read-only.
 - **Approvals**: signed with `experimental_toolApprovalSecret`; the CLI bridge accepts only its run token and answers only from the user's session.
 - **Claude Code `acceptEdits`** in Agent mode: edits without asking, as today.

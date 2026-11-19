@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { findConversationArtifact } from "@/lib/api/artifacts";
+import { withNoNetworkCsp } from "@/lib/api/artifactHtml";
 import { requireUserId } from "@/lib/auth";
 
 export async function GET(
@@ -23,7 +24,7 @@ export async function GET(
       return new NextResponse("Artifact is not HTML", { status: 400 });
     }
 
-    return new NextResponse(artifact.content, {
+    return new NextResponse(withNoNetworkCsp(artifact.content), {
       headers: {
         "Content-Type": "text/html; charset=utf-8",
       },

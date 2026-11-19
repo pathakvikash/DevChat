@@ -3,14 +3,14 @@ import { emptyGraph, TRIGGER_ID, type WorkflowGraph } from "./graph";
 
 export type TemplateKind = "blank" | "news" | "jobs" | "explain-repo" | "explain-folder";
 
-/** `local`: needs a command-line model and a folder on the server's own machine (no Vercel, owner only). */
+/** `local`: needs a folder on the server's own machine (no Vercel, owner only). */
 export const TEMPLATE_OPTIONS: { kind: TemplateKind; label: string; description: string; local?: boolean }[] = [
   { kind: "blank", label: "Blank", description: "Just the Run manually card." },
   { kind: "news", label: "News digest", description: "Search the web for your topics, have a model write a digest, post it to a new chat." },
   { kind: "jobs", label: "Jobs", description: "Read company job boards, pick the jobs you like, and get a draft application for each. You submit it yourself." },
   // Sample flows: Explain a project or feature (docs/design/workflows.md).
   { kind: "explain-repo", label: "Explain a GitHub repo", description: "Reads a public repo and explains the project, or one feature, with diagrams." },
-  { kind: "explain-folder", label: "Explain a project folder", description: "Local only. Claude Code or OpenCode reads a folder and explains it with diagrams.", local: true },
+  { kind: "explain-folder", label: "Explain a project folder", description: "Local only. A model reads a folder on this machine and explains it with diagrams.", local: true },
 ];
 
 /** The News digest: web search → save to the News table → keep the rows still marked new → digest → a new chat → mark those rows read. */

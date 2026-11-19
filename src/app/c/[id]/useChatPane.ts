@@ -218,7 +218,7 @@ export function useChatPane(conversationId: string, { focused, kind, searchProvi
     onSendToChatRef,
   });
 
-  const { messages, setMessages, sendMessage: chatSend, status, stop: stopStream, regenerate, error, addToolResult, addToolApprovalResponse, setRequestBody, isLoading } = chatTransport;
+  const { messages, setMessages, sendMessage: chatSend, status, stop: stopStream, regenerate, error, addToolResult, addToolApprovalResponse, setRequestBody, isLoading, runExecuteCode } = chatTransport;
   const isSubagent = conversation?.kind === "subagent";
   // What other panes read through the agent handle, the moment a message goes out. It follows every status
   // change and is set when a delivery starts a turn, so it is right before React renders `isLoading`.
@@ -472,13 +472,19 @@ export function useChatPane(conversationId: string, { focused, kind, searchProvi
   }
 
   /** Allow or Deny a waiting tool call. "Allow for this chat" is remembered for the rest of the chat. */
-  function answerApproval({ approvalId, toolName, approved, allowForChat }: ApprovalAnswer) {
+  function answerApproval({ approvalId, toolName, approved, allowForChat, toolCallId, input }: ApprovalAnswer) {
     if (!claim(approvalId)) return;
     if (approved && allowForChat && !allowedTools.includes(toolName)) {
       const next = [...allowedTools, toolName];
       setAllowedState({ chat: conversationId, tools: next });
       setRequestBody({ allowedTools: next });
       try { localStorage.setItem(`vas:allow:${conversationId}`, JSON.stringify(next)); } catch {}
+    }
+    // executeCode runs in the browser and the server has no execute for it: run it here, and the
+    // result resumes the reply. A Deny goes the normal way.
+    if (toolName === "executeCode" && approved && toolCallId) {
+      void runExecuteCode(toolCallId, input);
+      return;
     }
     addToolApprovalResponse({
       id: approvalId,
@@ -589,7 +595,7 @@ export function useChatPane(conversationId: string, { focused, kind, searchProvi
     // A card that just appeared is announced once, in the pane's live region (UX 2.5).
     if (!finish?.isAbort) {
       const card = parts.find((p) => p?.state === "approval-requested");
-      if (card) setAnnouncement(`Needs your OK: ${approvalTitle(String(card.type).replace(/^tool-/, ""), card.input)}`);
+      if (card) setAnnouncement(`Needs your OK: ${approvalTitle(String(card.type).replace(/^tool-/, ""), card.input, !!card.toolMetadata?.sendsOut)}`);
       else if (parts.some((p) => p?.type === "tool-presentPlan" && p.state === "input-available")) setAnnouncement("Plan ready");
     }
     for (const p of isSide ? [] : parts) {

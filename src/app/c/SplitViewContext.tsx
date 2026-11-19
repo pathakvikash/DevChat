@@ -35,6 +35,7 @@ export const CHAT_DRAG_TYPE = "application/x-devchat-chat";
 
 export interface PaneInfo {
   title: string;
+  model: string;
   workingFolder: string | null;
 }
 
@@ -206,7 +207,7 @@ export function SplitViewProvider({ children }: { children: React.ReactNode }) {
     try {
       const list = await fetchConversations();
       const next: Record<string, PaneInfo> = {};
-      for (const c of list) next[c.id] = { title: c.title, workingFolder: c.workingFolder ?? null };
+      for (const c of list) next[c.id] = { title: c.title, model: c.model, workingFolder: c.workingFolder ?? null };
       setInfo(next);
     } catch {
       // Titles are cosmetic; the panes still work without them.
@@ -220,7 +221,11 @@ export function SplitViewProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     window.addEventListener("vas:title-updated", loadInfo);
-    return () => window.removeEventListener("vas:title-updated", loadInfo);
+    window.addEventListener("vas:pane-info-changed", loadInfo);
+    return () => {
+      window.removeEventListener("vas:title-updated", loadInfo);
+      window.removeEventListener("vas:pane-info-changed", loadInfo);
+    };
   }, [loadInfo]);
 
   // Each pane's mode lives in the same per-chat storage ChatModeContext writes; there is no event, so poll while split.
@@ -247,7 +252,7 @@ export function SplitViewProvider({ children }: { children: React.ReactNode }) {
 
   const warnings = useMemo(() => {
     const writers = writerConflicts(
-      ids.map((id) => ({ id, kind: "chat", mode: modes[id] ?? "chat", workingFolder: info[id]?.workingFolder ?? null })),
+      ids.map((id) => ({ id, kind: "chat", mode: modes[id] ?? "chat", model: info[id]?.model ?? "", workingFolder: info[id]?.workingFolder ?? null })),
     );
     const out: Record<string, PaneWarning> = {};
     for (const id of writers) {

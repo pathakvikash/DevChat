@@ -1,5 +1,7 @@
 /** Split view state: which chats are open, their order, and the focused one. Pure, no React. */
 
+import { isCliModelId } from "@/lib/providers";
+
 export const SPLIT_MIN_PX = 360;
 export const SPLIT_DIVIDER_PX = 6;
 
@@ -195,14 +197,19 @@ export interface PaneWriter {
   id: string;
   kind: string;
   mode: string;
+  model: string;
   workingFolder: string | null;
 }
 
-const WRITER_MODES = new Set(["agent", "ask"]);
+/** Only a CLI model writes files: in Agent mode any of them, in Ask mode only Claude Code. API models read only. */
+function canWrite(p: PaneWriter): boolean {
+  if (!isCliModelId(p.model)) return false;
+  return p.mode === "agent" || (p.mode === "ask" && p.model.startsWith("claude-code/"));
+}
 
-/** Panes in Agent or Ask mode that share a working folder with another such pane. Side chats never count. */
+/** Panes that can write and share a working folder with another such pane. Side chats never count. */
 export function writerConflicts(panes: PaneWriter[]): Set<string> {
-  const writers = panes.filter((p) => p.kind !== "side" && WRITER_MODES.has(p.mode) && p.workingFolder);
+  const writers = panes.filter((p) => p.kind !== "side" && canWrite(p) && p.workingFolder);
   const perFolder = new Map<string, number>();
   for (const p of writers) perFolder.set(p.workingFolder!, (perFolder.get(p.workingFolder!) ?? 0) + 1);
   return new Set(writers.filter((p) => perFolder.get(p.workingFolder!)! > 1).map((p) => p.id));

@@ -29,7 +29,8 @@ export const chatMessageCard: CardImpl = {
       conversationId = chat.id;
     }
 
-    const part = buildAgentMessagePart({ from: "workflow", fromConversationId: c.workflowId, fromTitle: tctx.workflow.name, hop: 1 });
+    // The marker gates the chat like a stored folder-tool call (files/readFiles.ts).
+    const part = buildAgentMessagePart({ from: "workflow", fromConversationId: c.workflowId, fromTitle: tctx.workflow.name, hop: 1, ...(c.readsFolder ? { readFiles: true as const } : {}) });
     const row = await prisma.message.create({
       data: { conversationId, role: "user", content: message, parts: JSON.stringify([part, { type: "text", text: message }]) },
     });

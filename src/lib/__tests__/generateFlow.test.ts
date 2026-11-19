@@ -348,7 +348,7 @@ describe("generateFlow hardening", () => {
       version: 1 as const, defaultModel: "mock/gen", maxRunTokens: 500_000, vars: [],
       nodes: [
         { id: "trigger", type: "trigger" as const, fromIds: [], config: {}, ui },
-        { id: "digest", type: "agent" as any, fromIds: ["trigger"], config: { instructions: "summarise", mcpTools: ["mcp_srv_list"], folder: "/work", allowEdits: true }, ui },
+        { id: "digest", type: "agent" as any, fromIds: ["trigger"], config: { instructions: "summarise", mcpTools: ["mcp_srv_list"] }, ui },
         { id: "notify", type: "mcpTool" as any, fromIds: ["digest"], config: { serverId: "srv1", tool: "list_files", args: { path: "{{digest.text}}" } }, ui: { label: "Notify", position: { x: 0, y: 0 } } },
       ],
     };
@@ -365,7 +365,14 @@ describe("generateFlow hardening", () => {
       expect(notify.args).toEqual(current.nodes[2].config.args);
       expect(warnings.filter((w) => /Removed/.test(w))).toEqual([]);
       // unchanged agent keeps its by-hand settings
-      expect(graph.nodes.find((n) => n.id === "digest")!.config).toMatchObject({ folder: "/work", allowEdits: true, mcpTools: ["mcp_srv_list"] });
+      expect(graph.nodes.find((n) => n.id === "digest")!.config).toMatchObject({ mcpTools: ["mcp_srv_list"] });
+    });
+
+    it("an unchanged folder-only agent card keeps its folder and edit settings", async () => {
+      const folderOnly = { ...current, nodes: [current.nodes[0], { ...current.nodes[1], config: { instructions: "read", folder: "/work", allowEdits: true } }] };
+      const reply = { vars: [], nodes: [node("trigger", "trigger", []), node("digest", "agent", ["trigger"], { instructions: "read" })] };
+      const { graph } = await generateFlow({ description: "change", model: scripted([fence(reply)]).model, current: folderOnly });
+      expect(graph.nodes.find((n) => n.id === "digest")!.config).toMatchObject({ folder: "/work", allowEdits: true });
     });
 
     it("keeps a kept mcpTool card's own inputs when the model rewires it", async () => {

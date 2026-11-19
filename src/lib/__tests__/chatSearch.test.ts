@@ -7,12 +7,15 @@ vi.mock("@prisma/client", () => ({ Prisma: { ConversationScalarFieldEnum: { temp
 
 vi.mock("@/lib/db", () => ({
   prisma: {
-    conversation: { findMany: vi.fn(), findFirst: vi.fn() },
+    conversation: { findMany: vi.fn(), findFirst: vi.fn(), count: vi.fn() },
     message: { findMany: vi.fn(), count: vi.fn() },
   },
 }));
 
+vi.mock("@/lib/files/readFiles", () => ({ chatsThatReadFiles: vi.fn().mockResolvedValue([]) }));
+
 import { Prisma } from "@prisma/client";
+import { chatsThatReadFiles } from "@/lib/files/readFiles";
 import { prisma } from "@/lib/db";
 
 const db = prisma as any;
@@ -45,9 +48,38 @@ afterEach(() => {
 describe("searchUserChats", () => {
   it("only looks at the user's own non-temporary chats, minus the excluded one", async () => {
     await searchUserChats("u1", "cache", { excludeId: "current" });
-    const owned = { userId: "u1", temporary: false, parentId: null, id: { not: "current" } };
+    const owned = { userId: "u1", temporary: false, parentId: null, id: { notIn: [], not: "current" } };
     expect(db.conversation.findMany.mock.calls[0][0].where).toMatchObject(owned);
     expect(db.message.findMany.mock.calls[0][0].where.conversation).toEqual(owned);
+  });
+
+  it("leaves out chats that read files from a working folder, in both queries", async () => {
+    vi.mocked(chatsThatReadFiles).mockResolvedValueOnce(["x", "kid", "p"]);
+    await searchUserChats("u1", "cache");
+    expect(chatsThatReadFiles).toHaveBeenCalledWith("u1");
+    expect(db.conversation.findMany.mock.calls[0][0].where.id.notIn).toEqual(["x", "kid", "p"]);
+    expect(db.message.findMany.mock.calls[0][0].where.conversation.id.notIn).toEqual(["x", "kid", "p"]);
+  });
+
+  it("counts matching chats it left out for reading files, not the current one", async () => {
+    vi.mocked(chatsThatReadFiles).mockResolvedValueOnce(["x", "kid", "p"]);
+    db.conversation.count.mockResolvedValue(2);
+    const { leftOut } = await searchUserChats("u1", "cache", { excludeId: "current" });
+    expect(leftOut).toBe(2);
+    expect(db.conversation.count).toHaveBeenCalledWith({
+      where: {
+        userId: "u1",
+        temporary: false,
+        parentId: null,
+        id: { in: ["x", "kid", "p"], not: "current" },
+        OR: [{ title: { contains: "cache" } }, { messages: { some: { content: { contains: "cache" } } } }],
+      },
+    });
+  });
+
+  it("skips the count when no chat read files", async () => {
+    expect((await searchUserChats("u1", "cache")).leftOut).toBe(0);
+    expect(db.conversation.count).not.toHaveBeenCalled();
   });
 
   it("groups message hits by chat, newest message's snippet first", async () => {
@@ -56,20 +88,20 @@ describe("searchUserChats", () => {
       hit("a", "an older note about the cache"),
       hit("b", "cache invalidation", "2026-09-01T00:00:00Z"),
     ]);
-    const hits = await searchUserChats("u1", "cache");
+    const { hits } = await searchUserChats("u1", "cache");
     expect(hits.map((h) => h.id)).toEqual(["a", "b"]);
     expect(hits[0].snippet).toContain("newest note");
   });
 
   it("adds chats that only match by title, without a snippet", async () => {
     db.conversation.findMany.mockResolvedValue([chat("t", "2026-10-02T00:00:00Z")]);
-    const hits = await searchUserChats("u1", "cache");
+    const { hits } = await searchUserChats("u1", "cache");
     expect(hits).toEqual([expect.objectContaining({ id: "t", snippet: "" })]);
   });
 
   it("caps the result at 5 chats, newest first, and loads text only for those", async () => {
     setHits(Array.from({ length: 8 }, (_, i) => hit(`c${i}`, "cache", `2026-10-0${i + 1}T00:00:00Z`)));
-    const hits = await searchUserChats("u1", "cache");
+    const { hits } = await searchUserChats("u1", "cache");
     expect(hits).toHaveLength(5);
     expect(hits[0].id).toBe("c7");
     const [scan, text] = db.message.findMany.mock.calls.map((c: any[]) => c[0]);
@@ -197,5 +229,14 @@ describe("readUserChat", () => {
     setChat(conv(), [{ role: "user", content: "`".repeat(5000), parts: null }]);
     const read = (await readUserChat("u1", "c1", 1024))!;
     expect(countTokens(read)).toBeLessThanOrEqual(1024);
+  });
+});
+
+describe("readUserChat for a chat that read files", () => {
+  it("returns a short plain message and loads nothing", async () => {
+    vi.mocked(chatsThatReadFiles).mockResolvedValueOnce(["c1"]);
+    expect(await readUserChat("u1", "c1", 4000)).toBe("That chat read files from a working folder, so it can't be quoted here. Open it directly.");
+    expect(db.conversation.findFirst).not.toHaveBeenCalled();
+    expect(db.message.findMany).not.toHaveBeenCalled();
   });
 });

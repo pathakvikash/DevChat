@@ -5,6 +5,8 @@ import {
   createUIMessageStream,
   createUIMessageStreamResponse,
 } from "ai";
+import { folderToolSpecs } from "@/lib/files/folderTools";
+import { chatFolderAccess } from "@/lib/files/readFiles";
 import { pipeJsonRender } from "@json-render/core";
 import { prisma } from "@/lib/db";
 import { getModel } from "@/lib/models";
@@ -49,7 +51,7 @@ import {
 import { resolveChatSettings } from "@/lib/chat/resolveChatSettings";
 import { resolveModelCandidates } from "@/lib/chat/resolveModelCandidates";
 import { cliProviderForModel, dropParkedRuns } from "@/lib/cliProviders";
-import { isRunnableCwd } from "@/lib/claude/sessions";
+import { folderGoneMessage, isAllowedFolder } from "@/lib/folders";
 import { recordTrace } from "@/lib/observability";
 import { providerOptionsFor } from "@/lib/chat/providerOptions";
 import {
@@ -106,10 +108,11 @@ export async function POST(req: Request) {
   let model: string | undefined = bodyModel;
   try {
     let compressedAt: Date | null = null;
+    let parentId: string | null = null;
     if (conversationId) {
       const owned = await prisma.conversation.findUnique({
         where: { id: conversationId },
-        select: { userId: true, compressedAt: true, parent: { select: { userId: true } } },
+        select: { userId: true, compressedAt: true, parentId: true, parent: { select: { userId: true } } },
       });
       // A side chat is only ever read against a main chat of the same user.
       if (!owned || owned.userId !== userId || (owned.parent && owned.parent.userId !== userId)) {
@@ -119,6 +122,7 @@ export async function POST(req: Request) {
         });
       }
       compressedAt = owned.compressedAt;
+      parentId = owned.parentId;
       ownerVerified = true;
       if (!answeringCli) releaseCliRuns();
     }
@@ -227,6 +231,16 @@ export async function POST(req: Request) {
         { status: 403, headers: { "Content-Type": "application/json" } },
       );
     }
+    // A user without host access ignores a folder set before they lost it (they can't act on a "pick another" message).
+    // Side chats inherit the parent's folder, so they get this check too.
+    const folder = hostTools ? workingFolder : undefined;
+    if (folder && !(await isAllowedFolder(userId, folder))) {
+      releaseCliRuns();
+      return new Response(JSON.stringify({ error: folderGoneMessage(folder) }), {
+        status: 400,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
 
     let lastError: unknown;
     for (const servedModel of candidateModels) {
@@ -241,10 +255,19 @@ export async function POST(req: Request) {
     }
     if (!maxTokens) maxTokens = 8192;
     const useTools = modelConfig.supportsTools && !chatOnlyMode;
+    const cliProvider = cliProviderForModel(servedModel);
     const activeToolIds = resolveActiveToolIds(explicitToolIds, skillIds, kbId);
 
-    // One result for the prompt's section and the sendToChat tool.
-    const agentTargets = sendToChatTargets(openPanes, conversationId ?? "", useTools);
+    const { fileFolder, sendsOutGate, showFolder } = await chatFolderAccess({
+      useTools,
+      cli: !!cliProvider,
+      folder,
+      messages: bodyMessages,
+      conversationId,
+      parentId,
+    });
+    // One result for the prompt's section and the sendToChat tool. A gated chat gets none: a pane without the gate could carry file text out.
+    const agentTargets = sendToChatTargets(openPanes, conversationId ?? "", useTools && !sendsOutGate);
     const { text: finalSystemPrompt, sections } = await buildSystemPrompt({
       useTools,
       systemPrompt,
@@ -259,6 +282,9 @@ export async function POST(req: Request) {
       mode: toolMode,
       contextWindow: contextWindowFor(servedModel, modelConfig, contextLength),
       agentTargets,
+      fileFolder,
+      sendsOutGate,
+      showFolder,
     });
 
     console.log(
@@ -307,6 +333,8 @@ export async function POST(req: Request) {
             ? bodyAllowedTools.filter((t: unknown): t is string => typeof t === "string" && !answeredNow.has(t))
             : [],
           contextWindow: contextWindowFor(servedModel, modelConfig, contextLength),
+          workingFolder: fileFolder,
+          askBeforeSendingOut: sendsOutGate,
         })
       : {};
 
@@ -342,9 +370,8 @@ export async function POST(req: Request) {
     // CLI-backed models take effort/folder/mode as provider options. The folder is
     // re-checked every turn; chat mode is read-only there, agent mode may edit, and
     // Ask lets Claude Code ask per change (its allow-for-chat list rides along).
-    const cliProvider = cliProviderForModel(servedModel);
     if (!cliProvider) releaseCliRuns();
-    const cliCwd = workingFolder && (await isRunnableCwd(workingFolder)) ? workingFolder : "";
+    const cliCwd = folder ?? "";
     const providerOptions = providerOptionsFor({
       modelId: servedModel,
       numCtx: contextLength ?? modelConfig.contextWindow,
@@ -368,7 +395,7 @@ export async function POST(req: Request) {
         parentId: conversationId,
         model: modelConfig,
         mode: toolMode,
-        workingFolder,
+        workingFolder: folder,
         providerOptions,
         maxParallel: cliProvider ? 1 : 3,
         activeChildren: new Set<string>(),
@@ -623,12 +650,15 @@ export async function POST(req: Request) {
                       console.error("[queue] releasing unshown messages failed:", e),
                     );
                     if (saved && canAutoCompress(event, isAborted)) {
+                      const window = modelConfig ? contextWindowFor(servedModel, modelConfig, contextLength) : null;
                       await autoCompress(
                         conversationId,
                         autoCompressThreshold ?? 85,
-                        modelConfig ? contextWindowFor(servedModel, modelConfig, contextLength) : null,
+                        window,
                         () =>
                         writer.write({ type: "data-compressing", data: true, transient: true }),
+                        // What the folder adds to the sent prompt, which the estimate would miss.
+                        [sections.folder, window && fileFolder ? await folderToolSpecs(fileFolder, window) : ""].filter(Boolean).join("\n") || undefined,
                       );
                     }
                   },

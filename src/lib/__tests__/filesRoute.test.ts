@@ -5,7 +5,7 @@ import { tmpdir } from "os";
 import { join } from "path";
 import { NextRequest } from "next/server";
 
-// HOME is a temp dir before the app loads, so the real isRunnableCwd reads a fixture ~/.claude/projects.
+// HOME is a temp dir before the app loads, so the real folder list reads a fixture ~/.claude/projects.
 const home = await vi.hoisted(async () => {
   const { mkdtempSync } = await import("fs");
   const { tmpdir } = await import("os");
@@ -15,7 +15,7 @@ const home = await vi.hoisted(async () => {
   return dir;
 });
 
-vi.mock("@/lib/db", () => ({ prisma: { conversation: { findUnique: vi.fn() } } }));
+vi.mock("@/lib/db", () => ({ prisma: { conversation: { findUnique: vi.fn() }, appSetting: { findUnique: vi.fn().mockResolvedValue(null) } } }));
 vi.mock("@/lib/auth", () => ({ requireUserId: vi.fn().mockResolvedValue("user-1") }));
 
 import { prisma } from "@/lib/db";
@@ -96,7 +96,7 @@ describe("GET /api/conversations/[id]/files", () => {
     expect((await call()).status).toBe(400);
   });
 
-  it("refuses a folder that is not one of the Claude Code projects (real isRunnableCwd)", async () => {
+  it("refuses a folder that is not in the folder list (real isAllowedFolder)", async () => {
     setConversation({ userId: "user-1", workingFolder: other });
     expect((await call("src/a.ts")).status).toBe(400);
   });

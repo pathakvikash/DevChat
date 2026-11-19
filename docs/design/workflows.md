@@ -408,15 +408,15 @@ Two platform-provided templates at the end of **New workflow**, built on the `fl
 |---|---|---|
 | Cards | Run manually → Fetch the repo info → Fetch the top-level files → Agent "Explain it" → Post to a chat | Run manually → Agent "Explain it" → Post to a chat |
 | Variables | `repo` (owner/name or a full URL, the variable has `format: "githubRepo"`, which the runner and the editor preview read as owner/name; only the template sets it, a model can't, and a plain variable named `repo` is left alone), `focus` | `focus` |
-| Model | Any API model | Claude Code or OpenCode, picked by the user (Codex is blocked) |
-| Where | Local and Vercel. Public repos only; on Vercel it may be rate-limited (60 requests an hour per IP) | Local only: the owner, on a machine where Claude Code or OpenCode is installed (`hostToolsHere`). Otherwise the menu entry is disabled with a reason and the create call returns 403 "Explaining a folder needs Claude Code or OpenCode on this server." |
-| Agent tools | Fetch URL only | None. Read-only folder (`allowEdits` off) |
+| Model | Any API model | Any model that can use tools (an API model, Claude Code or OpenCode), picked by the user; Codex is blocked |
+| Where | Local and Vercel. Public repos only; on Vercel it may be rate-limited (60 requests an hour per IP) | Local only: the owner (`hostToolsReason`). Otherwise the menu entry is disabled with a reason and the create call returns 403 "This is only available to the server's owner." |
+| Agent tools | Fetch URL only | None. Read-only folder (`allowEdits` off). An API model reads the folder with `listFiles`, `readFile` and `searchFiles` (added by the server, not ticked); a CLI model uses its own file access |
 
-The folder card carries `preset: "explain-folder"`, so `checkGraph` says "Pick a Claude Code or OpenCode model" and "Pick the project folder" until both are set; Run refuses with the same messages.
+The folder card carries `preset: "explain-folder"`, so `checkGraph` says "Pick the project folder" until it is set; Run refuses with the same message. Run also refuses a folder on a model that cannot use tools.
 
-**Leak rules.** The GitHub flow reads only the public web and nothing private, so there is no private reader and the rules in 10.5 pass with no warning. The folder flow has one private reader (a CLI model with a folder, run with its own web tools off) and nothing after it reaches the web: the only later card is Post to a chat. The card has no tools, so it is not also a web reader. Adding a Fetch, Web search or web tool after it is refused as for any folder card.
+**Leak rules.** The GitHub flow reads only the public web and nothing private, so there is no private reader and the rules in 10.5 pass with no warning. The folder flow has one private reader (a card with a folder, on any model; a CLI model runs with its own web tools off) and nothing after it reaches the web: the only later card is Post to a chat. The card has no tools, so it is not also a web reader. Adding a Fetch, Web search or web tool after it is refused as for any folder card.
 
-**Limits.** GitHub's unauthenticated API allows about 60 requests an hour, so the flow makes two fetches (the repo info and the top-level files only: a recursive tree is about 240 bytes an entry and would break big repos) and the agent is told to fetch at most 8 more URLs, folder listings included (`/git/trees/HEAD:<folder>`, with `/contents/` as a fallback, then the README and a few files). The Fetch URL tool has no allowlist, so "only raw.githubusercontent.com and api.github.com" is an instruction, not a lock; fetched text is data and the agent is told to ignore any instructions in it (10.5). A fetched file is cut at 8,000 characters, so line references from the GitHub flow are only given for lines the agent saw. An HTTP error carries GitHub's own message (for example the rate limit). A folder card on a CLI model may work for 15 minutes and is told to read about 30 files at most. In tests (sanity mode) the GitHub API answers come from `e2e/fixtures/workflows/repo-*.json` and the `mock/workflow` model replies with a small flowchart. See 10.5 for how the posted message is drawn.
+**Limits.** GitHub's unauthenticated API allows about 60 requests an hour, so the flow makes two fetches (the repo info and the top-level files only: a recursive tree is about 240 bytes an entry and would break big repos) and the agent is told to fetch at most 8 more URLs, folder listings included (`/git/trees/HEAD:<folder>`, with `/contents/` as a fallback, then the README and a few files). The Fetch URL tool has no allowlist, so "only raw.githubusercontent.com and api.github.com" is an instruction, not a lock; fetched text is data and the agent is told to ignore any instructions in it (10.5). A fetched file is cut at 8,000 characters, so line references from the GitHub flow are only given for lines the agent saw. An HTTP error carries GitHub's own message (for example the rate limit). A folder card on a CLI model may work for 15 minutes and is told to read about 30 files at most. On an API model `searchFiles` stops at 2,000 files, 20 MB or 5 seconds, so a big repo is explained more shallowly. In tests (sanity mode) the GitHub API answers come from `e2e/fixtures/workflows/repo-*.json` and the `mock/workflow` model replies with a small flowchart. See 10.5 for how the posted message is drawn.
 
 ---
 
@@ -525,7 +525,7 @@ This needs no `instrumentation.ts`. Hot reload in dev keeps the run alive, becau
 - **Provider options.** Move `src/app/api/chat/route.ts:340-369` into `providerOptionsFor(modelId, modelConfig, { cwd, access, userId, … })` in a new `src/lib/chat/providerOptions.ts`. The chat route calls it with no change in behaviour. Workflows get:
   - Ollama: `num_ctx` set to the model's window.
   - CLI: `access: "chat"` and no `cwd`, which means a sandboxed scratch folder.
-  - Phase 6: a card with a folder that passes `isRunnableCwd` (checked at run time) gets that `cwd`, and `access: "agent"` only when `allowEdits` is on.
+  - Phase 6: a card with a folder that passes `isAllowedFolder` (checked at run time) gets that `cwd`, and `access: "agent"` only when `allowEdits` is on.
 - **Tools.**
   - Built with `buildTools({ activeToolIds: new Set(card.tools), mode: "agent", userId, searchProvider, memoryDisabled: true, contextWindow })` (`buildTools.ts:112`).
   - Afterwards, any id that is not in the allowlist, or is in `BLOCKED`, is removed. `BLOCKED` is `executeCode`, `sendToChat`, `askClarification`, `presentPlan`, `runAgent`, `messageAgent`, the artifact tools, the todo tools and the memory tools.
@@ -775,7 +775,7 @@ The existing `/api/models`, `/api/registry` and `/api/mcp/servers/[id]/tools` ro
 ### 10.1 Owner gate
 
 - CLI models and folders run as the server's OS user. `canUseHostTools` is checked at run start and again before each CLI card, so access is refused at run time, not only when the flow is saved.
-- `isRunnableCwd` (`src/lib/claude/sessions.ts:173`) is checked again when a run uses a folder.
+- `isAllowedFolder` (`src/lib/folders.ts`) is checked again when a run uses a folder.
 - Edits need a folder, the `allowEdits` toggle on that card, and owner status.
 - CLI children keep the existing `childEnv` secret stripping.
 
@@ -956,7 +956,7 @@ Sanity mode uses no network and no real model, following the precedent at `src/l
 
 **Files:** `cards/mcpTool.ts`; the agent card's MCP section and warning; `folder` and `allowEdits` for CLI cards, owner-only, with `WorkingFolderPicker`.
 
-**Vitest:** another user's or a disabled server is refused; `isError` fails the item; a folder outside `runnableCwds` fails at run time; `allowEdits` → access `agent`, otherwise `chat`.
+**Vitest:** another user's or a disabled server is refused; `isError` fails the item; a folder outside `isAllowedFolder` fails at run time; `allowEdits` → access `agent`, otherwise `chat`.
 
 **e2e:** the warning text appears when MCP and `fetchUrl` are both ticked. Live-only `@live` check: Codex with a folder.
 
