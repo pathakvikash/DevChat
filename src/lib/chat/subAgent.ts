@@ -92,9 +92,16 @@ function helperPrompt(mode: ToolMode, workingFolder: string | null | undefined, 
     .join("\n");
 }
 
+const HOSTED_REASONING_KEYS = ["openai", "anthropic", "google"];
+
 /** The parent's provider options for a helper. A CLI helper outside Agent mode only reads: no permission bridge, no
  *  allow list, and no chat id (so it cannot close the chat's open card). Ask and Plan promise read-only helpers. */
 export function helperProviderOptions(options: ProviderOptions | undefined, mode: ToolMode): ProviderOptions | undefined {
+  // A hosted helper runs with a small output cap (model.maxTokens), so it gets no reasoning options: they would spend the cap on thinking.
+  if (options && HOSTED_REASONING_KEYS.some((k) => k in options)) {
+    options = Object.fromEntries(Object.entries(options).filter(([id]) => !HOSTED_REASONING_KEYS.includes(id)));
+    if (!Object.keys(options).length) return undefined;
+  }
   if (!options || mode === "agent") return options;
   return Object.fromEntries(
     Object.entries(options).map(([id, o]) => [id, "access" in o ? { ...o, access: "chat", allowedTools: [], conversationId: "" } : o]),

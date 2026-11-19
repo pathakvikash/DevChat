@@ -195,9 +195,8 @@ export async function POST(req: Request) {
     }
     // Side chats are read-only, whatever mode the request asks for.
     const toolMode: ToolMode = settings.kind === "side" ? "chat" : authMode;
-    // `contextLength`/`maxTokens` are reassigned below (Ollama context bump,
-    // default maxTokens), so these two stay `let` unlike the rest.
-    let { contextLength, maxTokens, kbId } = settings;
+    // `contextLength`/`kbId` are reassigned below (Ollama context bump, KB ownership check), so they stay `let`.
+    let { contextLength, kbId } = settings;
     // `kbId` can come from an unvalidated client-supplied fallback inside
     // resolveChatSettings — verify it's actually owned by this user before
     // letting searchKnowledgeBase / the KB auto-inject read from it.
@@ -256,8 +255,9 @@ export async function POST(req: Request) {
     }
     // Hosted models get provider-specific reasoning options; some reject temperature/top_p.
     const reasoning = reasoningPlan(servedModel, reasoningEffort);
-    // Anthropic's adaptive thinking spends from max_tokens, so leave room for the answer.
-    if (!maxTokens) maxTokens = reasoning.providerOptions?.anthropic ? 32_000 : 8192;
+    // Reasoning tokens count against the output cap, so leave room for the answer. Per candidate: a fallback
+    // on another provider must not inherit the first one's default. An explicit user value always wins.
+    const maxTokens = settings.maxTokens || (reasoning.providerOptions ? 32_000 : 8192);
     const useTools = modelConfig.supportsTools && !chatOnlyMode;
     const cliProvider = cliProviderForModel(servedModel);
     const activeToolIds = resolveActiveToolIds(explicitToolIds, skillIds, kbId);
