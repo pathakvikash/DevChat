@@ -131,6 +131,8 @@ export default function ConversationPane({ conversationId, focused, initialPromp
   const [activityOpen, setActivityOpen] = useState(false);
   // Set when the bridge opens the panel by itself, so the panel does not take focus from the composer mid-reply.
   const quietOpen = useRef(false);
+  // A side chat or a sub-agent transcript has no docked panel: its artifacts open in the full-screen Outputs overlay.
+  const [outputsOverlay, setOutputsOverlay] = useState(false);
 
   // ponytail: bridge; fold into useChatPane once the tool-approval branch lands
   // The old open-flags (slash commands, artifact cards, the context ring, a new artifact) now open a panel view and reset.
@@ -148,6 +150,8 @@ export default function ConversationPane({ conversationId, focused, initialPromp
     if (canPanel) {
       quietOpen.current = true;
       openView(view, view === "outputs" ? selectedArtifactId : null);
+    } else if (view === "outputs") {
+      setOutputsOverlay(true);
     }
     setArtifactPanelOpen(false);
     setContextPanelOpen(false);
@@ -542,6 +546,15 @@ export default function ConversationPane({ conversationId, focused, initialPromp
         />
         )}
       </main>
+      {!canPanel && (
+        <ArtifactPanel
+          conversationId={conversationId}
+          isOpen={outputsOverlay}
+          onClose={() => setOutputsOverlay(false)}
+          selectedId={selectedArtifactId}
+          onSelect={(id: string | null) => p.setSelectedArtifactId(id)}
+        />
+      )}
       {panel.panel && canPanel && (
         <ChatSidePanel
           view={view}
