@@ -19,19 +19,21 @@ const SECRET_HOME_DIRS = [
   "Library/Keychains", "Library/Cookies", "Library/Application Support",
 ];
 
-export const OPEN_SERVER_REFUSED =
+const OPEN_SERVER_REFUSED_PROD =
   "Adding folders is off: this server runs in production without OWNER_EMAILS, so anyone signed in could reach any folder. Set OWNER_EMAILS first.";
+const ON_VERCEL_REFUSED = "Working folders only work when DevChat runs on your own machine.";
 
 const short = (p: string) => (p.startsWith(homedir() + sep) ? "~" + p.slice(homedir().length) : p);
 const fail = (status: number, error: string) => ({ ok: false as const, status, error });
-const openServer = () => process.env.NODE_ENV === "production" && !process.env.OWNER_EMAILS?.trim();
+// Vercel is never your own machine, so folders stay off there whatever OWNER_EMAILS says.
+const openServer = () => !!process.env.VERCEL || (process.env.NODE_ENV === "production" && !process.env.OWNER_EMAILS?.trim());
 
 export const folderGoneMessage = (path: string) =>
   `${short(path)} isn't one of your folders any more. Add it again with Choose folder…, or pick another.`;
 
 export async function folderAccess(userId: string): Promise<{ hostTools: boolean; reason: string | null }> {
   if (!(await canUseHostTools(userId))) return { hostTools: false, reason: HOST_TOOLS_REFUSED };
-  return { hostTools: true, reason: openServer() ? OPEN_SERVER_REFUSED : null };
+  return { hostTools: true, reason: !openServer() ? null : process.env.VERCEL ? ON_VERCEL_REFUSED : OPEN_SERVER_REFUSED_PROD };
 }
 
 async function readAdded(userId: string): Promise<string[]> {

@@ -164,6 +164,17 @@ describe("addFolder", () => {
     expect(await allowedFolders(U)).toEqual([]);
   });
 
+  it("refuses add and browse on Vercel even with OWNER_EMAILS set, and ignores already-added folders", async () => {
+    await addFolder(U, proj);
+    process.env = { ...saved, NODE_ENV: "production", OWNER_EMAILS: "a@b.c", VERCEL: "1" };
+    expect(err(await addFolder(U, proj)).error).toMatch(/your own machine/);
+    expect(err(await browseFolder(U, proj, false)).status).toBe(403);
+    expect(await isAllowedFolder(U, proj)).toBe(false);
+    process.env = { ...saved, NODE_ENV: "production", OWNER_EMAILS: "a@b.c" };
+    delete process.env.VERCEL;
+    expect(await isAllowedFolder(U, proj)).toBe(true);
+  });
+
   it("adding twice is a no-op; the 101st folder is refused", async () => {
     await addFolder(U, proj);
     expect(await addFolder(U, proj)).toMatchObject({ ok: true, added: false });
