@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { orphanSides, replaceChat, sideShares } from "@/lib/splitPanes";
+import { keepParamsForPanes, orphanSides, replaceChat, sideShares } from "@/lib/splitPanes";
 import {
   clampWidths,
   closePane,
@@ -272,5 +272,18 @@ describe("replaceChat", () => {
     const r = replaceChat(["A", "C"], "A", "A", "B", {});
     expect({ ids: r.ids, focus: r.focus }).toEqual(replacePane(["A", "C"], "A", "B"));
     expect(r.closed).toEqual([]);
+  });
+});
+
+describe("keepParamsForPanes", () => {
+  const params = new URLSearchParams("q=hi&panel=outputs&item=x1&panelOf=b&split=b&theme=dark");
+  it("keeps every param while the first pane stays", () => {
+    expect(keepParamsForPanes(params, "a", "a").toString()).toBe(params.toString());
+  });
+  it("drops ?q=, the panel and its item when the first pane is swapped", () => {
+    expect(keepParamsForPanes(params, "a", "c").toString()).toBe("split=b&theme=dark");
+  });
+  it("drops them too when the first pane closes and another becomes first", () => {
+    expect(keepParamsForPanes(params, "a", "b").toString()).toBe("split=b&theme=dark");
   });
 });

@@ -45,7 +45,7 @@ import { useAltShortcuts } from "@/app/hooks/useKeyboardShortcuts";
 import { useFolders } from "@/app/hooks/useFolders";
 import { runningCount, tasksFrom } from "@/lib/chat/backgroundTasks";
 import { markTabTitle } from "@/lib/tabTitle";
-import type { PanelView } from "@/lib/chatPanel";
+import { parsePanel, type PanelView } from "@/lib/chatPanel";
 
 import { useChatPane } from "./useChatPane";
 
@@ -131,11 +131,14 @@ export default function ConversationPane({ conversationId, focused, initialPromp
   const [activityOpen, setActivityOpen] = useState(false);
   // Set when the bridge opens the panel by itself, so the panel does not take focus from the composer mid-reply.
   const quietOpen = useRef(false);
+  // A side chat or a sub-agent transcript has no docked panel: its artifacts open in the full-screen Outputs overlay.
+  const [outputsOverlay, setOutputsOverlay] = useState(false);
 
   // ponytail: bridge; fold into useChatPane once the tool-approval branch lands
   // The old open-flags (slash commands, artifact cards, the context ring, a new artifact) now open a panel view and reset.
-  const { artifactPanelOpen, contextPanelOpen, scratchpadOpen, todoPanelOpen, selectedArtifactId } = p;
+  const { artifactPanelOpen, takeArtifactFromReply, contextPanelOpen, scratchpadOpen, todoPanelOpen, selectedArtifactId } = p;
   const { setArtifactPanelOpen, setContextPanelOpen, setScratchpadOpen, setTodoPanelOpen } = p;
+  const splitIds = split?.ids;
   const openView = panel.open;
   const panelOpen = !!panel.panel;
   // The flag lasts until the panel closes, so a user's next open takes focus.
@@ -143,17 +146,26 @@ export default function ConversationPane({ conversationId, focused, initialPromp
     if (!panelOpen) quietOpen.current = false;
   }, [panelOpen]);
   useEffect(() => {
+    // Only a finished reply opens Outputs by itself; a card click, /artifacts and the other flags are the user's.
+    const replyMark = takeArtifactFromReply();
+    const fromReply = artifactPanelOpen && replyMark;
     const view: PanelView | null = artifactPanelOpen ? "outputs" : contextPanelOpen ? "context" : scratchpadOpen ? "notes" : todoPanelOpen ? "todos" : null;
     if (!view) return;
     if (canPanel) {
-      quietOpen.current = true;
-      openView(view, view === "outputs" ? selectedArtifactId : null);
+      // The reply's open skips a pane that is not focused when another pane's chat holds the panel: that pane is the user's.
+      const owner = parsePanel(new URLSearchParams(window.location.search), splitIds ?? [conversationId])?.owner;
+      const ownedElsewhere = !!owner && owner !== conversationId;
+      if (!fromReply || focused || !ownedElsewhere) {
+        // A reply's open stays quiet (focus stays in the composer); a user's open takes focus.
+        quietOpen.current = fromReply;
+        openView(view, view === "outputs" ? selectedArtifactId : null);
+      }
     }
     setArtifactPanelOpen(false);
     setContextPanelOpen(false);
     setScratchpadOpen(false);
     setTodoPanelOpen(false);
-  }, [artifactPanelOpen, contextPanelOpen, scratchpadOpen, todoPanelOpen, selectedArtifactId, canPanel, openView, setArtifactPanelOpen, setContextPanelOpen, setScratchpadOpen, setTodoPanelOpen]);
+  }, [artifactPanelOpen, takeArtifactFromReply, contextPanelOpen, scratchpadOpen, todoPanelOpen, selectedArtifactId, canPanel, focused, splitIds, conversationId, openView, setArtifactPanelOpen, setContextPanelOpen, setScratchpadOpen, setTodoPanelOpen]);
 
   // Background tasks: the reply's start time is not in the messages, so note it when the reply begins.
   const [replyStartedAt, setReplyStartedAt] = useState<number | null>(null);
@@ -443,7 +455,12 @@ export default function ConversationPane({ conversationId, focused, initialPromp
               onCopyMessage={p.handleCopyMessage}
               onForkMessage={isSub || isSide ? undefined : p.handleForkMessage}
               onRegenerateMessage={isSub || isSide ? undefined : p.handleRegenerateMessage}
-              onOpenArtifact={(id: string) => { p.setSelectedArtifactId(id); p.setArtifactPanelOpen(true); }}
+              onOpenArtifact={(id: string) => {
+                p.setSelectedArtifactId(id);
+                // A pane without a docked panel shows the Outputs overlay instead.
+                if (canPanel) p.setArtifactPanelOpen(true);
+                else setOutputsOverlay(true);
+              }}
               onClarificationAnswer={p.handleClarificationAnswer}
               onApprovePlan={p.mode === "plan" && !p.toolsAvailable ? p.approvePlanReply : undefined}
               toolsAvailable={p.toolsAvailable}
@@ -542,6 +559,15 @@ export default function ConversationPane({ conversationId, focused, initialPromp
         />
         )}
       </main>
+      {!canPanel && (
+        <ArtifactPanel
+          conversationId={conversationId}
+          isOpen={outputsOverlay}
+          onClose={() => setOutputsOverlay(false)}
+          selectedId={selectedArtifactId}
+          onSelect={(id: string | null) => p.setSelectedArtifactId(id)}
+        />
+      )}
       {panel.panel && canPanel && (
         <ChatSidePanel
           view={view}

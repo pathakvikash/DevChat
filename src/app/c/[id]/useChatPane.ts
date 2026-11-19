@@ -161,6 +161,13 @@ export function useChatPane(conversationId: string, { focused, kind, searchProvi
   const [enabledSkills, setEnabledSkills] = useState<string[]>([]);
   const [modelSettingsOpen, setModelSettingsOpen] = useState(false);
   const [artifactPanelOpen, setArtifactPanelOpen] = useState(false);
+  // Set just before a finished reply opens Outputs by itself, so the bridge can tell that open from a user's (card, /artifacts).
+  const artifactFromReply = useRef(false);
+  const takeArtifactFromReply = useCallback(() => {
+    const was = artifactFromReply.current;
+    artifactFromReply.current = false;
+    return was;
+  }, []);
   const [selectedArtifactId, setSelectedArtifactId] = useState<string | null>(null);
   const [contextPanelOpen, setContextPanelOpen] = useState(false);
   const [contextData, setContextData] = useState<{ usedTokens: number; maxContextTokens: number; contextPercent: number } | null>(null);
@@ -625,6 +632,7 @@ export function useChatPane(conversationId: string, { focused, kind, searchProvi
       if (typeof output === "string" && (output.startsWith("Artifact created:") || output.startsWith("Artifact updated:"))) {
         const id = output.replace(/^Artifact (created|updated): /, "").split(" ")[0];
         setSelectedArtifactId(id);
+        artifactFromReply.current = true;
         setArtifactPanelOpen(true);
       }
     }
@@ -1097,7 +1105,7 @@ export function useChatPane(conversationId: string, { focused, kind, searchProvi
     todoPanelOpen, setTodoPanelOpen,
     advancedOpen, setAdvancedOpen,
     modelSettingsOpen, setModelSettingsOpen,
-    artifactPanelOpen, setArtifactPanelOpen, selectedArtifactId, setSelectedArtifactId,
+    artifactPanelOpen, setArtifactPanelOpen, takeArtifactFromReply, selectedArtifactId, setSelectedArtifactId,
     contextPanelOpen, setContextPanelOpen, contextData, setContextData,
     toolErrorDialogOpen, setToolErrorDialogOpen,
     keyboardShortcutsOpen, setKeyboardShortcutsOpen,
