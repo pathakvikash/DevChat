@@ -52,6 +52,7 @@ import { resolveChatSettings } from "@/lib/chat/resolveChatSettings";
 import { resolveModelCandidates } from "@/lib/chat/resolveModelCandidates";
 import { cliProviderForModel, dropParkedRuns } from "@/lib/cliProviders";
 import { folderGoneMessage, isAllowedFolder } from "@/lib/folders";
+import { reasoningPlan, type ProviderOptions } from "@/lib/reasoning";
 import { recordTrace } from "@/lib/observability";
 import { providerOptionsFor } from "@/lib/chat/providerOptions";
 import {
@@ -194,9 +195,8 @@ export async function POST(req: Request) {
     }
     // Side chats are read-only, whatever mode the request asks for.
     const toolMode: ToolMode = settings.kind === "side" ? "chat" : authMode;
-    // `contextLength`/`maxTokens` are reassigned below (Ollama context bump,
-    // default maxTokens), so these two stay `let` unlike the rest.
-    let { contextLength, maxTokens, kbId } = settings;
+    // `contextLength`/`kbId` are reassigned below (Ollama context bump, KB ownership check), so they stay `let`.
+    let { contextLength, kbId } = settings;
     // `kbId` can come from an unvalidated client-supplied fallback inside
     // resolveChatSettings — verify it's actually owned by this user before
     // letting searchKnowledgeBase / the KB auto-inject read from it.
@@ -253,7 +253,11 @@ export async function POST(req: Request) {
       );
       continue;
     }
-    if (!maxTokens) maxTokens = 8192;
+    // Hosted models get provider-specific reasoning options; some reject temperature/top_p.
+    const reasoning = reasoningPlan(servedModel, reasoningEffort);
+    // Reasoning tokens count against the output cap, so leave room for the answer. Per candidate: a fallback
+    // on another provider must not inherit the first one's default. An explicit user value always wins.
+    const maxTokens = settings.maxTokens || (reasoning.providerOptions ? 32_000 : 8192);
     const useTools = modelConfig.supportsTools && !chatOnlyMode;
     const cliProvider = cliProviderForModel(servedModel);
     const activeToolIds = resolveActiveToolIds(explicitToolIds, skillIds, kbId);
@@ -372,7 +376,7 @@ export async function POST(req: Request) {
     // Ask lets Claude Code ask per change (its allow-for-chat list rides along).
     if (!cliProvider) releaseCliRuns();
     const cliCwd = folder ?? "";
-    const providerOptions = providerOptionsFor({
+    const providerOptions = (providerOptionsFor({
       modelId: servedModel,
       numCtx: contextLength ?? modelConfig.contextWindow,
       temperature,
@@ -386,7 +390,7 @@ export async function POST(req: Request) {
       allowedTools: Array.isArray(bodyAllowedTools)
         ? bodyAllowedTools.filter((t: unknown): t is string => typeof t === "string" && CHAT_ALLOWABLE_TOOLS.has(t))
         : [],
-    });
+    }) ?? reasoning.providerOptions) as ProviderOptions | undefined;
 
     // Only main chats with tools get helpers. A helper runs on this same model, in this mode.
     if (canStartSubAgents(settings.kind, useTools) && conversationId) {
@@ -397,6 +401,7 @@ export async function POST(req: Request) {
         mode: toolMode,
         workingFolder: folder,
         providerOptions,
+        maxTokens,
         maxParallel: cliProvider ? 1 : 3,
         activeChildren: new Set<string>(),
       };
@@ -438,8 +443,8 @@ export async function POST(req: Request) {
           model: modelConfig.model,
           system: finalSystemPrompt,
           messages: modelMessages,
-          temperature,
-          topP,
+          temperature: reasoning.allowSampling ? temperature : undefined,
+          topP: reasoning.allowSampling ? topP : undefined,
           // Signs each approval request so a browser cannot change an approved tool's input.
           experimental_toolApprovalSecret: process.env.AUTH_SECRET || undefined,
           // Hard cap on response length: without it a looping model streams

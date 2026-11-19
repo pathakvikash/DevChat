@@ -247,6 +247,10 @@ describe("helpers in Ask and Plan only read", () => {
     const ollama = { ollama: { num_ctx: 4096 } } as any;
     expect(helperProviderOptions(ollama, "ask")).toEqual(ollama);
     expect(helperProviderOptions(undefined, "ask")).toBeUndefined();
+    // Hosted reasoning options are dropped: a helper's output cap is small.
+    const hosted = { openai: { reasoningEffort: "high" }, anthropic: { thinking: { type: "adaptive" } }, google: { x: 1 } } as any;
+    expect(helperProviderOptions(hosted, "agent")).toBeUndefined();
+    expect(helperProviderOptions({ ...hosted, ollama: { num_ctx: 1 } }, "ask")).toEqual({ ollama: { num_ctx: 1 } });
   });
 
   it("starts Claude Code without the permission bridge and with read-only tools", async () => {

@@ -1,5 +1,7 @@
 import { createHash } from "crypto";
+import { defaultSettingsMiddleware, wrapLanguageModel, type LanguageModel } from "ai";
 import { createOpenAI } from "@ai-sdk/openai";
+import { createAnthropic } from "@ai-sdk/anthropic";
 import { createOllama } from "ollama-ai-provider-v2";
 import {
   PROVIDERS,
@@ -11,6 +13,7 @@ import {
 import { listCliModels, cliProviderForModel, createCliModel, type CliCatalogEntry } from "./cliProviders";
 import { detectionAvailable } from "./providerDetect";
 import { mockModelConfig } from "@/lib/mockModels";
+import { supportsReasoning } from "./reasoning";
 
 const ollamaUrl = process.env.OLLAMA_BASE_URL || "http://localhost:11434";
 const ollama = createOllama({ baseURL: `${ollamaUrl}/api` });
@@ -248,7 +251,7 @@ export async function initializeOllamaModels(): Promise<void> {
   }
 }
 
-// ─── Hosted providers (OpenAI-compatible, bring-your-own-key) ───────────────
+// ─── Hosted providers (bring-your-own-key) ───────────────
 
 /** Resolved credentials per provider id. Built per request in apiKeys.ts. */
 export type ProviderCreds = Record<string, { apiKey: string; baseUrl: string }>;
@@ -335,7 +338,7 @@ function toCatalogEntry(def: ProviderDef, m: UpstreamModel): ModelCatalogEntry |
     // completion-style ones don't.
     supportsTools: getSupportsTools(haystack) || !/instruct|chat-bison/i.test(haystack),
     supportsVision: def.vision || getSupportsVision(haystack),
-    supportsThinking: getSupportsThinking(haystack),
+    supportsThinking: getSupportsThinking(haystack) || supportsReasoning(`${def.id}/${upstreamId}`),
   };
 }
 
@@ -372,23 +375,43 @@ function cachedEntry(def: ProviderDef, cred: { apiKey: string; baseUrl: string }
   return catalogCache.get(cacheKey(def, cred))?.entries.find((e) => e.id === modelId);
 }
 
-function providerClient(def: ProviderDef, cred: { apiKey: string; baseUrl: string }) {
-  return createOpenAI({
+type LanguageModelV3 = Exclude<LanguageModel, string>;
+
+/** Builds models for one provider: OpenAI via the Responses API and Anthropic via the
+ *  Messages API (native SDKs); every other provider through OpenAI Chat Completions. */
+function providerClient(
+  def: ProviderDef,
+  cred: { apiKey: string; baseUrl: string },
+): (upstreamId: string) => LanguageModelV3 {
+  if (def.native === "anthropic") {
+    const client = createAnthropic({ baseURL: cred.baseUrl, apiKey: cred.apiKey });
+    return (id) => client.languageModel(id);
+  }
+  const client = createOpenAI({
     baseURL: cred.baseUrl,
     apiKey: cred.apiKey,
     name: def.id,
     headers: def.headers?.(cred.apiKey),
   });
+  // Responses only on OpenAI's own hosts (api.openai.com and its us/eu residency subdomains): a proxy or vLLM behind OPENAI_BASE_URL may speak just Chat Completions.
+  if (def.native === "openai" && URL.canParse(cred.baseUrl) && /(^|\.)api\.openai\.com$/.test(new URL(cred.baseUrl).hostname)) {
+    // store:false keeps OpenAI from retaining every call and makes the SDK send history inline, not as item_reference.
+    return (id) =>
+      wrapLanguageModel({
+        model: client.responses(id),
+        middleware: defaultSettingsMiddleware({ settings: { providerOptions: { openai: { store: false } } } }),
+      });
+  }
+  return (id) => client.chat(id);
 }
 
 function toModelConfig(
-  def: ProviderDef,
   entry: ModelCatalogEntry,
-  client: ReturnType<typeof createOpenAI>,
+  client: ReturnType<typeof providerClient>,
 ): ModelConfig {
   return {
     ...entry,
-    model: client.chat(bareModelId(entry.id)),
+    model: client(bareModelId(entry.id)),
     costPer1kInputTokens: 0,
     costPer1kOutputTokens: 0,
     maxTokens: 4096,
@@ -421,7 +444,7 @@ export async function listModels(
       try {
         const entries = await fetchCatalog(def, cred);
         const client = providerClient(def, cred);
-        for (const e of entries) models.push(toModelConfig(def, e, client));
+        for (const e of entries) models.push(toModelConfig(e, client));
         return { id: def.id, label: def.label, configured: true, modelCount: entries.length };
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
@@ -486,7 +509,7 @@ export function getModel(modelId: string, creds: ProviderCreds = {}, hostTools =
     contextWindow: def.defaultContextWindow,
     supportsTools: true,
     supportsVision: def.vision || getSupportsVision(upstreamId),
-    supportsThinking: getSupportsThinking(upstreamId),
+    supportsThinking: getSupportsThinking(upstreamId) || supportsReasoning(modelId),
   };
-  return toModelConfig(def, entry, providerClient(def, cred));
+  return toModelConfig(entry, providerClient(def, cred));
 }

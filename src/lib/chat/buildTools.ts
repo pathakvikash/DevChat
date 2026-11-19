@@ -362,6 +362,8 @@ export interface SubAgentToolOptions {
   mode: ToolMode;
   workingFolder?: string | null;
   providerOptions?: RunSubAgentOptions["providerOptions"];
+  /** The route's per-candidate output cap, passed on so a helper's reasoning has room. */
+  maxTokens?: number;
   /** Helpers allowed to run in one step: 3 for API models, 1 for CLI models. */
   maxParallel: number;
   /** Helper ids running in this request. runAgent and messageAgent share one set, so a helper runs once at a time. */
@@ -500,6 +502,7 @@ async function* runChildCard(
     workingFolder: opts.workingFolder,
     tools,
     providerOptions: opts.providerOptions,
+    maxTokens: opts.maxTokens,
     abortSignal: signal,
     onProgress,
     resume,

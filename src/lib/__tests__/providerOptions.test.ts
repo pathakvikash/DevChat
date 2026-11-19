@@ -15,6 +15,9 @@ describe("providerOptionsFor", () => {
   it("gives a hosted model no options", () => {
     expect(providerOptionsFor(base)).toBeUndefined();
     expect(providerOptionsFor({ ...base, modelId: "openai/gpt-4o" })).toBeUndefined();
+    // Hosted reasoning models also get none here: the chat route falls back to reasoningPlan() only then,
+    // so Ollama and CLI options always win and workflow cards stay unchanged.
+    expect(providerOptionsFor({ ...base, modelId: "openai/gpt-5.6-sol", reasoningEffort: "high" })).toBeUndefined();
   });
 
   it("gives Ollama the sampling window exactly as the chat route built it", () => {
