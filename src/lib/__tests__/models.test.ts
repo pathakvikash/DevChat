@@ -48,6 +48,15 @@ describe("getModel routing", () => {
     expect(String((fetchMock.mock.calls[0] as unknown[])[0])).toBe("http://vllm.test/v1/chat/completions");
   });
 
+  it("takes OpenAI's residency hosts native, and a scheme-less or lookalike base URL falls back to chat", () => {
+    const provider = (baseUrl: string) => (getModel("openai/m", { openai: { apiKey: "k", baseUrl } }).model as { provider: string }).provider;
+    expect(provider("https://us.api.openai.com/v1")).toBe("openai.responses");
+    expect(provider("https://eu.api.openai.com/v1")).toBe("openai.responses");
+    expect(provider("api.openai.com/v1")).toMatch(/\.chat$/); // not a URL: must not throw
+    expect(provider("https://api.openai.com.evil.test/v1")).toMatch(/\.chat$/);
+    expect(provider("https://notapi.openai.com/v1")).toMatch(/\.chat$/);
+  });
+
   it("never stores OpenAI Responses calls and sends history inline, not as item_reference", async () => {
     const fetchMock = vi.fn(async () => new Response("{}", { status: 400 }));
     vi.stubGlobal("fetch", fetchMock);

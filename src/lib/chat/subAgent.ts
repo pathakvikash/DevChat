@@ -46,6 +46,8 @@ export interface RunSubAgentOptions {
   tools: Record<string, Tool>;
   /** The parent's provider options (CLI cwd and access come through here). */
   providerOptions?: ProviderOptions;
+  /** The parent's output cap for this turn. A hosted helper still reasons at its default effort, so it gets at least this much. */
+  maxTokens?: number;
   abortSignal: AbortSignal;
   onProgress?: (event: SubAgentProgress) => void;
   /** The default is 5 minutes; tests pass a short one. */
@@ -239,7 +241,7 @@ export async function runSubAgent(opts: RunSubAgentOptions): Promise<SubAgentRes
         : undefined,
       stopWhen: stepCountIs(SUB_AGENT_MAX_STEPS),
       abortSignal: signal,
-      maxOutputTokens: model.maxTokens,
+      maxOutputTokens: Math.max(model.maxTokens, opts.maxTokens ?? 0),
       ...(providerOptions ? { providerOptions } : {}),
     });
   } catch (err) {

@@ -401,6 +401,7 @@ export async function POST(req: Request) {
         mode: toolMode,
         workingFolder: folder,
         providerOptions,
+        maxTokens,
         maxParallel: cliProvider ? 1 : 3,
         activeChildren: new Set<string>(),
       };

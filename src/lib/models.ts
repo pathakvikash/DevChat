@@ -393,8 +393,8 @@ function providerClient(
     name: def.id,
     headers: def.headers?.(cred.apiKey),
   });
-  // Responses only on OpenAI's own host: a proxy or vLLM behind OPENAI_BASE_URL may speak just Chat Completions.
-  if (def.native === "openai" && new URL(cred.baseUrl).hostname === "api.openai.com") {
+  // Responses only on OpenAI's own hosts (api.openai.com and its us/eu residency subdomains): a proxy or vLLM behind OPENAI_BASE_URL may speak just Chat Completions.
+  if (def.native === "openai" && URL.canParse(cred.baseUrl) && /(^|\.)api\.openai\.com$/.test(new URL(cred.baseUrl).hostname)) {
     // store:false keeps OpenAI from retaining every call and makes the SDK send history inline, not as item_reference.
     return (id) =>
       wrapLanguageModel({

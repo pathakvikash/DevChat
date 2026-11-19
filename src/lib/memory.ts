@@ -1,4 +1,3 @@
-
 import { generateText } from "ai";
 import { temperatureFor } from "./reasoning";
 import { prisma } from "./db";
