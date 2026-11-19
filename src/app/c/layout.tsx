@@ -20,7 +20,7 @@ const SIDEBAR_WIDTH = 256;
 const widthKey = (n: number) => `vas:split:widths:${n}`;
 
 function LayoutInner({ children }: { children: ReactNode }) {
-  const { isOpen, close, collapsed, toggleCollapsed } = useSidebar();
+  const { isOpen, close, collapsed } = useSidebar();
 
   return (
     <div className="relative flex h-screen bg-[var(--background)]">
@@ -55,18 +55,6 @@ function LayoutInner({ children }: { children: ReactNode }) {
       >
         <Sidebar />
       </motion.div>
-
-      {/* Desktop collapse/expand handle */}
-      <motion.button
-        onClick={toggleCollapsed}
-        animate={{ left: collapsed ? 8 : SIDEBAR_WIDTH - 12 }}
-        transition={{ duration: 0.2, ease: "easeInOut" }}
-        className="hidden md:flex items-center justify-center absolute top-1/2 -translate-y-1/2 z-30 size-6 rounded-full glass-button text-zinc-400 hover:text-zinc-100 transition-colors"
-        title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-        aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-      >
-        {collapsed ? <ChevronRight size={14} /> : <ChevronLeft size={14} />}
-      </motion.button>
 
       <div className="flex-1 flex flex-col min-w-0">
         <SplitPaletteActions />

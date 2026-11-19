@@ -2,7 +2,8 @@
 
 import { motion, AnimatePresence } from "framer-motion";
 import { X } from "lucide-react";
-import type { ReactNode } from "react";
+import { useContext, type ReactNode } from "react";
+import { PanelDockContext } from "@/app/components/panel/PanelDockContext";
 
 interface SidePanelProps {
   isOpen: boolean;
@@ -43,6 +44,20 @@ export default function SidePanel({
   children,
   footer,
 }: SidePanelProps) {
+  const docked = useContext(PanelDockContext);
+  if (docked) {
+    if (!isOpen) return null;
+    return (
+      <div className="flex h-full min-h-0 flex-col">
+        <header className="border-b border-[var(--glass-border)] px-4 py-3">
+          <h2 className="text-sm font-semibold text-[var(--foreground)]">{title}</h2>
+          {subtitle && <p className="mt-0.5 text-xs text-zinc-400">{subtitle}</p>}
+        </header>
+        <div className="flex-1 space-y-6 overflow-y-auto px-4 py-4">{children}</div>
+        {footer && <div className="border-t border-[var(--glass-border)] px-4 py-3">{footer}</div>}
+      </div>
+    );
+  }
   return (
     <AnimatePresence>
       {isOpen && (

@@ -152,6 +152,7 @@ export default function ModelSelector({
   return (
     <div className="relative" ref={containerRef}>
       <button
+        data-model-picker
         onClick={() => {
           if (disabled) return;
           setSelectedProvider(currentModelInfo?.provider ?? null);

@@ -49,6 +49,7 @@ export default function WorkingFolderPicker({ value, onChange, disabled, label, 
         <FolderOpen size={13} className={`shrink-0 ${stale ? "text-amber-400" : value ? "text-emerald-400" : "text-zinc-500"}`} />
         <select
           aria-label={label ?? "Working folder"}
+          data-folder-picker
           value={value ?? ""}
           onChange={(e) => {
             if (e.target.value === CHOOSE) {

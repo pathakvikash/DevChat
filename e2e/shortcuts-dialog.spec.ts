@@ -20,7 +20,7 @@ test("the header's More menu opens the dialog and the close button closes it", a
 
   // The sidebar rows have a "More actions" button too, so start from the header's title.
   await page.getByRole("heading", { level: 1 }).locator("xpath=..").getByTitle("More actions").click();
-  await page.getByRole("button", { name: "Shortcuts" }).click();
+  await page.getByRole("menuitem", { name: "Shortcuts" }).click();
   await expect(heading(page)).toBeVisible();
 
   await heading(page).locator("xpath=../..").getByRole("button").click();
