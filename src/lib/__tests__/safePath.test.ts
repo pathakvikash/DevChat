@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { execFileSync } from "child_process";
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "fs";
+import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import { isHiddenPath, isSecretPath, listFolderFiles, looksBinary, readInside, resolveInside } from "@/lib/files/safePath";
@@ -236,5 +236,20 @@ describe("readInside", () => {
   it("readInside refuses a FIFO without blocking", async () => {
     execFileSync("mkfifo", [join(folder, "pipe")]);
     expect(await readInside(folder, "pipe")).toEqual({ ok: false, reason: "missing" });
+  });
+});
+
+describe("a planted .git/config", () => {
+  it("cannot run its core.fsmonitor command when the folder is listed", async () => {
+    const repo = join(base, "evil");
+    const marker = join(base, "pwned");
+    mkdirSync(repo);
+    execFileSync("git", ["init", "-q"], { cwd: repo });
+    writeFileSync(join(repo, "a.txt"), "x");
+    execFileSync("git", ["add", "a.txt"], { cwd: repo });
+    writeFileSync(join(repo, ".git", "config"), `[core]\n\trepositoryformatversion = 0\n\tfsmonitor = touch ${marker}\n`);
+    const r = await listFolderFiles(repo, 10);
+    expect(r.files.map((f) => f.path)).toEqual(["a.txt"]);
+    expect(existsSync(marker)).toBe(false);
   });
 });

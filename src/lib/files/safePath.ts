@@ -119,7 +119,8 @@ export async function listFolderFiles(
 async function gitFiles(folder: string, sub: string): Promise<string[] | null> {
   try {
     // Literal pathspecs: a folder named like a glob or ":(magic)" is just a name.
-    const args = ["--literal-pathspecs", "ls-files", "-z", ...(sub ? ["--", sub] : [])];
+    // core.fsmonitor=false: a repo's own config could otherwise run a command during ls-files.
+    const args = ["-c", "core.fsmonitor=false", "--literal-pathspecs", "ls-files", "-z", ...(sub ? ["--", sub] : [])];
     const { stdout } = await run("git", args, { cwd: folder, maxBuffer: 64 * 1024 * 1024 });
     return stdout.split("\0").filter(Boolean);
   } catch {
