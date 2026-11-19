@@ -132,7 +132,7 @@ export async function compressConversation(
       ...temperatureFor(effectiveModelId, 0.3),
       abortSignal: signal,
       maxRetries: timeoutMs ? 0 : undefined,
-      ...(isOllama ? { providerOptions: { ollama: { num_predict: 2048, temperature: 0.3 } } } : {}),
+      ...(isOllama ? { providerOptions: { ollama: { options: { num_predict: 2048, temperature: 0.3 } } } } : {}),
     });
 
     if (!result.text || result.text.trim().length === 0) {

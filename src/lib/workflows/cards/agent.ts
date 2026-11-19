@@ -224,7 +224,7 @@ export const agentCard: CardImpl = {
     if (cwd && !cli) Object.assign(tools, folderTools(cwd, model.contextWindow));
     const providerOptions = providerOptionsFor({
       modelId: model.id,
-      numCtx: model.contextWindow,
+      numCtx: contextWindowFor(model.id, model),
       cwd,
       access,
       conversationId: "",

@@ -2,6 +2,7 @@ import { createHash } from "crypto";
 import { defaultSettingsMiddleware, wrapLanguageModel, type LanguageModel } from "ai";
 import { createOpenAI } from "@ai-sdk/openai";
 import { createAnthropic } from "@ai-sdk/anthropic";
+import { OLLAMA_DEFAULT_CTX } from "@/lib/chat/contextBudget";
 import { createOllama } from "ollama-ai-provider-v2";
 import {
   PROVIDERS,
@@ -129,6 +130,30 @@ let ollamaModelInfoCache: OllamaModelInfo[] = [];
 let ollamaModelsFetchedAt = 0;
 const OLLAMA_CACHE_TTL = 30_000; // 30 seconds
 
+/** ollama-ai-provider-v2 has no case for `execution-denied`, so Ollama would get an empty tool message. Send the reason as error text, as older history already does. */
+export function deniedAsErrorText<T extends Array<{ role: string; content: any }>>(prompt: T): T {
+  return prompt.map((m) =>
+    m.role !== "tool"
+      ? m
+      : {
+          ...m,
+          content: m.content.map((c: any) =>
+            c?.output?.type === "execution-denied"
+              ? { ...c, output: { type: "error-text", value: c.output.reason ?? "Tool call execution denied." } }
+              : c,
+          ),
+        },
+  ) as T;
+}
+
+/** Calls that set no `num_ctx` (title, suggestions, memory, compression) get the chat's default, so Ollama doesn't reload the model between them. */
+export function withDefaultNumCtx<P extends { providerOptions?: any }>(params: P, contextWindow: number): P {
+  const ollamaOpts = params.providerOptions?.ollama ?? {};
+  if (ollamaOpts.options?.num_ctx != null) return params;
+  const num_ctx = Math.min(contextWindow, OLLAMA_DEFAULT_CTX);
+  return { ...params, providerOptions: { ...params.providerOptions, ollama: { ...ollamaOpts, options: { ...ollamaOpts.options, num_ctx } } } };
+}
+
 function createOllamaModelConfig(modelInfo: OllamaModelInfo): ModelConfig {
   const modelName = modelInfo.name;
   const contextWindow =
@@ -137,7 +162,10 @@ function createOllamaModelConfig(modelInfo: OllamaModelInfo): ModelConfig {
     id: `ollama/${modelName}`,
     name: modelName.replace(":latest", ""),
     provider: "Ollama",
-    model: ollama(modelName),
+    model: wrapLanguageModel({
+      model: ollama(modelName),
+      middleware: { specificationVersion: "v3", transformParams: async ({ params }) => withDefaultNumCtx({ ...params, prompt: deniedAsErrorText(params.prompt) }, contextWindow) },
+    }),
     costPer1kInputTokens: 0,
     costPer1kOutputTokens: 0,
     maxTokens: 4096,

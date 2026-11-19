@@ -244,7 +244,7 @@ describe("helpers in Ask and Plan only read", () => {
       expect(helperProviderOptions(parent, mode)).toEqual({ "claude-code": { cwd: "/w", access: "chat", conversationId: "", allowedTools: [], effort: "" } });
     }
     expect(helperProviderOptions(parent, "agent")).toBe(parent);
-    const ollama = { ollama: { num_ctx: 4096 } } as any;
+    const ollama = { ollama: { options: { num_ctx: 4096 } } } as any;
     expect(helperProviderOptions(ollama, "ask")).toEqual(ollama);
     expect(helperProviderOptions(undefined, "ask")).toBeUndefined();
     // Hosted reasoning options are dropped: a helper's output cap is small.
