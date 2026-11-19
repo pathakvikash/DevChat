@@ -300,15 +300,19 @@ export function codexParser(): (line: string) => CliEvent[] {
   };
 }
 
+/** Where a CLI runs when the chat has no folder. */
+const CLI_SCRATCH = join(tmpdir(), "devchat-cli");
+
 // Claude Code expands `@path` mentions in -p input (even with --tools ""), which would let chat text pull in local
-// files. A zero-width space after the @ stops that. Only a mention that could be a file is touched: one starting
-// with / ~ ./ ../, or naming something that exists under the folder the CLI runs in. Emails, decorators and scoped
-// packages stay as written, so code the model copies back into a file is not corrupted.
+// files. A zero-width space after the @ stops that. This mirrors its own parser (2.1.326): a mention starts the text
+// or follows whitespace or 。、？！, may be quoted (@"a b"), and loses a #L suffix and trailing non-word characters.
+// Only one that could be a file is touched: it starts with / ~ . , contains .., or exists under the folder the CLI
+// runs in. Emails, decorators and `"@/lib/db"` imports stay as written, so code the model copies back is not corrupted.
 export const defuseMentions = (text: string, cwd?: string) =>
-  text.replace(/(^|[\s(\["'`])@([^\s@]+)/g, (m, lead: string, path: string) => {
-    const p = path.replace(/[.,;:!?)\]}'"`]+$/, "");
-    const fileLike = /^(\/|~|\.\.?\/)/.test(p) || (!!cwd && !!p && existsSync(resolve(cwd, p)));
-    return fileLike ? `${lead}@\u200b${path}` : m;
+  text.replace(/(^|[\s。、？！])@("[^"]+"|\S+)/g, (m, lead: string, raw: string) => {
+    const p = raw.replace(/^"|"$/g, "").replace(/#.*$/, "").replace(/\W+$/, "");
+    const fileLike = /^[/~.]/.test(p) || p.includes("..") || (!!cwd && !!p && existsSync(resolve(cwd, p)));
+    return fileLike ? `${lead}@\u200b${raw}` : m;
   });
 
 const withSystem = (system: string, user: string) => (system ? `System instructions:\n${system}\n\n${user}` : user);
@@ -355,11 +359,11 @@ export const CLI_PROVIDERS: readonly CliProviderDef[] = [
                 ? [...(offline ? [...allow, "--strict-mcp-config"] : ["--tools", "default"]), "--permission-mode", "default", "--permission-prompt-tool", "stdio"]
                 : ["--tools", "Read", "Glob", "Grep", ...(offline ? ["--strict-mcp-config"] : ["WebSearch", "WebFetch"]), ...(access === "plan" ? [] : ["--permission-mode", "manual"])]),
           ...(access === "plan" ? ["--permission-mode", "plan"] : []),
-          ...(system ? ["--system-prompt", defuseMentions(system, cwd)] : []),
+          ...(system ? ["--system-prompt", defuseMentions(system, cwd || CLI_SCRATCH)] : []),
           ...(model !== "default" ? ["--model", model] : []),
           ...(effort ? ["--effort", effort] : []),
         ],
-        stdin: bridged ? userMessageLine(defuseMentions(user, cwd)) : defuseMentions(user, cwd),
+        stdin: bridged ? userMessageLine(defuseMentions(user, cwd || CLI_SCRATCH)) : defuseMentions(user, cwd || CLI_SCRATCH),
         holdStdin: bridged,
         cwd,
       };
@@ -1098,7 +1102,7 @@ function runCli(
         );
         child = run.proc;
       } else {
-        const scratch = join(tmpdir(), "devchat-cli");
+        const scratch = CLI_SCRATCH;
         await mkdir(scratch, { recursive: true });
         // Already cancelled (also while the folder was made): don't start a process nobody will read.
         if (signal?.aborted) return controller.error(signal.reason ?? new Error("Aborted"));

@@ -508,12 +508,21 @@ describe("working folder and access", () => {
   it("stops chat text from expanding @path mentions in Claude Code, but leaves code and emails alone", () => {
     const dir = mkdtempSync(join(tmpdir(), "mention-"));
     writeFileSync(join(dir, "secrets.txt"), "x");
-    const text = 'read @secrets.txt @/etc/hosts @./x @~/.ssh/id (@../up) mail me@x.io @app.route import "@ai-sdk/openai" @ alone';
-    const stdin = claude.invoke({ ...base, user: text, cwd: dir }).stdin!;
-    for (const d of ["@secrets.txt", "@/etc/hosts", "@./x", "@~/.ssh/id", "@../up"]) expect(stdin).toContain(d.replace("@", "@\u200b"));
-    for (const keep of ["me@x.io", " @app.route", '"@ai-sdk/openai"', "@ alone"]) expect(stdin).toContain(keep);
-    // Without a folder only path-shaped mentions are touched, and the system prompt gets the same treatment.
+    const defused = [
+      "@secrets.txt", "@/etc/hosts", "@./x", "@~/.ssh/id", '@"/etc/hosts"', '@"~/.ssh/id_rsa"', "。@/etc/hosts",
+      "@sub/../../../../etc/hosts#L1", "@sub/../x*", "@.env#L1", "@.env#L1-3",
+    ];
+    const kept = [
+      "(@../up)", "me@x.io", " @app.route", '"@ai-sdk/openai"', 'import { db } from "@/lib/db"', "'@/components/Foo'",
+      '@"hello"', "@ alone", "@nope.txt",
+    ];
+    // Each probe sits after a space, so the mention parser would see it.
+    const stdin = claude.invoke({ ...base, user: [...defused, ...kept].map((t) => `x ${t}`).join("\n"), cwd: dir }).stdin!;
+    for (const d of defused) expect(stdin).toContain(d.replace("@", "@\u200b"));
+    for (const k of kept) expect(stdin).toContain(k);
+    // Without a folder the check runs in the scratch folder, so only path-shaped mentions are touched.
     expect(claude.invoke({ ...base, user: "@secrets.txt" }).stdin).toBe("@secrets.txt");
+    expect(claude.invoke({ ...base, user: "@/etc/hosts" }).stdin).toBe("@\u200b/etc/hosts");
     const args = claude.invoke({ ...base, system: "KB: @/etc/passwd and @app.route", cwd: dir }).args;
     expect(args[args.indexOf("--system-prompt") + 1]).toBe("KB: @\u200b/etc/passwd and @app.route");
     rmSync(dir, { recursive: true, force: true });
