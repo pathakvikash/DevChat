@@ -128,6 +128,8 @@ describe("presentPlan and stale cards", () => {
     expect(hasApprovalCards(undefined)).toBe(false);
     // executeCode never reaches approval-responded, so it must not suppress the clarification's own send.
     expect(hasApprovalCards([{ type: "tool-executeCode", state: "approval-requested" }])).toBe(false);
+    // A denied executeCode card goes through addToolApprovalResponse, so the SDK sends.
+    expect(hasApprovalCards([{ type: "tool-executeCode", state: "approval-responded" }])).toBe(true);
   });
 
   it("titles a card by its tool", () => {

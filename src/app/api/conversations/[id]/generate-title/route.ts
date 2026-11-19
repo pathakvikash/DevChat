@@ -50,7 +50,7 @@ export async function POST(
       prompt,
       temperature: 0.5,
       abortSignal: AbortSignal.timeout(60_000), // a CLI model has no Stop button here
-      ...(isOllama ? { providerOptions: { ollama: { num_predict: 20, temperature: 0.5 } } } : {}),
+      ...(isOllama ? { providerOptions: { ollama: { options: { num_predict: 20, temperature: 0.5 } } } } : {}),
     });
 
     const title = (result.text || "").trim().replace(/^["']|["']$/g, "") || "New Chat";

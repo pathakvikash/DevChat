@@ -1,6 +1,7 @@
 import { createHash } from "crypto";
 import { createOpenAI } from "@ai-sdk/openai";
 import { wrapLanguageModel } from "ai";
+import { OLLAMA_DEFAULT_CTX } from "@/lib/chat/contextBudget";
 import { createOllama } from "ollama-ai-provider-v2";
 import {
   PROVIDERS,
@@ -143,6 +144,14 @@ export function deniedAsErrorText<T extends Array<{ role: string; content: any }
   ) as T;
 }
 
+/** Calls that set no `num_ctx` (title, suggestions, memory, compression) get the chat's default, so Ollama doesn't reload the model between them. */
+export function withDefaultNumCtx<P extends { providerOptions?: any }>(params: P, contextWindow: number): P {
+  const ollamaOpts = params.providerOptions?.ollama ?? {};
+  if (ollamaOpts.options?.num_ctx != null) return params;
+  const num_ctx = Math.min(contextWindow, OLLAMA_DEFAULT_CTX);
+  return { ...params, providerOptions: { ...params.providerOptions, ollama: { ...ollamaOpts, options: { ...ollamaOpts.options, num_ctx } } } };
+}
+
 function createOllamaModelConfig(modelInfo: OllamaModelInfo): ModelConfig {
   const modelName = modelInfo.name;
   const contextWindow =
@@ -153,7 +162,7 @@ function createOllamaModelConfig(modelInfo: OllamaModelInfo): ModelConfig {
     provider: "Ollama",
     model: wrapLanguageModel({
       model: ollama(modelName),
-      middleware: { specificationVersion: "v3", transformParams: async ({ params }) => ({ ...params, prompt: deniedAsErrorText(params.prompt) }) },
+      middleware: { specificationVersion: "v3", transformParams: async ({ params }) => withDefaultNumCtx({ ...params, prompt: deniedAsErrorText(params.prompt) }, contextWindow) },
     }),
     costPer1kInputTokens: 0,
     costPer1kOutputTokens: 0,

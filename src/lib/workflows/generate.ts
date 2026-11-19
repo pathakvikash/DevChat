@@ -266,7 +266,7 @@ export async function generateFlow(o: GenerateOptions): Promise<{ graph: Workflo
   const defaultModel = o.defaultModel ?? o.current?.defaultModel ?? o.model.id;
   if (isCodexModelId(defaultModel)) throw new GenerateError(CODEX_BLOCKED);
   // A design run only writes JSON: a CLI model gets no network tools.
-  const providerOptions = providerOptionsFor({ modelId: o.model.id, numCtx: o.model.contextWindow, cwd: "", access: "chat", conversationId: "", userId: o.userId ?? "", allowedTools: [], web: false });
+  const providerOptions = providerOptionsFor({ modelId: o.model.id, numCtx: contextWindowFor(o.model.id, o.model), cwd: "", access: "chat", conversationId: "", userId: o.userId ?? "", allowedTools: [], web: false });
   const ask = async () => {
     o.signal?.throwIfAborted();
     const { text } = await generateText({ model: o.model.model, system, messages, providerOptions, abortSignal: o.signal });

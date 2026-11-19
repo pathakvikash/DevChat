@@ -525,6 +525,21 @@ export function useChatPane(conversationId: string, { focused, kind, searchProvi
     }
   }
 
+  /** After Stop settled a running card: the server saves once it sees the disconnect, so a GET that wins the race returns a
+   *  live card whose id is already claimed (dead buttons). Apply a snapshot only once its last message has no card; retry a few times, else keep this state. */
+  async function reloadAfterStop() {
+    for (let i = 0; i < 4 && !loadingRef.current; i++) {
+      let applied = false;
+      await refreshConversationAndMessages((conv) => {
+        const last = buildMessagesFromConversation(conv as RawConversation).at(-1) as { parts?: any[] } | undefined;
+        applied = !loadingRef.current && !(last?.parts ?? []).some((p) => p?.state === "approval-requested" || p?.state === "approval-responded");
+        return applied;
+      });
+      if (applied) return;
+      await new Promise((r) => setTimeout(r, 300));
+    }
+  }
+
   /** Stop: a card still open is denied in the transcript and its id is claimed, so Allow can't run it. */
   function stopReply() {
     for (const m of messages) {
@@ -532,7 +547,7 @@ export function useChatPane(conversationId: string, { focused, kind, searchProvi
         if (p?.state === "approval-requested" && p.approval?.id) answeredRef.current.add(p.approval.id);
       }
     }
-    if (messages.some((m) => ((m.parts ?? []) as any[]).some((p) => p?.state === "approval-responded"))) reloadAfterStopRef.current = true;
+    if (isLoading && ((messages.at(-1)?.parts ?? []) as any[]).some((p) => p?.state === "approval-responded")) reloadAfterStopRef.current = true;
     setMessages((prev) =>
       prev.map((m) => (m.parts?.some((p: any) => p?.state === "approval-requested" || p?.state === "approval-responded") ? { ...m, parts: denyOpenApprovals(m.parts as any[]) } : m)) as typeof prev,
     );
@@ -576,9 +591,9 @@ export function useChatPane(conversationId: string, { focused, kind, searchProvi
     loadingRef.current = false;
     if (reloadAfterStopRef.current) {
       reloadAfterStopRef.current = false;
-      void refreshConversationAndMessages(() => !loadingRef.current);
+      void reloadAfterStop();
     }
-    const stopped =!!(finish?.isAbort || finish?.isError);
+    const stopped = !!(finish?.isAbort || finish?.isError);
     const continues = !!(finish?.message && shouldAutoContinue(finish.message.parts as AnyPart[]));
     // Queued messages still waiting: after a Stop or an error they go back to the input; after a normal end
     // they go out as the next message. A reply that auto-continues keeps them.

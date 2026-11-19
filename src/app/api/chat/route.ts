@@ -344,7 +344,7 @@ export async function POST(req: Request) {
     // Ollama context window before the request if we're approaching the
     // current tier limit.
     if (isOllama && conversationId) {
-      const currentCtx = contextLength ?? modelConfig.contextWindow;
+      const currentCtx = contextWindowFor(servedModel, modelConfig, contextLength);
       const promptTokens = estimatePromptTokens(
         finalSystemPrompt,
         sanitizedMessages,
@@ -374,7 +374,7 @@ export async function POST(req: Request) {
     const cliCwd = folder ?? "";
     const providerOptions = providerOptionsFor({
       modelId: servedModel,
-      numCtx: contextLength ?? modelConfig.contextWindow,
+      numCtx: contextWindowFor(servedModel, modelConfig, contextLength),
       temperature,
       topP,
       maxTokens,
@@ -731,11 +731,11 @@ export async function POST(req: Request) {
           conversationId &&
           errMsg.includes("available context size")
         ) {
-          const nextCtx = getNextContextTier(contextLength ?? modelConfig.contextWindow);
+          const nextCtx = getNextContextTier(contextWindowFor(servedModel, modelConfig, contextLength));
           if (nextCtx) {
             contextLength = nextCtx;
             // The same object the stream's providerOptions holds, so the retry sees the larger window.
-            if (providerOptions && "ollama" in providerOptions && providerOptions.ollama?.options) providerOptions.ollama.options.num_ctx = nextCtx;
+            if (providerOptions && "ollama" in providerOptions && providerOptions.ollama?.options) (providerOptions.ollama.options as { num_ctx?: number }).num_ctx = nextCtx;
             console.log(
               `[ctx] ${conversationId} context overflow — retrying with ctx=${nextCtx}`,
             );
