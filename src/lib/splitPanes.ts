@@ -33,6 +33,13 @@ export function serializePanes(ids: string[], focus: string, keep?: URLSearchPar
   return `/c/${first}${parts.length ? `?${parts.join("&")}` : ""}`;
 }
 
+/** The query params to keep when the panes change. `?q=` and the panel's params belong to the first chat, so they go when it is replaced. */
+export function keepParamsForPanes(params: URLSearchParams, firstBefore: string | undefined, firstAfter: string | undefined): URLSearchParams {
+  const keep = new URLSearchParams(params.toString());
+  if (firstAfter !== firstBefore) for (const key of ["q", "panel", "item", "panelOf"]) keep.delete(key);
+  return keep;
+}
+
 /** Opening limit by window width: 3 from 1440px, 2 from 768px, else 1. */
 export function maxPanesForWidth(windowPx: number): 1 | 2 | 3 {
   if (windowPx < 768) return 1;

@@ -26,6 +26,7 @@ import {
   nextPane,
   openPane,
   parsePanes,
+  keepParamsForPanes,
   replaceChat,
   serializePanes,
   writerConflicts,
@@ -278,8 +279,7 @@ export function SplitViewProvider({ children }: { children: React.ReactNode }) {
   /** Writes the new panes to the URL. Adding or removing a pane replaces the entry; focus only uses replaceState. */
   const commit = useCallback(
     (next: { ids: string[]; focus: string }) => {
-      const keep = new URLSearchParams(searchParams.toString());
-      if (next.ids[0] !== ids[0]) keep.delete("q"); // ?q= applies to the first pane only
+      const keep = keepParamsForPanes(new URLSearchParams(searchParams.toString()), ids[0], next.ids[0]);
       const href = serializePanes(next.ids, next.focus, keep);
       if (href === window.location.pathname + window.location.search) return;
       if (next.ids.join(",") !== idsKey) router.replace(href, { scroll: false });
