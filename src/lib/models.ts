@@ -1,5 +1,5 @@
 import { createHash } from "crypto";
-import { defaultSettingsMiddleware, wrapLanguageModel, type LanguageModel } from "ai";
+import { defaultSettingsMiddleware, extractReasoningMiddleware, wrapLanguageModel, type LanguageModel } from "ai";
 import { createOpenAI } from "@ai-sdk/openai";
 import { createAnthropic } from "@ai-sdk/anthropic";
 import { OLLAMA_DEFAULT_CTX } from "@/lib/chat/contextBudget";
@@ -433,6 +433,11 @@ function providerClient(
         middleware: defaultSettingsMiddleware({ settings: { providerOptions: { openai: { store: false } } } }),
       });
   }
+  if (def.id === "lmstudio") {
+    // withReasoningContent turns reasoning_content into <think> text; this turns that text into reasoning parts.
+    const middleware = extractReasoningMiddleware({ tagName: "think" });
+    return (id) => wrapLanguageModel({ model: client.chat(id), middleware });
+  }
   return (id) => client.chat(id);
 }
 
@@ -471,13 +476,21 @@ export async function listModels(
   const status = await Promise.all(
     PROVIDERS.map(async (def): Promise<ProviderStatus> => {
       const cred = creds[def.id];
-      if (!cred) return { id: def.id, label: def.label, configured: false, modelCount: 0 };
+      const unconfigured: ProviderStatus = { id: def.id, label: def.label, configured: false, modelCount: 0 };
+      if (!cred) return unconfigured;
+      // LM Studio's default localhost URL is not a real configuration: it is only tried when the
+      // user or operator set a URL or key. On Vercel nothing can be on localhost, so no fetch at all.
+      const defaultLocal = def.id === "lmstudio" && cred.baseUrl === def.baseUrl;
+      if (defaultLocal && process.env.VERCEL) return unconfigured;
+      const implicit = defaultLocal && cred.apiKey === def.fallbackKey;
       try {
         const entries = await fetchCatalog(def, cred);
         const client = providerClient(def, cred);
         for (const e of entries) models.push(toModelConfig(e, client));
         return { id: def.id, label: def.label, configured: true, modelCount: entries.length };
       } catch (error) {
+        // Nothing explicitly configured and no server answering: quietly not configured, not an error.
+        if (implicit) return unconfigured;
         const message = error instanceof Error ? error.message : String(error);
         console.warn(`[models] ${def.label} unavailable: ${message}`);
         const shown = error instanceof CatalogError ? message : "Could not reach this provider";
