@@ -11,7 +11,12 @@ test("the settings page loads with its sections and the saved default model", as
   const defaultModel = page.locator("select").first();
   await expect(defaultModel).toHaveValue("mock/echo");
   await expect(defaultModel.locator("option", { hasText: "Mock Slow" })).toHaveCount(1);
-  await expect(page.getByText("Not configured")).toHaveCount(PROVIDERS.length); // no provider API keys
+  // No provider API keys. LM Studio is probed at its default local URL, so it reads "N models available"
+  // on a machine that happens to run LM Studio; every other provider is "Not configured".
+  const lmstudio = page.getByText("LM Studio", { exact: true }).locator("xpath=following-sibling::*[1]");
+  await expect(lmstudio).toHaveText(/Not configured|\d+ models? available/);
+  const lmNotConfigured = (await lmstudio.textContent()) === "Not configured" ? 1 : 0;
+  await expect(page.getByText("Not configured")).toHaveCount(PROVIDERS.length - 1 + lmNotConfigured);
 });
 
 test("Save Settings confirms and the choice sticks", async ({ page, request }) => {
