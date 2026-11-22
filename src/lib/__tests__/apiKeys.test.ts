@@ -13,6 +13,7 @@ beforeEach(() => {
   saved.mockResolvedValue({});
   for (const p of PROVIDERS) vi.stubEnv(p.envKey, "");
   vi.stubEnv("CUSTOM_BASE_URL", "");
+  vi.stubEnv("LMSTUDIO_BASE_URL", "");
 });
 afterEach(() => vi.unstubAllEnvs());
 
@@ -47,5 +48,28 @@ describe("resolveProviderCreds and the server's env key", () => {
       expect(cred?.apiKey, p.id).not.toBe("operator-key");
       expect(cred?.baseUrl, p.id).toBe("https://attacker.example/v1");
     }
+  });
+});
+
+describe("LM Studio", () => {
+  it("defaults to localhost with the placeholder key when nothing is configured", async () => {
+    expect((await resolveProviderCreds("u1")).lmstudio).toEqual({ apiKey: "lm-studio", baseUrl: "http://localhost:1234/v1" });
+  });
+
+  it("uses the server's env base URL and key when set", async () => {
+    vi.stubEnv("LMSTUDIO_BASE_URL", "http://gpu-box:1234/v1");
+    vi.stubEnv("LMSTUDIO_API_KEY", "operator-key");
+    expect((await resolveProviderCreds("u1")).lmstudio).toEqual({ apiKey: "operator-key", baseUrl: "http://gpu-box:1234/v1" });
+  });
+
+  it("sends the placeholder, not the server's key, to a base URL the user saved", async () => {
+    vi.stubEnv("LMSTUDIO_API_KEY", "operator-key");
+    saved.mockResolvedValue({ lmstudioBaseUrl: "http://mine:1234/v1" });
+    expect((await resolveProviderCreds("u1")).lmstudio).toEqual({ apiKey: "lm-studio", baseUrl: "http://mine:1234/v1" });
+  });
+
+  it("keeps a key the user saved", async () => {
+    saved.mockResolvedValue({ lmstudioApiKey: "my-key" });
+    expect((await resolveProviderCreds("u1")).lmstudio?.apiKey).toBe("my-key");
   });
 });

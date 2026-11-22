@@ -28,8 +28,6 @@ feature branches: preview builds run `prisma migrate deploy` against the product
 
 ## What's next
 
-- LM Studio: works today via the Custom OpenAI-compatible provider (base URL
-  `http://localhost:1234/v1`); a dedicated preset and Qwen `reasoning_content` display are not built yet.
 - Header title truncates on very narrow phones (about 400px).
 - Rare duplicate sticky nav bar flash on first home load.
 - Production setup still needed: `OWNER_EMAILS`, `GITHUB_TOKEN`, and Google OAuth for Sheets.
@@ -46,6 +44,12 @@ calls on the newest models (Anthropic's compat layer also hides adaptive
 thinking). Every other provider goes through the OpenAI Chat Completions format.
 The conversation's "Reasoning effort" setting drives all of these.
 
+**LM Studio** runs on your own machine: start its local server, load a model, and
+DevChat lists the models it has loaded (embedding models are left out). Nothing
+is hard-coded. A reasoning model's thinking (`reasoning_content`, e.g. Qwen 3.5)
+shows as the thinking block. Its tokens count against the output limit, so keep
+Max tokens generous for these models.
+
 | Provider | Env var | Notes |
 |---|---|---|
 | Ollama | `OLLAMA_BASE_URL` | Auto-detected when reachable, no key needed |
@@ -54,7 +58,8 @@ The conversation's "Reasoning effort" setting drives all of these.
 | Google Gemini | `GOOGLE_API_KEY` | Google AI Studio key |
 | OpenRouter | `OPENROUTER_API_KEY` | free models only by default |
 | NVIDIA NIM | `NVIDIA_NIM_API_KEY` | `NVIDIA_NIM_BASE_URL` for self-hosted NIMs |
-| Custom | `CUSTOM_BASE_URL`, `CUSTOM_API_KEY` | Groq, Together, DeepSeek, xAI, Mistral, LM Studio, vLLM, a remote Ollama... |
+| LM Studio | `LMSTUDIO_BASE_URL`, `LMSTUDIO_API_KEY` | local server, no key needed; base URL defaults to `http://localhost:1234/v1` |
+| Custom | `CUSTOM_BASE_URL`, `CUSTOM_API_KEY` | Groq, Together, DeepSeek, xAI, Mistral, vLLM, a remote Ollama... |
 
 Two ways to configure them:
 
