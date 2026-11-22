@@ -1,22 +1,38 @@
-This is a [Next.js](https://nextjs.org/) project bootstrapped with [`create-next-app`](https://github.com/vercel/next.js/tree/canary/packages/create-next-app).
+# DevChat
+
+A bring-your-own-key chat app built on Next.js 16 (App Router), AI SDK v6 and Prisma.
+Chat with hosted or local models, run workflows, and work in your own folders.
 
 ## Getting Started
 
-First, run the development server:
-
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
+npm install
+npm run dev     # http://127.0.0.1:3000
+npm run sanity  # typecheck, eslint, vitest, build, Playwright (functional + visual)
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Locally it uses SQLite; production uses Postgres (Neon). Avoid Prisma migrations in
+feature branches: preview builds run `prisma migrate deploy` against the production DB.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## What's in it
 
-This project uses [`next/font`](https://nextjs.org/docs/basic-features/font-optimization) to automatically optimize and load Inter, a custom Google Font.
+- **Chat panel:** one docked right panel (Context, Outputs, Tasks, Connectors, Files,
+  Notes, Todos) driven by the URL (`?panel=`), with an Activity popover and a panel
+  launcher in the header. Shortcuts: Option+A (activity), Option+P (panel).
+- **Workflows:** visual editor, runs, job board and a sample project-overview workflow.
+- **Working folders:** let a chat read a folder on your machine (local only; refused on Vercel).
+- **CLI providers:** Claude Code, Codex and OpenCode, hardened (no slash commands,
+  no permission prompts except bridged Ask, mention defusing).
+- **Tool approval cards:** approve or deny tool calls, with Stop handled mid-call.
+- **Home page:** scroll tour with smooth scrolling (Lenis); reduced-motion safe.
+
+## What's next
+
+- LM Studio: works today via the Custom OpenAI-compatible provider (base URL
+  `http://localhost:1234/v1`); a dedicated preset and Qwen `reasoning_content` display are not built yet.
+- Header title truncates on very narrow phones (about 400px).
+- Rare duplicate sticky nav bar flash on first home load.
+- Production setup still needed: `OWNER_EMAILS`, `GITHUB_TOKEN`, and Google OAuth for Sheets.
 
 ## LLM providers
 
@@ -127,17 +143,7 @@ This is how [bb](https://github.com/get-bb/bb) works too. Details:
 To add another hosted provider, append one entry to `PROVIDERS` in
 [`src/lib/providers.ts`](src/lib/providers.ts). No other code changes needed.
 
-## Learn More
-
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js/) - your feedback and contributions are welcome!
-
 ## Deploy on Vercel
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/deployment) for more details.
+Set `OWNER_EMAILS` (working folders and owner-only features) and your provider keys in
+the Vercel project settings. Pushes to `main` deploy to production; branches get previews.
