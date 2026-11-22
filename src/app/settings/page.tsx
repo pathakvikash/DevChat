@@ -38,6 +38,11 @@ const LOCAL_KEYS = {
   autoCompressThreshold: "vas:settings:auto_compress_threshold",
 } as const;
 
+/** Base-URL field per provider (only those with a baseUrlSettingKey), prefilled with the built-in default. */
+function defaultBaseUrls(): Record<string, string> {
+  return Object.fromEntries(PROVIDERS.filter((p) => p.baseUrlSettingKey).map((p) => [p.id, p.baseUrl ?? ""]));
+}
+
 export default function SettingsPage() {
   const [analytics, setAnalytics] = useState<Analytics | null>(null);
   const [loading, setLoading] = useState(true);
@@ -47,8 +52,8 @@ export default function SettingsPage() {
   const [envProviders, setEnvProviders] = useState<string[]>([]);
   const [editingKey, setEditingKey] = useState<string | null>(null); // provider id
   const [keyDraft, setKeyDraft] = useState("");
-  const [customBaseUrl, setCustomBaseUrl] = useState("");
-  const [savedCustomBaseUrl, setSavedCustomBaseUrl] = useState("");
+  const [baseUrls, setBaseUrls] = useState<Record<string, string>>(defaultBaseUrls);
+  const [savedBaseUrls, setSavedBaseUrls] = useState<Record<string, string>>({});
   const [providerStatus, setProviderStatus] = useState<ProviderStatus[]>([]);
 
   // "Find providers on this machine": scan → review → import, nothing saved
@@ -101,9 +106,16 @@ export default function SettingsPage() {
       setKeyDisplay(display);
       setEnvProviders(data.envProviders ?? []);
       setDetectionAvailable(!!data.detectionAvailable);
-      const base = (data.customBaseUrl as string | null) ?? "";
-      setCustomBaseUrl(base);
-      setSavedCustomBaseUrl(base);
+      const defaults = defaultBaseUrls();
+      const drafts: Record<string, string> = {};
+      const saved: Record<string, string> = {};
+      for (const p of PROVIDERS) {
+        if (!p.baseUrlSettingKey) continue;
+        saved[p.id] = (data[p.baseUrlSettingKey] as string | null) ?? "";
+        drafts[p.id] = saved[p.id] || defaults[p.id];
+      }
+      setBaseUrls(drafts);
+      setSavedBaseUrls(saved);
       setDefaultModel(data.defaultModel || "");
     } catch {}
     if (typeof window !== "undefined") {
@@ -142,9 +154,13 @@ export default function SettingsPage() {
     const payload: Record<string, string> = {};
     const editing = PROVIDERS.find((p) => p.id === editingKey);
     if (editing && keyDraft.trim()) payload[editing.settingKey] = keyDraft.trim();
-    const base = customBaseUrl.trim();
-    if (base) payload.customBaseUrl = base;
-    else if (savedCustomBaseUrl) await apiDeleteSettings(["customBaseUrl"]);
+    // The default is never stored: clearing the field or matching the default drops the saved override.
+    for (const p of PROVIDERS) {
+      if (!p.baseUrlSettingKey) continue;
+      const base = (baseUrls[p.id] ?? "").trim();
+      if (base && base !== p.baseUrl) payload[p.baseUrlSettingKey] = base;
+      else if (savedBaseUrls[p.id]) await apiDeleteSettings([p.baseUrlSettingKey]);
+    }
     payload.defaultModel = defaultModel;
 
     await apiSaveSettings(payload);
@@ -246,15 +262,15 @@ export default function SettingsPage() {
   async function handleClearSettings() {
     const toRemove: string[] = [];
     for (const p of PROVIDERS) if (keyDisplay[p.id]) toRemove.push(p.settingKey);
-    if (savedCustomBaseUrl) toRemove.push("customBaseUrl");
+    for (const p of PROVIDERS) if (p.baseUrlSettingKey && savedBaseUrls[p.id]) toRemove.push(p.baseUrlSettingKey);
     if (defaultModel) toRemove.push("defaultModel");
     if (toRemove.length > 0) {
       await apiDeleteSettings(toRemove);
     }
 
     setKeyDisplay({});
-    setCustomBaseUrl("");
-    setSavedCustomBaseUrl("");
+    setBaseUrls(defaultBaseUrls());
+    setSavedBaseUrls({});
     setKeyDraft("");
     setEditingKey(null);
     setDefaultModel("");
@@ -342,8 +358,8 @@ export default function SettingsPage() {
                     onDraft={setKeyDraft}
                     onEdit={() => { setEditingKey(p.id); setKeyDraft(""); }}
                     onCancel={() => setEditingKey(null)}
-                    baseUrl={p.baseUrlSettingKey ? customBaseUrl : undefined}
-                    onBaseUrl={p.baseUrlSettingKey ? setCustomBaseUrl : undefined}
+                    baseUrl={p.baseUrlSettingKey ? baseUrls[p.id] ?? "" : undefined}
+                    onBaseUrl={p.baseUrlSettingKey ? (v) => setBaseUrls((prev) => ({ ...prev, [p.id]: v })) : undefined}
                   />
                 ))}
               </div>

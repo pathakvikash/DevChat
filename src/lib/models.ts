@@ -15,6 +15,7 @@ import { listCliModels, cliProviderForModel, createCliModel, type CliCatalogEntr
 import { detectionAvailable } from "./providerDetect";
 import { mockModelConfig } from "@/lib/mockModels";
 import { supportsReasoning } from "./reasoning";
+import { withReasoningContent } from "./reasoningContent";
 
 const ollamaUrl = process.env.OLLAMA_BASE_URL || "http://localhost:11434";
 const ollama = createOllama({ baseURL: `${ollamaUrl}/api` });
@@ -420,6 +421,8 @@ function providerClient(
     apiKey: cred.apiKey,
     name: def.id,
     headers: def.headers?.(cred.apiKey),
+    // LM Studio streams a reasoning model's thinking as reasoning_content, which the SDK drops.
+    fetch: def.id === "lmstudio" ? withReasoningContent(fetch) : undefined,
   });
   // Responses only on OpenAI's own hosts (api.openai.com and its us/eu residency subdomains): a proxy or vLLM behind OPENAI_BASE_URL may speak just Chat Completions.
   if (def.native === "openai" && URL.canParse(cred.baseUrl) && /(^|\.)api\.openai\.com$/.test(new URL(cred.baseUrl).hostname)) {

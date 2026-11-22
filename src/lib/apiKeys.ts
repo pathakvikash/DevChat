@@ -15,7 +15,7 @@ export async function resolveProviderCreds(userId: string): Promise<ProviderCred
   for (const p of PROVIDERS) {
     const env = envCredsFor(p);
     const userBaseUrl = (p.baseUrlSettingKey && saved[p.baseUrlSettingKey]) || "";
-    const apiKey = saved[p.settingKey] || (userBaseUrl ? "" : env?.apiKey) || "";
+    const apiKey = saved[p.settingKey] || (userBaseUrl ? "" : env?.apiKey) || p.fallbackKey || "";
     const baseUrl = userBaseUrl || env?.baseUrl || p.baseUrl || "";
     if (!baseUrl) continue;
     if (!apiKey && !p.keyOptional) continue;

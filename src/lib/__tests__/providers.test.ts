@@ -35,6 +35,32 @@ describe("providers registry", () => {
     expect(isChatModel("custom", "anything-goes")).toBe(true);
   });
 
+  it("registers LM Studio as a keyless local preset with a live model list", () => {
+    const lm = PROVIDERS.find((p) => p.id === "lmstudio");
+    expect(lm).toMatchObject({
+      label: "LM Studio",
+      envKey: "LMSTUDIO_API_KEY",
+      envBaseUrl: "LMSTUDIO_BASE_URL",
+      settingKey: "lmstudioApiKey",
+      baseUrlSettingKey: "lmstudioBaseUrl",
+      baseUrl: "http://localhost:1234/v1",
+      keyOptional: true,
+      fallbackKey: "lm-studio",
+      defaultContextWindow: 32_768,
+    });
+    expect(lm?.native).toBeUndefined();
+  });
+
+  it("resolves LM Studio model ids, keeping nested upstream ids intact", () => {
+    expect(providerForModel("lmstudio/qwen/qwen3.5-9b")?.id).toBe("lmstudio");
+    expect(bareModelId("lmstudio/qwen/qwen3.5-9b")).toBe("qwen/qwen3.5-9b");
+  });
+
+  it("drops LM Studio embedding models from the chat list", () => {
+    expect(isChatModel("lmstudio", "qwen/qwen3.5-9b")).toBe(true);
+    expect(isChatModel("lmstudio", "text-embedding-nomic-embed-text-v1.5")).toBe(false);
+  });
+
   it("marks only OpenAI and Anthropic for native SDKs", () => {
     const native = Object.fromEntries(PROVIDERS.map((p) => [p.id, p.native]));
     expect(native).toEqual({
@@ -43,6 +69,7 @@ describe("providers registry", () => {
       google: undefined,
       openrouter: undefined,
       "nvidia-nim": undefined,
+      lmstudio: undefined,
       custom: undefined,
     });
   });

@@ -21,6 +21,8 @@ export interface ProviderDef {
   baseUrlSettingKey?: string;
   /** Endpoint works without a key (local LM Studio, vLLM, remote Ollama). */
   keyOptional?: boolean;
+  /** Sent as the bearer token when no key is configured, for servers that check nothing but need a value. */
+  fallbackKey?: string;
   /** Used when the provider's /models response has no context length. */
   defaultContextWindow: number;
   /** Every chat model from this provider accepts images. */
@@ -94,6 +96,20 @@ export const PROVIDERS: readonly ProviderDef[] = [
     defaultContextWindow: 128_000,
     placeholder: "nvapi-...",
     docsUrl: "https://build.nvidia.com/",
+  },
+  {
+    id: "lmstudio",
+    label: "LM Studio",
+    envKey: "LMSTUDIO_API_KEY",
+    envBaseUrl: "LMSTUDIO_BASE_URL",
+    settingKey: "lmstudioApiKey",
+    baseUrlSettingKey: "lmstudioBaseUrl",
+    baseUrl: "http://localhost:1234/v1",
+    keyOptional: true,
+    fallbackKey: "lm-studio",
+    defaultContextWindow: 32_768,
+    placeholder: "optional (LM Studio ignores it)",
+    docsUrl: "https://lmstudio.ai/docs/developer/openai-compat",
   },
   {
     id: "custom",
