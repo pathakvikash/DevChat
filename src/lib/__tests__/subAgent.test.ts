@@ -323,3 +323,35 @@ describe("runSubAgent with resume", () => {
     expect(prompt).toContain("Message from Main (the main chat, not the user):\\n```\\nCheck the second folder.\\n```");
   });
 });
+
+describe("helper prompt", () => {
+  const systemOf = (o: CallOptions) => String((o.prompt.find((m) => m.role === "system") as { content: unknown }).content);
+  const readFileTool = tool({ description: "Read", inputSchema: z.object({}), execute: async () => "x" });
+
+  async function promptFor(modelId: string, mode: "agent" | "ask", tools: Record<string, Tool>) {
+    const { config, calls } = scriptedModel(() => ({ text: ["Done."] }));
+    await runSubAgent({ brief, model: { ...config, id: modelId }, mode, workingFolder: "/work/app", tools, abortSignal: new AbortController().signal });
+    return systemOf(calls[0]);
+  }
+
+  it("a CLI helper keeps the old mode and folder lines", async () => {
+    const agent = await promptFor("claude-code/default", "agent", { calculator: calculator() });
+    expect(agent).toContain("Mode: agent. You may change files in the working folder.");
+    expect(agent).toContain("Working folder: /work/app.");
+    expect(await promptFor("codex/default", "ask", { calculator: calculator() })).toContain("Mode: read-only. Change nothing.");
+  });
+
+  it("an API helper with readFile is told the folder is read-only", async () => {
+    const out = await promptFor("mock/sub", "agent", { readFile: readFileTool });
+    expect(out).toContain("Mode: agent. You may use every tool you were given.");
+    expect(out).not.toContain("You may change files");
+    expect(out).toContain("Working folder: /work/app (read-only: read it with listFiles, readFile and searchFiles; you cannot change files).");
+    expect(await promptFor("mock/sub", "ask", { readFile: readFileTool })).toContain("Mode: read-only. Change nothing.");
+  });
+
+  it("an API helper without readFile gets no folder line", async () => {
+    const out = await promptFor("mock/sub", "agent", { calculator: calculator() });
+    expect(out).not.toContain("Working folder");
+    expect(out).toContain("Mode: agent. You may use every tool you were given.");
+  });
+});

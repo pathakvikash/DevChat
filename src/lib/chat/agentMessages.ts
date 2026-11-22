@@ -24,6 +24,8 @@ export interface AgentMessageData {
   fromConversationId: string;
   fromTitle: string;
   hop: number;
+  /** Posted by a workflow from text a card read in a folder: the chat is gated like one with a folder-tool call (files/folderTools.ts). */
+  readFiles?: true;
 }
 
 export interface AgentMessagePart {
@@ -45,15 +47,15 @@ export interface AgentTarget {
 const SENDERS: readonly AgentSender[] = ["chat", "side", "parent", "workflow"];
 
 export function buildAgentMessagePart(data: AgentMessageData): AgentMessagePart {
-  const { from, fromConversationId, fromTitle, hop } = data;
-  return { type: AGENT_MESSAGE_PART, data: { from, fromConversationId, fromTitle, hop } };
+  const { from, fromConversationId, fromTitle, hop, readFiles } = data;
+  return { type: AGENT_MESSAGE_PART, data: { from, fromConversationId, fromTitle, hop, ...(readFiles ? { readFiles } : {}) } };
 }
 
 /** The part's data, or null when the part is not a well-formed agent message. */
 export function parseAgentMessagePart(part: unknown): AgentMessageData | null {
   const p = part as { type?: unknown; data?: unknown } | null;
   if (p?.type !== AGENT_MESSAGE_PART || !p.data || typeof p.data !== "object") return null;
-  const { from, fromConversationId, fromTitle, hop } = p.data as Record<string, unknown>;
+  const { from, fromConversationId, fromTitle, hop, readFiles } = p.data as Record<string, unknown>;
   if (!SENDERS.includes(from as AgentSender)) return null;
   if (typeof fromConversationId !== "string" || typeof fromTitle !== "string") return null;
   if (typeof hop !== "number" || !Number.isInteger(hop) || hop < 1) return null;
@@ -62,6 +64,7 @@ export function parseAgentMessagePart(part: unknown): AgentMessageData | null {
     fromConversationId: fromConversationId.slice(0, ID_MAX),
     fromTitle: fromTitle.slice(0, TITLE_MAX),
     hop,
+    ...(readFiles === true ? { readFiles } : {}),
   };
 }
 

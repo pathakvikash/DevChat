@@ -1,8 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { buildTools, resolveActiveToolIds } from "@/lib/chat/buildTools";
+import { BUILTIN_TOOL_IDS, buildTools, resolveActiveToolIds } from "@/lib/chat/buildTools";
 import { prisma } from "@/lib/db";
 import { listServerTools } from "@/lib/mcp/client";
 import { z } from "zod";
+import { TOOL_REGISTRY } from "@/lib/registry";
 
 vi.mock("@/lib/db", () => ({
   prisma: {
@@ -14,6 +15,7 @@ vi.mock("@/lib/db", () => ({
       findMany: vi.fn(),
     },
     mcpServer: { findMany: vi.fn().mockResolvedValue([]) },
+    artifact: { findFirst: vi.fn() },
   },
 }));
 
@@ -23,7 +25,7 @@ vi.mock("@/lib/search", async (importOriginal) => ({
 }));
 
 vi.mock("@/lib/chatSearch", () => ({
-  searchUserChats: vi.fn().mockResolvedValue([]),
+  searchUserChats: vi.fn().mockResolvedValue({ hits: [], leftOut: 0 }),
   readUserChat: vi.fn().mockResolvedValue(null),
 }));
 
@@ -360,6 +362,14 @@ describe("buildTools past-chat tools", () => {
     expect(out).toEqual({ results: [] });
   });
 
+  it("searchChats output never carries the left-out count", async () => {
+    const { searchUserChats } = await import("@/lib/chatSearch");
+    vi.mocked(searchUserChats).mockResolvedValueOnce({ hits: [], leftOut: 2 });
+    const tools = await buildTools({ activeToolIds: ids, searchProvider: "duckduckgo", userId: "test-user", contextWindow: 8192, conversationId: "current", mode: "chat" });
+    const out = await tools.searchChats.execute!({ query: "cache" }, {} as any);
+    expect(out).not.toHaveProperty("leftOut");
+  });
+
   it("searchChats shows the model its results only as framed data", async () => {
     const tools = await buildTools({
       activeToolIds: ids,
@@ -500,3 +510,184 @@ describe("buildTools by mode", () => {
     vi.mocked(prisma.mcpServer.findMany).mockResolvedValue([] as any);
   });
 });
+
+describe("folder tools", () => {
+  const base = { searchProvider: "duckduckgo" as const, userId: "test-user", contextWindow: 8192, activeToolIds: new Set(["webSearch"]) };
+  const names = ["listFiles", "readFile", "searchFiles"];
+
+  it("folder tools only with workingFolder", async () => {
+    const without = await buildTools({ ...base });
+    for (const name of names) expect(without).not.toHaveProperty(name);
+    const withFolder = await buildTools({ ...base, workingFolder: "/work/app" });
+    for (const name of names) expect(withFolder).toHaveProperty(name);
+  });
+
+  it("folder tools in chat and plan mode", async () => {
+    for (const mode of ["chat", "plan", "ask", "agent"] as const) {
+      const tools = await buildTools({ ...base, mode, workingFolder: "/work/app" });
+      for (const name of names) {
+        expect(tools).toHaveProperty(name);
+        expect(tools[name].needsApproval).toBeUndefined();
+      }
+    }
+  });
+});
+
+describe("folder chat outbound tools", () => {
+  const OUTBOUND = ["executeCode", "fetchUrl", "webSearch", "rememberFact"];
+  const base = {
+    searchProvider: "duckduckgo" as const,
+    userId: "test-user",
+    contextWindow: 8192,
+    activeToolIds: new Set([...OUTBOUND, "calculator", "currentTime"]),
+  };
+  const modes = ["chat", "plan", "ask", "agent"] as const;
+  const mcpServer = { id: "s1", name: "docs" };
+  const mcpTool = { name: "search", description: "Search docs", inputSchema: { type: "object", properties: {} } };
+  const withMcp = () => {
+    vi.mocked(prisma.mcpServer.findMany).mockResolvedValue([mcpServer] as any);
+    vi.mocked(listServerTools).mockResolvedValue([mcpTool] as any);
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(prisma.mcpServer.findMany).mockResolvedValue([] as any);
+  });
+
+  it("with a folder, executeCode, fetchUrl, webSearch and rememberFact need approval in chat, plan, ask and agent", async () => {
+    for (const mode of modes) {
+      const tools = await buildTools({ ...base, mode, workingFolder: "/work/app", askBeforeSendingOut: true });
+      for (const id of ["executeCode", "fetchUrl", "webSearch"]) expect(tools[id].needsApproval, `${mode} ${id}`).toBe(true);
+      // Saving a fact only exists in the modes that may write.
+      if (mode === "ask" || mode === "agent") expect(tools.rememberFact.needsApproval, `${mode} rememberFact`).toBe(true);
+      else expect(tools).not.toHaveProperty("rememberFact");
+    }
+  });
+
+  it("with a folder, an allowed tool still asks (the allow-list is ignored)", async () => {
+    withMcp();
+    const tools = await buildTools({
+      ...base,
+      mode: "ask",
+      workingFolder: "/work/app", askBeforeSendingOut: true,
+      activeToolIds: new Set([...base.activeToolIds, "mcp_docs_search"]),
+      allowedTools: [...OUTBOUND, "mcp_docs_search"],
+    });
+    for (const id of [...OUTBOUND, "mcp_docs_search"]) expect(tools[id].needsApproval, id).toBe(true);
+  });
+
+  it("with a folder, every MCP tool needs approval in ask and agent", async () => {
+    for (const mode of ["ask", "agent"] as const) {
+      withMcp();
+      const tools = await buildTools({ ...base, mode, workingFolder: "/work/app", askBeforeSendingOut: true, activeToolIds: new Set(["mcp_docs_search"]) });
+      expect(tools.mcp_docs_search.needsApproval, mode).toBe(true);
+    }
+  });
+
+  it("with a folder, outbound tools carry sendsOut metadata with the folder name; calculator, currentTime and readFile do not", async () => {
+    withMcp();
+    const tools = await buildTools({ ...base, mode: "agent", workingFolder: "/work/app", askBeforeSendingOut: true, activeToolIds: new Set([...base.activeToolIds, "mcp_docs_search"]) });
+    for (const id of [...OUTBOUND, "mcp_docs_search"]) expect(tools[id].metadata, id).toEqual({ sendsOut: true, folder: "app" });
+    for (const id of ["calculator", "currentTime", "readFile"]) expect(tools[id].metadata, id).toBeUndefined();
+  });
+
+  it("a chat that read files keeps asking after the folder is cleared", async () => {
+    withMcp();
+    const tools = await buildTools({ ...base, mode: "agent", askBeforeSendingOut: true, activeToolIds: new Set([...base.activeToolIds, "mcp_docs_search"]) });
+    for (const id of [...OUTBOUND, "mcp_docs_search"]) {
+      expect(tools[id].needsApproval, id).toBe(true);
+      expect(tools[id].metadata, id).toEqual({ sendsOut: true });
+    }
+    expect(tools).not.toHaveProperty("readFile");
+  });
+
+  it("without a folder nothing changes: no approval on outbound tools in chat or agent, and ask still asks only for mutating and MCP tools", async () => {
+    for (const mode of ["chat", "agent"] as const) {
+      const tools = await buildTools({ ...base, mode });
+      for (const id of ["executeCode", "fetchUrl", "webSearch", "rememberFact"]) {
+        if (tools[id]) expect(tools[id].needsApproval, `${mode} ${id}`).toBeFalsy();
+        if (tools[id]) expect(tools[id].metadata, `${mode} ${id}`).toBeUndefined();
+      }
+    }
+    withMcp();
+    const ask = await buildTools({ ...base, mode: "ask", activeToolIds: new Set([...base.activeToolIds, "mcp_docs_search"]) });
+    expect(ask.executeCode.needsApproval).toBeFalsy();
+    expect(ask.fetchUrl.needsApproval).toBeFalsy();
+    expect(ask.webSearch.needsApproval).toBeUndefined();
+    expect(ask.rememberFact.needsApproval).toBe(true);
+    expect(ask.mcp_docs_search.needsApproval).toBe(true);
+  });
+
+  it("every registry tool is either outbound or on the reviewed local list", () => {
+    // A new tool fails here until someone decides whether it can carry data out of a chat.
+    const reviewedLocal = [
+      "createArtifact", "updateArtifact", "currentTime", "calculator", "jsonExtract", "presentPlan",
+      "askClarification", "searchKnowledgeBase", "createTodo", "createTodos", "updateTodo", "sendToChat",
+    ];
+    for (const [id, def] of Object.entries(TOOL_REGISTRY)) {
+      expect(def.outbound === true || reviewedLocal.includes(id), `${id} is not classified`).toBe(true);
+      expect(def.outbound === true && reviewedLocal.includes(id), `${id} is on both lists`).toBe(false);
+    }
+    expect(Object.keys(TOOL_REGISTRY).filter((id) => TOOL_REGISTRY[id].outbound).sort()).toEqual(["executeCode", "fetchUrl", "webSearch"]);
+  });
+
+  describe("HTML artifacts", () => {
+    const ask = async (tool: any, input: object) => tool.needsApproval(input, { toolCallId: "t", messages: [] });
+    const gated = (mode: "agent" | "ask" = "agent") =>
+      buildTools({ ...base, mode, conversationId: "c1", workingFolder: "/work/app", askBeforeSendingOut: true, activeToolIds: new Set(["createArtifact", "updateArtifact"]) });
+
+    it("in a gated chat creating an HTML page asks; svg, document and code do not (agent mode)", async () => {
+      const tools = await gated();
+      expect(await ask(tools.createArtifact, { type: "html", title: "t", content: "<p>x</p>" })).toBe(true);
+      for (const type of ["svg", "document", "code", "mermaid"]) expect(await ask(tools.createArtifact, { type, title: "t", content: "x" }), type).toBe(false);
+      expect(tools.createArtifact.metadata).toEqual({ sendsOut: true, folder: "app" });
+    });
+
+    it("in a gated chat updating an HTML page asks, looked up in this chat only; other types do not", async () => {
+      const tools = await gated();
+      vi.mocked(prisma.artifact.findFirst).mockResolvedValue({ type: "html" } as any);
+      expect(await ask(tools.updateArtifact, { artifactId: "a1", content: "<p>y</p>" })).toBe(true);
+      expect(vi.mocked(prisma.artifact.findFirst).mock.calls[0][0]).toMatchObject({ where: { id: "a1", conversationId: "c1" } });
+      vi.mocked(prisma.artifact.findFirst).mockResolvedValue({ type: "svg" } as any);
+      expect(await ask(tools.updateArtifact, { artifactId: "a2", content: "x" })).toBe(false);
+      vi.mocked(prisma.artifact.findFirst).mockResolvedValue(null);
+      expect(await ask(tools.updateArtifact, { artifactId: "gone", content: "x" })).toBe(false);
+    });
+
+    it("Ask mode still asks for every artifact, HTML or not", async () => {
+      const tools = await gated("ask");
+      expect(await ask(tools.createArtifact, { type: "svg", title: "t", content: "x" })).toBe(true);
+    });
+
+    it("an ungated chat is unchanged: no metadata, no approval in agent mode", async () => {
+      const tools = await buildTools({ ...base, mode: "agent", conversationId: "c1", activeToolIds: new Set(["createArtifact", "updateArtifact"]) });
+      for (const id of ["createArtifact", "updateArtifact"]) {
+        expect(tools[id].needsApproval).toBe(false);
+        expect(tools[id].metadata).toBeUndefined();
+      }
+    });
+  });
+
+  it("every tool built in a gated agent chat is outbound-gated or on the reviewed local list", async () => {
+    // Covers the inline tools too (todos, searchChats, folder tools...): a new one fails until it is classified.
+    withMcp();
+    const tools = await buildTools({
+      ...base,
+      mode: "agent",
+      workingFolder: "/work/app",
+      askBeforeSendingOut: true,
+      conversationId: "c1",
+      activeToolIds: new Set([...BUILTIN_TOOL_IDS, "fetchUrl", "mcp_docs_search"]),
+    });
+    const reviewedLocal = [
+      "currentTime", "calculator", "jsonExtract", "askClarification",
+      "createTodo", "createTodos", "updateTodo", "searchChats", "readChat", "forgetFact", "presentPlan",
+      "listFiles", "readFile", "searchFiles",
+    ];
+    for (const [id, t] of Object.entries(tools)) {
+      expect(Boolean(t.metadata?.sendsOut) || reviewedLocal.includes(id), `${id} is not classified`).toBe(true);
+    }
+    expect(Object.keys(tools)).toEqual(expect.arrayContaining(["executeCode", "createArtifact", "forgetFact", "readFile"]));
+  });
+});
+

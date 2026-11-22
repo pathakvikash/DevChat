@@ -161,6 +161,13 @@ export function useChatPane(conversationId: string, { focused, kind, searchProvi
   const [enabledSkills, setEnabledSkills] = useState<string[]>([]);
   const [modelSettingsOpen, setModelSettingsOpen] = useState(false);
   const [artifactPanelOpen, setArtifactPanelOpen] = useState(false);
+  // Set just before a finished reply opens Outputs by itself, so the bridge can tell that open from a user's (card, /artifacts).
+  const artifactFromReply = useRef(false);
+  const takeArtifactFromReply = useCallback(() => {
+    const was = artifactFromReply.current;
+    artifactFromReply.current = false;
+    return was;
+  }, []);
   const [selectedArtifactId, setSelectedArtifactId] = useState<string | null>(null);
   const [contextPanelOpen, setContextPanelOpen] = useState(false);
   const [contextData, setContextData] = useState<{ usedTokens: number; maxContextTokens: number; contextPercent: number } | null>(null);
@@ -196,6 +203,8 @@ export function useChatPane(conversationId: string, { focused, kind, searchProvi
 
   const onFinishRef = useRef<(finish: ChatFinish) => void>(() => {});
   const onErrorRef = useRef<(err: Error) => void>(() => {});
+  // Set when Stop settled an approved running card: the server may have saved the finished result, so reload once the stream closes.
+  const reloadAfterStopRef = useRef(false);
   const onQueuedDeliveredRef = useRef<(queuedId: string) => void>(() => {});
   const onSendToChatRef = useRef<(input: { to: string; message: string }) => Promise<string>>(async () => AGENT_NOT_OPEN);
   // The other open chat panes, sent with each request (the model is told which chats it can message).
@@ -218,7 +227,7 @@ export function useChatPane(conversationId: string, { focused, kind, searchProvi
     onSendToChatRef,
   });
 
-  const { messages, setMessages, sendMessage: chatSend, status, stop: stopStream, regenerate, error, addToolResult, addToolApprovalResponse, setRequestBody, isLoading } = chatTransport;
+  const { messages, setMessages, sendMessage: chatSend, status, stop: stopStream, regenerate, error, addToolResult, addToolApprovalResponse, setRequestBody, isLoading, runExecuteCode } = chatTransport;
   const isSubagent = conversation?.kind === "subagent";
   // What other panes read through the agent handle, the moment a message goes out. It follows every status
   // change and is set when a delivery starts a turn, so it is right before React renders `isLoading`.
@@ -472,13 +481,19 @@ export function useChatPane(conversationId: string, { focused, kind, searchProvi
   }
 
   /** Allow or Deny a waiting tool call. "Allow for this chat" is remembered for the rest of the chat. */
-  function answerApproval({ approvalId, toolName, approved, allowForChat }: ApprovalAnswer) {
+  function answerApproval({ approvalId, toolName, approved, allowForChat, toolCallId, input }: ApprovalAnswer) {
     if (!claim(approvalId)) return;
     if (approved && allowForChat && !allowedTools.includes(toolName)) {
       const next = [...allowedTools, toolName];
       setAllowedState({ chat: conversationId, tools: next });
       setRequestBody({ allowedTools: next });
       try { localStorage.setItem(`vas:allow:${conversationId}`, JSON.stringify(next)); } catch {}
+    }
+    // executeCode runs in the browser and the server has no execute for it: run it here, and the
+    // result resumes the reply. A Deny goes the normal way.
+    if (toolName === "executeCode" && approved && toolCallId) {
+      void runExecuteCode(toolCallId, input);
+      return;
     }
     addToolApprovalResponse({
       id: approvalId,
@@ -517,6 +532,21 @@ export function useChatPane(conversationId: string, { focused, kind, searchProvi
     }
   }
 
+  /** After Stop settled a running card: the server saves once it sees the disconnect, so a GET that wins the race returns a
+   *  live card whose id is already claimed (dead buttons). Apply a snapshot only once its last message has no card; retry a few times, else keep this state. */
+  async function reloadAfterStop() {
+    for (let i = 0; i < 4 && !loadingRef.current; i++) {
+      let applied = false;
+      await refreshConversationAndMessages((conv) => {
+        const last = buildMessagesFromConversation(conv as RawConversation).at(-1) as { parts?: any[] } | undefined;
+        applied = !loadingRef.current && !(last?.parts ?? []).some((p) => p?.state === "approval-requested" || p?.state === "approval-responded");
+        return applied;
+      });
+      if (applied) return;
+      await new Promise((r) => setTimeout(r, 300));
+    }
+  }
+
   /** Stop: a card still open is denied in the transcript and its id is claimed, so Allow can't run it. */
   function stopReply() {
     for (const m of messages) {
@@ -524,8 +554,9 @@ export function useChatPane(conversationId: string, { focused, kind, searchProvi
         if (p?.state === "approval-requested" && p.approval?.id) answeredRef.current.add(p.approval.id);
       }
     }
+    if (isLoading && ((messages.at(-1)?.parts ?? []) as any[]).some((p) => p?.state === "approval-responded")) reloadAfterStopRef.current = true;
     setMessages((prev) =>
-      prev.map((m) => (m.parts?.some((p: any) => p?.state === "approval-requested") ? { ...m, parts: denyOpenApprovals(m.parts as any[]) } : m)) as typeof prev,
+      prev.map((m) => (m.parts?.some((p: any) => p?.state === "approval-requested" || p?.state === "approval-responded") ? { ...m, parts: denyOpenApprovals(m.parts as any[]) } : m)) as typeof prev,
     );
     stop();
   }
@@ -565,6 +596,10 @@ export function useChatPane(conversationId: string, { focused, kind, searchProvi
     const all = finish?.messages ?? messages;
     // The status is already ready or error here, though React has not rendered it.
     loadingRef.current = false;
+    if (reloadAfterStopRef.current) {
+      reloadAfterStopRef.current = false;
+      void reloadAfterStop();
+    }
     const stopped = !!(finish?.isAbort || finish?.isError);
     const continues = !!(finish?.message && shouldAutoContinue(finish.message.parts as AnyPart[]));
     // Queued messages still waiting: after a Stop or an error they go back to the input; after a normal end
@@ -589,7 +624,7 @@ export function useChatPane(conversationId: string, { focused, kind, searchProvi
     // A card that just appeared is announced once, in the pane's live region (UX 2.5).
     if (!finish?.isAbort) {
       const card = parts.find((p) => p?.state === "approval-requested");
-      if (card) setAnnouncement(`Needs your OK: ${approvalTitle(String(card.type).replace(/^tool-/, ""), card.input)}`);
+      if (card) setAnnouncement(`Needs your OK: ${approvalTitle(String(card.type).replace(/^tool-/, ""), card.input, !!card.toolMetadata?.sendsOut)}`);
       else if (parts.some((p) => p?.type === "tool-presentPlan" && p.state === "input-available")) setAnnouncement("Plan ready");
     }
     for (const p of isSide ? [] : parts) {
@@ -597,6 +632,7 @@ export function useChatPane(conversationId: string, { focused, kind, searchProvi
       if (typeof output === "string" && (output.startsWith("Artifact created:") || output.startsWith("Artifact updated:"))) {
         const id = output.replace(/^Artifact (created|updated): /, "").split(" ")[0];
         setSelectedArtifactId(id);
+        artifactFromReply.current = true;
         setArtifactPanelOpen(true);
       }
     }
@@ -628,7 +664,7 @@ export function useChatPane(conversationId: string, { focused, kind, searchProvi
         else console.warn("[suggest] no suggestion returned");
       })
       .catch((e) => console.warn("[suggest] request failed:", e?.message || e));
-  }, [refreshConversation, fetchContextUsage, messages, setSelectedArtifactId, setArtifactPanelOpen, setIsCompressing, conversationId, conversation?.model, conversation?.temporary, conversation?.memoryDisabled, isSide]);
+  }, [refreshConversation, refreshConversationAndMessages, fetchContextUsage, messages, setSelectedArtifactId, setArtifactPanelOpen, setIsCompressing, conversationId, conversation?.model, conversation?.temporary, conversation?.memoryDisabled, isSide]);
 
   onErrorRef.current = useCallback((err: Error) => {
     const msg = err?.message || String(err);
@@ -1069,7 +1105,7 @@ export function useChatPane(conversationId: string, { focused, kind, searchProvi
     todoPanelOpen, setTodoPanelOpen,
     advancedOpen, setAdvancedOpen,
     modelSettingsOpen, setModelSettingsOpen,
-    artifactPanelOpen, setArtifactPanelOpen, selectedArtifactId, setSelectedArtifactId,
+    artifactPanelOpen, setArtifactPanelOpen, takeArtifactFromReply, selectedArtifactId, setSelectedArtifactId,
     contextPanelOpen, setContextPanelOpen, contextData, setContextData,
     toolErrorDialogOpen, setToolErrorDialogOpen,
     keyboardShortcutsOpen, setKeyboardShortcutsOpen,

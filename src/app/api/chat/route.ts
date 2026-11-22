@@ -5,6 +5,8 @@ import {
   createUIMessageStream,
   createUIMessageStreamResponse,
 } from "ai";
+import { folderToolSpecs } from "@/lib/files/folderTools";
+import { chatFolderAccess } from "@/lib/files/readFiles";
 import { pipeJsonRender } from "@json-render/core";
 import { prisma } from "@/lib/db";
 import { getModel } from "@/lib/models";
@@ -49,7 +51,8 @@ import {
 import { resolveChatSettings } from "@/lib/chat/resolveChatSettings";
 import { resolveModelCandidates } from "@/lib/chat/resolveModelCandidates";
 import { cliProviderForModel, dropParkedRuns } from "@/lib/cliProviders";
-import { isRunnableCwd } from "@/lib/claude/sessions";
+import { folderGoneMessage, isAllowedFolder } from "@/lib/folders";
+import { reasoningPlan, type ProviderOptions } from "@/lib/reasoning";
 import { recordTrace } from "@/lib/observability";
 import { providerOptionsFor } from "@/lib/chat/providerOptions";
 import {
@@ -106,10 +109,11 @@ export async function POST(req: Request) {
   let model: string | undefined = bodyModel;
   try {
     let compressedAt: Date | null = null;
+    let parentId: string | null = null;
     if (conversationId) {
       const owned = await prisma.conversation.findUnique({
         where: { id: conversationId },
-        select: { userId: true, compressedAt: true, parent: { select: { userId: true } } },
+        select: { userId: true, compressedAt: true, parentId: true, parent: { select: { userId: true } } },
       });
       // A side chat is only ever read against a main chat of the same user.
       if (!owned || owned.userId !== userId || (owned.parent && owned.parent.userId !== userId)) {
@@ -119,6 +123,7 @@ export async function POST(req: Request) {
         });
       }
       compressedAt = owned.compressedAt;
+      parentId = owned.parentId;
       ownerVerified = true;
       if (!answeringCli) releaseCliRuns();
     }
@@ -190,9 +195,8 @@ export async function POST(req: Request) {
     }
     // Side chats are read-only, whatever mode the request asks for.
     const toolMode: ToolMode = settings.kind === "side" ? "chat" : authMode;
-    // `contextLength`/`maxTokens` are reassigned below (Ollama context bump,
-    // default maxTokens), so these two stay `let` unlike the rest.
-    let { contextLength, maxTokens, kbId } = settings;
+    // `contextLength`/`kbId` are reassigned below (Ollama context bump, KB ownership check), so they stay `let`.
+    let { contextLength, kbId } = settings;
     // `kbId` can come from an unvalidated client-supplied fallback inside
     // resolveChatSettings — verify it's actually owned by this user before
     // letting searchKnowledgeBase / the KB auto-inject read from it.
@@ -227,6 +231,16 @@ export async function POST(req: Request) {
         { status: 403, headers: { "Content-Type": "application/json" } },
       );
     }
+    // A user without host access ignores a folder set before they lost it (they can't act on a "pick another" message).
+    // Side chats inherit the parent's folder, so they get this check too.
+    const folder = hostTools ? workingFolder : undefined;
+    if (folder && !(await isAllowedFolder(userId, folder))) {
+      releaseCliRuns();
+      return new Response(JSON.stringify({ error: folderGoneMessage(folder) }), {
+        status: 400,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
 
     let lastError: unknown;
     for (const servedModel of candidateModels) {
@@ -239,12 +253,25 @@ export async function POST(req: Request) {
       );
       continue;
     }
-    if (!maxTokens) maxTokens = 8192;
+    // Hosted models get provider-specific reasoning options; some reject temperature/top_p.
+    const reasoning = reasoningPlan(servedModel, reasoningEffort);
+    // Reasoning tokens count against the output cap, so leave room for the answer. Per candidate: a fallback
+    // on another provider must not inherit the first one's default. An explicit user value always wins.
+    const maxTokens = settings.maxTokens || (reasoning.providerOptions ? 32_000 : 8192);
     const useTools = modelConfig.supportsTools && !chatOnlyMode;
+    const cliProvider = cliProviderForModel(servedModel);
     const activeToolIds = resolveActiveToolIds(explicitToolIds, skillIds, kbId);
 
-    // One result for the prompt's section and the sendToChat tool.
-    const agentTargets = sendToChatTargets(openPanes, conversationId ?? "", useTools);
+    const { fileFolder, sendsOutGate, showFolder } = await chatFolderAccess({
+      useTools,
+      cli: !!cliProvider,
+      folder,
+      messages: bodyMessages,
+      conversationId,
+      parentId,
+    });
+    // One result for the prompt's section and the sendToChat tool. A gated chat gets none: a pane without the gate could carry file text out.
+    const agentTargets = sendToChatTargets(openPanes, conversationId ?? "", useTools && !sendsOutGate);
     const { text: finalSystemPrompt, sections } = await buildSystemPrompt({
       useTools,
       systemPrompt,
@@ -259,6 +286,9 @@ export async function POST(req: Request) {
       mode: toolMode,
       contextWindow: contextWindowFor(servedModel, modelConfig, contextLength),
       agentTargets,
+      fileFolder,
+      sendsOutGate,
+      showFolder,
     });
 
     console.log(
@@ -307,6 +337,8 @@ export async function POST(req: Request) {
             ? bodyAllowedTools.filter((t: unknown): t is string => typeof t === "string" && !answeredNow.has(t))
             : [],
           contextWindow: contextWindowFor(servedModel, modelConfig, contextLength),
+          workingFolder: fileFolder,
+          askBeforeSendingOut: sendsOutGate,
         })
       : {};
 
@@ -316,7 +348,7 @@ export async function POST(req: Request) {
     // Ollama context window before the request if we're approaching the
     // current tier limit.
     if (isOllama && conversationId) {
-      const currentCtx = contextLength ?? modelConfig.contextWindow;
+      const currentCtx = contextWindowFor(servedModel, modelConfig, contextLength);
       const promptTokens = estimatePromptTokens(
         finalSystemPrompt,
         sanitizedMessages,
@@ -342,12 +374,11 @@ export async function POST(req: Request) {
     // CLI-backed models take effort/folder/mode as provider options. The folder is
     // re-checked every turn; chat mode is read-only there, agent mode may edit, and
     // Ask lets Claude Code ask per change (its allow-for-chat list rides along).
-    const cliProvider = cliProviderForModel(servedModel);
     if (!cliProvider) releaseCliRuns();
-    const cliCwd = workingFolder && (await isRunnableCwd(workingFolder)) ? workingFolder : "";
-    const providerOptions = providerOptionsFor({
+    const cliCwd = folder ?? "";
+    const providerOptions = (providerOptionsFor({
       modelId: servedModel,
-      numCtx: contextLength ?? modelConfig.contextWindow,
+      numCtx: contextWindowFor(servedModel, modelConfig, contextLength),
       temperature,
       topP,
       maxTokens,
@@ -359,7 +390,7 @@ export async function POST(req: Request) {
       allowedTools: Array.isArray(bodyAllowedTools)
         ? bodyAllowedTools.filter((t: unknown): t is string => typeof t === "string" && CHAT_ALLOWABLE_TOOLS.has(t))
         : [],
-    });
+    }) ?? reasoning.providerOptions) as ProviderOptions | undefined;
 
     // Only main chats with tools get helpers. A helper runs on this same model, in this mode.
     if (canStartSubAgents(settings.kind, useTools) && conversationId) {
@@ -368,8 +399,9 @@ export async function POST(req: Request) {
         parentId: conversationId,
         model: modelConfig,
         mode: toolMode,
-        workingFolder,
+        workingFolder: folder,
         providerOptions,
+        maxTokens,
         maxParallel: cliProvider ? 1 : 3,
         activeChildren: new Set<string>(),
       };
@@ -411,8 +443,8 @@ export async function POST(req: Request) {
           model: modelConfig.model,
           system: finalSystemPrompt,
           messages: modelMessages,
-          temperature,
-          topP,
+          temperature: reasoning.allowSampling ? temperature : undefined,
+          topP: reasoning.allowSampling ? topP : undefined,
           // Signs each approval request so a browser cannot change an approved tool's input.
           experimental_toolApprovalSecret: process.env.AUTH_SECRET || undefined,
           // Hard cap on response length: without it a looping model streams
@@ -623,12 +655,15 @@ export async function POST(req: Request) {
                       console.error("[queue] releasing unshown messages failed:", e),
                     );
                     if (saved && canAutoCompress(event, isAborted)) {
+                      const window = modelConfig ? contextWindowFor(servedModel, modelConfig, contextLength) : null;
                       await autoCompress(
                         conversationId,
                         autoCompressThreshold ?? 85,
-                        modelConfig ? contextWindowFor(servedModel, modelConfig, contextLength) : null,
+                        window,
                         () =>
                         writer.write({ type: "data-compressing", data: true, transient: true }),
+                        // What the folder adds to the sent prompt, which the estimate would miss.
+                        [sections.folder, window && fileFolder ? await folderToolSpecs(fileFolder, window) : ""].filter(Boolean).join("\n") || undefined,
                       );
                     }
                   },
@@ -701,11 +736,11 @@ export async function POST(req: Request) {
           conversationId &&
           errMsg.includes("available context size")
         ) {
-          const nextCtx = getNextContextTier(contextLength ?? modelConfig.contextWindow);
+          const nextCtx = getNextContextTier(contextWindowFor(servedModel, modelConfig, contextLength));
           if (nextCtx) {
             contextLength = nextCtx;
             // The same object the stream's providerOptions holds, so the retry sees the larger window.
-            if (providerOptions && "ollama" in providerOptions && providerOptions.ollama) providerOptions.ollama.num_ctx = nextCtx;
+            if (providerOptions && "ollama" in providerOptions && providerOptions.ollama?.options) (providerOptions.ollama.options as { num_ctx?: number }).num_ctx = nextCtx;
             console.log(
               `[ctx] ${conversationId} context overflow — retrying with ctx=${nextCtx}`,
             );

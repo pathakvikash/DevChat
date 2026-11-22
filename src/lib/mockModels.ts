@@ -181,6 +181,92 @@ const MODELS: Record<string, { name: string; tools: boolean; turn: (o: CallOptio
         ? { tool: { name: "sendToChat", input: { to: "side", message: "ping from main" } }, toolCallId: `mock-talk-${o.prompt.length}` }
         : { chunks: words("sent"), delayMs: 15 },
   },
+  // Reads src/notes.ts with readFile (when the request offers it), then quotes the first exported function.
+  "mock/files": {
+    name: "Mock Files",
+    tools: true,
+    turn: (o) => {
+      if (!offersTool(o, "readFile")) return { chunks: words("Mock files reply: no readFile tool was offered here."), delayMs: 15 };
+      if (!toolRanThisTurn(o)) {
+        return { tool: { name: "readFile", input: { path: "src/notes.ts" } }, toolCallId: `mock-files-${o.prompt.length}` };
+      }
+      const result = [...o.prompt].reverse().find((m) => m.role === "tool");
+      const text = result?.role === "tool"
+        ? result.content.map((p) => (p.type === "tool-result" && p.output.type === "text" ? p.output.value : "")).join("\n")
+        : "";
+      const line = text.split("\n").find((l) => l.includes("export function"))?.replace(/^\d+\| /, "") ?? "";
+      return { chunks: words(`Mock files answer (deterministic): the file starts with ${line}`), delayMs: 15 };
+    },
+  },
+  // Runs `return 6 * 7` with executeCode (when offered), then repeats the result, or the denial, in its reply.
+  "mock/send": {
+    name: "Mock Send",
+    tools: true,
+    turn: (o) => {
+      if (!offersTool(o, "executeCode")) return { chunks: words("Mock send reply: no executeCode tool was offered here."), delayMs: 15 };
+      if (!toolRanThisTurn(o)) {
+        return { tool: { name: "executeCode", input: { language: "javascript", code: "return 6 * 7" } }, toolCallId: `mock-send-${o.prompt.length}` };
+      }
+      const result = [...o.prompt].reverse().find((m) => m.role === "tool");
+      const text = result?.role === "tool"
+        ? result.content
+            .map((p) => {
+              if (p.type !== "tool-result") return "";
+              const out = p.output;
+              return out.type === "text" ? out.value : out.type === "execution-denied" ? `denied: ${out.reason ?? ""}` : JSON.stringify(out.value);
+            })
+            .join("\n")
+        : "";
+      return { chunks: words(`Mock send reply: ${text}`), delayMs: 15 };
+    },
+  },
+  // Creates an HTML artifact whose script probes its own sandbox (parent access, a same-origin fetch) and writes what it saw into its body.
+  "mock/artifact": {
+    name: "Mock Artifact",
+    tools: true,
+    turn: (o) =>
+      toolRanThisTurn(o)
+        ? { chunks: words("Mock artifact reply (deterministic). The page is ready."), delayMs: 15 }
+        : {
+            tool: {
+              name: "createArtifact",
+              input: {
+                type: "html",
+                title: "Sandbox probe",
+                content:
+                  "<body><p id=\"a\"></p><p id=\"b\"></p><script>" +
+                  "var a=document.getElementById('a'),b=document.getElementById('b');" +
+                  "try{a.textContent='parent: '+typeof parent.document}catch(e){a.textContent='parent: blocked'}" +
+                  "try{fetch('/api/conversations').then(function(){b.textContent='fetch: open'},function(){b.textContent='fetch: blocked'})}catch(e){b.textContent='fetch: blocked'}" +
+                  "</script></body>",
+              },
+            },
+            toolCallId: `mock-artifact-${o.prompt.length}`,
+          },
+  },
+  // Creates an SVG artifact that tries to run script (a <script>, an onerror image) and to mark the app page.
+  "mock/svg": {
+    name: "Mock SVG",
+    tools: true,
+    turn: (o) =>
+      toolRanThisTurn(o)
+        ? { chunks: words("Mock svg reply (deterministic). The drawing is ready."), delayMs: 15 }
+        : {
+            tool: {
+              name: "createArtifact",
+              input: {
+                type: "svg",
+                title: "Svg probe",
+                content:
+                  '<svg xmlns="http://www.w3.org/2000/svg" width="120" height="60"><script>window.__svgRan=true;document.title="svg-ran"</script>' +
+                  '<image href="x" onerror="window.__svgRan=true;document.title=\'svg-ran\'"/>' +
+                  '<foreignObject width="10" height="10"><img xmlns="http://www.w3.org/1999/xhtml" src="x" onerror="window.__svgRan=true"/></foreignObject>' +
+                  '<rect width="120" height="60" fill="teal"/></svg>',
+              },
+            },
+            toolCallId: `mock-svg-${o.prompt.length}`,
+          },
+  },
   "mock/workflow": { name: "Mock Workflow", tools: true, turn: workflowTurn },
   "mock/flowgen": { name: "Mock Flow Generator", tools: false, turn: flowgenTurn },
   "mock/notools": {

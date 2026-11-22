@@ -81,4 +81,39 @@ for (const theme of THEMES) {
     await expectNoHorizontalScroll(page);
     await expect(page).toHaveScreenshot(`settings-${theme}.png`);
   });
+
+  // Opened at the fixtures root, so the list is the same on every machine; the real paths are masked.
+  test(`folder dialog, ${theme}`, async ({ page, request }) => {
+    await prepare(page, theme);
+    await seed(request);
+    await page.goto("/settings");
+    await page.waitForLoadState("networkidle");
+    await page.getByRole("button", { name: "Add folder" }).click();
+    const dialog = page.getByRole("dialog", { name: "Choose a folder" });
+    await expect(dialog.getByRole("list", { name: "Sub-folders" }).getByRole("button", { name: "project", exact: true })).toBeVisible();
+    // The breadcrumb shows the real path, which wraps to a different number of lines depending on where the repo is
+    // checked out. Pin its height to what the baselines were recorded with (two lines on desktop, three on a phone)
+    // so the shot is the same everywhere.
+    const crumbHeight = (page.viewportSize()?.width ?? 1280) < 600 ? 96 : 64;
+    await dialog.getByRole("navigation", { name: "Breadcrumb" }).evaluate((el, h) => {
+      (el as HTMLElement).style.cssText += `;height:${h}px;overflow:hidden`;
+    }, crumbHeight);
+    await settle(page, theme);
+    await expectNoHorizontalScroll(page);
+    await expect(page).toHaveScreenshot(`folder-dialog-${theme}.png`, {
+      mask: [dialog.getByLabel("Folder path"), dialog.getByRole("navigation", { name: "Breadcrumb" })],
+    });
+  });
+
+  // Reduced motion shows every section in its final state and skips Lenis, so the long page is stable.
+  test(`home, ${theme}`, async ({ page }) => {
+    await prepare(page, theme);
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    await page.goto("/");
+    await expect(page.getByRole("textbox", { name: "Message", exact: true })).toBeVisible();
+    await settle(page, theme);
+    await expectNoHorizontalScroll(page);
+    await expect(page).toHaveScreenshot(`home-hero-${theme}.png`);
+    await expect(page).toHaveScreenshot(`home-tour-${theme}.png`, { fullPage: true });
+  });
 }

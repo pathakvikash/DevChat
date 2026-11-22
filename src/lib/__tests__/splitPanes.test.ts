@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { orphanSides, sideShares } from "@/lib/splitPanes";
+import { keepParamsForPanes, orphanSides, replaceChat, sideShares } from "@/lib/splitPanes";
 import {
   clampWidths,
   closePane,
@@ -182,10 +182,11 @@ describe("isPaneBusy", () => {
 });
 
 describe("writerConflicts", () => {
-  const pane = (id: string, mode: string, workingFolder: string | null = "/repo", kind = "chat") => ({
+  const pane = (id: string, mode: string, workingFolder: string | null = "/repo", kind = "chat", model = "codex/gpt-5") => ({
     id,
     kind,
     mode,
+    model,
     workingFolder,
   });
 
@@ -197,8 +198,16 @@ describe("writerConflicts", () => {
     expect(writerConflicts([pane("A", "agent"), pane("B", "chat")]).size).toBe(0);
   });
 
-  it("counts ask as a writer", () => {
-    expect(writerConflicts([pane("A", "ask"), pane("B", "agent")]).size).toBe(2);
+  it("counts Claude Code in Ask mode as a writer", () => {
+    expect(writerConflicts([pane("A", "ask", "/repo", "chat", "claude-code/sonnet"), pane("B", "agent")]).size).toBe(2);
+  });
+
+  it("does not count Codex in Ask mode as a writer", () => {
+    expect(writerConflicts([pane("A", "ask"), pane("B", "agent")]).size).toBe(0);
+  });
+
+  it("does not count an API pane in Agent mode as a writer", () => {
+    expect(writerConflicts([pane("A", "agent", "/repo", "chat", "openai/gpt-4o"), pane("B", "agent")]).size).toBe(0);
   });
 
   it("never flags null folders", () => {
@@ -239,5 +248,42 @@ describe("sideShares", () => {
   it("gives a wide side chat half the row, and leaves the no-side layout equal", () => {
     expect(sideShares([false, true], [false, true], 1000)).toEqual([0.5, 0.5]);
     expect(sideShares([false, false], [false, false], 1000)).toEqual([0.5, 0.5]);
+  });
+});
+
+describe("replaceChat", () => {
+  const p = { S: "A", S2: "A" };
+  it("replacing a main chat closes its side chat", () => {
+    expect(replaceChat(["A", "S"], "A", "A", "B", p)).toEqual({ ids: ["B"], focus: "B", closed: ["S"] });
+  });
+  it("replacing from the focused side chat swaps the main chat", () => {
+    expect(replaceChat(["A", "S"], "S", "S", "B", p)).toEqual({ ids: ["B"], focus: "B", closed: ["S"] });
+  });
+  it("in a real split, A is replaced in place and its side closes", () => {
+    expect(replaceChat(["A", "S", "C"], "A", "A", "B", p)).toEqual({ ids: ["B", "C"], focus: "B", closed: ["S"] });
+  });
+  it("replacing C keeps A and its side", () => {
+    expect(replaceChat(["A", "S", "C"], "C", "C", "B", p)).toEqual({ ids: ["A", "S", "B"], focus: "B", closed: [] });
+  });
+  it("an already open chat only takes focus", () => {
+    expect(replaceChat(["A", "S", "C"], "A", "A", "C", p)).toEqual({ ids: ["A", "S", "C"], focus: "C", closed: [] });
+  });
+  it("without parents it matches replacePane", () => {
+    const r = replaceChat(["A", "C"], "A", "A", "B", {});
+    expect({ ids: r.ids, focus: r.focus }).toEqual(replacePane(["A", "C"], "A", "B"));
+    expect(r.closed).toEqual([]);
+  });
+});
+
+describe("keepParamsForPanes", () => {
+  const params = new URLSearchParams("q=hi&panel=outputs&item=x1&panelOf=b&split=b&theme=dark");
+  it("keeps every param while the first pane stays", () => {
+    expect(keepParamsForPanes(params, "a", "a").toString()).toBe(params.toString());
+  });
+  it("drops ?q=, the panel and its item when the first pane is swapped", () => {
+    expect(keepParamsForPanes(params, "a", "c").toString()).toBe("split=b&theme=dark");
+  });
+  it("drops them too when the first pane closes and another becomes first", () => {
+    expect(keepParamsForPanes(params, "a", "b").toString()).toBe("split=b&theme=dark");
   });
 });

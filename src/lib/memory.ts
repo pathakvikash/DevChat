@@ -1,4 +1,5 @@
 import { generateText } from "ai";
+import { temperatureFor } from "./reasoning";
 import { prisma } from "./db";
 import { resolveModel } from "./llm";
 import { extractJson } from "./utils/json";
@@ -153,7 +154,7 @@ export async function consolidateMemory(opts: {
       model: cfg.model,
       system: CONSOLIDATION_SYSTEM,
       prompt: `EXISTING MEMORY:\n${existingBlock}\n\nRECENT CONVERSATION:\n${transcript}\n\nReturn the JSON array of memory operations.`,
-      temperature: 0.2,
+      ...temperatureFor(cfg.id, 0.2),
       abortSignal: AbortSignal.timeout(180_000), // a CLI model has no Stop button here; a slow local model needs the room
     });
 

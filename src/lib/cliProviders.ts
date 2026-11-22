@@ -1,9 +1,9 @@
 import { spawn, execFile, type ChildProcess } from "child_process";
 import { randomUUID } from "crypto";
-import { readFileSync } from "fs";
+import { existsSync, readFileSync } from "fs";
 import { access, constants, mkdir } from "fs/promises";
 import { homedir, tmpdir } from "os";
-import { delimiter, join } from "path";
+import { delimiter, join, resolve } from "path";
 import { createInterface } from "readline";
 import { parseEnv } from "util";
 import type { LanguageModel } from "ai";
@@ -46,7 +46,9 @@ export type CliEvent =
   | { type: "usage"; usage: CliUsage }
   | { type: "error"; message: string }
   /** The tool is retrying its upstream API call; several in a row with no reply means it's stuck. */
-  | { type: "retry" }
+  | { type: "retry"; detail?: string }
+  /** A non-fatal status line (e.g. a tool call the CLI had to refuse), shown like progress. */
+  | { type: "notice"; text: string }
   /** A tool the CLI ran itself (Claude Code's Read/Edit/…), shown as a provider-executed call. */
   | { type: "tool-call"; id: string; name: string; input: unknown }
   | { type: "tool-result"; id: string; name: string; result: unknown; isError: boolean }
@@ -144,7 +146,22 @@ export function claudeParser(): (line: string) => CliEvent[] {
       }
       return [];
     }
-    if (e.type === "system") return e.subtype === "api_retry" ? [{ type: "retry" }] : [];
+    if (e.type === "system") {
+      if (e.subtype === "api_retry") {
+        // no_response: the API sent no headers in time; error_status: HTTP code, null for timeouts.
+        const detail = e.no_response
+          ? `no response after ${Math.round((e.no_response.waited_ms ?? 0) / 1000)}s`
+          : typeof e.error_status === "number"
+            ? `HTTP ${e.error_status}`
+            : undefined;
+        return [{ type: "retry", detail }];
+      }
+      // --permission-prompts none: nobody can approve, so the CLI refuses and says so.
+      if (e.subtype === "permission_denied" && typeof e.tool_name === "string") {
+        return [{ type: "notice", text: `Claude Code was not allowed to use ${e.tool_name} (no one can approve prompts here).\n` }];
+      }
+      return [];
+    }
     if (e.type === "assistant") {
       const blocks: any[] = e.message?.content ?? [];
       const out: CliEvent[] = [];
@@ -268,7 +285,12 @@ export function codexParser(): (line: string) => CliEvent[] {
     }
     if (e.type === "turn.completed") {
       const u = e.usage ?? {};
-      return [{ type: "usage", usage: { input: u.input_tokens, cacheRead: u.cached_input_tokens, output: u.output_tokens } }];
+      return [
+        {
+          type: "usage",
+          usage: { input: u.input_tokens, cacheRead: u.cached_input_tokens, output: u.output_tokens, reasoning: u.reasoning_output_tokens },
+        },
+      ];
     }
     if (e.type === "error" || e.type === "turn.failed") {
       const raw = e.message ?? e.error?.message;
@@ -277,6 +299,21 @@ export function codexParser(): (line: string) => CliEvent[] {
     return [];
   };
 }
+
+/** Where a CLI runs when the chat has no folder. */
+const CLI_SCRATCH = join(tmpdir(), "devchat-cli");
+
+// Claude Code expands `@path` mentions in -p input (even with --tools ""), which would let chat text pull in local
+// files. A zero-width space after the @ stops that. This mirrors its own parser (2.1.326): a mention starts the text
+// or follows whitespace or 。、？！, may be quoted (@"a b"), and loses a #L suffix and trailing non-word characters.
+// Only one that could be a file is touched: it starts with / ~ . , contains .., or exists under the folder the CLI
+// runs in. Emails, decorators and `"@/lib/db"` imports stay as written, so code the model copies back is not corrupted.
+export const defuseMentions = (text: string, cwd?: string) =>
+  text.replace(/(^|[\s。、？！])@("[^"]+"|\S+)/g, (m, lead: string, raw: string) => {
+    const p = raw.replace(/^"|"$/g, "").replace(/#.*$/, "").replace(/\W+$/, "");
+    const fileLike = /^[/~.]/.test(p) || p.includes("..") || (!!cwd && !!p && existsSync(/*turbopackIgnore: true*/ resolve(cwd, p)));
+    return fileLike ? `${lead}@\u200b${raw}` : m;
+  });
 
 const withSystem = (system: string, user: string) => (system ? `System instructions:\n${system}\n\n${user}` : user);
 
@@ -311,19 +348,22 @@ export const CLI_PROVIDERS: readonly CliProviderDef[] = [
           "--include-partial-messages",
           "--no-session-persistence",
           "--setting-sources", "",
+          "--disable-slash-commands",
+          // Nobody answers prompts, so anything not pre-approved is denied. Ask mode is the exception: the bridge below answers.
+          ...(bridged ? [] : ["--permission-prompts", "none"]),
           ...(!cwd
-            ? ["--tools", "", "--strict-mcp-config"] // no --mcp-config given: none of the user's MCP servers start
+            ? ["--tools", "", "--strict-mcp-config", ...(access === "plan" ? [] : ["--permission-mode", "manual"])] // no --mcp-config given: none of the user's MCP servers start
             : access === "agent"
               ? [...(offline ? [...allow, "--strict-mcp-config"] : ["--tools", "default"]), "--permission-mode", "acceptEdits"]
               : bridged
                 ? [...(offline ? [...allow, "--strict-mcp-config"] : ["--tools", "default"]), "--permission-mode", "default", "--permission-prompt-tool", "stdio"]
-                : ["--tools", "Read", "Glob", "Grep", ...(offline ? ["--strict-mcp-config"] : ["WebSearch", "WebFetch"])]),
+                : ["--tools", "Read", "Glob", "Grep", ...(offline ? ["--strict-mcp-config"] : ["WebSearch", "WebFetch"]), ...(access === "plan" ? [] : ["--permission-mode", "manual"])]),
           ...(access === "plan" ? ["--permission-mode", "plan"] : []),
-          ...(system ? ["--system-prompt", system] : []),
+          ...(system ? ["--system-prompt", defuseMentions(system, cwd || CLI_SCRATCH)] : []),
           ...(model !== "default" ? ["--model", model] : []),
           ...(effort ? ["--effort", effort] : []),
         ],
-        stdin: bridged ? userMessageLine(user) : user,
+        stdin: bridged ? userMessageLine(defuseMentions(user, cwd || CLI_SCRATCH)) : defuseMentions(user, cwd || CLI_SCRATCH),
         holdStdin: bridged,
         cwd,
       };
@@ -374,6 +414,7 @@ export const CLI_PROVIDERS: readonly CliProviderDef[] = [
         ...(web === false ? { "*": "deny", glob: "allow", grep: "allow", list: "allow", task: "deny", skill: "deny" } : {}),
         read: { "*": "allow", "*.env": "deny", "*.env.*": "deny", "*.env.example": "allow" },
         bash: "deny",
+        shell: "deny", // renamed from `bash` in newer releases; older ones ignore it
         edit: cwd && access === "agent" ? "allow" : "deny",
         webfetch: cwd && web !== false ? "allow" : "deny",
         websearch: cwd && web !== false ? "allow" : "deny",
@@ -420,7 +461,8 @@ export const CLI_PROVIDERS: readonly CliProviderDef[] = [
 ];
 
 export function cliProviderForModel(modelId: string): CliProviderDef | undefined {
-  const prefix = modelId.slice(0, modelId.indexOf("/"));
+  const slash = modelId.indexOf("/");
+  const prefix = slash < 0 ? "" : modelId.slice(0, slash);
   return CLI_PROVIDERS.find((d) => d.id === prefix);
 }
 
@@ -1060,7 +1102,7 @@ function runCli(
         );
         child = run.proc;
       } else {
-        const scratch = join(tmpdir(), "devchat-cli");
+        const scratch = CLI_SCRATCH;
         await mkdir(scratch, { recursive: true });
         // Already cancelled (also while the folder was made): don't start a process nobody will read.
         if (signal?.aborted) return controller.error(signal.reason ?? new Error("Aborted"));
@@ -1275,10 +1317,12 @@ function runCli(
               retries++;
               // Otherwise the bubble just sits there: the tool is alive but its
               // upstream API isn't answering, and only we can see that.
-              emitReasoning(`Waiting for ${def.label}'s API (retry ${retries})…\n`);
+              emitReasoning(`Waiting for ${def.label}'s API (retry ${retries}${ev.detail ? `: ${ev.detail}` : ""})…\n`);
               if (retries >= MAX_RETRIES && !sawOutput) {
                 stop(`${def.label} keeps retrying its API call (${retries}×) without answering. Run \`${def.bin}\` in a terminal to check its login.`);
               }
+            } else if (ev.type === "notice") {
+              emitReasoning(ev.text);
             } else if (ev.type === "error") {
               errorMsg = ev.message;
             }

@@ -26,7 +26,8 @@ import {
   nextPane,
   openPane,
   parsePanes,
-  replacePane,
+  keepParamsForPanes,
+  replaceChat,
   serializePanes,
   writerConflicts,
 } from "@/lib/splitPanes";
@@ -35,6 +36,7 @@ export const CHAT_DRAG_TYPE = "application/x-devchat-chat";
 
 export interface PaneInfo {
   title: string;
+  model: string;
   workingFolder: string | null;
 }
 
@@ -206,7 +208,7 @@ export function SplitViewProvider({ children }: { children: React.ReactNode }) {
     try {
       const list = await fetchConversations();
       const next: Record<string, PaneInfo> = {};
-      for (const c of list) next[c.id] = { title: c.title, workingFolder: c.workingFolder ?? null };
+      for (const c of list) next[c.id] = { title: c.title, model: c.model, workingFolder: c.workingFolder ?? null };
       setInfo(next);
     } catch {
       // Titles are cosmetic; the panes still work without them.
@@ -220,7 +222,11 @@ export function SplitViewProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     window.addEventListener("vas:title-updated", loadInfo);
-    return () => window.removeEventListener("vas:title-updated", loadInfo);
+    window.addEventListener("vas:pane-info-changed", loadInfo);
+    return () => {
+      window.removeEventListener("vas:title-updated", loadInfo);
+      window.removeEventListener("vas:pane-info-changed", loadInfo);
+    };
   }, [loadInfo]);
 
   // Each pane's mode lives in the same per-chat storage ChatModeContext writes; there is no event, so poll while split.
@@ -247,7 +253,7 @@ export function SplitViewProvider({ children }: { children: React.ReactNode }) {
 
   const warnings = useMemo(() => {
     const writers = writerConflicts(
-      ids.map((id) => ({ id, kind: "chat", mode: modes[id] ?? "chat", workingFolder: info[id]?.workingFolder ?? null })),
+      ids.map((id) => ({ id, kind: "chat", mode: modes[id] ?? "chat", model: info[id]?.model ?? "", workingFolder: info[id]?.workingFolder ?? null })),
     );
     const out: Record<string, PaneWarning> = {};
     for (const id of writers) {
@@ -273,8 +279,7 @@ export function SplitViewProvider({ children }: { children: React.ReactNode }) {
   /** Writes the new panes to the URL. Adding or removing a pane replaces the entry; focus only uses replaceState. */
   const commit = useCallback(
     (next: { ids: string[]; focus: string }) => {
-      const keep = new URLSearchParams(searchParams.toString());
-      if (next.ids[0] !== ids[0]) keep.delete("q"); // ?q= applies to the first pane only
+      const keep = keepParamsForPanes(new URLSearchParams(searchParams.toString()), ids[0], next.ids[0]);
       const href = serializePanes(next.ids, next.focus, keep);
       if (href === window.location.pathname + window.location.search) return;
       if (next.ids.join(",") !== idsKey) router.replace(href, { scroll: false });
@@ -300,12 +305,19 @@ export function SplitViewProvider({ children }: { children: React.ReactNode }) {
     commit({ ids: next, focus: id });
   };
 
-  const replaceFocused = (id: string) => {
-    if (ids.includes(id)) return focusPane(id);
-    if (ids.length && !confirmBusy(focus, "Replace")) return;
-    if (isBusy(focus)) stoppers.current.get(focus)?.();
-    commit(ids.length ? replacePane(ids, focus, id) : { ids: [id], focus: id });
+  // Swap a chat for another. Side chats of the replaced main chat close with it (one confirm covers all busy panes).
+  const swapChat = (oldId: string, id: string) => {
+    const { ids: now, focus: cur, parentOf: parents } = live.current;
+    if (now.includes(id)) return focusPane(id);
+    if (!now.length) return commit({ ids: [id], focus: id });
+    const r = replaceChat(now, cur, oldId, id, parents);
+    const gone = now.filter((x) => !r.ids.includes(x) && isBusy(x));
+    if (gone.length && !window.confirm(`Replace "${titleOf(gone[0])}"? Its reply will stop and unsent text will be lost.`)) return;
+    for (const x of gone) stoppers.current.get(x)?.();
+    commit({ ids: r.ids, focus: r.focus });
   };
+
+  const replaceFocused = (id: string) => swapChat(focus, id);
 
   const insertAt = (id: string, index: number, side: "left" | "right") => {
     const next = openPane(ids, id, { index, side }, limit);
@@ -313,10 +325,7 @@ export function SplitViewProvider({ children }: { children: React.ReactNode }) {
     commit({ ids: next, focus: id });
   };
 
-  const replaceAt = (oldId: string, id: string) => {
-    if (ids.includes(id)) return focusPane(id);
-    commit(replacePane(ids, oldId, id));
-  };
+  const replaceAt = (oldId: string, id: string) => swapChat(oldId, id);
 
   const closeChat = (id: string) => {
     const { ids: now, focus: cur, parentOf: parents } = live.current;

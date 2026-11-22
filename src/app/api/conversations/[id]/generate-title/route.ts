@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { generateText } from "ai";
 import { prisma } from "@/lib/db";
 import { resolveModel } from "@/lib/llm";
+import { temperatureFor } from "@/lib/reasoning";
 import { getConversationOrNull } from "@/lib/api/conversations";
 import { requireUserId } from "@/lib/auth";
 
@@ -48,9 +49,9 @@ export async function POST(
       model: resolved.model,
       system: "Generate a very short title (max 6 words, no quotes, no punctuation at end) for this conversation based on its beginning. Reply with ONLY the title.",
       prompt,
-      temperature: 0.5,
+      ...temperatureFor(resolved.id, 0.5),
       abortSignal: AbortSignal.timeout(60_000), // a CLI model has no Stop button here
-      ...(isOllama ? { providerOptions: { ollama: { num_predict: 20, temperature: 0.5 } } } : {}),
+      ...(isOllama ? { providerOptions: { ollama: { options: { num_predict: 20, temperature: 0.5 } } } } : {}),
     });
 
     const title = (result.text || "").trim().replace(/^["']|["']$/g, "") || "New Chat";

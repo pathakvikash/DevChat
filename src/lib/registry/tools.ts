@@ -30,7 +30,7 @@ export const TOOL_REGISTRY: Record<string, ToolDefinition> = {
     description:
       "Create an artifact — a reusable document, code file, report, table, dataset, or other structured content that will be shown in a side panel.",
     modelDescription:
-      'Create an artifact — a reusable document, code file, report, table, dataset, or other structured content that will be shown in a side panel. Use this INSTEAD of printing large code blocks or documents in chat. The artifact is saved and can be updated later. Type `data` is a dataset: content must be a JSON {"columns":[...],"rows":[[...]]} object or CSV, and you then reference it from a Chart or Table component with `dataArtifactId` instead of retyping the rows.',
+      'Create an artifact — a reusable document, code file, report, table, dataset, or other structured content that will be shown in a side panel. Use this INSTEAD of printing large code blocks or documents in chat. The artifact is saved and can be updated later. Type `data` is a dataset: content must be a JSON {"columns":[...],"rows":[[...]]} object or CSV, and you then reference it from a Chart or Table component with `dataArtifactId` instead of retyping the rows. HTML artifacts run in an isolated sandbox with no network, cookies or localStorage.',
     category: "Utility",
     internal: true,
     inputSchema: z.object({
@@ -83,9 +83,10 @@ export const TOOL_REGISTRY: Record<string, ToolDefinition> = {
     }),
     execute: async ({ artifactId, content, title }, ctx) => {
       try {
-        const existing = await prisma.artifact.findUnique({
-          where: { id: artifactId },
-        });
+        // Only this chat's own artifacts: an id from anywhere else is "not found".
+        const existing = ctx.conversationId
+          ? await prisma.artifact.findFirst({ where: { id: artifactId, conversationId: ctx.conversationId } })
+          : null;
         if (!existing) return `Error: artifact ${artifactId} not found.`;
         const version =
           content !== undefined && content !== existing.content
@@ -111,10 +112,11 @@ export const TOOL_REGISTRY: Record<string, ToolDefinition> = {
   // ─── BUILT-IN, ALWAYS-ON ──────────────────────────────────────────────
   executeCode: {
     id: "executeCode",
+    outbound: true,
     name: "Execute Code (sandbox)",
     description: "Run Python (Pyodide) or JavaScript in a browser sandbox.",
     modelDescription:
-      "Execute Python or JavaScript code in a secure browser sandbox. Python runs in Pyodide (numpy/pandas pre-loaded; other PyPI via `import micropip; await micropip.install('pkg')`). JavaScript runs in a sandboxed iframe (5s timeout). Returns stdout/stderr/return value. Pass `saveAs: { title }` to store the printed output as a data artifact and get back an id to reference from a Chart or Table via `dataArtifactId` — use it for any dataset you'd otherwise retype into a component spec.",
+      "Execute Python or JavaScript code in a secure browser sandbox. Python runs in Pyodide (its bundled packages, such as numpy and pandas, load on import). JavaScript runs in a sandboxed iframe (5s timeout). Neither has network access. Returns stdout/stderr/return value. Pass `saveAs: { title }` to store the printed output as a data artifact and get back an id to reference from a Chart or Table via `dataArtifactId` — use it for any dataset you'd otherwise retype into a component spec.",
     category: "Code",
     internal: true,
     inputSchema: z.object({
@@ -134,6 +136,7 @@ export const TOOL_REGISTRY: Record<string, ToolDefinition> = {
 
   webSearch: {
     id: "webSearch",
+    outbound: true,
     name: "Web Search",
     description: "Search the live web (DuckDuckGo free, Tavily if key set).",
     modelDescription:
@@ -151,6 +154,7 @@ export const TOOL_REGISTRY: Record<string, ToolDefinition> = {
   // ─── EXTRA SHIPPING TOOLS (toggleable) ─────────────────────────────────
   fetchUrl: {
     id: "fetchUrl",
+    outbound: true,
     name: "Fetch URL",
     description: "Fetch a web page and return its readable text content.",
     modelDescription:

@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/db";
 import { NextRequest, NextResponse } from "next/server";
 import { requireUserId } from "@/lib/auth";
+import { keepReadFilesMarker } from "@/lib/files/folderTools";
 
 /**
  * DELETE /api/conversations/:id/messages
@@ -188,7 +189,7 @@ export async function POST(
           data: {
             role,
             content,
-            parts: partsJson,
+            parts: keepReadFilesMarker(existing.parts, partsJson),
             attachments: attachmentsJson,
             model: model ?? existing.model,
             inputTokens: inputTokens || existing.inputTokens,

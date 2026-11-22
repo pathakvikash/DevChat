@@ -13,6 +13,7 @@ const matches = (r: any, where: Record<string, any>) =>
     return r[k] === v;
   });
 let failProgressSave = false;
+let failTableLookup = false;
 let workflowRow: any = null;
 const chats = new Set<string>();
 const dataTables = new Map<string, { id: string; userId: string; name: string; privateFrom: string; statuses?: string }>();
@@ -47,6 +48,7 @@ vi.mock("@/lib/db", () => {
     conversation: { findFirst: vi.fn(async ({ where }: any) => (chats.has(where.id) ? { id: where.id } : null)) },
     dataTable: {
       findFirst: vi.fn(async ({ where }: any) => {
+        if (failTableLookup) throw new Error("database is locked");
         const t = dataTables.get(where.id);
         return t && t.userId === where.userId ? t : null;
       }),
@@ -99,6 +101,7 @@ vi.mock("@/lib/workflows/cards/agent", async (orig) => ({ ...(await orig<object>
 
 import { advanceRun, cancelRun, capOutput, continueRun, markPrivateTables, preflight, resetShutdownForTests, resumeRun, startRun, stopAllRuns, sweepOrphans, type RunnerDeps } from "@/lib/workflows/runner";
 import { resolveAgentModel } from "@/lib/workflows/cards/agent";
+import { canUseHostTools } from "@/lib/hostAccess";
 import { mcpToolCard } from "@/lib/workflows/cards/mcpTool";
 import { pickRowsCard } from "@/lib/workflows/cards/pickRows";
 import { emptyGraph, type CardRun, type FlowNode, type WorkflowGraph } from "@/lib/workflows/graph";
@@ -153,6 +156,7 @@ beforeEach(() => {
   runs.clear();
   saves.length = 0;
   failProgressSave = false;
+  failTableLookup = false;
   resetShutdownForTests();
   workflowRow = null;
   chats.clear();
@@ -403,6 +407,11 @@ describe("resume after interruption", () => {
     expect(await resumeRun("other", "f")).toMatchObject({ ok: false, status: 404 });
   });
 
+  it("answers with an issue message, not a throw, when the saved graph is damaged", async () => {
+    seedRun(graphOf(), { state: "failed", graph: "{not json" });
+    expect(await resumeRun("u1", "run1")).toMatchObject({ ok: false, status: 400, error: expect.stringContaining("damaged") });
+  });
+
   it("will not resume while another run of the workflow is in progress", async () => {
     const g = graphOf();
     seedRun(g, { state: "interrupted" }, "old");
@@ -482,6 +491,82 @@ describe("cancel, heartbeat and shutdown", () => {
     await advanceRun("run1", next.deps);
     expect(next.ran).toEqual(["a", "b"]);
     expect(runs.get("run1").state).toBe("succeeded");
+  });
+});
+
+describe("saved graphs are checked again", () => {
+  const unsafe = graphOf(agentNode("a", ["trigger"], 1, { folder: "/work/app", tools: ["fetchUrl"] }));
+
+  it("Resume of a run whose saved graph has a folder and fetchUrl is refused, with the first issue", async () => {
+    seedRun(unsafe, { state: "failed", nodes: JSON.stringify({ trigger: { status: "succeeded" }, a: { status: "failed", error: "x" } }) }, "f");
+    expect(await resumeRun("u1", "f")).toMatchObject({ ok: false, status: 400, error: expect.stringContaining("reads private data") });
+    expect(runs.get("f").state).toBe("failed");
+  });
+
+  it("Resume of a clean run still works", async () => {
+    seedRun(graphOf(agentNode("a", ["trigger"], 1, { folder: "/work/app" })), { state: "failed", nodes: JSON.stringify({ trigger: { status: "succeeded" }, a: { status: "failed", error: "x" } }) }, "f");
+    expect(await resumeRun("u1", "f")).toMatchObject({ ok: true });
+  });
+});
+
+describe("posting what a folder card read", () => {
+  const post = (id: string, from: string): FlowNode => ({ id, type: "chatMessage", fromIds: [from], config: { message: "{{a.text}}" }, ui: { label: id, position: { x: 5, y: 0 } } });
+  const seen = async (g: WorkflowGraph) => {
+    const flags: Record<string, unknown> = {};
+    const plain: CardImpl = { run: async (c) => ({ output: { text: "t" } }) };
+    const chat: CardImpl = { run: async (c) => ((flags[c.node.id] = c.readsFolder), { output: {} }) };
+    seedRun(g);
+    await advanceRun("run1", { cards: { trigger: plain, agent: plain, chatMessage: chat } });
+    return flags;
+  };
+
+  it("tells Post to a chat when a folder card is before it, even through another card, on any model", async () => {
+    const g = graphOf(agentNode("a", ["trigger"], 1, { folder: "/work/app", model: "claude-code/sonnet" }), agentNode("mid", ["a"], 2), post("p", "mid"));
+    expect(await seen(g)).toEqual({ p: true });
+  });
+
+  it("tells it when the folder text comes through a table, and not for a table with no folder source", async () => {
+    const save: FlowNode = { id: "s", type: "table", fromIds: ["a"], config: { tableId: "t1", list: "{{a.items}}" }, ui: { label: "s", position: { x: 2, y: 0 } } };
+    const pick: FlowNode = { id: "pk", type: "filter", fromIds: ["s"], config: { list: "{{s.items}}" }, ui: { label: "pk", position: { x: 3, y: 0 } } };
+    const read: FlowNode = { id: "pk", type: "table", fromIds: ["trigger"], config: { tableId: "t1", list: "{{trigger.items}}" }, ui: { label: "pk", position: { x: 3, y: 0 } } };
+    const viaTable = graphOf(agentNode("a", ["trigger"], 1, { folder: "/work/app" }), save, pick, { ...post("p", "pk"), ui: { label: "p", position: { x: 4, y: 0 } } });
+    dataTables.set("t1", { id: "t1", userId: "u1", name: "T", privateFrom: "", statuses: "[]" });
+    const flags: Record<string, unknown> = {};
+    const plain: CardImpl = { run: async () => ({ output: { text: "t" } }) };
+    const chat: CardImpl = { run: async (c) => ((flags[c.node.id] = c.readsFolder), { output: {} }) };
+    seedRun(viaTable);
+    await advanceRun("run1", { cards: { trigger: plain, agent: plain, table: plain, filter: plain, chatMessage: chat } as any });
+    expect(flags).toEqual({ p: true });
+
+    // A table that already holds folder text marks a post that only reads the table.
+    flags.p = undefined;
+    dataTables.set("t1", { id: "t1", userId: "u1", name: "T", privateFrom: "folder", statuses: "[]" });
+    seedRun(graphOf(read, post("p", "pk")), {}, "run2");
+    await advanceRun("run2", { cards: { trigger: plain, table: plain, chatMessage: chat } as any });
+    expect(flags.p).toBe(true);
+
+    flags.p = undefined;
+    dataTables.set("t1", { id: "t1", userId: "u1", name: "T", privateFrom: "", statuses: "[]" });
+    seedRun(graphOf(read, post("p", "pk")), {}, "run3");
+    await advanceRun("run3", { cards: { trigger: plain, table: plain, chatMessage: chat } as any });
+    expect(flags.p).toBe(false);
+  });
+
+  it("fails the card with the error when the folder lookup fails, instead of leaving it running", async () => {
+    const save: FlowNode = { id: "s", type: "table", fromIds: ["trigger"], config: { tableId: "t1", list: "{{trigger.items}}" }, ui: { label: "s", position: { x: 2, y: 0 } } };
+    dataTables.set("t1", { id: "t1", userId: "u1", name: "T", privateFrom: "", statuses: "[]" });
+    // The table card passes its own checks, then the database starts failing before the Post card.
+    const table: CardImpl = { run: async () => ((failTableLookup = true), { output: {} }) };
+    const chat: CardImpl = { run: async () => ({ output: {} }) };
+    seedRun(graphOf(save, post("p", "s")));
+    await advanceRun("run1", { cards: { trigger: { run: async () => ({ output: {} }) }, table, chatMessage: chat } as any });
+    expect(nodesOf().p).toMatchObject({ status: "failed", error: "Couldn't check whether this card gets text from a folder. Run it again." });
+    expect(runs.get("run1")).toMatchObject({ state: "failed", error: expect.stringContaining("Couldn't check whether this card gets text from a folder") });
+  });
+
+  it("does not when no card before it has a folder", async () => {
+    const g = graphOf(agentNode("a", ["trigger"], 1), post("p", "a"));
+    expect(await seen(g)).toEqual({ p: false });
   });
 });
 
@@ -644,6 +729,21 @@ describe("startRun", () => {
     withWorkflow(graphOf(agent({ tools: ["calculator"] })));
     expect(await startRun("u1", "wf1")).toMatchObject({ ok: false, status: 400, error: "A: Tiny can't use tools. Untick the tools or pick another model." });
     withWorkflow(graphOf(agent({ tools: [] }))); // no tools, so the same model is fine
+    expect(await startRun("u1", "wf1")).toMatchObject({ ok: true });
+  });
+
+  it("a folder on a model without tools is refused", async () => {
+    vi.mocked(resolveAgentModel).mockResolvedValue(model({ name: "Tiny", supportsTools: false }) as never);
+    withWorkflow(graphOf(agent({ folder: "/work/app" })));
+    expect(await startRun("u1", "wf1")).toMatchObject({ ok: false, status: 400, error: "A: Tiny can't read a folder. Pick a model that can use tools, or clear the folder." });
+    vi.mocked(resolveAgentModel).mockResolvedValue(model() as never);
+    expect(await startRun("u1", "wf1")).toMatchObject({ ok: true });
+  });
+
+  it("a folder is refused to a user who is not the owner, before the run starts", async () => {
+    withWorkflow(graphOf(agent({ folder: "/work/app" })));
+    vi.mocked(canUseHostTools).mockResolvedValueOnce(false);
+    expect(await startRun("u1", "wf1")).toMatchObject({ ok: false, status: 400, error: "A: This is only available to the server's owner." });
     expect(await startRun("u1", "wf1")).toMatchObject({ ok: true });
   });
 

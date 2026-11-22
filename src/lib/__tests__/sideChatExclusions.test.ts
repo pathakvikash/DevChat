@@ -96,6 +96,20 @@ describe("memory consolidation runs for a main chat only", () => {
     expect(consolidateMemory).not.toHaveBeenCalled();
   });
 
+  it("applies nothing for a chat that used the folder tools, but still runs for a CLI chat with a folder", async () => {
+    db.message.findMany.mockResolvedValueOnce([{ id: "m1" }]);
+    const res = await consolidateChat({ kind: "main", workingFolder: "/work/app" });
+    expect(await res.json()).toEqual({ applied: 0, pruned: 0 });
+    expect(consolidateMemory).not.toHaveBeenCalled();
+    const where = db.message.findMany.mock.calls[0][0].where;
+    expect(where.OR.map((c: any) => c.parts?.contains)).toEqual(['"tool-listFiles"', '"tool-readFile"', '"tool-searchFiles"', '"dynamic-tool"', '"readFiles":true', undefined]);
+
+    // A chat with a folder but no folder-tool calls (a CLI model) is not skipped.
+    vi.mocked(consolidateMemory).mockResolvedValue({ applied: 1, pruned: 0 } as any);
+    await consolidateChat({ kind: "main", workingFolder: "/work/app" });
+    expect(consolidateMemory).toHaveBeenCalledTimes(1);
+  });
+
   it("still runs for a main chat", async () => {
     (consolidateMemory as any).mockResolvedValue({ applied: 2, pruned: 1 });
     const res = await consolidateChat({ kind: "main" });

@@ -11,6 +11,12 @@ async function sideIdOf(request: APIRequestContext, mainId: string): Promise<str
   return (await list())[0].id;
 }
 
+/** The header's Side chat button moved into the Panel launcher. */
+async function toggleSideFromLauncher(page: Page, mainId: string) {
+  await pane(page, mainId).getByRole("button", { name: "Panel", exact: true }).click();
+  await page.getByRole("menuitem", { name: /^Side chat/ }).click();
+}
+
 test.beforeEach(async ({ request }) => {
   await deleteAllChats(request);
 });
@@ -30,17 +36,17 @@ test("Cmd+\\ opens a side chat docked next to the main chat, and it reloads from
   await expect(pane(page, side)).toBeVisible();
 });
 
-test("the Side chat button in the chat header opens and closes the side chat", async ({ page, request }) => {
+test("the Panel launcher's Side chat entry opens and closes the side chat", async ({ page, request }) => {
   const main = await createChat(request, { title: "Main plan" });
   await openChat(page, main);
 
-  await pane(page, main).getByRole("button", { name: "Open side chat" }).click();
+  await toggleSideFromLauncher(page, main);
   const side = await sideIdOf(request, main);
   await expect(pane(page, side)).toBeVisible();
+  await expect(page).toHaveURL(new RegExp(`split=${side}`));
 
-  await pane(page, main).getByRole("button", { name: "Close side chat" }).click();
+  await toggleSideFromLauncher(page, main);
   await expect(pane(page, side)).toBeHidden();
-  await expect(pane(page, main).getByRole("button", { name: "Open side chat" })).toBeVisible();
 });
 
 test("/side opens a side chat and sends the question there, not in the main chat", async ({ page, request }) => {
@@ -69,4 +75,26 @@ test("Send to main prefills the main message box and sends nothing", async ({ pa
 
   await expect(composerIn(page, main)).toHaveValue("Mock reply (deterministic). You said: ping 7");
   await expect(pane(page, main).locator("[data-message-id]")).toHaveCount(0);
+});
+
+test("switching to another chat from the sidebar closes the old chat's side chat", async ({ page, request }) => {
+  const a = await createChat(request, { title: "Alpha plan" });
+  const b = await createChat(request, { title: "Beta notes" });
+  await openChat(page, a);
+  await page.keyboard.press("ControlOrMeta+Backslash");
+  const side = await sideIdOf(request, a);
+  await expect(pane(page, side)).toBeVisible();
+
+  await page.getByRole("link", { name: /Beta notes/ }).click();
+  await expect(page).toHaveURL(new RegExp(`/c/${b}$`));
+  await expect(pane(page, b)).toBeVisible();
+  await expect(pane(page, side)).toHaveCount(0);
+
+  await page.getByRole("link", { name: /Alpha plan/ }).click();
+  await expect(page).toHaveURL(new RegExp(`/c/${a}$`));
+  await expect(pane(page, side)).toHaveCount(0);
+
+  await toggleSideFromLauncher(page, a);
+  await expect(pane(page, side)).toBeVisible();
+  expect(await sideIdOf(request, a)).toBe(side);
 });

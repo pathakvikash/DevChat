@@ -12,6 +12,8 @@ export interface FieldSpec {
   help?: string;
   options?: { value: string; label: string }[];
   rows?: number;
+  /** One-click chips under a textarea: clicking adds the value as a line, or removes it. */
+  suggestions?: { label: string; value: string }[];
   /** Fields that only apply when this returns true (for example Items, only when "Run once per item" is on). */
   when?: (config: Record<string, unknown>) => boolean;
 }
@@ -133,8 +135,6 @@ export const AGENT_TOOL_CHOICES: { id: (typeof AGENT_TOOL_IDS)[number]; label: s
 export const isCodexModelId = (id: string): boolean => id.startsWith("codex/");
 /** Its offline flags are unverified until a live check runs, so a workflow card can't use it yet (lift this in `cardConflict`). */
 export const CODEX_BLOCKED = "Codex can't run workflow cards yet. Pick another model.";
-/** CLI model ids start with their provider id (cliProviders.ts); kept here because that file is server-only. */
-export const isCliModelId = (id: string): boolean => /^(claude-code|codex|opencode)\//.test(id);
 /** What an MCP tool card and an agent card with MCP tools can do outside DevChat (8.5). */
 export const MCP_WARNING = "Can change things outside DevChat";
 export const MCP_WEB_WARNING = "This card reads web pages and can act through MCP. A page could try to steer it.";
@@ -147,14 +147,10 @@ export const TOOL_CONFLICT_MESSAGE = "This card can read your chats and reach th
 type Cfg = Record<string, unknown>;
 const toolList = (c: Cfg): string[] => (Array.isArray(c.tools) ? (c.tools as string[]) : []);
 
-/** An agent card with this `preset` (the "Explain a project folder" template) is checked for a Claude Code or OpenCode model and a folder. */
+/** An agent card with this `preset` (the "Explain a project folder" template) is checked for a folder. */
 export const FOLDER_PRESET = "explain-folder";
-/** Claude Code or OpenCode (Codex is blocked for workflow cards). */
-export const isFolderModelId = (id: string): boolean => /^(claude-code|opencode)\//.test(id);
-
-/** A command-line model with a folder: it can read the folder. Workflow cards run it with its own web tools switched off (`web: false`). */
-export const hasCliFolder = (type: string, config: Cfg, defaultModel = ""): boolean =>
-  type === "agent" && !!config.folder && isCliModelId(String(config.model || defaultModel));
+/** An agent card with a folder reads it, on any model (a CLI model itself, others through the folder tools). A CLI card runs with its own web tools off (`web: false`). */
+export const hasFolder = (type: string, config: Cfg, _defaultModel = ""): boolean => type === "agent" && !!config.folder;
 
 /** Whether the card reads chats (an agent with a chat-reading tool). */
 export const readsChats = (type: string, config: Cfg): boolean => type === "agent" && toolList(config).some((t) => CHAT_READ_TOOLS.includes(t));
@@ -164,7 +160,7 @@ export const usesMcp = (type: string, config: Cfg): boolean => type === "mcpTool
 
 /** Private data a card can read: chats, MCP servers, or a folder. */
 export const readsPrivate = (type: string, config: Cfg, defaultModel = ""): boolean =>
-  readsChats(type, config) || usesMcp(type, config) || hasCliFolder(type, config, defaultModel);
+  readsChats(type, config) || usesMcp(type, config) || hasFolder(type, config, defaultModel);
 
 /** The open web: a search, fetch or job boards card, or an agent with a web tool. */
 export const reachesOpenWeb = (type: string, config: Cfg, _defaultModel = ""): boolean =>
@@ -178,7 +174,7 @@ export const reachesWeb = (type: string, config: Cfg, defaultModel = ""): boolea
 export const leaksTo = (earlier: { type: string; config: Cfg }, later: { type: string; config: Cfg }, defaultModel = ""): boolean => {
   if (!readsPrivate(earlier.type, earlier.config, defaultModel) || !reachesWeb(later.type, later.config, defaultModel)) return false;
   const mcpToMcp =
-    !readsChats(earlier.type, earlier.config) && !hasCliFolder(earlier.type, earlier.config, defaultModel) && !reachesOpenWeb(later.type, later.config, defaultModel);
+    !readsChats(earlier.type, earlier.config) && !hasFolder(earlier.type, earlier.config, defaultModel) && !reachesOpenWeb(later.type, later.config, defaultModel);
   return !mcpToMcp;
 };
 
@@ -204,7 +200,7 @@ const agent: CardDef = {
     tools: z.array(z.enum(AGENT_TOOL_IDS)).default([]),
     /** Owner only. Ids like mcp_<server>_<tool>, checked at run time against the user's enabled servers. The enum above stays closed. */
     mcpTools: z.array(z.string().regex(/^mcp_.{1,200}$/)).max(20).default([]),
-    /** Owner only, CLI models only: a folder Claude Code has worked in, and whether the model may change files in it. */
+    /** Owner only: a folder from the user's folder list, read by any model; only a CLI model may change files in it (allowEdits). */
     folder: z.string().max(1000).default(""),
     allowEdits: z.boolean().default(false),
     outputFields: z.array(outputFieldSchema).default([]),
@@ -218,7 +214,7 @@ const agent: CardDef = {
     { key: "model", label: "Model", kind: "model", help: "Empty uses the workflow's default model." },
     { key: "tools", label: "Tools", kind: "tools" },
     { key: "mcpTools", label: "MCP tools", kind: "mcpTools", help: "Only for the server's owner. Each tool you tick can be called without asking." },
-    { key: "folder", label: "Working folder", kind: "folder", help: "Command-line models only. Without one the model can't see any files." },
+    { key: "folder", label: "Working folder", kind: "folder", help: "Without one the model can't see any files." },
     { key: "allowEdits", label: "Allow edits in the folder", kind: "allowEdits" },
     { key: "outputFields", label: "Output fields", kind: "outputFields", help: "Empty means the output is plain text." },
     ...perItemFields,
@@ -405,6 +401,17 @@ export const MAX_PICK_LIMIT = 25; // the same as the default of a per-item card 
 /** The status a picked row gets, and the one pickRows offers, unless the card says otherwise. */
 export const DEFAULT_PICK_STATUS = "picked";
 
+const board = (host: string, list: [string, string][]) => list.map(([label, slug]) => ({ label, value: `https://${host}/${slug}` }));
+const words = (list: string[]) => list.map((w) => ({ label: w, value: w }));
+export const CAREERS_SUGGESTIONS = [
+  ...board("job-boards.greenhouse.io", [["Vercel", "vercel"], ["Stripe", "stripe"], ["Figma", "figma"], ["Airbnb", "airbnb"], ["Discord", "discord"], ["Databricks", "databricks"], ["Cloudflare", "cloudflare"], ["GitLab", "gitlab"], ["Dropbox", "dropbox"], ["Razorpay", "razorpaysoftwareprivatelimited"], ["Groww", "groww"]]),
+  ...board("jobs.ashbyhq.com", [["Supabase", "supabase"], ["Linear", "linear"], ["Notion", "notion"], ["Ramp", "ramp"], ["OpenAI", "openai"], ["PostHog", "posthog"]]),
+  ...board("jobs.lever.co", [["Palantir", "palantir"], ["CRED", "cred"], ["Meesho", "meesho"], ["Spotify", "spotify"]]),
+];
+const TITLE_IN = words(["Backend", "Frontend", "Full stack", "Software Engineer", "Data", "DevOps", "Mobile", "Machine Learning", "QA", "Junior", "Graduate", "New Grad", "Entry", "Associate", "Intern"]);
+const TITLE_OUT = words(["Senior", "Staff", "Principal", "Lead", "Manager", "Director", "Intern"]);
+const PLACES = words(["Remote", "India", "Bengaluru", "Bangalore", "Hyderabad", "Pune", "Mumbai", "Delhi", "United States", "United Kingdom", "Europe", "Singapore"]);
+
 const jobBoards: CardDef = {
   type: "jobBoards",
   label: "Job boards",
@@ -421,11 +428,11 @@ const jobBoards: CardDef = {
   }),
   defaults: () => ({ boards: "", titleInclude: "", titleExclude: "", locationAllow: "", locationBlock: "", maxItems: DEFAULT_MAX_JOBS }),
   fields: [
-    { key: "boards", label: "Careers pages", kind: "textarea", rows: 3, help: "One address per line: jobs.ashbyhq.com/<company>, jobs.lever.co/<company> or job-boards.greenhouse.io/<company>." },
-    { key: "titleInclude", label: "Title has any of", kind: "textarea", rows: 2, help: "One word per line. Empty keeps every title." },
-    { key: "titleExclude", label: "Title has none of", kind: "textarea", rows: 2, help: "One word per line." },
-    { key: "locationAllow", label: "Location has any of", kind: "textarea", rows: 2, help: "One word per line. Empty keeps every location. A job with no location is kept." },
-    { key: "locationBlock", label: "Location has none of", kind: "textarea", rows: 2, help: "One word per line. Wins over the list above." },
+    { key: "boards", label: "Careers pages", kind: "textarea", rows: 3, help: "One address per line: jobs.ashbyhq.com/<company>, jobs.lever.co/<company> or job-boards.greenhouse.io/<company>. Pick some below or paste your own.", suggestions: CAREERS_SUGGESTIONS },
+    { key: "titleInclude", label: "Title has any of", kind: "textarea", rows: 2, help: "One word per line; a title with any of them is kept (OR). Empty keeps every title.", suggestions: TITLE_IN },
+    { key: "titleExclude", label: "Title has none of", kind: "textarea", rows: 2, help: "One word per line; a title with any of them is dropped (OR).", suggestions: TITLE_OUT },
+    { key: "locationAllow", label: "Location has any of", kind: "textarea", rows: 2, help: "One word per line; a location with any of them is kept (OR). Empty keeps every location. A job with no location is kept.", suggestions: PLACES },
+    { key: "locationBlock", label: "Location has none of", kind: "textarea", rows: 2, help: "One word per line; a location with any of them is dropped (OR). Wins over the list above.", suggestions: PLACES },
     { key: "maxItems", label: "Most jobs to keep", kind: "number" },
   ],
   perItem: false,

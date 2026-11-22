@@ -1,10 +1,13 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { createContext, useContext, useMemo, useState } from "react";
 import { Play, X, Loader2 } from "lucide-react";
 import { runCode, isExecutableLanguage } from "@/lib/sandbox";
 import { resolveLanguage, highlightCode } from "@/lib/utils/highlight";
 import AsyncButton from "./ui/AsyncButton";
+
+// The chat a Run belongs to (Python keeps its state per chat). The conversation pane provides it.
+export const RunScope = createContext<string | undefined>(undefined);
 
 interface CodeRunnerProps {
   code: string;
@@ -12,6 +15,7 @@ interface CodeRunnerProps {
 }
 
 export default function CodeRunner({ code, language }: CodeRunnerProps) {
+  const scope = useContext(RunScope);
   const [output, setOutput] = useState<string>("");
   const [showOutput, setShowOutput] = useState(false);
   const [executing, setExecuting] = useState(false);
@@ -32,7 +36,7 @@ export default function CodeRunner({ code, language }: CodeRunnerProps) {
     setShowOutput(true);
     setOutput("Running…");
     try {
-      const result = await runCode(language, code);
+      const result = await runCode(language, code, scope ?? "");
       setOutput(result);
     } catch (error: any) {
       setOutput(`Error: ${error?.message || String(error)}`);

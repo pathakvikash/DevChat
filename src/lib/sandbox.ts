@@ -1,102 +1,51 @@
 "use client";
 
-let pyodideLoader: Promise<any> | null = null;
+const PYODIDE = "https://cdn.jsdelivr.net/pyodide/v0.26.4/full/";
+// The Run frame's own policy, on top of the page's: no network. Python may fetch only Pyodide's own folder.
+export const RUN_CSP = {
+  javascript: "default-src 'none'; script-src 'unsafe-inline' 'unsafe-eval'",
+  python: `default-src 'none'; script-src 'unsafe-inline' 'unsafe-eval' ${PYODIDE}; connect-src ${PYODIDE}`,
+} as const;
 
-function loadPyodide(): Promise<any> {
-  if (typeof window === "undefined") {
-    return Promise.reject(new Error("Pyodide only runs in the browser"));
-  }
-  const w = window as any;
-  if (w.__pyodide) return Promise.resolve(w.__pyodide);
-  if (pyodideLoader) return pyodideLoader;
-
-  pyodideLoader = new Promise((resolve, reject) => {
-    const CDNS = [
-      "https://cdn.jsdelivr.net/pyodide/v0.26.4/full/",
-      "https://cdn.jsdelivr.net/pyodide/v0.25.1/full/",
-    ];
-    let cdnIndex = 0;
-
-    const tryNext = () => {
-      cdnIndex++;
-      if (cdnIndex < CDNS.length) {
-        loadFromIndex(cdnIndex);
-      } else {
-        reject(new Error("Failed to load Pyodide from any CDN"));
-      }
-    };
-
-    function loadFromIndex(idx: number) {
-      if (w.loadPyodide) {
-        w.loadPyodide({ indexURL: CDNS[idx] })
-          .then((py: any) => {
-            w.__pyodide = py;
-            resolve(py);
-          })
-          .catch(tryNext);
-        return;
-      }
-      const script = document.createElement("script");
-      script.src = `${CDNS[idx]}pyodide.js`;
-      script.onload = () => {
-        w.loadPyodide({ indexURL: CDNS[idx] })
-          .then((py: any) => {
-            w.__pyodide = py;
-            resolve(py);
-          })
-          .catch(tryNext);
-      };
-      script.onerror = tryNext;
-      document.head.appendChild(script);
+const PYTHON_BODY = `<script src="${PYODIDE}pyodide.js"><\/script><script>
+  let ready;
+  let queue = Promise.resolve();
+  const start = () => (ready ||= loadPyodide({ indexURL: '${PYODIDE}' }).catch((e) => { ready = null; throw e; }));
+  async function run(code) {
+    let py;
+    try { py = await start(); } catch (e) { return 'Error: ' + (e && e.message ? e.message : String(e)); }
+    try {
+      await py.loadPackagesFromImports(code);
+    } catch (e) {
+      return 'Could not load package(s) for imports: ' + (e && e.message ? e.message : String(e));
     }
-
-    loadFromIndex(0);
+    py.runPython('import sys, io\\nsys.stdout = io.StringIO()\\nsys.stderr = io.StringIO()');
+    let result;
+    let err = null;
+    try {
+      result = await py.runPythonAsync(code);
+    } catch (e) {
+      err = e && e.message ? e.message : String(e);
+    }
+    const stdout = py.runPython('sys.stdout.getvalue()');
+    const stderr = py.runPython('sys.stderr.getvalue()');
+    const parts = [];
+    if (stdout) parts.push(stdout);
+    if (stderr) parts.push(stderr);
+    if (result !== undefined && result !== null && !err) parts.push(String(result));
+    if (err) parts.push('Error: ' + err);
+    return parts.join('').trimEnd() || '(no output)';
+  }
+  window.addEventListener('message', (e) => {
+    if (e.source !== parent || !e.data || typeof e.data.code !== 'string') return;
+    const { channel, code } = e.data;
+    queue = queue.then(() => run(code)).catch((e) => 'Error: ' + (e && e.message ? e.message : String(e))).then((output) => parent.postMessage({ channel, output }, '*'));
   });
-  return pyodideLoader;
-}
+<\/script>`;
 
-async function runPython(code: string): Promise<string> {
-  const py = await loadPyodide();
-  try {
-    await py.loadPackagesFromImports(code);
-  } catch (e: any) {
-    return `Could not load package(s) for imports: ${e?.message || String(e)}`;
-  }
-  py.runPython(`
-import sys, io
-sys.stdout = io.StringIO()
-sys.stderr = io.StringIO()
-  `);
-  let result: any;
-  let err: string | null = null;
-  try {
-    result = await py.runPythonAsync(code);
-  } catch (e: any) {
-    err = e?.message || String(e);
-  }
-  const stdout = py.runPython("sys.stdout.getvalue()");
-  const stderr = py.runPython("sys.stderr.getvalue()");
-  const parts: string[] = [];
-  if (stdout) parts.push(stdout);
-  if (stderr) parts.push(stderr);
-  if (result !== undefined && result !== null && !err) parts.push(String(result));
-  if (err) parts.push(`Error: ${err}`);
-  return parts.join("").trimEnd() || "(no output)";
-}
-
-function runJavaScript(code: string, timeoutMs = 5000): Promise<string> {
-  if (code.length > 10000) {
-    return Promise.resolve(`Error: code exceeds 10,000 character limit (${code.length} chars).`);
-  }
+function javascriptBody(code: string, channel: string) {
   const sanitized = code.replace(/<\/script/gi, "<\\/script");
-  return new Promise((resolve) => {
-    const iframe = document.createElement("iframe");
-    iframe.sandbox.add("allow-scripts");
-    iframe.style.display = "none";
-    document.body.appendChild(iframe);
-
-    const channel = `vas-sandbox-${Math.random().toString(36).slice(2)}`;
-    const html = `<!doctype html><html><body><script>
+  return `<script>
       (async () => {
         const logs = [];
         const orig = { log: console.log, error: console.error, warn: console.warn, info: console.info };
@@ -116,8 +65,28 @@ function runJavaScript(code: string, timeoutMs = 5000): Promise<string> {
         if (result !== undefined) logs.push(fmt(result));
         parent.postMessage({ channel: '${channel}', output: logs.join('\\n') }, '*');
       })();
-    <\/script></body></html>`;
+    <\/script>`;
+}
 
+// The page a Run frame loads: its own CSP comes first, so nothing after it can run before the policy applies.
+export function runDocument(lang: "python" | "javascript", code: string, channel: string): string {
+  const body = lang === "python" ? PYTHON_BODY : javascriptBody(code, channel);
+  return `<!doctype html><html><head><meta http-equiv="Content-Security-Policy" content="${RUN_CSP[lang]}"></head><body>${body}</body></html>`;
+}
+
+function hiddenFrame(html: string, onLoad?: () => void) {
+  const iframe = document.createElement("iframe");
+  iframe.sandbox.add("allow-scripts");
+  iframe.style.display = "none";
+  if (onLoad) iframe.addEventListener("load", onLoad, { once: true });
+  iframe.srcdoc = html;
+  document.body.appendChild(iframe);
+  return iframe;
+}
+
+// Waits for the frame's reply on `channel`; start() sends the work once the listener is in place.
+function reply(iframe: HTMLIFrameElement, channel: string, timeoutMs: number, signal: AbortSignal | undefined, start: () => void): Promise<string> {
+  return new Promise((resolve) => {
     const timer = setTimeout(() => {
       window.removeEventListener("message", handler);
       iframe.remove();
@@ -125,15 +94,55 @@ function runJavaScript(code: string, timeoutMs = 5000): Promise<string> {
     }, timeoutMs);
 
     function handler(e: MessageEvent) {
-      if (e.data?.channel !== channel) return;
+      if (e.source !== iframe.contentWindow || e.data?.channel !== channel) return;
       clearTimeout(timer);
       window.removeEventListener("message", handler);
-      iframe.remove();
-      resolve(e.data.output || "(no output)");
+      resolve((typeof e.data.output === "string" && e.data.output) || "(no output)");
     }
     window.addEventListener("message", handler);
-    iframe.srcdoc = html;
+    signal?.addEventListener("abort", () => {
+      clearTimeout(timer);
+      window.removeEventListener("message", handler);
+      resolve("Error: Python was restarted for another chat. Run it again.");
+    });
+    start();
   });
+}
+
+const newChannel = () => `vas-sandbox-${Math.random().toString(36).slice(2)}`;
+
+// One Python frame for the chat's Runs: Pyodide loads once and variables persist between Runs.
+// ponytail: one Python frame at a time; a Run in another chat replaces it and a Run still waiting there is told to run again. One frame per chat if split view needs it.
+let pythonFrame: { iframe: HTMLIFrameElement; scope: string; loaded: boolean; restart: AbortController } | null = null;
+
+function runPython(code: string, scope: string, timeoutMs = 120_000): Promise<string> {
+  const channel = newChannel();
+  if (pythonFrame && pythonFrame.scope !== scope) {
+    pythonFrame.restart.abort();
+    pythonFrame.iframe.remove();
+    pythonFrame = null;
+  }
+  if (!pythonFrame) {
+    const frame = { iframe: hiddenFrame(runDocument("python", "", ""), () => (frame.loaded = true)), scope, loaded: false, restart: new AbortController() };
+    pythonFrame = frame;
+  }
+  const frame = pythonFrame;
+  const post = () => frame.iframe.contentWindow?.postMessage({ channel, code }, "*");
+  return reply(frame.iframe, channel, timeoutMs, frame.restart.signal, () => (frame.loaded ? post() : frame.iframe.addEventListener("load", post, { once: true }))).finally(
+    () => {
+      // A timed-out frame is already removed; forget it so the next Run starts fresh.
+      if (!frame.iframe.isConnected && pythonFrame === frame) pythonFrame = null;
+    },
+  );
+}
+
+function runJavaScript(code: string, timeoutMs = 5000): Promise<string> {
+  if (code.length > 10000) {
+    return Promise.resolve(`Error: code exceeds 10,000 character limit (${code.length} chars).`);
+  }
+  const channel = newChannel();
+  const iframe = hiddenFrame(runDocument("javascript", code, channel));
+  return reply(iframe, channel, timeoutMs, undefined, () => {}).finally(() => iframe.remove());
 }
 
 export function isExecutableLanguage(lang: string): "python" | "javascript" | null {
@@ -143,9 +152,10 @@ export function isExecutableLanguage(lang: string): "python" | "javascript" | nu
   return null;
 }
 
-export async function runCode(language: string, code: string): Promise<string> {
+// `scope` is the conversation id: Python state is kept per chat. No chat shares one frame.
+export async function runCode(language: string, code: string, scope: string): Promise<string> {
   const lang = isExecutableLanguage(language);
-  if (lang === "python") return runPython(code);
+  if (lang === "python") return runPython(code, scope);
   if (lang === "javascript") return runJavaScript(code);
   throw new Error(`Language not executable: ${language}`);
 }

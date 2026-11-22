@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { contextWindowFor, budgetTokens } from "@/lib/chat/contextBudget";
+import { contextWindowFor, budgetTokens, OLLAMA_DEFAULT_CTX } from "@/lib/chat/contextBudget";
 
 describe("contextWindowFor", () => {
   it("uses the Ollama contextLength override first", () => {
@@ -8,6 +8,12 @@ describe("contextWindowFor", () => {
 
   it("falls back to the catalog window for Ollama without an override", () => {
     expect(contextWindowFor("ollama/llama3", { contextWindow: 4096 }, null)).toBe(4096);
+  });
+
+  it("caps a trained 128K window at the default for Ollama, but keeps an explicit override and hosted windows", () => {
+    expect(contextWindowFor("ollama/llama3.1", { contextWindow: 131072 }, null)).toBe(OLLAMA_DEFAULT_CTX);
+    expect(contextWindowFor("ollama/llama3.1", { contextWindow: 131072 }, 65536)).toBe(65536);
+    expect(contextWindowFor("gpt-4o", { contextWindow: 131072 })).toBe(131072);
   });
 
   it("ignores contextLength for non-Ollama models", () => {

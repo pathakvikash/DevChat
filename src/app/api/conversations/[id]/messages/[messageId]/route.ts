@@ -2,6 +2,7 @@ import { prisma } from "@/lib/db";
 import { NextRequest, NextResponse } from "next/server";
 import { findConversationMessage } from "@/lib/api/messages";
 import { requireUserId } from "@/lib/auth";
+import { keepReadFilesMarker } from "@/lib/files/folderTools";
 
 function messageLookupErrorResponse(reason: "not_found" | "wrong_conversation") {
   return reason === "not_found"
@@ -29,7 +30,7 @@ export async function PATCH(
       where: { id: messageId },
       data: {
         content,
-        parts: JSON.stringify([{ type: "text", text: content }]),
+        parts: keepReadFilesMarker(result.message.parts, JSON.stringify([{ type: "text", text: content }])),
       },
     });
 

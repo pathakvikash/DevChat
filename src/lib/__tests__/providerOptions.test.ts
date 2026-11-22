@@ -15,14 +15,17 @@ describe("providerOptionsFor", () => {
   it("gives a hosted model no options", () => {
     expect(providerOptionsFor(base)).toBeUndefined();
     expect(providerOptionsFor({ ...base, modelId: "openai/gpt-4o" })).toBeUndefined();
+    // Hosted reasoning models also get none here: the chat route falls back to reasoningPlan() only then,
+    // so Ollama and CLI options always win and workflow cards stay unchanged.
+    expect(providerOptionsFor({ ...base, modelId: "openai/gpt-5.6-sol", reasoningEffort: "high" })).toBeUndefined();
   });
 
   it("gives Ollama the sampling window exactly as the chat route built it", () => {
     expect(providerOptionsFor({ ...base, modelId: "ollama/llama3", numCtx: 16384, temperature: 0.4, topP: null, maxTokens: null })).toEqual({
-      ollama: { num_ctx: 16384, temperature: 0.4, top_p: 0.9, num_predict: -1 },
+      ollama: { options: { num_ctx: 16384, temperature: 0.4, top_p: 0.9, num_predict: -1 } },
     });
     expect(providerOptionsFor({ ...base, modelId: "ollama/llama3", temperature: 0.7, topP: 0.5, maxTokens: 300 })).toEqual({
-      ollama: { num_ctx: 8192, temperature: 0.7, top_p: 0.5, num_predict: 300 },
+      ollama: { options: { num_ctx: 8192, temperature: 0.7, top_p: 0.5, num_predict: 300 } },
     });
   });
 
@@ -32,9 +35,9 @@ describe("providerOptionsFor", () => {
     const options = providerOptionsFor({ ...base, modelId: "ollama/llama3", numCtx: 8192 });
     const other = providerOptionsFor({ ...base, modelId: "ollama/llama3", numCtx: 8192 });
     const streamArgs = { providerOptions: options };
-    if (options && "ollama" in options && options.ollama) options.ollama.num_ctx = 32768; // as route.ts does
-    expect(streamArgs.providerOptions).toMatchObject({ ollama: { num_ctx: 32768 } });
-    expect(other).toMatchObject({ ollama: { num_ctx: 8192 } });
+    if (options && "ollama" in options && options.ollama) options.ollama.options.num_ctx = 32768; // as route.ts does
+    expect(streamArgs.providerOptions).toMatchObject({ ollama: { options: { num_ctx: 32768 } } });
+    expect(other).toMatchObject({ ollama: { options: { num_ctx: 8192 } } });
   });
 
   it("gives a CLI model its effort, folder, access, chat and allow list", () => {

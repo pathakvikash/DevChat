@@ -163,8 +163,8 @@ export default function GenerationParams({
               <option value="max">Max</option>
             </select>
             <p className="text-xs text-zinc-500 mt-1">
-              How hard the model thinks before answering. Claude Code, Codex and
-              OpenCode honor this; other models ignore it.
+              How hard the model thinks before answering. OpenAI, Anthropic and
+              Gemini reasoning models, Claude Code, Codex and OpenCode honor this; others ignore it.
             </p>
           </div>
         )}

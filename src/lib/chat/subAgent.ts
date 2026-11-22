@@ -1,5 +1,6 @@
 import { convertToModelMessages, generateId, readUIMessageStream, stepCountIs, streamText, type Tool, type UIMessage } from "ai";
 import type { ModelConfig } from "@/lib/models";
+import { isCliModelId } from "@/lib/providers";
 import type { ToolMode } from "@/lib/chat/buildTools";
 import { normalizeMessageToolParts, normalizeToolParts } from "@/lib/chat/normalizeToolParts";
 import { nextStepSettings } from "@/lib/chat/loopGuard";
@@ -45,6 +46,8 @@ export interface RunSubAgentOptions {
   tools: Record<string, Tool>;
   /** The parent's provider options (CLI cwd and access come through here). */
   providerOptions?: ProviderOptions;
+  /** The parent's output cap for this turn. A hosted helper still reasons at its default effort, so it gets at least this much. */
+  maxTokens?: number;
   abortSignal: AbortSignal;
   onProgress?: (event: SubAgentProgress) => void;
   /** The default is 5 minutes; tests pass a short one. */
@@ -71,18 +74,36 @@ export interface SubAgentResult {
 
 type AnyPart = { type: string; [key: string]: any };
 
-function helperPrompt(mode: ToolMode, workingFolder?: string | null): string {
+function helperPrompt(mode: ToolMode, workingFolder: string | null | undefined, cli: boolean, canRead: boolean): string {
+  const folderLine = cli
+    ? `Working folder: ${workingFolder || "none"}.`
+    : canRead
+      ? `Working folder: ${workingFolder} (read-only: read it with listFiles, readFile and searchFiles; you cannot change files).`
+      : "";
   return [
     "You are a helper started by another assistant. Do the brief alone. You cannot ask the user questions; use tools as needed.",
     `End with a report for the other assistant: facts and file paths first, under ${REPORT_MAX_CHARS.toLocaleString("en-US")} characters.`,
-    mode === "agent" ? "Mode: agent. You may change files in the working folder." : "Mode: read-only. Change nothing.",
-    `Working folder: ${workingFolder || "none"}.`,
-  ].join("\n");
+    mode !== "agent"
+      ? "Mode: read-only. Change nothing."
+      : cli
+        ? "Mode: agent. You may change files in the working folder."
+        : "Mode: agent. You may use every tool you were given.",
+    folderLine,
+  ]
+    .filter(Boolean)
+    .join("\n");
 }
+
+const HOSTED_REASONING_KEYS = ["openai", "anthropic", "google"];
 
 /** The parent's provider options for a helper. A CLI helper outside Agent mode only reads: no permission bridge, no
  *  allow list, and no chat id (so it cannot close the chat's open card). Ask and Plan promise read-only helpers. */
 export function helperProviderOptions(options: ProviderOptions | undefined, mode: ToolMode): ProviderOptions | undefined {
+  // A hosted helper runs with a small output cap (model.maxTokens), so it gets no reasoning options: they would spend the cap on thinking.
+  if (options && HOSTED_REASONING_KEYS.some((k) => k in options!)) {
+    options = Object.fromEntries(Object.entries(options).filter(([id]) => !HOSTED_REASONING_KEYS.includes(id)));
+    if (!Object.keys(options).length) return undefined;
+  }
   if (!options || mode === "agent") return options;
   return Object.fromEntries(
     Object.entries(options).map(([id, o]) => [id, "access" in o ? { ...o, access: "chat", allowedTools: [], conversationId: "" } : o]),
@@ -210,7 +231,7 @@ export async function runSubAgent(opts: RunSubAgentOptions): Promise<SubAgentRes
       : [{ role: "user" as const, content: brief }];
     result = streamText({
       model: model.model,
-      system: opts.system ?? helperPrompt(mode, workingFolder),
+      system: opts.system ?? helperPrompt(mode, workingFolder, isCliModelId(model.id), "readFile" in tools),
       messages,
       ...(hasTools ? { tools } : {}),
       // The last step must write the report: no more tool calls. Models that ignore it
@@ -220,7 +241,7 @@ export async function runSubAgent(opts: RunSubAgentOptions): Promise<SubAgentRes
         : undefined,
       stopWhen: stepCountIs(SUB_AGENT_MAX_STEPS),
       abortSignal: signal,
-      maxOutputTokens: model.maxTokens,
+      maxOutputTokens: Math.max(model.maxTokens, opts.maxTokens ?? 0),
       ...(providerOptions ? { providerOptions } : {}),
     });
   } catch (err) {

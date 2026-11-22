@@ -8,6 +8,7 @@ import { BUILTIN_TOOL_IDS, type ToolMode } from "./buildTools";
 import { MODE_POLICY } from "./modes";
 import { countTokens } from "@/lib/tokens";
 import { getSettingsKey } from "@/lib/settings";
+import { folderPrompt } from "@/lib/files/folderTools";
 import { catalog as generativeUiCatalog } from "@/lib/generativeUi/catalog";
 import { loadParentContext, type MainContext } from "./loadParentContext";
 import type { AgentTarget } from "./agentMessages";
@@ -94,6 +95,12 @@ export interface BuildSystemPromptOptions {
   contextWindow?: number;
   /** The chats sendToChat may reach: the route's one sendToChatTargets result, shared with buildTools. */
   agentTargets?: AgentTarget[];
+  /** Working folder the model reads with listFiles, readFile and searchFiles (API models only). */
+  fileFolder?: string;
+  /** Outbound tools ask on every call (a folder, or folder text in the chat's history). */
+  sendsOutGate?: boolean;
+  /** A CLI model's side chat sees the main chat's folder line. */
+  showFolder?: boolean;
 }
 
 /** Individual sections of the system prompt, exposed for the Context panel
@@ -106,6 +113,8 @@ export interface SystemPromptSections {
   persona: string | null;
   skills: string | null;
   tools: string | null;
+  /** The working folder and its read-only file tools. */
+  folder?: string | null;
   memory: string | null;
   compressed: string | null;
   /** A side chat's view of its main chat. */
@@ -190,6 +199,14 @@ export async function buildSystemPrompt(
           .join("\n")}`
       : null;
 
+  const askFirst =
+    "Tools that can send data off this computer (code runs, web fetches, web searches and MCP tools) wait for the user's OK on every call, so say briefly why you need one before you call it.";
+  const folder = opts.fileFolder
+    ? `--- Working folder ---\n${folderPrompt(opts.fileFolder)} ${askFirst}`
+    : opts.sendsOutGate
+      ? `--- Sending data out ---\n${askFirst}`
+      : null;
+
   const memoryRaw = opts.memoryDisabled ? null : await getMemoryBlock(opts.userId);
   const memory = memoryRaw ?? null;
 
@@ -200,7 +217,7 @@ export async function buildSystemPrompt(
   }
 
   const mainContext = conversationId
-    ? await loadParentContext(conversationId, opts.userId, opts.contextWindow ?? 8192)
+    ? await loadParentContext(conversationId, opts.userId, opts.contextWindow ?? 8192, { showFolder: opts.showFolder })
     : null;
   const main = mainContext?.text ?? null;
 
@@ -211,8 +228,8 @@ export async function buildSystemPrompt(
     customRules: GENERATIVE_UI_RULES,
   });
 
-  const sections: SystemPromptSections = { base, instructions, persona, skills, tools, memory, compressed, main, kb, generativeUi };
-  const text = [base, instructions, persona, skills, tools, memory, compressed, main, kb, generativeUi]
+  const sections: SystemPromptSections = { base, instructions, persona, skills, tools, folder, memory, compressed, main, kb, generativeUi };
+  const text = [base, instructions, persona, skills, tools, folder, memory, compressed, main, kb, generativeUi]
     .filter((s): s is string => Boolean(s))
     .join("\n\n");
 

@@ -6,6 +6,9 @@ export interface ApprovalAnswer {
   approvalId: string;
   toolName: string;
   approved: boolean;
+  /** The call itself, so a client-run tool (executeCode) can run once it is allowed. */
+  toolCallId?: string;
+  input?: unknown;
   /** Allow this tool for the rest of this chat (only with approved). */
   allowForChat?: boolean;
 }
