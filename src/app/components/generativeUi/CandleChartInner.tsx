@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef } from "react";
 import { ColorType, CrosshairMode, createChart } from "lightweight-charts";
 import type { ISeriesApi, UTCTimestamp } from "lightweight-charts";
-import { toLwcData, type Candle, type LwcData } from "@/lib/generativeUi/appData";
+import { toLwcData, volumeUpdate, type Candle, type LwcData } from "@/lib/generativeUi/appData";
 
 const UP = "#199e70";
 const DOWN = "#e66767";
@@ -41,8 +41,9 @@ export default function CandleChartInner({ candles }: { candles: Candle[] }) {
       s.vol?.setData(data.volume.map(toVol));
     } else {
       for (const d of data.candles.slice(tail)) s.candle.update({ ...d, time: d.time as UTCTimestamp });
-      const vt = data.volume.findIndex((d) => d.time === lastT);
-      for (const d of data.volume.slice(Math.max(vt, 0))) s.vol?.update(toVol(d));
+      const v = volumeUpdate(prev.volume, data.volume);
+      if (v.set) s.vol?.setData(v.bars.map(toVol));
+      else for (const d of v.bars) s.vol?.update(toVol(d));
     }
     shown.current = data;
   }, [data]);

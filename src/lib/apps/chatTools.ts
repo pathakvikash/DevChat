@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import { tool, type Tool } from "ai";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
+import { refreshSig } from "./refreshSig";
 import { orreryTable, parseDataArtifact } from "@/lib/generativeUi/data";
 import { MODE_POLICY, type ChatMode } from "@/lib/chat/modes";
 import type { AppRecord, AppTool, OrreryResult, ResultType } from "./types";
@@ -182,12 +183,17 @@ export async function modelResult(
   const wrap = (t: string) => wrapAppText(ctx.appId, ctx.toolName, t);
   if (!structured) return wrap(r.text || "(no output)");
   const body = dataArtifactBody(structured);
-  // A result that can refresh is always saved: the refresh route finds `refresh` in the stored artifact.
-  if (body && ctx.conversationId && (valueCount(structured) > INLINE_VALUE_LIMIT || "refresh" in structured)) {
+  // A result that can refresh (not a table) is always saved: the refresh route finds `refresh` in the stored artifact.
+  // Tables are not polled yet, so a small table stays inline for the model.
+  const live = "refresh" in structured && structured.refresh && structured.type !== "table";
+  if (body && ctx.conversationId && (valueCount(structured) > INLINE_VALUE_LIMIT || live)) {
     const title = ("title" in structured && structured.title) || ("symbol" in structured ? `${structured.symbol} ${structured.interval}` : `${ctx.toolName} result`);
     // The result itself: CandleChart and Chart read symbol, interval and series from it; parseDataArtifact reads it as `body`.
     // `app` is added by Orrery (never by the app) so the refresh route knows which app produced the result.
     const id = await saveDataArtifact(ctx.conversationId, title, JSON.stringify({ ...structured, app: ctx.appId }));
+    // Sign what is stored, so the refresh route trusts only a `refresh` Orrery saved (not one the model wrote into an artifact).
+    const sig = "refresh" in structured && structured.refresh ? refreshSig(id, ctx.appId, structured.refresh) : null;
+    if (sig) await prisma.artifact.update({ where: { id }, data: { content: JSON.stringify({ ...structured, app: ctx.appId, sig }) } });
     const hint = structured.type === "ohlc" ? "CandleChart" : structured.type === "table" ? "Table" : "Chart";
     return [
       `Saved ${body.rows.length} rows (columns: ${body.columns.join(", ")}) as data artifact artifactId=${id}. You do not see the rows.`,

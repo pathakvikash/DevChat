@@ -94,6 +94,16 @@ export function settleStaleParts<T extends { type?: string; state?: string; appr
 /** Claude Code tools that may be allowed for the rest of a chat. Bash and everything else always asks. */
 export const CHAT_ALLOWABLE_TOOLS: ReadonlySet<string> = new Set(["Edit", "Write", "MultiEdit", "NotebookEdit"]);
 
+/** Tools whose card the untrusted gate can raise (a model-built URL, or external text in the chat): the gate ignores the
+ *  chat's allow list, so "Allow for this chat" would promise something it cannot keep. HTML artifacts are gated too. */
+export function askedByUntrustedGate(toolName: string, input: unknown): boolean {
+  if (toolName === "createArtifact" || toolName === "updateArtifact") return (input as { type?: string } | null)?.type === "html";
+  return (
+    toolName.startsWith("mcp_") ||
+    ["fetchUrl", "executeCode", "rememberFact", "forgetFact", "searchChats", "readChat", "sendToChat", "runAgent", "messageAgent"].includes(toolName)
+  );
+}
+
 /** A short preview of an edit: at most `max` removed and `max` added lines, each cut side ends in "…". */
 export function editPreview(input: unknown, max = 6): { minus: string[]; plus: string[] } {
   const i = (input ?? {}) as Record<string, unknown>;

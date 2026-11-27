@@ -206,3 +206,13 @@ describe("waitsForApproval", () => {
     expect(waitsForApproval({})).toBe(false);
   });
 });
+
+describe("askedByUntrustedGate", () => {
+  it("is true for tools the untrusted gate can ask about, and for HTML artifacts only", async () => {
+    const { askedByUntrustedGate: a } = await import("@/lib/utils/messageParts");
+    for (const t of ["fetchUrl", "mcp_s_t", "rememberFact", "readChat", "runAgent", "executeCode"]) expect(a(t, {})).toBe(true);
+    expect(a("createArtifact", { type: "html" })).toBe(true);
+    expect(a("createArtifact", { type: "document" })).toBe(false);
+    expect(a("Edit", {})).toBe(false);
+  });
+});

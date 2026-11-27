@@ -3,6 +3,8 @@ import { prisma } from "@/lib/db";
 import { callAppTool, getApp } from "@/lib/apps/registry";
 import { withUser } from "@/lib/apps/http";
 import { orreryResultSchema } from "@/lib/apps/types";
+import { jsonSchemaToZod } from "@/lib/chat/buildTools";
+import { verifyRefreshSig } from "@/lib/apps/refreshSig";
 import { isAppId } from "@/lib/generativeUi/appData";
 
 const MIN_REFRESH_GAP_MS = 2000;
@@ -21,7 +23,8 @@ const bad = (error: string, status = 400) => NextResponse.json({ error }, { stat
 
 /**
  * Body `{ artifactId }`. The tool and args are NOT taken from the client: they are read from the data artifact Orrery
- * saved (chatTools.modelResult), i.e. from the `refresh` the app returned, and the app id from the `app` key Orrery added.
+ * saved (chatTools.modelResult), i.e. from the `refresh` the app returned, and the app id from the `app` key Orrery added;
+ * both are covered by the `sig` Orrery added (HMAC with AUTH_SECRET), which a model-written artifact cannot have.
  * The artifact must belong to the signed-in user, and the tool must be a read-only tool of that approved app.
  */
 export async function POST(req: NextRequest) {
@@ -40,10 +43,14 @@ export async function POST(req: NextRequest) {
     if (!original.success || !isAppId(appId)) return bad("This result cannot refresh");
     const refresh = "refresh" in original.data ? original.data.refresh : undefined;
     if (!refresh) return bad("This result cannot refresh");
+    // Only a result Orrery saved itself carries a valid signature; a model-written artifact has none (and no AUTH_SECRET means none can be checked).
+    if (!verifyRefreshSig(artifact.id, appId, refresh, stored.sig)) return bad("This result cannot refresh");
 
     const app = await getApp(userId, appId);
     if (!app) return bad("Not found", 404);
-    if (!app.tools.some((t) => t.name === refresh.tool && t.readOnly === true)) return bad("Not a read-only tool of this app");
+    const spec = app.tools.find((t) => t.name === refresh.tool && t.readOnly === true);
+    if (!spec) return bad("Not a read-only tool of this app");
+    if (!jsonSchemaToZod(spec.inputSchema).safeParse(refresh.args ?? {}).success) return bad("The refresh arguments do not match the tool");
 
     const wait = tooSoon(`${userId}\0${artifactId}`);
     if (wait > 0) return NextResponse.json({ error: "Too many refreshes" }, { status: 429, headers: { "Retry-After": String(Math.ceil(wait / 1000)) } });

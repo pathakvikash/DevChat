@@ -13,6 +13,7 @@ vi.mock("@/lib/db", () => ({
 vi.mock("@/lib/auth", () => ({ requireUserId: h.requireUserId, UnauthorizedError: class UnauthorizedError extends Error {} }));
 vi.mock("@/lib/apps/registry", () => ({ getApp: h.getApp, callAppTool: h.callAppTool }));
 
+import { refreshSig, stripRefreshKeys } from "@/lib/apps/refreshSig";
 import { POST } from "@/app/api/apps/refresh-result/route";
 import { orreryResultSchema } from "@/lib/apps/types";
 import { clampEvery, liveDelay, liveExpired, liveFailed, LIVE_SESSION_MS } from "@/lib/generativeUi/livePoll";
@@ -65,14 +66,17 @@ describe("POST /api/apps/refresh-result", () => {
   let n = 0;
   const post = (artifactId: unknown = `art${++n}`) =>
     POST(new NextRequest("http://localhost/api/apps/refresh-result", { method: "POST", body: JSON.stringify({ artifactId }) }) as any);
-  const stored = (extra: object = {}, app: unknown = "trade") => ({
-    content: JSON.stringify({ ...ohlc({ refresh: { tool: "klines", args: { symbol: "BTC" } } }), app, ...extra }),
-    conversation: { userId: "u1" },
-  });
-  const tools = [{ name: "klines", readOnly: true }, { name: "order", readOnly: false }];
+  // A result as Orrery saves it: signed over id, app and refresh. `extra` is applied before signing, so it is trusted-but-odd content.
+  const stored = (extra: object = {}, app: unknown = "trade", sign: boolean | string = true) => {
+    const body: any = { ...ohlc({ refresh: { tool: "klines", args: { symbol: "BTC" } } }), app, ...extra };
+    if (sign && typeof app === "string") body.sig = typeof sign === "string" ? sign : refreshSig("A1", app, body.refresh);
+    return { id: "A1", content: JSON.stringify(body), conversation: { userId: "u1" } };
+  };
+  const tools = [{ name: "klines", readOnly: true, inputSchema: { type: "object", properties: { symbol: { type: "string" } }, required: ["symbol"] } }, { name: "order", readOnly: false }];
 
   beforeEach(() => {
     vi.clearAllMocks();
+    process.env.AUTH_SECRET = "test-secret";
     h.requireUserId.mockResolvedValue("u1");
     h.findArtifact.mockResolvedValue(stored());
     h.getApp.mockResolvedValue({ id: "trade", tools });
@@ -94,7 +98,7 @@ describe("POST /api/apps/refresh-result", () => {
     expect(h.callAppTool).not.toHaveBeenCalled();
   });
   it("refuses a result without refresh or without an app id", async () => {
-    h.findArtifact.mockResolvedValue({ content: JSON.stringify({ ...ohlc(), app: "trade" }), conversation: { userId: "u1" } });
+    h.findArtifact.mockResolvedValue({ id: "A1", content: JSON.stringify({ ...ohlc(), app: "trade" }), conversation: { userId: "u1" } });
     expect((await post()).status).toBe(400);
     h.findArtifact.mockResolvedValue(stored({}, null));
     expect((await post()).status).toBe(400);
@@ -103,6 +107,30 @@ describe("POST /api/apps/refresh-result", () => {
     h.findArtifact.mockResolvedValue(stored({ refresh: { tool: "order" } }));
     expect((await post()).status).toBe(400);
     h.findArtifact.mockResolvedValue(stored({ refresh: { tool: "missing" } }));
+    expect((await post()).status).toBe(400);
+    expect(h.callAppTool).not.toHaveBeenCalled();
+  });
+  it("refuses a model-written artifact: no sig, a wrong sig, a sig for other args, another id or app, or no AUTH_SECRET", async () => {
+    const bad = [
+      stored({}, "trade", false),
+      stored({}, "trade", "00"),
+      { ...stored(), content: JSON.stringify({ ...JSON.parse(stored().content), refresh: { tool: "klines", args: { symbol: "ETH" } } }) },
+      { ...stored(), id: "OTHER" },
+      { ...stored(), content: JSON.stringify({ ...JSON.parse(stored().content), app: "other" }) },
+    ];
+    for (const a of bad) {
+      h.findArtifact.mockResolvedValue(a);
+      expect((await post()).status).toBe(400);
+    }
+    h.findArtifact.mockResolvedValue(stored());
+    delete process.env.AUTH_SECRET;
+    expect((await post()).status).toBe(400);
+    expect(h.callAppTool).not.toHaveBeenCalled();
+  });
+  it("refuses refresh args that fail the tool's input schema", async () => {
+    h.findArtifact.mockResolvedValue(stored({ refresh: { tool: "klines", args: { symbol: 5 } } }));
+    expect((await post()).status).toBe(400);
+    h.findArtifact.mockResolvedValue(stored({ refresh: { tool: "klines" } }));
     expect((await post()).status).toBe(400);
     expect(h.callAppTool).not.toHaveBeenCalled();
   });
@@ -129,5 +157,21 @@ describe("POST /api/apps/refresh-result", () => {
     expect(again.status).toBe(429);
     expect(Number(again.headers.get("Retry-After"))).toBeGreaterThanOrEqual(1);
     expect((await post("other")).status).toBe(200);
+  });
+});
+
+describe("stripRefreshKeys", () => {
+  it("drops refresh, app and sig from a JSON object and leaves everything else alone", () => {
+    expect(JSON.parse(stripRefreshKeys(JSON.stringify({ type: "ohlc", refresh: { tool: "k" }, app: "trade", sig: "x", symbol: "B" })))).toEqual({ type: "ohlc", symbol: "B" });
+    for (const t of ["<html></html>", "a,b\n1,2", "[1]", '{"columns":[],"rows":[]}']) expect(stripRefreshKeys(t)).toBe(t);
+  });
+  it("a signed artifact edited through the content no longer verifies", () => {
+    const refresh = { tool: "k", args: { a: 1 } };
+    process.env.AUTH_SECRET = "s";
+    const sig = refreshSig("A1", "trade", refresh)!;
+    const edited = JSON.parse(stripRefreshKeys(JSON.stringify({ refresh: { tool: "evil" }, app: "trade", sig })));
+    expect(edited.sig).toBeUndefined();
+    expect(refreshSig("A1", "trade", { args: { a: 1 }, tool: "k" })).toBe(sig); // key order does not matter
+    expect(refreshSig("A1", "trade", { tool: "evil" })).not.toBe(sig);
   });
 });

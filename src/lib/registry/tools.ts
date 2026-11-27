@@ -3,6 +3,7 @@ import type { ToolDefinition } from "./types";
 import { prisma } from "@/lib/db";
 import { REINGEST_NOTE, searchKb } from "@/lib/rag";
 import { parseDataArtifact } from "@/lib/generativeUi/data";
+import { stripRefreshKeys } from "@/lib/apps/refreshSig";
 import { uiGuideText } from "@/lib/generativeUi/guide";
 import { evaluate } from "mathjs";
 import { safeFetch } from "@/lib/net/safeFetch";
@@ -58,7 +59,7 @@ export const TOOL_REGISTRY: Record<string, ToolDefinition> = {
           }
         }
         const artifact = await prisma.artifact.create({
-          data: { conversationId: ctx.conversationId, type, title, content },
+          data: { conversationId: ctx.conversationId, type, title, content: stripRefreshKeys(content) },
         });
         return `Artifact created: ${artifact.id} (v${artifact.version}) — "${artifact.title}"`;
       } catch (e: any) {
@@ -84,8 +85,9 @@ export const TOOL_REGISTRY: Record<string, ToolDefinition> = {
       content: z.string().optional(),
       title: z.string().optional(),
     }),
-    execute: async ({ artifactId, content, title }, ctx) => {
+    execute: async ({ artifactId, content: raw, title }, ctx) => {
       try {
+        const content = raw === undefined ? undefined : stripRefreshKeys(raw);
         // Only this chat's own artifacts: an id from anywhere else is "not found".
         const existing = ctx.conversationId
           ? await prisma.artifact.findFirst({ where: { id: artifactId, conversationId: ctx.conversationId } })

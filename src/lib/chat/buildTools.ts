@@ -94,7 +94,7 @@ export interface BuildToolsOptions {
   userEmail?: string;
   /** Chat route only (a person can answer the card): fetchUrl asks for any URL the user did not type, and tools that
    *  write, send or read other chats ask once external text (a page, search, MCP or app result) is in the conversation. */
-  gateUntrusted?: boolean;
+  gateUntrusted?: boolean | { tainted: boolean };
 }
 
 /** Convert a JSON Schema object to a Zod schema (supports basic types). */
@@ -130,13 +130,21 @@ export function mcpToolId(serverName: string, toolName: string): string {
 
 /** The tool asks first once external text is in the conversation (on top of any rule it already has). The route also
  *  wraps runAgent and messageAgent with it: a helper can fetch pages and send data out, so spawning is gated at the parent. */
-export function askAfterExternalText(t: Tool): Tool {
+export function askAfterExternalText(t: Tool, tainted = false): Tool {
   const base = t.needsApproval;
   return {
     ...t,
     needsApproval: async (input: unknown, o: { messages?: Parameters<typeof hasExternalText>[0] }) =>
-      hasExternalText(o?.messages) || (typeof base === "function" ? await (base as (i: unknown, o: unknown) => boolean | Promise<boolean>)(input, o) : !!base),
+      tainted || hasExternalText(o?.messages) || (typeof base === "function" ? await (base as (i: unknown, o: unknown) => boolean | Promise<boolean>)(input, o) : !!base),
   } as Tool;
+}
+
+/** An HTML page auto-opens a preview, and even an isolated page can leak through DNS prefetch or WebRTC, which CSP does not cover. */
+async function writesHtml(id: string, conversationId: string | undefined, input: { type?: string; artifactId?: string }): Promise<boolean> {
+  return id === "createArtifact"
+    ? input.type === "html"
+    : !!input.artifactId &&
+        (await prisma.artifact.findFirst({ where: { id: input.artifactId, conversationId }, select: { type: true } }))?.type === "html";
 }
 
 export async function buildTools({
@@ -341,6 +349,8 @@ export async function buildTools({
   );
 
   if (gateUntrusted) {
+    // `tainted`: external text sits in the STORED history (compression may have dropped it from the prompt).
+    const tainted = typeof gateUntrusted === "object" && gateUntrusted.tainted;
     const fetchTool = aiTools.fetchUrl;
     if (fetchTool) {
       aiTools.fetchUrl = {
@@ -350,7 +360,19 @@ export async function buildTools({
     }
     // Page text can carry instructions: after one is read, writing or sending asks first. App tools of an `actions` app already always ask.
     for (const [id, t] of Object.entries(aiTools)) {
-      if (id.startsWith("mcp_") || ["rememberFact", "forgetFact", "searchChats", "readChat", "sendToChat"].includes(id)) aiTools[id] = askAfterExternalText(t);
+      if (id.startsWith("mcp_") || ["rememberFact", "forgetFact", "searchChats", "readChat", "sendToChat"].includes(id)) aiTools[id] = askAfterExternalText(t, tainted);
+    }
+    // Isolated code runs can leak too, and so can an HTML page: both ask after external text.
+    if (aiTools.executeCode) aiTools.executeCode = askAfterExternalText(aiTools.executeCode, tainted);
+    for (const id of ["createArtifact", "updateArtifact"]) {
+      const t = aiTools[id];
+      if (!t) continue;
+      const base = t.needsApproval;
+      aiTools[id] = {
+        ...t,
+        needsApproval: async (input: any, o: any) =>
+          ((tainted || hasExternalText(o?.messages)) && (await writesHtml(id, conversationId, input))) || (typeof base === "function" ? await base(input, o) : !!base),
+      } as Tool;
     }
   }
 
@@ -366,14 +388,9 @@ export async function buildTools({
       const t = aiTools[id];
       if (!t) continue;
       const base = t.needsApproval;
-      const isHtml = async (input: { type?: string; artifactId?: string }) =>
-        id === "createArtifact"
-          ? input.type === "html"
-          : !!input.artifactId &&
-            (await prisma.artifact.findFirst({ where: { id: input.artifactId, conversationId }, select: { type: true } }))?.type === "html";
       aiTools[id] = {
         ...t,
-        needsApproval: async (input: any, o: any) => (await isHtml(input)) || (typeof base === "function" ? await base(input, o) : !!base),
+        needsApproval: async (input: any, o: any) => (await writesHtml(id, conversationId, input)) || (typeof base === "function" ? await base(input, o) : !!base),
         metadata: sendsOut,
       } as Tool;
     }

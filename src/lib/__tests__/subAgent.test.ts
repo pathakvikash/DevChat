@@ -2,7 +2,7 @@ import { describe, it, expect, vi, afterEach } from "vitest";
 import { simulateReadableStream, tool, type Tool, type UIMessage } from "ai";
 import { MockLanguageModelV3 } from "ai/test";
 import { z } from "zod";
-import { runSubAgent, REPORT_MAX_CHARS, type SubAgentProgress } from "@/lib/chat/subAgent";
+import { helperTools, runSubAgent, REPORT_MAX_CHARS, type SubAgentProgress } from "@/lib/chat/subAgent";
 import type { ModelConfig } from "@/lib/models";
 
 type CallOptions = Parameters<MockLanguageModelV3["doStream"]>[0];
@@ -351,5 +351,22 @@ describe("helper prompt", () => {
     const out = await promptFor("mock/sub", "agent", { calculator: calculator() });
     expect(out).not.toContain("Working folder");
     expect(out).toContain("Mode: agent. You may use every tool you were given.");
+  });
+});
+
+describe("helperTools", () => {
+  const mk = (...names: string[]) => Object.fromEntries(names.map((n) => [n, tool({ description: n, inputSchema: z.object({}), execute: async () => "" })]));
+  const priv = ["searchChats", "readChat", "rememberFact", "forgetFact", "sendToChat", "mcp_srv_go", "app_x_y", "loadAppTools"];
+
+  it("a helper with fetchUrl or webSearch gets none of the private-data tools", () => {
+    for (const web of ["fetchUrl", "webSearch"]) {
+      expect(Object.keys(helperTools(mk(web, "calculator", ...priv))).sort()).toEqual([web, "calculator"].sort());
+    }
+  });
+  it("without a web tool the private tools stay (approval cleared for the gated ones)", () => {
+    expect(Object.keys(helperTools(mk("calculator", "readChat", "mcp_srv_go"))).sort()).toEqual(["calculator", "mcp_srv_go", "readChat"]);
+  });
+  it("a workflow card (keepPrivateWithWeb) keeps its explicit list", () => {
+    expect(Object.keys(helperTools(mk("fetchUrl", "mcp_srv_go"), true)).sort()).toEqual(["fetchUrl", "mcp_srv_go"]);
   });
 });
