@@ -468,7 +468,7 @@ export function useChatPane(conversationId: string, { focused, kind, searchProvi
     setAllowedState({ chat: conversationId, tools: [] });
     setRequestBody({ allowedTools: [] });
     try { localStorage.removeItem(`vas:allow:${conversationId}`); } catch {}
-    toast("Ask mode will ask again", "info");
+    toast("Confirm each change will ask again", "info");
   }
 
 

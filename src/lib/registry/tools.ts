@@ -1,7 +1,7 @@
 import { z } from "zod";
 import type { ToolDefinition } from "./types";
 import { prisma } from "@/lib/db";
-import { searchKb } from "@/lib/rag";
+import { REINGEST_NOTE, searchKb } from "@/lib/rag";
 import { parseDataArtifact } from "@/lib/generativeUi/data";
 import { evaluate } from "mathjs";
 import { safeFetch } from "@/lib/net/safeFetch";
@@ -362,18 +362,19 @@ export const TOOL_REGISTRY: Record<string, ToolDefinition> = {
           return "No knowledge base attached to this conversation. Tell the user to open Model Settings and pick a KB from the Knowledge Base dropdown, then ask their question again.";
         }
 
-        const { docCount, chunks } = await searchKb(conv.kbId, query, topK);
+        const { docCount, chunks, mismatched } = await searchKb(conv.kbId, query, topK);
+        const note = mismatched ? `\n\n${REINGEST_NOTE}` : "";
 
         if (docCount === 0) {
           return "The knowledge base is empty. Tell the user to upload documents at /kb.";
         }
         if (chunks.length === 0) {
-          return "No embedded chunks found. The documents may not have been indexed — try re-uploading.";
+          return "No embedded chunks found. The documents may not have been indexed — try re-uploading." + note;
         }
 
         return chunks
           .map((c) => `[source: ${c.source} | score=${c.score.toFixed(3)}]\n${c.text}`)
-          .join("\n\n---\n\n");
+          .join("\n\n---\n\n") + note;
       } catch (err) {
         console.error("[searchKnowledgeBase] error:", err);
         return `Error searching knowledge base: ${(err as Error).message || String(err)}. Tell the user something went wrong and to try again.`;

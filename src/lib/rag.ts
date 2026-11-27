@@ -102,11 +102,17 @@ export interface ScoredChunk {
 export function scoreDocumentChunks(
   doc: { filename: string; chunks: string },
   queryEmbedding: number[],
+  /** Counts chunks skipped because their vector length differs from the query's (a different embedding model). */
+  stats?: { mismatched: number },
 ): ScoredChunk[] {
   const chunks: Array<{ text: string; embedding: number[] }> = JSON.parse(doc.chunks);
   const scored: ScoredChunk[] = [];
   chunks.forEach((chunk, i) => {
     if (!chunk.embedding || !Array.isArray(chunk.embedding)) return;
+    if (chunk.embedding.length !== queryEmbedding.length) {
+      if (stats) stats.mismatched++;
+      return;
+    }
     scored.push({
       text: chunk.text,
       source: `${doc.filename}#chunk${i}`,
@@ -117,17 +123,30 @@ export function scoreDocumentChunks(
 }
 
 
-/** Top-k chunks of a knowledge base for a query, best first. Documents with malformed chunk data are skipped. */
-export async function searchKb(kbId: string, query: string, k: number): Promise<{ docCount: number; chunks: ScoredChunk[] }> {
+export const REINGEST_NOTE = "Note: some documents were embedded with a different model; re-ingest them.";
+const warnedKbs = new Set<string>();
+
+/** Top-k chunks of a knowledge base for a query, best first. Documents with malformed chunk data are skipped;
+ *  `mismatched` counts chunks skipped for a vector of another size (embedded with a different model). */
+export async function searchKb(
+  kbId: string,
+  query: string,
+  k: number,
+): Promise<{ docCount: number; chunks: ScoredChunk[]; mismatched: number }> {
   const queryEmbedding = await embed(query);
   const documents = await prisma.document.findMany({ where: { kbId }, select: { id: true, filename: true, chunks: true } });
   const scored: ScoredChunk[] = [];
+  const stats = { mismatched: 0 };
   for (const doc of documents) {
     try {
-      scored.push(...scoreDocumentChunks(doc, queryEmbedding));
+      scored.push(...scoreDocumentChunks(doc, queryEmbedding, stats));
     } catch {
       // malformed chunk JSON
     }
   }
-  return { docCount: documents.length, chunks: scored.sort((a, b) => b.score - a.score).slice(0, k) };
+  if (stats.mismatched && !warnedKbs.has(kbId)) {
+    warnedKbs.add(kbId);
+    console.warn(`[rag] knowledge base ${kbId}: ${stats.mismatched} chunk(s) skipped, embedded with a different model. Re-ingest them.`);
+  }
+  return { docCount: documents.length, chunks: scored.sort((a, b) => b.score - a.score).slice(0, k), mismatched: stats.mismatched };
 }

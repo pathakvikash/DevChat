@@ -159,13 +159,13 @@ describe("the card for a call that sends data out", () => {
     expect(out).toContain("Sends data out");
     expect(out).toContain("This chat can read project. Check what is being sent before you allow it.");
     expect(out).not.toContain("Allow for this chat");
-    expect(out).not.toContain("Ask mode");
+    expect(out).not.toContain("Confirm each change");
     expect(card({ sendsOut: true })).toContain("This chat has read files from a working folder. Check what is being sent before you allow it.");
   });
 
   it("an ordinary Ask card is unchanged", () => {
     const out = card();
-    expect(out).toContain("Ask mode");
+    expect(out).toContain("Confirm each change");
     expect(out).toContain("Allow for this chat");
     expect(out).not.toContain("Check what is being sent");
   });

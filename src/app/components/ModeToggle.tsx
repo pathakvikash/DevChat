@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { MoreHorizontal } from "lucide-react";
 import { modeSegment, segmentToMode, toggleConfirm, togglePlan, type ChatMode, type ModeSegment } from "@/lib/chat/modes";
 import { useToast } from "@/app/components/Toast";
@@ -28,6 +28,26 @@ export default function ModeToggle({
 }) {
   const { toast } = useToast();
   const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  // The options popover closes on a press outside it, or on Escape (focus returns to its button).
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: PointerEvent) => {
+      if (!rootRef.current?.contains(e.target as Node)) setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      setOpen(false);
+      triggerRef.current?.focus();
+    };
+    document.addEventListener("pointerdown", onDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("pointerdown", onDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
   const active = modeSegment(mode);
   const blocked = (id: ModeSegment) => !toolsAvailable && id === "agent";
   // Confirming changes needs tools; Plan first does not.
@@ -43,7 +63,7 @@ export default function ModeToggle({
   };
 
   return (
-    <div className="relative flex items-center gap-1">
+    <div ref={rootRef} className="relative flex items-center gap-1">
       <div
         role="radiogroup"
         aria-label="Conversation mode"
@@ -76,6 +96,7 @@ export default function ModeToggle({
       </div>
       {mode === "plan" && <span className="text-xs text-blue-300" data-testid="mode-plan-label">Plan</span>}
       <button
+        ref={triggerRef}
         type="button"
         aria-label="Mode options"
         aria-haspopup="true"
@@ -87,7 +108,7 @@ export default function ModeToggle({
         <MoreHorizontal size={14} />
       </button>
       {open && (
-        <div className="absolute bottom-full left-0 z-50 mb-2 w-60 rounded-[var(--glass-radius-md)] glass-strong p-2 text-xs text-zinc-200 shadow-lg">
+        <div className="absolute bottom-full right-0 z-50 mb-2 w-60 max-w-[calc(100vw-2rem)] rounded-[var(--glass-radius-md)] glass-strong p-2 text-xs text-zinc-200 shadow-lg">
           <label className="flex cursor-pointer items-start gap-2 p-1.5" title="Agent waits for Allow or Deny before each change">
             <input type="checkbox" checked={mode === "ask"} onChange={() => pick(toggleConfirm(mode))} className="mt-0.5" />
             <span>Confirm each change</span>

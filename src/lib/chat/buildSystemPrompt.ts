@@ -50,7 +50,7 @@ You are planning. Look around with read-only tools, if you have them. Do not cha
 ${withTools ? "End by calling presentPlan with a short title and the steps in order. The user approves the plan or asks for changes." : "End with a numbered list of concrete steps. The user approves it with a button."}`;
 
 const VAS_READ_ONLY_SECTION = `--- Read-only mode ---
-You are in Chat mode, so only read-only tools are available. You CANNOT create or
+You are in Ask mode, so only read-only tools are available. You CANNOT create or
 update artifacts, create or update todos, save or forget memories, or call MCP
 servers right now.
 

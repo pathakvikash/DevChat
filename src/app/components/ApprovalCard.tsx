@@ -25,7 +25,7 @@ function Visible({ text }: { text: string }) {
   );
 }
 
-/** Ask mode: a tool call waits here for Allow or Deny. Shown only in the latest message. */
+/** Confirm each change (Agent mode): a tool call waits here for Allow or Deny. Shown only in the latest message. */
 export default function ApprovalCard({
   toolName,
   approvalId,
@@ -62,7 +62,7 @@ export default function ApprovalCard({
       <div className="flex items-center gap-2 px-3 py-2 bg-[var(--glass-bg-elevated)] text-xs">
         <ShieldQuestion size={14} className="text-amber-400 shrink-0" />
         <span className="font-medium text-zinc-200 truncate">Needs your OK</span>
-        <span className="ml-auto text-zinc-400 shrink-0">{sendsOut?.sendsOut ? "Sends data out" : "Ask mode"}</span>
+        <span className="ml-auto text-zinc-400 shrink-0">{sendsOut?.sendsOut ? "Sends data out" : "Confirm each change"}</span>
       </div>
       <div className="px-3 py-2">
         <p className="text-sm font-medium text-[var(--foreground)] break-words">{title}</p>

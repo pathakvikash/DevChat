@@ -230,7 +230,7 @@ export function SplitViewProvider({ children }: { children: React.ReactNode }) {
     };
   }, [loadInfo]);
 
-  // Each pane's mode lives in the same per-chat storage ChatModeContext writes; there is no event, so poll while split.
+  // Each pane's mode lives in the same per-chat storage ChatModeContext writes; re-read when a pane announces a change.
   useEffect(() => {
     if (ids.length < 2) return;
     const read = () => {

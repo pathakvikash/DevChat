@@ -15,8 +15,10 @@ export function sanitizeSpec<T extends Spec>(spec: T): T {
   if (!spec?.elements) return spec;
   const elements: Record<string, El> = {};
   for (const [id, el] of Object.entries(spec.elements)) {
-    const { watch: _watch, on, ...rest } = el;
-    const press = on?.press;
+    const rest = { ...el };
+    delete rest.watch;
+    delete rest.on;
+    const press = el.on?.press;
     const keep = el.type === "Button" && press && !Array.isArray(press) && press.action === "submit";
     elements[id] = keep ? { ...rest, on: { press: { action: "submit" } } } : rest;
   }
