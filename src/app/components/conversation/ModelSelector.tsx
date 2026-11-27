@@ -8,6 +8,9 @@ import AsyncButton from "../ui/AsyncButton";
 import { useResource } from "@/app/hooks/useResource";
 import { fetchModels as apiFetchModels, fetchModelUsage } from "@/app/hooks/useModelsApi";
 import { ModelInfo, groupModelsByProvider } from "./types";
+import { useBridge } from "@/app/hooks/useBridge";
+import { useFolders } from "@/app/hooks/useFolders";
+import { bridgeProblemText } from "@/lib/bridge/client";
 
 interface ModelSelectorProps {
   currentModel: string;
@@ -113,7 +116,20 @@ export default function ModelSelector({
     [],
     { onError: (e) => console.error("Failed to load models:", e) },
   );
-  const models = (modelsData ?? []).filter((m) => !exclude?.(m));
+  // Deployed with a bridge token stored: the bridge's models join the list, disabled while it cannot be reached.
+  const bridge = useBridge();
+  // Reads the folder answer (and fetches it) only when a bridge token is stored: no /api/folders call for everyone else.
+  const { noHostTools } = useFolders(bridge.hasToken, { bridge: true });
+  const bridgeModels: ModelInfo[] =
+    noHostTools === true && bridge.hasToken
+      ? bridge.models.map((m) => ({
+          ...m,
+          viaBridge: true,
+          supportsTools: true,
+          ...(bridge.status === "ready" ? {} : { disabledReason: bridgeProblemText(bridge.status, bridge.protocol) ?? undefined }),
+        }))
+      : [];
+  const models = [...(modelsData ?? []), ...bridgeModels.filter((b) => !modelsData?.some((m) => m.id === b.id))].filter((m) => !exclude?.(m));
 
   const modelGroups = useMemo(() => {
     return groupModelsByProvider(models).map((g) => ({
@@ -156,6 +172,7 @@ export default function ModelSelector({
         onClick={() => {
           if (disabled) return;
           setSelectedProvider(currentModelInfo?.provider ?? null);
+          if (!showDropdown && bridge.hasToken) void bridge.check(5_000);
           setShowDropdown(!showDropdown);
         }}
         disabled={disabled}
@@ -230,16 +247,18 @@ export default function ModelSelector({
               <button
                 key={model.id}
                 ref={model.id === currentModel ? selectedRef : undefined}
+                disabled={!!model.disabledReason}
                 onClick={() => {
                   onModelChange(model.id);
                   setShowDropdown(false);
                 }}
-                className={`w-full text-left px-4 py-3 text-sm hover:bg-[var(--glass-bg-hover)] border-b border-[var(--glass-border)] last:border-b-0 ${
+                className={`w-full text-left px-4 py-3 text-sm hover:bg-[var(--glass-bg-hover)] border-b border-[var(--glass-border)] last:border-b-0 disabled:cursor-not-allowed disabled:opacity-60 ${
                   currentModel === model.id ? "bg-[var(--glass-bg-active)]" : ""
                 }`}
               >
                 <div className="flex items-center gap-1.5">
                   <span className="font-medium">{model.name}</span>
+                  {model.viaBridge && <span className="rounded bg-[var(--glass-bg-active)] px-1.5 py-0.5 text-[10px] text-zinc-400">via local bridge</span>}
                   <div className="flex items-center gap-0.5 ml-1">
                     {model.supportsTools && <span title="Supports tools"><Wrench size={11} className="text-zinc-500" /></span>}
                     {model.supportsVision && <span title="Vision capable"><Eye size={11} className="text-zinc-500" /></span>}
@@ -252,6 +271,7 @@ export default function ModelSelector({
                     <span className="text-[10px] text-zinc-600">{model.usageCount} chats</span>
                   ) : null}
                 </div>
+                {model.disabledReason && <div className="text-xs text-amber-400">{model.disabledReason}</div>}
                 {model.contextWindow && (
                   <div className="text-xs text-zinc-500">{formatContext(model.contextWindow)} ctx</div>
                 )}

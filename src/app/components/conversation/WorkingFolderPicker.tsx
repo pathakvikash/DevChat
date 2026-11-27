@@ -3,6 +3,8 @@
 import { useState } from "react";
 import { FolderOpen } from "lucide-react";
 import { shortenHome, useFolders } from "@/app/hooks/useFolders";
+import { setBridgeFolder, useBridgeFolder } from "@/app/hooks/useBridge";
+import { SERVER_NO_CLI } from "@/lib/bridge/constants";
 import FolderBrowserDialog from "./FolderBrowserDialog";
 
 interface WorkingFolderPickerProps {
@@ -15,14 +17,19 @@ interface WorkingFolderPickerProps {
   hint?: string;
   /** Replaces the outer label's classes, e.g. a full-width input look. */
   className?: string;
+  /** A chat's picker: on a deployment with the local bridge ready, it lists the bridge's folders and keeps the choice in this browser. */
+  conversationId?: string;
 }
 
 const CHOOSE = "__choose__"; // sentinel option: opens the browser, never becomes the value
 
 /** Folder a model may read in (and edit in, for Agent mode), chosen from the user's folder list.
  *  The model settings dialog carries the same control. */
-export default function WorkingFolderPicker({ value, onChange, disabled, label, hint, className }: WorkingFolderPickerProps) {
-  const { folders, hostTools, reason, loaded, error, refetch } = useFolders();
+export default function WorkingFolderPicker({ value: serverValue, onChange: serverOnChange, disabled, label, hint, className, conversationId }: WorkingFolderPickerProps) {
+  const { folders, hostTools, reason, loaded, error, refetch, viaBridge } = useFolders(true, { bridge: !!conversationId });
+  const bridgeValue = useBridgeFolder(conversationId ?? "");
+  const value = viaBridge ? bridgeValue : serverValue;
+  const onChange = viaBridge ? (f: string | null) => setBridgeFolder(conversationId!, f) : serverOnChange;
   const [browsing, setBrowsing] = useState(false);
   const short = shortenHome;
 
@@ -34,7 +41,9 @@ export default function WorkingFolderPicker({ value, onChange, disabled, label, 
 
   const defaultTitle = value
     ? `Working folder: ${value}. Type @ to mention a file.`
-    : "No working folder: the tool can't see any files";
+    : viaBridge
+      ? "No working folder: Claude Code runs with no tools"
+      : "No working folder: the tool can't see any files";
   const staleTitle = `${value && short(value)} isn't one of your folders any more. Add it again with Choose folder…, or pick another.`;
 
   return (
@@ -68,10 +77,16 @@ export default function WorkingFolderPicker({ value, onChange, disabled, label, 
             </option>
           ))}
           {value && !(hostTools && listed) && <option value={value}>{short(value)}{stale ? " (removed)" : ""}</option>}
-          {canChoose && (
+          {viaBridge && (
             <>
               <hr />
-              <option value={CHOOSE} disabled={!!reason}>
+              <option disabled>{"Add one: npm run bridge -- --add <folder>"}</option>
+            </>
+          )}
+          {canChoose && !viaBridge && (
+            <>
+              <hr />
+              <option value={CHOOSE} disabled={!!reason && reason !== SERVER_NO_CLI}>
                 Choose folder…
               </option>
             </>

@@ -24,6 +24,8 @@ export interface PlanAnswer {
 export interface ToolAnswers {
   answerApproval: (answer: ApprovalAnswer) => void;
   answerPlan: (answer: PlanAnswer) => void;
+  /** The chat's model id: a bridge chat's shell approvals are also confirmed in the bridge's terminal. */
+  model?: string;
 }
 
 /** Lets the approval and plan cards answer without threading callbacks through every message. */

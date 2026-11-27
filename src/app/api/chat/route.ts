@@ -51,6 +51,7 @@ import {
 import { resolveChatSettings } from "@/lib/chat/resolveChatSettings";
 import { resolveModelCandidates } from "@/lib/chat/resolveModelCandidates";
 import { cliProviderForModel, dropParkedRuns } from "@/lib/cliProviders";
+import { detectionAvailable } from "@/lib/providerDetect";
 import { folderGoneMessage, isAllowedFolder } from "@/lib/folders";
 import { reasoningPlan, type ProviderOptions } from "@/lib/reasoning";
 import { recordTrace } from "@/lib/observability";
@@ -232,10 +233,16 @@ export async function POST(req: Request) {
     const candidateModels = resolution.candidateModels;
     // CLI models run as the server's OS user; a fallback that is one is skipped below (getModel refuses it).
     const hostTools = await canUseHostTools(userId);
-    if (!hostTools && cliProviderForModel(model)) {
+    // Also when this server cannot run CLIs at all (Vercel): getModel would throw below and the fallback loop would
+    // quietly answer with a hosted model, so a CLI model is refused here, before any candidate is tried.
+    if (cliProviderForModel(model) && (!hostTools || !detectionAvailable())) {
       releaseCliRuns();
       return new Response(
-        JSON.stringify({ error: `${HOST_TOOLS_REFUSED} Pick another model: this one runs on the server's own machine.` }),
+        JSON.stringify({
+          error: hostTools
+            ? "This model only runs when Orrery runs on your own machine. Pick another model, or use the local bridge."
+            : `${HOST_TOOLS_REFUSED} Pick another model: this one runs on the server's own machine.`,
+        }),
         { status: 403, headers: { "Content-Type": "application/json" } },
       );
     }
@@ -335,7 +342,7 @@ export async function POST(req: Request) {
 
     // External text in the STORED history (compression drops those results from the prompt, not their text from the summary).
     // A side chat carries its parent's transcript in its prompt, so the parent's outside text counts too.
-  const tainted = useTools && ((await storedTaint(conversationId)) || (!!parentId && (await storedTaint(parentId))));
+    const tainted = useTools && ((await storedTaint(conversationId)) || (!!parentId && (await storedTaint(parentId))));
     // A tool answered in this request keeps needing approval for it (see toolsWithAnsweredApproval).
     const answeredNow = new Set(toolsWithAnsweredApproval(sanitizedMessages));
     const aiTools: ToolSet = useTools

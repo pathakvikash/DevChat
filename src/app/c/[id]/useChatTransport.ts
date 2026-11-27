@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport, lastAssistantMessageIsCompleteWithApprovalResponses, type UIMessage } from "ai";
 
@@ -9,6 +9,9 @@ import { parseDataArtifact } from "@/lib/generativeUi/data";
 import { shouldAutoContinue, waitsForApproval, type AnyPart } from "@/lib/utils/messageParts";
 import type { ChatMode } from "@/lib/chat/modes";
 import type { AgentPane } from "@/lib/chat/agentMessages";
+import { buildSavePayload } from "@/lib/bridge/client";
+import { createSaveQueue, SaveHttpError } from "@/lib/bridge/saveQueue";
+import { createRoutingTransport, type BridgeTurn } from "@/app/hooks/bridgeTransport";
 
 /** Python tracebacks and our sandbox's own failures both start this way. */
 const CODE_FAILED_RE = /^(Error|Traceback)/;
@@ -53,11 +56,13 @@ export interface ChatFinish {
   messages?: UIMessage[];
   isAbort?: boolean;
   isError?: boolean;
+  /** The turn ran on the local bridge (the page saved it itself): server-only follow-ups like suggestions are skipped. */
+  viaBridge?: boolean;
 }
 
 interface ChatTransportOptions {
   conversationId: string;
-  conversation: { model?: string; systemPrompt?: string; temperature?: number; chatOnlyMode?: boolean; memoryDisabled?: boolean; maxToolCalls?: number } | null;
+  conversation: { model?: string; systemPrompt?: string; temperature?: number; chatOnlyMode?: boolean; memoryDisabled?: boolean; maxToolCalls?: number; reasoningEffort?: string | null } | null;
   selectedKbId: string;
   searchProvider: string;
   enabledTools: string[];
@@ -121,8 +126,18 @@ export function useChatTransport(opts: ChatTransportOptions) {
     };
   }, [conversationId, conversation?.model, conversation?.systemPrompt, conversation?.temperature, selectedKbId, searchProvider, enabledTools, enabledSkills, mode, allowedTools, conversation?.chatOnlyMode, conversation?.memoryDisabled, conversation?.maxToolCalls, openPanes]);
 
-  const transport = useMemo(
+  // What a bridge turn also needs; kept out of transportBodyRef, which goes to the server as is.
+  const effortRef = useRef(conversation?.reasoningEffort);
+  useEffect(() => {
+    effortRef.current = conversation?.reasoningEffort;
+  }, [conversation?.reasoningEffort]);
+  // The turn that went to the local bridge, until onFinish saves it.
+  const bridgeTurnRef = useRef<BridgeTurn | null>(null);
+
+  // The closures below read the refs when a request goes out, never during render.
+  const serverTransport = useMemo(
     () =>
+      // eslint-disable-next-line react-hooks/refs -- read at send time
       new DefaultChatTransport({
         api: "/api/chat",
         body: () => transportBodyRef.current,
@@ -139,6 +154,62 @@ export function useChatTransport(opts: ChatTransportOptions) {
       }),
     [],
   );
+  const getBridgeContext = useCallback(() => {
+    const b = transportBodyRef.current;
+    return { model: b.model, systemPrompt: b.systemPrompt, mode: b.mode, allowedTools: b.allowedTools, reasoningEffort: effortRef.current };
+  }, []);
+  const onBridgeTurn = useCallback((turn: BridgeTurn) => {
+    bridgeTurnRef.current = turn;
+  }, []);
+  const transport = useMemo(
+    // eslint-disable-next-line react-hooks/refs -- the transport only calls getBridgeContext when a request goes out
+    () => createRoutingTransport({ server: serverTransport, getContext: getBridgeContext, onBridgeTurn }),
+    [serverTransport, getBridgeContext, onBridgeTurn],
+  );
+
+  // A bridge turn never passes through this server, so the page saves the finished turn, in order (see saveQueue). The ids
+  // of user messages already saved are kept, so a resume after an approval (or a retry) does not send the question twice.
+  const [bridgeSaveFailed, setBridgeSaveFailed] = useState(false);
+  const [bridgeSaveDropped, setBridgeSaveDropped] = useState(false);
+  const [savedUserIds] = useState(() => new Set<string>());
+  const [saveQueue] = useState(() =>
+    createSaveQueue({
+      onFailed: setBridgeSaveFailed,
+      onDropped: () => setBridgeSaveDropped(true),
+      post: async ({ conversationId: id, payload }) => {
+        // The question may have been saved by an earlier job since this one was built.
+        const body = payload.user && savedUserIds.has(payload.user.id) ? { ...payload, user: undefined } : payload;
+        const res = await fetch(`/api/conversations/${id}/messages`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        });
+        if (!res.ok) throw new SaveHttpError(res.status);
+        if (payload.user) savedUserIds.add(payload.user.id);
+      },
+    }),
+  );
+  const retryBridgeSave = useCallback(() => saveQueue.retry(), [saveQueue]);
+  /** Called from onFinish: saves the turn when it ran on the bridge. True when it did. */
+  const persistBridgeTurn = useCallback(
+    (finish: ChatFinish): boolean => {
+      const turn = bridgeTurnRef.current;
+      if (!turn) return false;
+      bridgeTurnRef.current = null;
+      const payload = buildSavePayload({ messages: finish.messages ?? [], model: turn.model, continuing: turn.continuing, savedUserIds });
+      if (payload) {
+        setBridgeSaveDropped(false);
+        void saveQueue.push({ conversationId, payload });
+      }
+      return true;
+    },
+    [conversationId, saveQueue, savedUserIds],
+  );
+  // useChat keeps the callbacks it was created with, so onFinish goes through this ref.
+  const persistBridgeRef = useRef(persistBridgeTurn);
+  useEffect(() => {
+    persistBridgeRef.current = persistBridgeTurn;
+  }, [persistBridgeTurn]);
 
   const chat = useChat({
     id: conversationId,
@@ -168,7 +239,10 @@ export function useChatTransport(opts: ChatTransportOptions) {
       if (part.type === "data-queued-message") onQueuedDeliveredRef.current(String((part.data as { queuedId?: string })?.queuedId ?? ""));
     },
     onError: (err) => { onErrorRef.current(err); },
-    onFinish: (finish) => { onFinishRef.current(finish); },
+    onFinish: (finish) => {
+      const viaBridge = persistBridgeRef.current(finish);
+      onFinishRef.current(viaBridge ? { ...finish, viaBridge } : finish);
+    },
   });
 
   /** Runs `executeCode` in the browser and adds its result. Called on arrival, or after Allow on a card. */
@@ -198,5 +272,5 @@ export function useChatTransport(opts: ChatTransportOptions) {
     Object.assign(transportBodyRef.current, patch);
   }, []);
 
-  return { ...chat, isLoading, setRequestBody, runExecuteCode };
+  return { ...chat, isLoading, setRequestBody, runExecuteCode, bridgeSaveFailed, bridgeSaveDropped, retryBridgeSave };
 }

@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/db";
+import { HOST_TOOLS_REFUSED } from "@/lib/bridge/constants";
 
 /** Tools that run on the server's own machine (Claude Code and the other CLIs, its folders, its home
  *  directory) belong to the server's owner. OWNER_EMAILS (comma-separated) lists who that is; unset means
@@ -43,4 +44,4 @@ export function resetHostAccessCache() {
   warned = false;
 }
 
-export const HOST_TOOLS_REFUSED = "This is only available to the server's owner.";
+export { HOST_TOOLS_REFUSED };

@@ -52,6 +52,10 @@ export interface ModelInfo {
   supportsVision?: boolean;
   supportsThinking?: boolean;
   usageCount?: number;
+  /** Listed by the local bridge, not the server. */
+  viaBridge?: boolean;
+  /** Why it cannot be picked right now. */
+  disabledReason?: string;
 }
 
 export interface ModelGroup {

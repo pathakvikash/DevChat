@@ -5,6 +5,8 @@ import { generateId, type UIMessage } from "ai";
 import { useToast } from "@/app/components/Toast";
 import type { QueuedItem } from "@/app/components/QueuedMessages";
 import { fetchModels } from "@/app/hooks/useModelsApi";
+import { useBridgeProbe } from "@/app/hooks/useBridge";
+import { isBridgeModel } from "@/lib/bridge/client";
 import type { Conversation, ModelInfo } from "@/app/components/conversation/types";
 import { useConversationMode, type ModelCaps } from "@/app/contexts/ChatModeContext";
 import { useSplitViewOptional } from "@/app/c/SplitViewContext";
@@ -228,7 +230,9 @@ export function useChatPane(conversationId: string, { focused, kind, searchProvi
     onSendToChatRef,
   });
 
-  const { messages, setMessages, sendMessage: chatSend, status, stop: stopStream, regenerate, error, addToolResult, addToolApprovalResponse, setRequestBody, isLoading, runExecuteCode } = chatTransport;
+  const { messages, setMessages, sendMessage: chatSend, status, stop: stopStream, regenerate, error, addToolResult, addToolApprovalResponse, setRequestBody, isLoading, runExecuteCode, bridgeSaveFailed, bridgeSaveDropped, retryBridgeSave } = chatTransport;
+  // Choosing (or opening a chat with) a bridge model is what first probes the local bridge; the page never probes on load.
+  useBridgeProbe(isBridgeModel(conversation?.model));
   const isSubagent = conversation?.kind === "subagent";
   // What other panes read through the agent handle, the moment a message goes out. It follows every status
   // change and is set when a delivery starts a turn, so it is right before React renders `isLoading`.
@@ -642,7 +646,7 @@ export function useChatPane(conversationId: string, { focused, kind, searchProvi
       }
     }
     // Auto-consolidate memory every 10 messages, unless memory is off (temporary chats never save).
-    if (!isSide && !conversation?.temporary && !conversation?.memoryDisabled && all.length > 0 && all.length % 10 === 0) {
+    if (!isSide && !conversation?.temporary && !conversation?.memoryDisabled && !finish?.viaBridge && all.length > 0 && all.length % 10 === 0) {
       fetch(`/api/memory/consolidate`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -651,7 +655,7 @@ export function useChatPane(conversationId: string, { focused, kind, searchProvi
     }
     // Suggest a next message from the last exchange; shown greyed in the box,
     // accepted with the arrow button or the → key.
-    const exchange = finish?.isAbort || isSide ? null : lastExchange(all);
+    const exchange = finish?.isAbort || isSide || finish?.viaBridge ? null : lastExchange(all);
     if (!exchange) {
       if (!finish?.isAbort) console.debug("[suggest] skipped: no completed assistant turn to suggest from");
       return;
@@ -1127,7 +1131,7 @@ export function useChatPane(conversationId: string, { focused, kind, searchProvi
     handleClarificationAnswer, handleUiSubmit, handleEditMessage, handleDeleteMessage, handleCopyMessage, handleForkMessage,
     handleRegenerateMessage, handleRegenExecute, regenModal, setRegenModal,
     queued, queueMessage, editQueued, removeQueued, retryQueued,
-    handleSubmit, isSubagent, sendToPane,
+    handleSubmit, isSubagent, sendToPane, bridgeSaveFailed, bridgeSaveDropped, retryBridgeSave,
     minimapMessages,
     isDialogOpen, closeTopDialog,
   };

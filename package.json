@@ -18,6 +18,7 @@
     "test:watch": "vitest",
     "sanity": "node scripts/sanity.mjs",
     "sanity:ui": "playwright show-report",
+    "bridge": "tsx scripts/bridge.ts",
     "db:seed": "npx tsx scripts/seed.ts",
     "vercel-build": "prisma generate --schema=prisma/postgres/schema.prisma && prisma migrate deploy --schema=prisma/postgres/schema.prisma && next build"
   },
@@ -71,6 +72,7 @@
     "eslint": "^9",
     "eslint-config-next": "16.2.6",
     "prettier": "^3.4.0",
+    "tsx": "^4.23.15",
     "typescript": "^5",
     "vitest": "^4.1.8"
   }

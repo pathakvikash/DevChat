@@ -10,6 +10,7 @@ vi.mock("@/lib/db", () => ({
   },
 }));
 vi.mock("@/lib/auth", () => ({ requireUserId: vi.fn().mockResolvedValue("u1") }));
+vi.mock("@/lib/providerDetect", () => ({ detectionAvailable: vi.fn(() => true) }));
 vi.mock("@/lib/settings", () => ({ getSettingsKey: vi.fn() }));
 vi.mock("@/lib/models", () => ({
   getModel: vi.fn(() => ({ supportsTools: true, model: {}, contextWindow: 8192 })),
@@ -50,6 +51,7 @@ vi.mock("ai", async (importOriginal) => ({
 
 import { prisma } from "@/lib/db";
 import { getModel } from "@/lib/models";
+import { detectionAvailable } from "@/lib/providerDetect";
 import { buildTools } from "@/lib/chat/buildTools";
 import { dropParkedRuns } from "@/lib/cliProviders";
 import { resetHostAccessCache } from "@/lib/hostAccess";
@@ -90,6 +92,15 @@ describe("POST /api/chat: CLI models belong to the server's owner", () => {
     const res = await send("claude-code/default");
     expect(res.status).toBe(403);
     expect((await res.json()).error).toMatch(/server's owner/);
+    expect(buildTools).not.toHaveBeenCalled();
+  });
+
+  it("refuses a CLI model when this server cannot run CLIs (Vercel), instead of falling back to a hosted model", async () => {
+    vi.mocked(detectionAvailable).mockReturnValueOnce(false);
+    const res = await send("claude-code/default");
+    expect(res.status).toBe(403);
+    expect((await res.json()).error).toMatch(/your own machine/);
+    expect(getModel).not.toHaveBeenCalled();
     expect(buildTools).not.toHaveBeenCalled();
   });
 

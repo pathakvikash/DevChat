@@ -15,6 +15,7 @@ import { isPaneBusy } from "@/lib/splitPanes";
 import ChatMessages from "@/app/components/ChatMessages";
 import MinimapNavigator from "@/app/components/MinimapNavigator";
 import ChatInput from "@/app/components/chatInput";
+import BridgeNotice from "@/app/components/BridgeNotice";
 import Scratchpad from "@/app/components/Scratchpad";
 import ArtifactPanel from "@/app/components/ArtifactPanel";
 import TodoPanel from "@/app/components/TodoPanel";
@@ -446,7 +447,7 @@ export default function ConversationPane({ conversationId, focused, initialPromp
 
           {p.messages.length > 0 && (
             <AgentSendContext.Provider value={agentSend}>
-            <ToolAnswersProvider value={{ answerApproval: p.answerApproval, answerPlan: p.answerPlan }}>
+            <ToolAnswersProvider value={{ answerApproval: p.answerApproval, answerPlan: p.answerPlan, model: p.conversation.model }}>
             <ChatMessages
               messages={p.messages}
               isLoading={p.isLoading}
@@ -509,6 +510,9 @@ export default function ConversationPane({ conversationId, focused, initialPromp
             quote={p.quotes[0]}
             onQuoteRemove={p.removeQuote}
           />
+        )}
+        {!isSub && !isSide && (
+          <BridgeNotice conversationId={conversationId} model={p.conversation.model} saveFailed={p.bridgeSaveFailed} saveDropped={p.bridgeSaveDropped} onRetry={() => void p.retryBridgeSave()} />
         )}
         {!isSub && !isSide && (
         <ChatInput

@@ -40,6 +40,11 @@ export interface ChatPaneState extends DataActions {
   editQueued: (id: string, text: string) => Promise<void>;
   removeQueued: (id: string) => Promise<void>;
   retryQueued: (id: string) => void;
+  /** The last local-bridge turn could not be saved to the server; retry posts it again. */
+  bridgeSaveFailed: boolean;
+  /** A reply the server refused for good (not retryable) was dropped. */
+  bridgeSaveDropped: boolean;
+  retryBridgeSave: () => Promise<void>;
   /** Text for the pane's polite live region. */
   announcement: string;
   toggleTemporary: () => Promise<void>;
