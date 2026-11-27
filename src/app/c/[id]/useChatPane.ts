@@ -7,6 +7,7 @@ import type { QueuedItem } from "@/app/components/QueuedMessages";
 import { fetchModels } from "@/app/hooks/useModelsApi";
 import { useBridgeProbe } from "@/app/hooks/useBridge";
 import { isBridgeModel } from "@/lib/bridge/client";
+import { isBridgeLocalModel } from "@/lib/bridge/constants";
 import type { Conversation, ModelInfo } from "@/app/components/conversation/types";
 import { useConversationMode, type ModelCaps } from "@/app/contexts/ChatModeContext";
 import { useSplitViewOptional } from "@/app/c/SplitViewContext";
@@ -232,7 +233,7 @@ export function useChatPane(conversationId: string, { focused, kind, searchProvi
 
   const { messages, setMessages, sendMessage: chatSend, status, stop: stopStream, regenerate, error, addToolResult, addToolApprovalResponse, setRequestBody, isLoading, runExecuteCode, bridgeSaveFailed, bridgeSaveDropped, retryBridgeSave } = chatTransport;
   // Choosing (or opening a chat with) a bridge model is what first probes the local bridge; the page never probes on load.
-  useBridgeProbe(isBridgeModel(conversation?.model));
+  useBridgeProbe(isBridgeModel(conversation?.model) || isBridgeLocalModel(conversation?.model));
   const isSubagent = conversation?.kind === "subagent";
   // What other panes read through the agent handle, the moment a message goes out. It follows every status
   // change and is set when a delivery starts a turn, so it is right before React renders `isLoading`.

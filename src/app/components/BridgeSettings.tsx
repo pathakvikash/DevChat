@@ -24,7 +24,7 @@ export default function BridgeSettings() {
       <p className="text-sm text-zinc-400">
         The local bridge is a small program on your computer that lets this page use your own Claude Code. The page talks to it directly on 127.0.0.1; nothing you
         run goes through this server. Bridge chats use Claude Code&apos;s own tools (no Orrery memory, knowledge bases or generated interfaces), and bridge models work only on the
-        computer running the bridge.
+        computer running the bridge. Your local Ollama and LM Studio models also appear in the model list when the bridge is running (text only, no tools or folder).
       </p>
       <p className="text-sm text-zinc-400">
         By default the bridge is read-only (Plan, the safe default): Claude Code can read the folders you add and change nothing. To allow edits, run{" "}

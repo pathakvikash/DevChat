@@ -171,3 +171,26 @@ describe("POST /api/conversations/[id]/messages (bridge turn)", () => {
     expect(h.rows.has("u-1")).toBe(false);
   });
 });
+
+describe("POST /api/conversations/[id]/messages (local model bridge turn)", () => {
+  const local = (model: string, parts: unknown[]) => turn({ assistant: { id: "a-1", model, parts } });
+
+  it.each(["ollama/llama3:latest", "lmstudio/my-model"])("saves a %s turn of text, reasoning and step-start", async (model) => {
+    const res = await post(local(model, [{ type: "step-start" }, { type: "reasoning", text: "hmm" }, text("hello")]));
+    expect(res.status).toBe(200);
+    expect(h.rows.get("a-1").model).toBe(model);
+    expect(stored("a-1").map((p: { type: string }) => p.type)).toEqual(["step-start", "reasoning", "text"]);
+  });
+
+  it.each(["ollama/x", "lmstudio/x"])("refuses a tool part in a %s turn", async (model) => {
+    const tool = { type: "dynamic-tool", toolName: "Read", toolCallId: "t", state: "output-available" };
+    expect((await post(local(model, [text("a"), tool]))).status).toBe(400);
+    expect(h.rows.size).toBe(0);
+  });
+
+  it("still allows the tool part for claude-code, and refuses other prefixes", async () => {
+    const tool = { type: "dynamic-tool", toolName: "Read", toolCallId: "t", state: "output-available" };
+    expect((await post(local("claude-code/sonnet", [tool]))).status).toBe(200);
+    for (const m of ["openai/gpt-4o", "llama3", "ollama", "xollama/x"]) expect((await post(turn({ assistant: { id: `a-${m}`, model: m, parts: [text("x")] } }))).status).toBe(400);
+  });
+});

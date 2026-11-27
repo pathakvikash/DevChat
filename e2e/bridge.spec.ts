@@ -17,13 +17,13 @@ const CHAT_BODY = sse([
   { type: "finish" },
 ]);
 
-async function stubDeployedWithBridge(page: Page, chatBodies: unknown[] = []) {
+async function stubDeployedWithBridge(page: Page, chatBodies: unknown[] = [], extraModels: object[] = []) {
   // A deployment has no Claude Code of its own: the picker must show only the bridge's models, even where this
   // machine has `claude` installed and the dev server lists it.
   await page.route("**/api/models", async (route) => {
     if (route.request().method() !== "GET") return route.fallback();
     const json = await (await route.fetch()).json();
-    return route.fulfill({ json: { ...json, models: json.models.filter((m: { id: string }) => !m.id.startsWith("claude-code/")) } });
+    return route.fulfill({ json: { ...json, models: json.models.filter((m: { id: string }) => !/^(claude-code|ollama|lmstudio)\//.test(m.id)) } });
   });
   await page.route("**/api/folders", (route) =>
     route.request().method() === "GET"
@@ -37,7 +37,7 @@ async function stubDeployedWithBridge(page: Page, chatBodies: unknown[] = []) {
     if (req.headers()["authorization"] !== `Bearer ${TOKEN}`) return route.fulfill({ status: 401, headers: cors, json: { error: "Missing or wrong token" } });
     const path = new URL(req.url()).pathname;
     if (path === "/health") return route.fulfill({ headers: cors, json: { protocol: 1, version: "0.1.0", claude: true } });
-    if (path === "/models") return route.fulfill({ headers: cors, json: { models: [{ id: "claude-code/sonnet", name: "Bridge Sonnet", provider: "Claude Code", contextWindow: 200000 }] } });
+    if (path === "/models") return route.fulfill({ headers: cors, json: { models: [{ id: "claude-code/sonnet", name: "Bridge Sonnet", provider: "Claude Code", contextWindow: 200000 }, ...extraModels] } });
     if (path === "/folders") return route.fulfill({ headers: cors, json: { folders: [], hostTools: true, reason: null } });
     if (path === "/chat") {
       chatBodies.push(req.postDataJSON());
@@ -94,4 +94,30 @@ test("a bridge model with the bridge offline says why instead of using another m
   await openChat(page, id);
   await send(page, "anyone there");
   await expect(page.getByTestId("bridge-notice")).toContainText("Start the bridge on this computer: npm run bridge");
+});
+
+test("a local Ollama model listed by the bridge: pick it, stream text, and see it saved after a reload", async ({ page, request }) => {
+  const chatBodies: any[] = [];
+  await stubDeployedWithBridge(page, chatBodies, [{ id: "ollama/llama3", name: "llama3", provider: "Ollama", contextWindow: 8192, supportsTools: false }]);
+  await page.addInitScript((t) => localStorage.setItem("orrery:bridge-token", t), TOKEN);
+
+  const id = await createChat(request, { title: "Local model chat" });
+  await openChat(page, id);
+  await page.getByRole("button", { name: /^Mock Echo/ }).click();
+  await page.getByRole("button", { name: "Ollama", exact: true }).click();
+  await expect(page.getByText("via local bridge")).toBeVisible();
+  await page.getByRole("button", { name: /^llama3/ }).click();
+  await expect.poll(async () => (await (await request.get(`/api/conversations/${id}`)).json()).model).toBe("ollama/llama3");
+
+  const saved = page.waitForResponse((r) => r.url().endsWith(`/api/conversations/${id}/messages`) && r.request().method() === "POST");
+  await send(page, "hello local");
+  await expect(page.getByText(REPLY)).toBeVisible();
+  expect((await saved).ok()).toBe(true);
+  expect(chatBodies).toHaveLength(1);
+  expect(chatBodies[0]).toMatchObject({ conversationId: id, model: "ollama/llama3" });
+
+  await page.reload();
+  await expect(page.getByText(REPLY)).toBeVisible();
+  const rows = await storedMessages(request, id);
+  expect(rows.map((m) => m.role)).toEqual(["user", "assistant"]);
 });

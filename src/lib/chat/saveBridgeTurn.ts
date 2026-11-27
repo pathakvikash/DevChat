@@ -3,7 +3,7 @@ import { prisma } from "@/lib/db";
 import { saveUserMessage } from "@/lib/chat/saveUserMessage";
 import { safePersistAssistantMessage } from "@/lib/chat/persistAssistantMessage";
 import { denyOpenApprovals } from "@/lib/utils/messageParts";
-import { BRIDGE_MODEL_PREFIX } from "@/lib/bridge/constants";
+import { BRIDGE_LOCAL_PREFIXES, BRIDGE_MODEL_PREFIX, isBridgeLocalModel } from "@/lib/bridge/constants";
 
 /**
  * A "local bridge" turn runs on the user's own machine and never passes through this server, so the
@@ -59,12 +59,17 @@ export const bridgeTurnSchema = z
       .object({
         id,
         parts: z.array(assistantPart).max(1_000),
-        model: z.string().max(100).startsWith(BRIDGE_MODEL_PREFIX),
+        model: z.string().max(200).refine((m) => m.startsWith(BRIDGE_MODEL_PREFIX) || BRIDGE_LOCAL_PREFIXES.some((p) => m.startsWith(p)), "must be a bridge model"),
       })
       .strict(),
     continuing: z.boolean().optional(),
   })
-  .strict();
+  .strict()
+  // A local model (Ollama, LM Studio) has no tools: a tool card in its turn is not a real one.
+  .refine((t) => !isBridgeLocalModel(t.assistant.model) || t.assistant.parts.every((p) => p.type !== "dynamic-tool"), {
+    path: ["assistant", "parts"],
+    message: "a local model turn has no tool parts",
+  });
 
 export type BridgeSaveResult =
   | { status: 200; body: { ok: true; alreadySaved: boolean } }
