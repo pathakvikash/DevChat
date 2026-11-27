@@ -79,3 +79,7 @@ Large data (table/timeseries/ohlc over ~12 values) is saved by Orrery once as a 
 ## Sidebar
 
 An "Apps" group lists approved apps (icon + name, opens `/go` in a new tab) with an unreachable dot; also CommandPalette entries; Settings > Apps registers and removes apps (owner).
+
+## Kit
+
+`kit/orrery-app-kit/` is the starter kit sibling apps copy (zero dependencies): manifest validator, HS256 token and SSO handoff verification, result builders, a minimal MCP handler (Next and Express adapters), the SSO route and a suite strip. See its README for the 3 adoption recipes (Next, Express, FastAPI).
