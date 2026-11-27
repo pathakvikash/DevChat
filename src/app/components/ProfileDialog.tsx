@@ -20,6 +20,7 @@ import {
   Cable,
   Table2,
   Workflow,
+  AppWindow,
 } from "lucide-react";
 import Link from "next/link";
 import { useSession, signOut } from "next-auth/react";
@@ -50,6 +51,7 @@ const WORKSPACE_LINKS: NavLink[] = [
 const TOOL_LINKS: NavLink[] = [
   { label: "Manage Models", icon: Cpu, action: "models" },
   { label: "MCP Servers", icon: Cable, href: "/settings/mcp" },
+  { label: "Apps", icon: AppWindow, href: "/settings/apps" },
   { label: "Settings", icon: Settings, href: "/settings" },
   { label: "Observability", icon: Activity, href: "/observability" },
 ];

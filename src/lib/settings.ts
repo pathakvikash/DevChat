@@ -16,7 +16,7 @@ function getEncryptionKey(): Buffer {
   return createHash("sha256").update(`devchat:appsetting:${secret}`).digest();
 }
 
-function encryptValue(value: string): string {
+export function encryptValue(value: string): string {
   const key = getEncryptionKey();
   const iv = randomBytes(12);
   const cipher = createCipheriv("aes-256-gcm", key, iv);
@@ -25,7 +25,7 @@ function encryptValue(value: string): string {
   return ENC_PREFIX + Buffer.concat([iv, authTag, ciphertext]).toString("base64");
 }
 
-function decryptValue(stored: string): string {
+export function decryptValue(stored: string): string {
   if (!stored.startsWith(ENC_PREFIX)) return stored;
   const key = getEncryptionKey();
   const raw = Buffer.from(stored.slice(ENC_PREFIX.length), "base64");

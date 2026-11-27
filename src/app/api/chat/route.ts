@@ -61,6 +61,8 @@ import {
   getNextContextTier,
 } from "@/lib/contextManager";
 import { requireUserId } from "@/lib/auth";
+import { activeToolNames, appToolIds } from "@/lib/apps/chatTools";
+import { listApps } from "@/lib/apps/registry";
 import { canUseHostTools, HOST_TOOLS_REFUSED } from "@/lib/hostAccess";
 import { effectiveToolMode, isChatMode, MODE_POLICY, toolsWithAnsweredApproval } from "@/lib/chat/modes";
 
@@ -277,6 +279,15 @@ export async function POST(req: Request) {
       parentId,
     });
     // One result for the prompt's section and the sendToChat tool. A gated chat gets none: a pane without the gate could carry file text out.
+    // Approved apps: main chats with tools only. Side chats are read-only helpers and sub-agents never reach this route.
+    const apps =
+      useTools && settings.kind === "main"
+        ? await listApps(userId).catch((e) => {
+            console.error("[apps] could not list apps:", e);
+            return [];
+          })
+        : [];
+    const userEmail = apps.length ? ((await prisma.user.findUnique({ where: { id: userId }, select: { email: true } }))?.email ?? "") : "";
     const agentTargets = sendToChatTargets(openPanes, conversationId ?? "", useTools && !sendsOutGate);
     const { text: finalSystemPrompt, sections } = await buildSystemPrompt({
       useTools,
@@ -295,6 +306,7 @@ export async function POST(req: Request) {
       fileFolder,
       sendsOutGate,
       showFolder,
+      apps,
     });
 
     const sanitizedMessages = normalizeMessageToolParts(
@@ -334,8 +346,11 @@ export async function POST(req: Request) {
           contextWindow: contextWindowFor(servedModel, modelConfig, contextLength),
           workingFolder: fileFolder,
           askBeforeSendingOut: sendsOutGate,
+          apps,
+          userEmail,
         })
       : {};
+    const appTools = appToolIds(apps, toolMode);
 
     const isOllama = servedModel.startsWith("ollama/");
 
@@ -491,9 +506,13 @@ export async function POST(req: Request) {
         }
         // Forces a text-only step on a loop or the last allowed step, so a turn ends with an answer.
         const guard = nextStepSettings({ steps, stepNumber, maxSteps: maxToolCalls, toolOnlyLimit: 3 });
-        if (!injected.length && !guard) return undefined;
+        // App tools are registered but inactive (their schemas stay out of the context) until loadAppTools ran
+        // in the history or in an earlier step of this turn.
+        const activeTools = activeToolNames({ allToolNames: Object.keys(aiTools), apps, appTools, history: sanitizedMessages, steps });
+        if (!injected.length && !guard && !activeTools) return undefined;
         return {
           ...(injected.length ? { messages: withInjected(stepMessages, injected) } : {}),
+          ...(activeTools ? { activeTools } : {}),
           ...guard,
         };
       },

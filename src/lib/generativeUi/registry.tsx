@@ -3,24 +3,34 @@ import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { Check } from "lucide-react";
 import { defineRegistry, useBoundProp } from "@json-render/react";
 import { useResource } from "@/app/hooks/useResource";
+import type { OrreryResult } from "@/lib/apps/types";
 import { catalog } from "./catalog";
 import { parseDataArtifact, type DataArtifactTable, type DataCell } from "./data";
 import Chart from "./Chart";
+import { parseOrreryArtifact, tableResultToData } from "./appData";
+import CandleChart from "@/app/components/generativeUi/CandleChart";
+import DataTable from "@/app/components/generativeUi/DataTable";
+import JobCard from "@/app/components/generativeUi/JobCard";
+import Model3D from "@/app/components/generativeUi/Model3D";
 
 /** Loads a `type: "data"` artifact body so Chart/Table can reference a large result by
  *  id instead of inlining it. Kept out of Chart.tsx, which stays presentational. */
 function useArtifactData(id: string | null | undefined) {
-  const { data, loading, error } = useResource<DataArtifactTable>(
+  const { data, loading, error } = useResource<{ table?: DataArtifactTable; orrery?: OrreryResult }>(
     async () => {
       const res = await fetch(`/api/artifacts/${id}`);
       if (!res.ok) throw new Error(res.status === 404 ? "Data artifact not found" : `Request failed (${res.status})`);
       const artifact = (await res.json()) as { content: string };
-      return parseDataArtifact(artifact.content);
+      // An app result (timeseries/table) saved as an artifact is an OrreryResult, not columns/rows.
+      const orrery = parseOrreryArtifact(artifact.content);
+      if (orrery?.type === "table") return { table: tableResultToData(orrery) };
+      if (orrery) return { orrery };
+      return { table: parseDataArtifact(artifact.content) };
     },
     [id],
     { enabled: !!id },
   );
-  return { table: data, loading: !!id && loading, error };
+  return { table: data?.table ?? null, orrery: data?.orrery ?? null, loading: !!id && loading, error };
 }
 
 const DataPending = () => <p className="text-xs text-zinc-500">Loading data…</p>;
@@ -190,38 +200,7 @@ export const { registry } = defineRegistry(catalog, {
       const { headers, rows, truncated } = table
         ? tableFrom(table, props.columns)
         : { headers: props.headers ?? [], rows: props.rows ?? [], truncated: 0 };
-      return (
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm border-collapse">
-            <thead>
-              <tr>
-                {headers.map((h, i) => (
-                  <th
-                    key={i}
-                    className="text-left px-3 py-2 border-b border-[var(--glass-border)] text-zinc-400 font-medium"
-                  >
-                    {h}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((row, ri) => (
-                <tr key={ri}>
-                  {row.map((cell, ci) => (
-                    <td key={ci} className="px-3 py-2 border-b border-[var(--glass-border)] text-zinc-300">
-                      {cell}
-                    </td>
-                  ))}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          {truncated > 0 && (
-            <p className="text-xs text-zinc-500 mt-1">…{truncated} more rows not shown.</p>
-          )}
-        </div>
-      );
+      return <DataTable headers={headers} rows={rows} truncated={truncated} />;
     },
     Link: ({ props }) =>
       SAFE_URL_RE.test(props.href) ? (
@@ -287,14 +266,33 @@ export const { registry } = defineRegistry(catalog, {
       );
     },
     Chart: ({ props }) => {
-      const { table, loading, error } = useArtifactData(props.dataArtifactId);
+      const { table, orrery, loading, error } = useArtifactData(props.dataArtifactId);
       if (loading) return <DataPending />;
       if (error) return <DataError error={error} />;
+      if (orrery?.type === "timeseries") {
+        const type = props.type === "area" ? "area" : "line";
+        return <Chart type={type} title={props.title ?? orrery.title} series={orrery.series} />;
+      }
+      if (orrery) return <DataError error={new Error("This artifact is not a timeseries")} />;
       const data = table
         ? chartDataFrom(table, props.labelColumn, props.valueColumn)
         : props.data ?? [];
-      return <Chart type={props.type} title={props.title} data={data} />;
+      return <Chart type={props.type} title={props.title} data={data} series={props.series} />;
     },
+    CandleChart: ({ props }) => (
+      <CandleChart
+        symbol={props.symbol}
+        interval={props.interval}
+        dataArtifactId={props.dataArtifactId}
+        candles={props.candles}
+      />
+    ),
+    Model3D: ({ props }) => (
+      <Model3D appId={props.appId} file={props.file} title={props.title} openLink={props.openLink} appName={props.appName} />
+    ),
+    JobCard: ({ props }) => (
+      <JobCard appId={props.appId} jobId={props.jobId} statusTool={props.statusTool} title={props.title} pollMs={props.pollMs} />
+    ),
   },
   // Real handler is supplied by MessageContent's ActionProvider (per message).
   actions: { submit: async () => {} },

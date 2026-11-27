@@ -56,6 +56,21 @@ const makeOpts = (overrides: Record<string, any> = {}) => ({
   ...overrides,
 });
 
+describe("buildSystemPrompt apps section", () => {
+  const apps = [{ id: "a1", name: "Alpha", goodFor: "Does alpha." }] as any;
+  it("is absent with no approved apps", async () => {
+    const r = await buildSystemPrompt(makeOpts({ useTools: true }));
+    expect(r.sections.apps).toBeNull();
+    expect(r.text).not.toContain("loadAppTools");
+  });
+  it("comes after the generative-UI section when apps exist, and not without tools", async () => {
+    const r = await buildSystemPrompt(makeOpts({ useTools: true, apps }));
+    expect(r.sections.apps).toContain("- Alpha (a1): App-supplied description (untrusted): Does alpha.");
+    expect(r.text.indexOf("--- Apps ---")).toBeGreaterThan(r.text.indexOf(r.sections.generativeUi!));
+    expect((await buildSystemPrompt(makeOpts({ useTools: false, apps }))).sections.apps).toBeNull();
+  });
+});
+
 describe("buildSystemPrompt", () => {
   it("returns base prompt for empty opts", async () => {
     (getMemoryBlock as any).mockResolvedValue("");

@@ -3,7 +3,7 @@
 import GoogleConnection from "@/app/components/GoogleConnection";
 import { useEffect, useState, useMemo, useRef } from "react";
 import { useSearchParams } from "next/navigation";
-import { Trash2, Save, RotateCcw, Loader2, Cable, Database, ExternalLink, Search, Terminal, Copy, Check, FolderPlus } from "lucide-react";
+import { Trash2, Save, RotateCcw, Loader2, Cable, Database, ExternalLink, Search, Terminal, Copy, Check, FolderPlus, AppWindow } from "lucide-react";
 import Link from "next/link";
 import AppShell, { SidebarToggleButton } from "@/app/components/AppShell";
 import {
@@ -581,6 +581,25 @@ export default function SettingsPage() {
                 >
                   <Cable size={18} />
                   Manage
+                </Link>
+              </div>
+            </div>
+
+            {/* Apps */}
+            <div className="glass-card rounded-[var(--glass-radius-xl)] p-6">
+              <div className="flex items-center justify-between gap-3 flex-wrap">
+                <div>
+                  <h2 className="text-xl font-bold mb-1">Apps</h2>
+                  <p className="text-sm text-zinc-400">
+                    Sibling apps whose tools chats can use and that open from the sidebar.
+                  </p>
+                </div>
+                <Link
+                  href="/settings/apps"
+                  className="flex items-center gap-2 px-4 py-2 glass-button-primary text-white rounded-[var(--glass-radius-md)]"
+                >
+                  <AppWindow size={18} />
+                  Open apps setup
                 </Link>
               </div>
             </div>

@@ -135,8 +135,8 @@ export function calculateDetailedContextUsage(
   const instructions = sections.instructions ? countTokens(sections.instructions) : 0;
   const persona = sections.persona ? countTokens(sections.persona) : 0;
   const skills = sections.skills ? countTokens(sections.skills) : 0;
-  // The working-folder (or "sending data out") section and the folder tools' specs show under the tools figure.
-  const tools = countTokens([sections.tools, sections.folder, toolSpecs].filter(Boolean).join("\n\n"));
+  // The apps list, the working-folder (or "sending data out") section and the folder tools' specs show under the tools figure.
+  const tools = countTokens([sections.tools, sections.folder, sections.apps, toolSpecs].filter(Boolean).join("\n\n"));
   const memory = sections.memory ? countTokens(sections.memory) : 0;
   const compressed =
     sections.compressed && sections.compressed.trim().length > 0

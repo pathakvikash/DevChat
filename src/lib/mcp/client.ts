@@ -1,6 +1,7 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { prisma } from "@/lib/db";
+import { appFetch } from "@/lib/net/safeFetch";
 
 interface McpTool {
   name: string;
@@ -11,6 +12,7 @@ interface McpTool {
 interface McpCallResult {
   content: unknown[];
   isError?: boolean;
+  structuredContent?: unknown;
 }
 
 /** In-memory cache of connected MCP clients keyed by server ID. */
@@ -135,7 +137,33 @@ export async function callServerTool(
   return {
     content: result.content as unknown[],
     isError: result.isError ? true : undefined,
+    structuredContent: result.structuredContent,
   };
+}
+
+/**
+ * One-shot client for a single call: custom headers (a per-call signed bearer), a timeout, and nothing cached,
+ * so a token is never reused across users or calls. Used by the apps registry; user-configured servers keep the cached path above.
+ */
+export async function withMcpClient<T>(
+  url: string,
+  opts: { headers?: Record<string, string>; timeoutMs: number; signal?: AbortSignal },
+  fn: (client: Client, req: { signal: AbortSignal; timeout: number }) => Promise<T>,
+): Promise<T> {
+  const signal = AbortSignal.any([AbortSignal.timeout(opts.timeoutMs), ...(opts.signal ? [opts.signal] : [])]);
+  const req = { signal, timeout: opts.timeoutMs };
+  const transport = new StreamableHTTPClientTransport(new URL(url), {
+    requestInit: { headers: { "Content-Type": "application/json", ...opts.headers } },
+    fetch: appFetch,
+  });
+  const client = new Client({ name: "orrery-apps-client", version: "1.0.0" }, { capabilities: {} });
+  try {
+    await client.connect(transport, req);
+    return await fn(client, req);
+  } finally {
+    try { await transport.close(); } catch {}
+    try { await client.close(); } catch {}
+  }
 }
 
 export async function testConnection(

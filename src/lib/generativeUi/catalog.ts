@@ -109,7 +109,7 @@ export const catalog = defineCatalog(schema, {
     },
     Chart: {
       props: z.object({
-        type: z.union([z.literal("bar"), z.literal("line"), z.literal("pie")]),
+        type: z.union([z.literal("bar"), z.literal("line"), z.literal("area"), z.literal("pie")]),
         title: z.string().nullable(),
         data: z
           .array(
@@ -122,9 +122,55 @@ export const catalog = defineCatalog(schema, {
         dataArtifactId: z.string().nullable(),
         labelColumn: z.string().nullable(),
         valueColumn: z.string().nullable(),
+        series: z
+          .array(z.object({ name: z.string(), points: z.array(z.tuple([z.number(), z.number()])) }))
+          .nullish(),
       }),
       description:
-        "A chart. Use 'bar' to compare values across categories, 'line' for a trend over an ordered sequence, 'pie' for parts of a whole. Prefer `dataArtifactId` (id of a saved data artifact) with `labelColumn`/`valueColumn` naming which of its columns to plot; use inline `data` only for a few hand-typed points. Keep to 3-8 points for readability.",
+        "A chart. Use 'bar' to compare values across categories, 'line' for a trend over an ordered sequence, 'area' for a filled trend, 'pie' for parts of a whole. Prefer `dataArtifactId` (id of a saved data artifact) with `labelColumn`/`valueColumn` naming which of its columns to plot; use inline `data` only for a few hand-typed points. Keep to 3-8 points for readability. For a time axis with one or more series ('line' or 'area'), use `series` ([{name, points: [[epochMs, value], ...]}], at most 12 points in total inline) or, when a connected app's timeseries result gave you an artifact id, just `dataArtifactId`.",
+    },
+    CandleChart: {
+      props: z.object({
+        symbol: z.string().nullable(),
+        interval: z.string().nullable(),
+        dataArtifactId: z.string().nullable(),
+        candles: z
+          .array(
+            z.object({
+              t: z.number(),
+              o: z.number(),
+              h: z.number(),
+              l: z.number(),
+              c: z.number(),
+              v: z.number().nullish(),
+            }),
+          )
+          .nullish(),
+      }),
+      description:
+        "An interactive candlestick (OHLC) chart with a volume histogram and crosshair. Use for market price history. Pass `dataArtifactId` when a connected app's ohlc result gave you an artifact id (symbol and interval are then read from it, so set them to null); `candles` ([{t: epochMs, o, h, l, c, v}]) only for a handful (at most 12) of hand-typed candles.",
+    },
+    Model3D: {
+      props: z.object({
+        appId: z.string(),
+        file: z.string(),
+        title: z.string().nullable(),
+        openLink: z.string().nullable(),
+        appName: z.string().nullable(),
+      }),
+      description:
+        "An interactive 3D viewer (drag to rotate) for an STL model produced by a connected app, with a Download STL link. `appId` is the app's id and `file` the file id from the app's model3d result, copied exactly. `openLink` is an optional deep-link name from that app's manifest for an 'Open in app' button (null to omit). Never invent a file id.",
+    },
+    JobCard: {
+      props: z.object({
+        appId: z.string(),
+        jobId: z.string(),
+        statusTool: z.string(),
+        title: z.string().nullable(),
+        pollMs: z.number().nullable(),
+      }),
+      description:
+        "Live progress for a long-running job started by a connected app. It polls the job's status, shows a progress bar, then renders the finished result itself (model, chart, table or link). Copy `appId`, `jobId` and `statusTool` exactly from the app's job result; pollMs is usually null (default 2000).",
     },
   },
   actions: {
