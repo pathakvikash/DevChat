@@ -170,3 +170,11 @@ describe("the card for a call that sends data out", () => {
     expect(out).not.toContain("Check what is being sent");
   });
 });
+
+describe("an app tool that needs OK", () => {
+  it("offers no \"Allow for this chat\": the server asks on every call of an app's non-read-only tool", () => {
+    const card = (toolName: string) => renderToStaticMarkup(createElement(ApprovalCard, { toolName, approvalId: "ap_1", input: { prompt: "a cube" } }));
+    expect(card("app_printpro3d_generate_model")).not.toContain("Allow for this chat");
+    expect(card("createArtifact")).toContain("Allow for this chat");
+  });
+});

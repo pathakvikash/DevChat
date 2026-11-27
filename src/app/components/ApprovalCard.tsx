@@ -124,7 +124,8 @@ export default function ApprovalCard({
         <button type="button" disabled={answered} onClick={() => answer(false)} className={`h-8 px-3 text-xs rounded-[var(--glass-radius-sm)] glass-button ${focus}`}>
           Deny
         </button>
-        {!sendsOut?.sendsOut && (!approvalId.startsWith("cli-") || CHAT_ALLOWABLE_TOOLS.has(toolName)) && (
+        {/* App tools (app_<id>_<tool>) that need OK ask on every call (appToolNeedsApproval ignores the chat's allow list). */}
+        {!sendsOut?.sendsOut && !toolName.startsWith("app_") && (!approvalId.startsWith("cli-") || CHAT_ALLOWABLE_TOOLS.has(toolName)) && (
           <button
             type="button"
             disabled={answered}
