@@ -621,7 +621,7 @@ describe("folder chat outbound tools", () => {
   it("every registry tool is either outbound or on the reviewed local list", () => {
     // A new tool fails here until someone decides whether it can carry data out of a chat.
     const reviewedLocal = [
-      "createArtifact", "updateArtifact", "currentTime", "calculator", "jsonExtract", "presentPlan",
+      "createArtifact", "updateArtifact", "currentTime", "loadUiGuide", "calculator", "jsonExtract", "presentPlan",
       "askClarification", "searchKnowledgeBase", "createTodo", "createTodos", "updateTodo", "sendToChat",
     ];
     for (const [id, def] of Object.entries(TOOL_REGISTRY)) {
@@ -680,7 +680,7 @@ describe("folder chat outbound tools", () => {
       activeToolIds: new Set([...BUILTIN_TOOL_IDS, "fetchUrl", "mcp_docs_search"]),
     });
     const reviewedLocal = [
-      "currentTime", "calculator", "jsonExtract", "askClarification",
+      "currentTime", "loadUiGuide", "calculator", "jsonExtract", "askClarification",
       "createTodo", "createTodos", "updateTodo", "searchChats", "readChat", "forgetFact", "presentPlan",
       "listFiles", "readFile", "searchFiles",
     ];

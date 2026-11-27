@@ -3,6 +3,7 @@ import type { ToolDefinition } from "./types";
 import { prisma } from "@/lib/db";
 import { REINGEST_NOTE, searchKb } from "@/lib/rag";
 import { parseDataArtifact } from "@/lib/generativeUi/data";
+import { uiGuideText } from "@/lib/generativeUi/guide";
 import { evaluate } from "mathjs";
 import { safeFetch } from "@/lib/net/safeFetch";
 import { githubAuthHeaders, httpErrorText } from "@/lib/net/github";
@@ -110,6 +111,21 @@ export const TOOL_REGISTRY: Record<string, ToolDefinition> = {
   },
 
   // ─── BUILT-IN, ALWAYS-ON ──────────────────────────────────────────────
+  loadUiGuide: {
+    id: "loadUiGuide",
+    mutates: false,
+    name: "Load UI Guide",
+    description: "Load the component catalog and rules for rendering tables, charts and forms.",
+    modelDescription:
+      "Load the guide for rendering tables, charts and forms in chat (component catalog and rules). Call it once, before writing any ```spec block, and follow its output exactly.",
+    category: "Utility",
+    internal: true,
+    inputSchema: z.object({}),
+    execute: async () => uiGuideText(),
+    enabledByDefault: true,
+    builtIn: true,
+  },
+
   executeCode: {
     id: "executeCode",
     outbound: true,
