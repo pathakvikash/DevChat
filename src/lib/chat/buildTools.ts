@@ -128,6 +128,17 @@ export function mcpToolId(serverName: string, toolName: string): string {
   return `mcp_${serverName}_${toolName}`;
 }
 
+/** The tool asks first once external text is in the conversation (on top of any rule it already has). The route also
+ *  wraps runAgent and messageAgent with it: a helper can fetch pages and send data out, so spawning is gated at the parent. */
+export function askAfterExternalText(t: Tool): Tool {
+  const base = t.needsApproval;
+  return {
+    ...t,
+    needsApproval: async (input: unknown, o: { messages?: Parameters<typeof hasExternalText>[0] }) =>
+      hasExternalText(o?.messages) || (typeof base === "function" ? await (base as (i: unknown, o: unknown) => boolean | Promise<boolean>)(input, o) : !!base),
+  } as Tool;
+}
+
 export async function buildTools({
   activeToolIds,
   searchProvider,
@@ -339,13 +350,7 @@ export async function buildTools({
     }
     // Page text can carry instructions: after one is read, writing or sending asks first. App tools of an `actions` app already always ask.
     for (const [id, t] of Object.entries(aiTools)) {
-      if (!(id.startsWith("mcp_") || ["rememberFact", "forgetFact", "searchChats", "readChat"].includes(id))) continue;
-      const base = t.needsApproval;
-      aiTools[id] = {
-        ...t,
-        needsApproval: async (input: unknown, o: { messages?: Parameters<typeof hasExternalText>[0] }) =>
-          hasExternalText(o?.messages) || (typeof base === "function" ? await (base as (i: unknown, o: unknown) => boolean | Promise<boolean>)(input, o) : !!base),
-      } as Tool;
+      if (id.startsWith("mcp_") || ["rememberFact", "forgetFact", "searchChats", "readChat", "sendToChat"].includes(id)) aiTools[id] = askAfterExternalText(t);
     }
   }
 

@@ -116,7 +116,8 @@ export async function GET(
       memoryDisabled,
       userId,
       modelId: conversation.model,
-      mayFallBack: !!conversation.fallbackModel,
+      // The chat route's candidate list: the model, the chat's fallback, then VAS_FALLBACK_MODEL, without repeats.
+      mayFallBack: new Set([conversation.model, conversation.fallbackModel, process.env.VAS_FALLBACK_MODEL].filter(Boolean)).size > 1,
       cli: !!cliProviderForModel(conversation.model),
       contextWindow: contextLength,
       fileFolder,

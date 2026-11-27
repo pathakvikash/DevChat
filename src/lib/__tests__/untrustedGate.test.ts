@@ -8,7 +8,7 @@ vi.mock("@/lib/mcp/client", () => ({
   callServerTool: vi.fn(),
 }));
 
-import { buildTools, resolveActiveToolIds } from "@/lib/chat/buildTools";
+import { askAfterExternalText, buildTools, messageAgentTool, resolveActiveToolIds, runAgentTool } from "@/lib/chat/buildTools";
 
 const user = (text: string) => ({ role: "user", content: [{ type: "text", text }] });
 const fetched = (toolName: string) => ({ role: "tool", content: [{ type: "tool-result", toolCallId: "c", toolName, output: { type: "text", value: "page" } }] });
@@ -63,6 +63,16 @@ describe("tools that write or send after external text", () => {
     }
     expect(await approval("readChat", { id: "c" }, tainted, "chat")).toBe(true);
     expect(await approval("readChat", { id: "c" }, clean, "chat")).toBe(false);
+  });
+
+  it("spawning a helper (runAgent, messageAgent) asks after a fetch, not before", async () => {
+    const tools = await buildTools({ activeToolIds: resolveActiveToolIds([], []), searchProvider: "duckduckgo", userId: "u", contextWindow: 8192, mode: "agent" });
+    const opts = { userId: "u", parentId: "p", model: {} as never, mode: "agent" as const, providerOptions: undefined, maxParallel: 1, activeChildren: new Set<string>() };
+    for (const t of [askAfterExternalText(runAgentTool(tools, opts)), askAfterExternalText(messageAgentTool(tools, opts))]) {
+      const na = t.needsApproval as (i: unknown, o: unknown) => Promise<boolean>;
+      expect(await na({}, { messages: clean })).toBe(false);
+      expect(await na({}, { messages: tainted })).toBe(true);
+    }
   });
 
   it("a search result counts too", async () => {

@@ -20,7 +20,7 @@ import {
   type ToolSet,
   type ToolMode,
 } from "@/lib/chat/buildTools";
-import { canStartSubAgents, messageAgentTool, runAgentTool, type SubAgentToolOptions } from "@/lib/chat/buildTools";
+import { askAfterExternalText, canStartSubAgents, messageAgentTool, runAgentTool, type SubAgentToolOptions } from "@/lib/chat/buildTools";
 import {
   agentMessageModelText,
   agentPartRefused,
@@ -420,8 +420,8 @@ export async function POST(req: Request) {
         maxParallel: cliProvider ? 1 : 3,
         activeChildren: new Set<string>(),
       };
-      aiTools.runAgent = runAgentTool(aiTools, subAgents);
-      aiTools.messageAgent = messageAgentTool(aiTools, subAgents);
+      aiTools.runAgent = askAfterExternalText(runAgentTool(aiTools, subAgents));
+      aiTools.messageAgent = askAfterExternalText(messageAgentTool(aiTools, subAgents));
     }
 
     // Built after the tools, so a sub-agent's toModelOutput applies to saved history too.
