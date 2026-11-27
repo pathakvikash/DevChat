@@ -9,6 +9,10 @@
 // identity, not decorate a single metric. Pie slices ARE distinct identities,
 // so they get the fixed categorical order, capped at 8 with overflow folded
 // into "Other".
+import { useRef, useState } from "react";
+import { cleanSeries, type Series } from "./appData";
+import { buildLayout, formatTime, formatValue, nearestIndex } from "./timeSeries";
+
 const DARK_CATEGORICAL = [
   "#3987e5", // blue
   "#d95926", // orange
@@ -20,9 +24,10 @@ const DARK_CATEGORICAL = [
   "#e66767", // red
 ];
 const SEQUENTIAL_BLUE = "#3987e5";
-const GRID_COLOR = "#3f3f46"; // zinc-700 — recessive baseline/gridline
-const TEXT_MUTED = "#a1a1aa"; // zinc-400
-const TEXT_PRIMARY = "#e4e4e7"; // zinc-200
+// Theme tokens: globals.css remaps --color-zinc-* under [data-theme="light"].
+const GRID_COLOR = "var(--color-zinc-700, #3f3f46)"; // recessive baseline/gridline
+const TEXT_MUTED = "var(--color-zinc-400, #a1a1aa)";
+const TEXT_PRIMARY = "var(--color-zinc-200, #e4e4e7)";
 
 interface ChartDatum {
   label: string;
@@ -30,16 +35,27 @@ interface ChartDatum {
 }
 
 interface ChartProps {
-  type: "bar" | "line" | "pie";
+  type: "bar" | "line" | "area" | "pie";
   title?: string | null;
-  data: ChartDatum[];
+  data?: ChartDatum[] | null;
+  /** Multi-series time chart (line/area); points are [epoch ms, value]. Takes precedence over `data`. */
+  series?: Series[] | null;
 }
 
 const WIDTH = 400;
 const HEIGHT = 220;
 const PAD = { top: 24, right: 12, bottom: 32, left: 12 };
 
-export default function Chart({ type, title, data }: ChartProps) {
+export default function Chart({ type, title, data, series }: ChartProps) {
+  const clean = series?.length ? cleanSeries(series) : [];
+  if (clean.length > 0) {
+    return (
+      <div className="my-2">
+        {title && <p className="text-sm font-semibold text-zinc-100 mb-2">{title}</p>}
+        <TimeSeriesChart series={clean} area={type === "area"} />
+      </div>
+    );
+  }
   if (!data || data.length === 0) {
     return <p className="text-xs text-zinc-500">No data to chart.</p>;
   }
@@ -47,7 +63,7 @@ export default function Chart({ type, title, data }: ChartProps) {
     <div className="my-2">
       {title && <p className="text-sm font-semibold text-zinc-100 mb-2">{title}</p>}
       {type === "bar" && <BarChart data={data} />}
-      {type === "line" && <LineChart data={data} />}
+      {(type === "line" || type === "area") && <LineChart data={data} />}
       {type === "pie" && <PieChart data={data} />}
     </div>
   );
@@ -167,13 +183,10 @@ function PieChart({ data }: { data: ChartDatum[] }) {
   const cx = 90;
   const cy = 90;
   const r = 70;
-  let angle = -90; // start at 12 o'clock
-
   const slices = sliced.map((d, i) => {
     const frac = d.value / total;
-    const startAngle = angle;
-    const endAngle = angle + frac * 360;
-    angle = endAngle;
+    const startAngle = -90 + (sliced.slice(0, i).reduce((s, x) => s + x.value, 0) / total) * 360; // 12 o'clock start
+    const endAngle = startAngle + frac * 360;
     return {
       path: arcPath(cx, cy, r, startAngle, endAngle),
       color: DARK_CATEGORICAL[i % DARK_CATEGORICAL.length],
@@ -198,6 +211,107 @@ function PieChart({ data }: { data: ChartDatum[] }) {
           </li>
         ))}
       </ul>
+    </div>
+  );
+}
+
+const T_BOX = { left: 44, top: 12, width: WIDTH - 44 - 12, height: HEIGHT - 12 - 28 };
+
+function TimeSeriesChart({ series, area }: { series: Series[]; area: boolean }) {
+  const ref = useRef<SVGSVGElement>(null);
+  const [hover, setHover] = useState<number | null>(null); // epoch ms
+  const L = buildLayout(series, T_BOX, area);
+  const span = L.xMax - L.xMin;
+  const color = (i: number) => DARK_CATEGORICAL[i % DARK_CATEGORICAL.length];
+  const base = T_BOX.top + T_BOX.height;
+
+  const onMove = (e: React.PointerEvent) => {
+    const r = ref.current?.getBoundingClientRect();
+    if (!r || r.width === 0) return;
+    const px = ((e.clientX - r.left) / r.width) * WIDTH;
+    const f = Math.min(Math.max((px - T_BOX.left) / T_BOX.width, 0), 1);
+    const first = series[0].points.map((p) => p[0]);
+    setHover(first[nearestIndex(first, L.xMin + f * (L.xMax - L.xMin))]);
+  };
+
+  const hits = hover === null ? [] : series.map((s, i) => {
+    const pt = s.points[nearestIndex(s.points.map((p) => p[0]), hover)];
+    return { name: s.name, i, t: pt[0], v: pt[1] };
+  });
+  const hx = hover === null ? 0 : L.x(hover);
+
+  return (
+    <div className="relative w-full max-w-xl">
+      <svg
+        ref={ref}
+        viewBox={`0 0 ${WIDTH} ${HEIGHT}`}
+        className="w-full touch-pan-y"
+        role="img"
+        aria-label={`${area ? "Area" : "Line"} chart of ${series.map((s) => s.name).join(", ")} over time`}
+        onPointerMove={onMove}
+        onPointerLeave={() => setHover(null)}
+      >
+        {L.yTicks.map((v) => (
+          <g key={v}>
+            <line x1={T_BOX.left} x2={WIDTH - 12} y1={L.y(v)} y2={L.y(v)} stroke={GRID_COLOR} strokeWidth={1} strokeOpacity={0.6} />
+            <text x={T_BOX.left - 6} y={L.y(v) + 3} textAnchor="end" fontSize={10} fill={TEXT_MUTED}>{formatValue(v)}</text>
+          </g>
+        ))}
+        {L.xTicks.map((t, i) => (
+          <text key={i} x={L.x(t)} y={HEIGHT - 10} textAnchor={i === 0 ? "start" : i === 3 ? "end" : "middle"} fontSize={10} fill={TEXT_MUTED}>
+            {formatTime(t, span)}
+          </text>
+        ))}
+        {series.map((s, i) => {
+          const d = s.points.map((p, j) => `${j === 0 ? "M" : "L"}${L.x(p[0]).toFixed(1)},${L.y(p[1]).toFixed(1)}`).join(" ");
+          const zero = Math.min(Math.max(L.y(0), T_BOX.top), base);
+          return (
+            <g key={s.name + i}>
+              {area && (
+                <path
+                  d={`${d} L${L.x(s.points[s.points.length - 1][0]).toFixed(1)},${zero} L${L.x(s.points[0][0]).toFixed(1)},${zero} Z`}
+                  fill={color(i)}
+                  fillOpacity={series.length > 1 ? 0.15 : 0.25}
+                />
+              )}
+              <path d={d} fill="none" stroke={color(i)} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" />
+            </g>
+          );
+        })}
+        {hover !== null && (
+          <g>
+            <line x1={hx} x2={hx} y1={T_BOX.top} y2={base} stroke={TEXT_MUTED} strokeWidth={1} strokeDasharray="3 3" />
+            {hits.map((h) => (
+              <circle key={h.i} cx={L.x(h.t)} cy={L.y(h.v)} r={4} fill={color(h.i)} stroke="var(--background, #09090b)" strokeWidth={1.5} />
+            ))}
+          </g>
+        )}
+      </svg>
+      {hover !== null && (
+        <div
+          className="pointer-events-none absolute top-0 z-10 glass-card rounded-[var(--glass-radius-sm)] px-2 py-1 text-[11px] text-zinc-200 whitespace-nowrap"
+          style={{ left: `${(hx / WIDTH) * 100}%`, transform: hx > WIDTH / 2 ? "translateX(calc(-100% - 8px))" : "translateX(8px)" }}
+        >
+          <div className="text-zinc-400">{new Date(hover).toLocaleString()}</div>
+          {hits.map((h) => (
+            <div key={h.i} className="flex items-center gap-1.5">
+              <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: color(h.i) }} />
+              {series.length > 1 && <span className="text-zinc-400">{h.name}</span>}
+              <span className="font-medium">{formatValue(h.v)}</span>
+            </div>
+          ))}
+        </div>
+      )}
+      {series.length > 1 && (
+        <ul className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs text-zinc-400">
+          {series.map((s, i) => (
+            <li key={s.name + i} className="flex items-center gap-1.5">
+              <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: color(i) }} />
+              {s.name}
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }
