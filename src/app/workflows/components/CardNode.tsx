@@ -1,6 +1,8 @@
 "use client";
 
-import { memo } from "react";
+import { memo, useState } from "react";
+import "./workflowMotion.css";
+import { cardMotion } from "./workflowMotion";
 import { Handle, Position, type Node, type NodeProps } from "@xyflow/react";
 import { CATALOG } from "@/lib/workflows/catalog";
 import { TRIGGER_ID, type CardRun, type FlowNode, type RunState } from "@/lib/workflows/graph";
@@ -29,10 +31,15 @@ function CardNode({ data, selected }: NodeProps<CardFlowNode>) {
   const def = CATALOG[node.type];
   const status = cardStatus(card, runState);
   const footer = footerOf(node, card);
+  // The status before the current one (undefined until it changes), so a freshly loaded card never animates.
+  const [seen, setSeen] = useState<{ cur: typeof status; prev?: typeof status }>({ cur: status });
+  if (seen.cur !== status) setSeen({ cur: status, prev: seen.cur });
+  const motion = cardMotion(status, seen.prev, runState);
   const border = status === "failed" ? "border-red-900/50" : status === "waiting" ? "border-amber-900/50" : "border-transparent";
 
   return (
-    <div className="relative w-60">
+    <div className={`relative w-60 ${motion}`}>
+      {(motion === "wf-run" || motion === "wf-wait") && <span className="wf-ring" aria-hidden="true" />}
       {node.id !== TRIGGER_ID && <Handle type="target" position={Position.Left} isConnectable={!readOnly} className="flow-handle" />}
       <div data-selected={selected || undefined} className={`flow-card glass-card overflow-hidden rounded-[var(--glass-radius-md)] border ${border}`}>
         <button type="button" tabIndex={-1} onClick={() => data.onOpen(node.id)} aria-label={`Open settings for ${node.ui.label}`} className="block w-full cursor-pointer text-left">

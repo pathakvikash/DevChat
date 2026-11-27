@@ -1,0 +1,56 @@
+/* Run motion: transform/opacity/stroke-dashoffset only. Classes are applied only while a run is active (see workflowMotion.ts). */
+
+/* Edges into the running card: flowing dash. */
+.devchat-flow .react-flow__edge.animated .react-flow__edge-path {
+  stroke-dasharray: 6 4;
+  animation: wf-dash 1.2s linear infinite;
+}
+@keyframes wf-dash {
+  to { stroke-dashoffset: -10; }
+}
+
+/* Running / waiting: a ring that scales and fades. */
+.wf-ring {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  border-radius: var(--glass-radius-md);
+  border: 2px solid var(--glass-accent-strong);
+  opacity: 0;
+}
+.wf-run > .wf-ring { animation: wf-ring 1.4s ease-out infinite; }
+.wf-wait > .wf-ring { border-color: rgb(251 191 36); animation: wf-ring 2s ease-in-out infinite; }
+@keyframes wf-ring {
+  0% { opacity: 0.7; transform: scale(1); }
+  100% { opacity: 0; transform: scale(1.06); }
+}
+
+.wf-pop .flow-card { animation: wf-pop 200ms cubic-bezier(0.3, 1.6, 0.5, 1); }
+@keyframes wf-pop {
+  0% { transform: scale(1); }
+  50% { transform: scale(1.04); }
+  100% { transform: scale(1); }
+}
+.wf-shake .flow-card { animation: wf-shake 200ms ease-in-out; }
+@keyframes wf-shake {
+  0%, 100% { transform: translateX(0); }
+  25% { transform: translateX(-4px); }
+  75% { transform: translateX(4px); }
+}
+
+/* Runs drawer. */
+.wf-row-in { animation: wf-row-in 160ms ease-out; }
+@keyframes wf-row-in {
+  from { opacity: 0; transform: translateY(-6px); }
+  to { opacity: 1; transform: none; }
+}
+.wf-chip-in { animation: wf-chip-in 160ms ease-out; }
+@keyframes wf-chip-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .devchat-flow .react-flow__edge.animated .react-flow__edge-path,
+  .wf-ring, .wf-pop .flow-card, .wf-shake .flow-card, .wf-row-in, .wf-chip-in { animation: none !important; }
+}
