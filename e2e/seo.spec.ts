@@ -36,8 +36,11 @@ test("marketing pages arrive as static HTML with no skeleton", async ({ request 
   expect(html).not.toContain('<template id="B:0"');
 });
 
-test("an unknown marketing slug is a 404", async ({ request }) => {
-  expect((await request.get("/features/nope", { maxRedirects: 0 })).status()).toBe(404);
+test("an unknown marketing slug is not public: a signed-out visitor is sent to login", async ({ request }) => {
+  // Only the exact paths in the data file are public; anything else is treated like a private route.
+  const res = await request.get("/features/nope", { maxRedirects: 0 });
+  expect(res.status()).toBe(307);
+  expect(res.headers().location).toContain("/login");
 });
 
 test("/login is noindex", async ({ page }) => {
