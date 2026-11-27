@@ -13,6 +13,20 @@ test("the landing page is public, with one h1, a sign-in link and JSON-LD", asyn
   expect(ld["@type"]).toBe("SoftwareApplication");
 });
 
+test("a feature page is public, with one h1, a canonical link and FAQ JSON-LD", async ({ page }) => {
+  await page.goto("/features/agents");
+  await expect(page).toHaveURL(/\/features\/agents$/);
+  await expect(page.getByRole("heading", { level: 1 })).toHaveCount(1);
+  await expect(page.locator('link[rel="canonical"]')).toHaveAttribute("href", /\/features\/agents$/);
+  const ld = JSON.parse((await page.locator('script[type="application/ld+json"]').textContent())!);
+  expect(ld["@graph"].map((n: { "@type": string }) => n["@type"])).toEqual(["BreadcrumbList", "FAQPage"]);
+  await expect(page.getByRole("link", { name: "Sign in to Orrery" }).first()).toHaveAttribute("href", "/login");
+});
+
+test("an unknown marketing slug is a 404", async ({ request }) => {
+  expect((await request.get("/features/nope", { maxRedirects: 0 })).status()).toBe(404);
+});
+
 test("/login is noindex", async ({ page }) => {
   await page.goto("/login");
   await expect(page.locator('meta[name="robots"]')).toHaveAttribute("content", /noindex/);

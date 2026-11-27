@@ -1,6 +1,7 @@
 import NextAuth from "next-auth";
 import Google from "next-auth/providers/google";
 import { NextResponse } from "next/server";
+import { isPublicPath } from "@/lib/site";
 
 // Edge-safe auth check: no Prisma adapter here, just JWT verification, so
 // this can run in middleware without a database round trip.
@@ -17,7 +18,8 @@ const { auth } = NextAuth({
 
 export default auth((req) => {
   // "/" is public: its page renders the landing for signed-out visitors and the app home for signed-in ones.
-  if (!req.auth && req.nextUrl.pathname !== "/") {
+  // The marketing pages (src/lib/marketing/pages.ts) are public too, by exact path.
+  if (!req.auth && !isPublicPath(req.nextUrl.pathname)) {
     if (req.nextUrl.pathname.startsWith("/api/")) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }

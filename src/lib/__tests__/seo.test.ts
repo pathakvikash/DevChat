@@ -13,8 +13,8 @@ describe("seo", () => {
     expect(r.sitemap).toBe(new URL("/sitemap.xml", siteUrl()).href);
   });
 
-  it("sitemap lists only the landing page", () => {
-    expect(sitemap().map((e) => e.url)).toEqual([siteUrl().href]);
+  it("sitemap starts with the landing page (marketing pages: marketingPages.test.ts)", () => {
+    expect(sitemap()[0].url).toBe(siteUrl().href);
   });
 
   it("siteUrl prefers SITE_URL, then the Vercel host, then the deployed fallback", () => {

@@ -1,5 +1,6 @@
 import Link from "next/link";
 import OrreryMark from "@/app/components/OrreryMark";
+import { MARKETING_PAGES, pagePath } from "@/lib/marketing/pages";
 import { SITE_DESCRIPTION, SITE_NAME, siteUrl } from "@/lib/site";
 
 const FEATURES = [
@@ -87,6 +88,22 @@ export default function Landing() {
             </section>
           ))}
         </div>
+
+        <section aria-labelledby="learn-more" className="mx-auto w-full max-w-5xl px-4 pb-20">
+          <h2 id="learn-more" className="text-center text-2xl font-bold tracking-tight md:text-3xl">
+            Learn what {SITE_NAME} can do
+          </h2>
+          <ul className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            {MARKETING_PAGES.map((p) => (
+              <li key={p.slug} className="glass-card rounded-[var(--glass-radius-xl)] p-5">
+                <Link href={pagePath(p)} className="focus-ring rounded font-semibold underline underline-offset-4">
+                  {p.h1}
+                </Link>
+                <p className="mt-2 text-sm text-[var(--foreground)]/70">{p.blurb}</p>
+              </li>
+            ))}
+          </ul>
+        </section>
 
         <section className="mx-auto w-full max-w-3xl px-4 pb-24 text-center">
           <h2 className="text-2xl font-bold tracking-tight md:text-3xl">Ready to try it?</h2>

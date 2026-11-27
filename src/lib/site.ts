@@ -1,3 +1,6 @@
+// Relative, not "@/": next.config.ts imports this file before the alias exists.
+import { MARKETING_PATHS } from "./marketing/pages";
+
 /** Public identity of the site, shared by metadata, robots, sitemap and the landing page. */
 export const SITE_NAME = "Orrery";
 export const SITE_TAGLINE = "A multi-model AI chat workspace";
@@ -17,8 +20,12 @@ export function siteUrl(env: Record<string, string | undefined> = process.env): 
   }
 }
 
-/** Pages a signed-out visitor can read and a crawler may index. */
-export const PUBLIC_PATHS = ["/"] as const;
+/** Pages a signed-out visitor can read and a crawler may index: the landing page plus the marketing pages. */
+export const PUBLIC_PATHS: readonly string[] = ["/", ...MARKETING_PATHS];
+
+/** Exactly the public pages and their share images. A prefix match would open anything under /features/. */
+const PUBLIC_EXACT = new Set(PUBLIC_PATHS.flatMap((p) => (p === "/" ? [p] : [p, `${p}/opengraph-image`, `${p}/twitter-image`])));
+export const isPublicPath = (pathname: string) => PUBLIC_EXACT.has(pathname);
 
 /** Top-level segments that belong to the signed-in app. */
 export const PRIVATE_SEGMENTS = [

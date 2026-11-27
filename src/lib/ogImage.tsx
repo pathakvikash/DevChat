@@ -2,7 +2,8 @@ import { ImageResponse } from "next/og";
 import { SITE_NAME, SITE_TAGLINE } from "@/lib/site";
 
 /** The social card: the Orrery mark (orbit plus one body) over the name and tagline. */
-export function renderOgImage() {
+/** `headline` replaces the tagline: a marketing page passes its own title. */
+export function renderOgImage(headline?: string) {
   return new ImageResponse(
     (
       <div
@@ -23,7 +24,7 @@ export function renderOgImage() {
         </svg>
         <div style={{ display: "flex", flexDirection: "column" }}>
           <div style={{ fontSize: 120, fontWeight: 700, letterSpacing: -3 }}>{SITE_NAME}</div>
-          <div style={{ fontSize: 40, color: "#a1a1aa" }}>{SITE_TAGLINE}</div>
+          <div style={{ fontSize: headline ? 44 : 40, color: "#a1a1aa", maxWidth: 640 }}>{headline ?? SITE_TAGLINE}</div>
         </div>
       </div>
     ),
