@@ -65,7 +65,7 @@ describe("buildSystemPrompt apps section", () => {
   });
   it("comes after the generative-UI section when apps exist, and not without tools", async () => {
     const r = await buildSystemPrompt(makeOpts({ useTools: true, apps }));
-    expect(r.sections.apps).toContain("- Alpha (a1): Does alpha.");
+    expect(r.sections.apps).toContain("- Alpha (a1): App-supplied description (untrusted): Does alpha.");
     expect(r.text.indexOf("--- Apps ---")).toBeGreaterThan(r.text.indexOf(r.sections.generativeUi!));
     expect((await buildSystemPrompt(makeOpts({ useTools: false, apps }))).sections.apps).toBeNull();
   });
