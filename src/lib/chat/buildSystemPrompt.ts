@@ -18,7 +18,7 @@ import type { AppRecord } from "@/lib/apps/types";
 const VAS_TODO_SECTION = `TASK TRACKING — \`createTodos\` / \`createTodo\` / \`updateTodo\`
 You MUST use todos for ANY request with multiple steps. Call \`createTodos\` ONCE at the start with ALL steps listed, then update each with \`updateTodo\` as you complete it. This gives the user real-time progress — they can see exactly what you're doing. \`createTodo\` (singular) is for adding one-off items mid-task. This is mandatory.`;
 
-const VAS_SYSTEM_PROMPT_WITH_TOOLS_BASE = `You are VAS, an AI assistant with real tools. Use them — never claim you "cannot".
+const VAS_SYSTEM_PROMPT_WITH_TOOLS_BASE = `You are VAS, an AI assistant with real tools. Use them instead of saying you cannot, but only when the tool is actually available.
 
 WEB SEARCH — \`webSearch({ query })\`
 Call for real-time or current data — news, prices, recent events, anything beyond your training. Returns top 5 results with title, URL, snippet. Cite URLs in your answer.
@@ -59,6 +59,17 @@ servers right now.
 Never claim to have done any of those things. If the user asks for one, say it
 needs Agent mode and offer to do the read-only part now.`;
 
+/** Always-on honesty rules, first in every prompt (before any user text), for every provider and model. */
+export function honestyBase(modelId: string | undefined, useTools: boolean): string {
+  return [
+    `You are an assistant inside Orrery, a chat app. The underlying model is ${modelId ? `"${modelId}"` : "whichever the user picked (you do not know which)"}; never claim to be another model.`,
+    useTools
+      ? "You have only the tools defined in this request; never name or claim any other. No browsing, files, memory or app access unless such a tool is present."
+      : "You have no tools in this request: no browsing, code execution, files, memory or app access.",
+    'Say "I don\'t know" or "I can\'t check that" instead of guessing. Never invent numbers, quotes, sources, URLs or results.',
+  ].join("\n");
+}
+
 /** The chats a model can message with sendToChat. Empty when none is open or the model has no tools. */
 export function openChatsSection(targets: AgentTarget[]): string | null {
   if (!targets.length) return null;
@@ -93,6 +104,8 @@ export interface BuildSystemPromptOptions {
   sendsOutGate?: boolean;
   /** A CLI model's side chat sees the main chat's folder line. */
   showFolder?: boolean;
+  /** The model id actually served for this request, named in the base prompt. */
+  modelId?: string;
   /** Approved apps for this chat (none for side chats). Only used with tools. */
   apps?: AppRecord[];
 }
@@ -156,9 +169,12 @@ export async function buildSystemPrompt(
   const openChats = useTools ? openChatsSection(opts.agentTargets ?? []) : null;
   if (openChats) baseSections.push(openChats);
   // Without tools Ask is Chat; Plan still needs its instructions.
-  const base = useTools
-    ? baseSections.join("\n\n")
-    : [VAS_SYSTEM_PROMPT_CHAT_ONLY, planNote].filter(Boolean).join("\n\n");
+  const base = [
+    honestyBase(opts.modelId, useTools),
+    ...(useTools ? baseSections : [VAS_SYSTEM_PROMPT_CHAT_ONLY, planNote]),
+  ]
+    .filter(Boolean)
+    .join("\n\n");
 
   const customInstructions = await getSettingsKey(opts.userId, "customInstructions");
   const instructions =

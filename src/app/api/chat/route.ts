@@ -291,6 +291,7 @@ export async function POST(req: Request) {
     const agentTargets = sendToChatTargets(openPanes, conversationId ?? "", useTools && !sendsOutGate);
     const { text: finalSystemPrompt, sections } = await buildSystemPrompt({
       useTools,
+      modelId: servedModel,
       systemPrompt,
       skillIds,
       activeToolIds,

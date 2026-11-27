@@ -72,3 +72,42 @@ describe("loadUiGuide tool", () => {
     }
   });
 });
+
+describe("honest replies", () => {
+  const BASE = "You are an assistant inside Orrery";
+
+  it("base prompt comes first with no user prompt, naming the real model", async () => {
+    const r = await buildSystemPrompt(opts({ modelId: "gpt-test-9" }));
+    expect(r.text.startsWith(BASE)).toBe(true);
+    expect(r.text).toContain('"gpt-test-9"');
+    expect(r.text).toContain("Never invent numbers, quotes, sources, URLs or results");
+  });
+
+  it("base prompt goes before the user's system prompt", async () => {
+    const r = await buildSystemPrompt(opts({ systemPrompt: "Talk like a pirate", useTools: true, modelId: "m1" }));
+    expect(r.text.startsWith(BASE)).toBe(true);
+    expect(r.text.indexOf(BASE)).toBeLessThan(r.text.indexOf("Talk like a pirate"));
+  });
+
+  it("tool claims follow the request: none without tools", async () => {
+    const none = (await buildSystemPrompt(opts())).text;
+    expect(none).toContain("no tools in this request");
+    expect(none).not.toContain("only the tools defined in this request");
+    const some = (await buildSystemPrompt(opts({ useTools: true }))).text;
+    expect(some).toContain("only the tools defined in this request");
+    expect(some).not.toContain("no tools in this request");
+  });
+
+  it("non-tool models still get honesty lines with or without the inlined guide", async () => {
+    for (const messages of [[user("hi")], [user("make a chart")]]) {
+      const t = (await buildSystemPrompt(opts({ messages }))).text;
+      expect(t).toContain("I can't check that");
+    }
+  });
+
+  it("sample-data rule is in the stub, the full guide and the artifact tool", () => {
+    expect(GENERATIVE_UI_STUB).toContain("Sample data");
+    expect(uiGuideText()).toContain("Sample data");
+    expect(TOOL_REGISTRY.createArtifact.modelDescription).toContain("Sample data");
+  });
+});

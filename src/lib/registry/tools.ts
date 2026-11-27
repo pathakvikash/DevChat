@@ -31,7 +31,7 @@ export const TOOL_REGISTRY: Record<string, ToolDefinition> = {
     description:
       "Create an artifact — a reusable document, code file, report, table, dataset, or other structured content that will be shown in a side panel.",
     modelDescription:
-      'Create an artifact — a reusable document, code file, report, table, dataset, or other structured content that will be shown in a side panel. Use this INSTEAD of printing large code blocks or documents in chat. The artifact is saved and can be updated later. Type `data` is a dataset: content must be a JSON {"columns":[...],"rows":[[...]]} object or CSV, and you then reference it from a Chart or Table component with `dataArtifactId` instead of retyping the rows. HTML artifacts run in an isolated sandbox with no network, cookies or localStorage.',
+      'Create an artifact — a reusable document, code file, report, table, dataset, or other structured content that will be shown in a side panel. Use this INSTEAD of printing large code blocks or documents in chat. The artifact is saved and can be updated later. Type `data` is a dataset: content must be a JSON {"columns":[...],"rows":[[...]]} object or CSV, and you then reference it from a Chart or Table component with `dataArtifactId` instead of retyping the rows. HTML artifacts run in an isolated sandbox with no network, cookies or localStorage. Data in an artifact must come from the chat, an attachment or a tool result; with none, ask for it or label it "Sample data" in the title.',
     category: "Utility",
     internal: true,
     inputSchema: z.object({
