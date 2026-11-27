@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { catalog } from "@/lib/generativeUi/catalog";
+import { composeUiSubmit } from "@/lib/generativeUi/composeSubmit";
 
 // `catalog.data` is the definition object handed to defineCatalog, so the raw
 // zod4 prop schemas are reachable without exporting them separately.
@@ -40,5 +41,24 @@ describe("generative UI catalog: data-driven Chart/Table", () => {
 
   it("Table still accepts inline headers and rows", () => {
     expect(table.safeParse({ ...nulls, headers: ["a"], rows: [["1"]] }).success).toBe(true);
+  });
+});
+
+describe("generative UI submit action", () => {
+  it("is advertised in the prompt", () => {
+    expect(catalog.prompt()).toContain("submit");
+  });
+
+  it("composes client-side text from values", () => {
+    expect(composeUiSubmit({ name: "Ann", ok: true })).toBe("Form submitted:\nname: Ann\nok: true");
+  });
+
+  it("caps values and total, rejects non-objects", () => {
+    expect(composeUiSubmit({ a: "x".repeat(5000) })!.length).toBeLessThan(2100);
+    const big = Object.fromEntries(Array.from({ length: 20 }, (_, i) => [`k${i}`, "y".repeat(2000)]));
+    expect(composeUiSubmit(big)!.length).toBeLessThan(8200);
+    expect(composeUiSubmit(null)).toBeNull();
+    expect(composeUiSubmit({})).toBeNull();
+    expect(composeUiSubmit(["a"])).toBeNull();
   });
 });

@@ -19,6 +19,7 @@ interface ChatMessagesProps {
   onRegenerateMessage?: (messageId: string) => void;
   onOpenArtifact?: (id: string) => void;
   onClarificationAnswer?: (toolCallId: string, answer: string) => void;
+  onUiSubmit?: (text: string) => void;
   /** Set in Plan mode: offers "Approve plan" under the latest reply when it has no plan card. */
   onApprovePlan?: () => void;
   /** The model can't use tools, so the plan is written out and the button says so. */
@@ -57,6 +58,7 @@ function ChatMessages({
   onRegenerateMessage,
   onOpenArtifact,
   onClarificationAnswer,
+  onUiSubmit,
   onApprovePlan,
   toolsAvailable = true,
   scrollRef,
@@ -136,6 +138,7 @@ function ChatMessages({
                     onRegenerateMessage={onRegenerateMessage}
                     onOpenArtifact={onOpenArtifact}
                     onClarificationAnswer={onClarificationAnswer}
+                    onUiSubmit={s === actionsAt && last && message.role === "assistant" && !isLoading ? onUiSubmit : undefined}
                     onApprovePlan={
                       s === actionsAt && last && message.role === "assistant" && !isLoading &&
                         !settled.some((p) => p?.type === "tool-presentPlan")

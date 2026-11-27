@@ -86,6 +86,7 @@ export interface ChatPaneState extends DataActions {
   isLoading: boolean;
   currentModelName: string;
   handleClarificationAnswer: (toolCallId: string, answer: string) => Promise<void>;
+  handleUiSubmit: (text: string) => void;
   answerApproval: (answer: ApprovalAnswer) => void;
   answerPlan: (answer: PlanAnswer) => void;
   approvePlanReply: () => void;

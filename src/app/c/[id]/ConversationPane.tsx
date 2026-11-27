@@ -462,6 +462,7 @@ export default function ConversationPane({ conversationId, focused, initialPromp
                 else setOutputsOverlay(true);
               }}
               onClarificationAnswer={p.handleClarificationAnswer}
+              onUiSubmit={isSub || isSide ? undefined : p.handleUiSubmit}
               onApprovePlan={p.mode === "plan" && !p.toolsAvailable ? p.approvePlanReply : undefined}
               toolsAvailable={p.toolsAvailable}
               scrollRef={p.scrollRef}
