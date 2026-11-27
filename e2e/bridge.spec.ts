@@ -18,6 +18,13 @@ const CHAT_BODY = sse([
 ]);
 
 async function stubDeployedWithBridge(page: Page, chatBodies: unknown[] = []) {
+  // A deployment has no Claude Code of its own: the picker must show only the bridge's models, even where this
+  // machine has `claude` installed and the dev server lists it.
+  await page.route("**/api/models", async (route) => {
+    if (route.request().method() !== "GET") return route.fallback();
+    const json = await (await route.fetch()).json();
+    return route.fulfill({ json: { ...json, models: json.models.filter((m: { id: string }) => !m.id.startsWith("claude-code/")) } });
+  });
   await page.route("**/api/folders", (route) =>
     route.request().method() === "GET"
       ? route.fulfill({ json: { folders: [], hostTools: true, reason: "Working folders only work when Orrery runs on your own machine." } })
@@ -46,10 +53,11 @@ test("pair on a deployment, pick the bridge model, stream a reply, and see it sa
 
   // Pair in Settings.
   await page.goto("/settings");
-  await expect(page.getByTestId("bridge-status")).toHaveText("Not paired. Paste the token the bridge printed.");
-  await page.getByLabel("Bridge token").fill(TOKEN);
-  await page.getByRole("button", { name: "Save", exact: true }).click();
-  await expect(page.getByTestId("bridge-status")).toContainText("Connected");
+  const status = page.getByRole("main").getByTestId("bridge-status");
+  await expect(status).toHaveText("Not paired. Paste the token the bridge printed.");
+  await page.getByRole("main").getByLabel("Bridge token").fill(TOKEN);
+  await page.getByRole("main").getByRole("button", { name: "Save", exact: true }).click();
+  await expect(status).toContainText("Connected");
 
   // Pick the bridge model (listed "via local bridge").
   const id = await createChat(request, { title: "Bridge chat" });

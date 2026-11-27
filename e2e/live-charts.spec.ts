@@ -22,18 +22,21 @@ test("a live candle chart shows the Live badge, updates in place, and pauses", a
   expect(art.ok()).toBeTruthy();
   const artifactId = (await art.json()).id;
   const patch = (path: string, value: unknown) => ({ type: "data-spec", data: { type: "patch", patch: { op: "add", path, value } } });
-  const seeded = await request.post(`/api/conversations/${id}/messages`, {
-    data: {
-      role: "assistant",
-      content: "Here is the chart.",
-      parts: [
-        { type: "text", text: "Here is the chart." },
-        patch("/root", "c"),
-        patch("/elements/c", { type: "CandleChart", props: { dataArtifactId: artifactId }, children: [] }),
-      ],
-    },
-  });
+  // The messages route stores text only (it drops `parts`), so the saved reply is text and the page is shown the
+  // conversation as the server would return it for a reply that carried the chart spec.
+  const seeded = await request.post(`/api/conversations/${id}/messages`, { data: { role: "assistant", content: "Here is the chart." } });
   expect(seeded.ok()).toBeTruthy();
+  const parts = [
+    { type: "text", text: "Here is the chart." },
+    patch("/root", "c"),
+    patch("/elements/c", { type: "CandleChart", props: { dataArtifactId: artifactId }, children: [] }),
+  ];
+  await page.route(`**/api/conversations/${id}`, async (r) => {
+    if (r.request().method() !== "GET") return r.fallback();
+    const json = await (await r.fetch()).json();
+    json.messages = json.messages.map((m: { role: string }) => (m.role === "assistant" ? { ...m, parts: JSON.stringify(parts) } : m));
+    return r.fulfill({ json });
+  });
 
   // Only Orrery's own app-result save keeps (and signs) `refresh`; the artifact API strips it from anything a client
   // or the model writes. So the page is shown the artifact as the server would return a signed one.
