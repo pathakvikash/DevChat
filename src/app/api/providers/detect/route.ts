@@ -15,7 +15,7 @@ export async function POST(req: NextRequest) {
   }
   if (!detectionAvailable()) {
     return NextResponse.json(
-      { error: "Provider detection only works when DevChat runs on your own machine." },
+      { error: "Provider detection only works when Orrery runs on your own machine." },
       { status: 403 },
     );
   }

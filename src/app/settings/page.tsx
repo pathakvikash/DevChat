@@ -375,7 +375,7 @@ export default function SettingsPage() {
                         {cliReady
                           .map((s) => `${s.label} (${s.modelCount} model${s.modelCount === 1 ? "" : "s"})`)
                           .join(", ")}
-                        . Pick them in the model selector; DevChat runs the tool for you with its own login.
+                        . Pick them in the model selector; Orrery runs the tool for you with its own login.
                       </p>
                     )}
                   </div>
@@ -598,7 +598,7 @@ export default function SettingsPage() {
             <div className="glass-card rounded-[var(--glass-radius-xl)] p-6">
               <h2 className="text-xl font-bold mb-1">Google Sheets</h2>
               <p className="text-sm text-zinc-400 mb-3">
-                Sync a table to a Google Sheet from its page or a workflow. Disconnecting deletes the saved access from DevChat.
+                Sync a table to a Google Sheet from its page or a workflow. Disconnecting deletes the saved access from Orrery.
               </p>
               <GoogleConnection />
             </div>

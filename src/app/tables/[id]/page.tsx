@@ -196,7 +196,7 @@ function TableView({ params }: { params: Promise<{ id: string }> }) {
     window.history.replaceState(null, "", `${window.location.pathname}${q.size ? `?${q}` : ""}`);
     // eslint-disable-next-line react-hooks/set-state-in-effect -- finishes the sync once, when the page is first loaded back from Google
     if (flag === "connected" && wantSync) void sync();
-    else if (flag === "scope") toast("Google didn't give DevChat access to the sheets it creates. Try again and keep that box ticked.", "error");
+    else if (flag === "scope") toast("Google didn't give Orrery access to the sheets it creates. Try again and keep that box ticked.", "error");
     else if (flag !== "connected") toast("Google wasn't connected. Try again.", "error");
   }, [table, sync, toast]);
 

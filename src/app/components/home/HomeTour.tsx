@@ -118,7 +118,7 @@ function StickyBar() {
         onClick={toComposer}
       >
         <span className="bg-gradient-to-r from-green-400 via-yellow-400 to-green-500 bg-clip-text text-transparent">
-          DevChat
+          Orrery
         </span>
       </button>
       <Link href="/c/new" className={`focus-ring ${linkBtn} !py-1.5`}>

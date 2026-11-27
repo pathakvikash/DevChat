@@ -30,7 +30,7 @@ export default function GoogleConnection({ compact = false, returnTo = "/setting
     if (compact) return;
     const flag = new URLSearchParams(window.location.search).get("google");
     if (flag === "denied" || flag === "failed") toast("Google wasn't connected. Try again.", "error");
-    if (flag === "scope") toast("Google didn't give DevChat access to the sheets it creates. Try again and keep that box ticked.", "error");
+    if (flag === "scope") toast("Google didn't give Orrery access to the sheets it creates. Try again and keep that box ticked.", "error");
     if (flag === "not-configured") toast("Google isn't set up on this server.", "error");
     // The flag has been shown: take it out of the address so a reload does not repeat it.
     if (flag) {
@@ -55,7 +55,7 @@ export default function GoogleConnection({ compact = false, returnTo = "/setting
   if (state) {
     if (!state.configured) text = "Google isn't set up on this server, so sheets can't be synced.";
     else if (state.connected) {
-      text = "Google is connected. DevChat can only open the sheets it creates.";
+      text = "Google is connected. Orrery can only open the sheets it creates.";
       action = (
         <button type="button" onClick={disconnect} disabled={busy} className="focus-ring glass-button h-9 rounded-[var(--glass-radius-md)] px-4 text-sm font-medium">
           Disconnect

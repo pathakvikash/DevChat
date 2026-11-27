@@ -36,7 +36,7 @@ function ScrollHint() {
       animate={{ opacity: 1 }}
       transition={{ delay: 0.9, duration: 0.4 }}
     >
-      See what DevChat can do
+      See what Orrery can do
       <ChevronDown size={16} className="animate-[float_2.4s_ease-in-out_infinite]" />
     </motion.button>
   );
@@ -97,7 +97,7 @@ export default function HomePage() {
                 transition={{ delay: 0.25, duration: 0.5 }}
               >
                 <span className="bg-gradient-to-r from-green-400 via-yellow-400 to-green-500 bg-clip-text text-transparent">
-                  DevChat
+                  Orrery
                 </span>
               </motion.h1>
             </motion.div>
