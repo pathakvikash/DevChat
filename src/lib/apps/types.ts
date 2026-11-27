@@ -56,10 +56,17 @@ export interface AppRecord {
   toolsCachedAt?: string;
 }
 
+/** Optional on table, timeseries and ohlc: Orrery re-runs `tool` (one of the same app's read-only tools) to refresh the result. */
+export interface RefreshSpec {
+  tool: string;
+  args?: Record<string, unknown>;
+  everyMs?: number;
+}
+
 export type OrreryResult =
-  | { orrery: 1; type: "table"; title?: string; columns: string[]; rows: unknown[][] }
-  | { orrery: 1; type: "timeseries"; title?: string; series: { name: string; points: [number, number][] }[] }
-  | { orrery: 1; type: "ohlc"; symbol: string; interval: string; candles: { t: number; o: number; h: number; l: number; c: number; v?: number }[] }
+  | { orrery: 1; type: "table"; title?: string; columns: string[]; rows: unknown[][]; refresh?: RefreshSpec }
+  | { orrery: 1; type: "timeseries"; title?: string; series: { name: string; points: [number, number][] }[]; refresh?: RefreshSpec }
+  | { orrery: 1; type: "ohlc"; symbol: string; interval: string; candles: { t: number; o: number; h: number; l: number; c: number; v?: number }[]; refresh?: RefreshSpec }
   | { orrery: 1; type: "model3d"; format: "stl"; title?: string; file: string }
   | { orrery: 1; type: "job"; jobId: string; statusTool: string; title?: string; pollMs?: number }
   | { orrery: 1; type: "link"; label: string; link: string; params?: Record<string, string> };
@@ -71,13 +78,20 @@ export interface JobStatus {
   error?: string;
 }
 
+const refreshSchema = z.object({
+  tool: z.string().min(1).max(128),
+  args: z.record(z.string(), z.unknown()).optional(),
+  everyMs: z.number().finite().positive().optional(),
+});
+
 export const orreryResultSchema: z.ZodType<OrreryResult> = z.discriminatedUnion("type", [
-  z.object({ orrery: z.literal(1), type: z.literal("table"), title: z.string().optional(), columns: z.array(z.string()), rows: z.array(z.array(z.unknown())) }),
+  z.object({ orrery: z.literal(1), type: z.literal("table"), title: z.string().optional(), columns: z.array(z.string()), rows: z.array(z.array(z.unknown())), refresh: refreshSchema.optional() }),
   z.object({
     orrery: z.literal(1),
     type: z.literal("timeseries"),
     title: z.string().optional(),
     series: z.array(z.object({ name: z.string(), points: z.array(z.tuple([z.number(), z.number()])) })),
+    refresh: refreshSchema.optional(),
   }),
   z.object({
     orrery: z.literal(1),
@@ -85,6 +99,7 @@ export const orreryResultSchema: z.ZodType<OrreryResult> = z.discriminatedUnion(
     symbol: z.string(),
     interval: z.string(),
     candles: z.array(z.object({ t: z.number(), o: z.number(), h: z.number(), l: z.number(), c: z.number(), v: z.number().optional() })),
+    refresh: refreshSchema.optional(),
   }),
   z.object({ orrery: z.literal(1), type: z.literal("model3d"), format: z.literal("stl"), title: z.string().optional(), file: z.string() }),
   z.object({ orrery: z.literal(1), type: z.literal("job"), jobId: z.string(), statusTool: z.string(), title: z.string().optional(), pollMs: z.number().optional() }),

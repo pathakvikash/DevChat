@@ -60,8 +60,20 @@ Job status tool result: `{ state: "queued"|"running"|"done"|"failed", progress?:
 
 Large data (table/timeseries/ohlc over ~12 values) is saved by Orrery once as a data artifact and referenced by id; the model sees a short summary plus the artifact id, never the rows. Unknown `type`: shown as text plus a link to the app.
 
+### Live results
+
+`table`, `timeseries` and `ohlc` results may carry an optional `refresh: { tool: string, args?: object, everyMs?: number }` (additive; the contract version stays 1). `tool` must be one of the same app's `readOnly` tools, and calling it with `args` must return a result of the same `type`. Orrery then re-runs it while the chart is on screen and replaces the data in place. Apps only send data; Orrery draws it. Orrery clamps `everyMs` to 2000..60000 (default 5000), polls only while the chart is in the viewport and the tab is visible, stops after 15 minutes (the user can resume), and backs off and stops after repeated failures. Currently `ohlc` and `timeseries` charts refresh; a `table` may carry `refresh` but is not polled yet.
+
+```json
+{ "orrery": 1, "type": "ohlc", "symbol": "BTCUSDT", "interval": "1m", "candles": [ ... ],
+  "refresh": { "tool": "klines", "args": { "symbol": "BTCUSDT", "interval": "1m", "limit": 200 }, "everyMs": 5000 } }
+```
+
+Orrery never takes the tool or args from the browser or the model. A result with `refresh` is always saved as a data artifact (with the id of the app that returned it), and `POST /api/apps/refresh-result` `{ artifactId }` reads `refresh` from that stored result.
+
 ## Orrery HTTP routes
 
+- `POST /api/apps/refresh-result` `{ artifactId }` signed-in user: re-runs the stored `refresh` of that user's data artifact. The app must be approved, the tool must be in its cached tool list with `readOnly: true` (else 400), and the response is validated against the result schema and must have the same `type` (else 502). At most one call per user and artifact every 2 s (else 429 with `Retry-After`).
 - `GET /api/apps` list approved apps for the signed-in user (no secrets): id, name, icon, baseUrl, goodFor, permission, capabilities, status (`ok` | `unreachable`).
 - `POST /api/apps/preview` `{ url }` (owner): fetch + validate manifest (safeFetch, https), connect to `mcp.url` to list tools, return `{ manifest, origin, tools, warnings }`, store nothing.
 - `POST /api/apps` `{ url, approve: true }` (owner): store, generate secret, return `{ app, secret }` (secret only once). Re-registering an existing id at the same origin re-approves, keeps the secret and returns `secret: null`; at a different origin it is refused with 409 until the owner removes the app first.
