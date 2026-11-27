@@ -228,7 +228,8 @@ export default function ModelSelector({
           </div>
 
           {/* Provider tabs */}
-          <div className="flex gap-1 px-2 py-1.5 border-b border-[var(--glass-border)] overflow-x-auto">
+          {/* Wraps onto more rows instead of scrolling sideways: with four or more providers the last tabs were cut off with no hint. */}
+          <div className="flex flex-wrap gap-1 px-2 py-1.5 border-b border-[var(--glass-border)]">
             {modelGroups.map((g) => (
               <button
                 key={g.provider}
