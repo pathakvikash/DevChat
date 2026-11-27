@@ -53,7 +53,7 @@ export interface OllamaModelInfo {
 
 // ─── Capability heuristics (shared by Ollama and hosted providers) ──────────
 
-function getDefaultContextWindow(modelName: string): number {
+export function getDefaultContextWindow(modelName: string): number {
   const name = modelName.toLowerCase();
   if (name.includes("llama3.2") || name.includes("llama3.1")) return 8192;
   if (name.includes("llama3")) return 8192;
@@ -153,6 +153,14 @@ export function withDefaultNumCtx<P extends { providerOptions?: any }>(params: P
   return { ...params, providerOptions: { ...params.providerOptions, ollama: { ...ollamaOpts, options: { ...ollamaOpts.options, num_ctx } } } };
 }
 
+/** One Ollama model, wrapped as the chat route runs it. The local bridge builds its Ollama models through this too. */
+export function ollamaLanguageModel(client: ReturnType<typeof createOllama>, modelName: string, contextWindow: number) {
+  return wrapLanguageModel({
+    model: client(modelName),
+    middleware: { specificationVersion: "v3", transformParams: async ({ params }) => withDefaultNumCtx({ ...params, prompt: deniedAsErrorText(params.prompt) }, contextWindow) },
+  });
+}
+
 function createOllamaModelConfig(modelInfo: OllamaModelInfo): ModelConfig {
   const modelName = modelInfo.name;
   const contextWindow =
@@ -161,10 +169,7 @@ function createOllamaModelConfig(modelInfo: OllamaModelInfo): ModelConfig {
     id: `ollama/${modelName}`,
     name: modelName.replace(":latest", ""),
     provider: "Ollama",
-    model: wrapLanguageModel({
-      model: ollama(modelName),
-      middleware: { specificationVersion: "v3", transformParams: async ({ params }) => withDefaultNumCtx({ ...params, prompt: deniedAsErrorText(params.prompt) }, contextWindow) },
-    }),
+    model: ollamaLanguageModel(ollama, modelName, contextWindow),
     maxTokens: 4096,
     contextWindow,
     supportsTools: getSupportsTools(modelName),
@@ -402,7 +407,7 @@ type LanguageModelV3 = Exclude<LanguageModel, string>;
 
 /** Builds models for one provider: OpenAI via the Responses API and Anthropic via the
  *  Messages API (native SDKs); every other provider through OpenAI Chat Completions. */
-function providerClient(
+export function providerClient(
   def: ProviderDef,
   cred: { apiKey: string; baseUrl: string },
 ): (upstreamId: string) => LanguageModelV3 {

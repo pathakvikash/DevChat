@@ -1,5 +1,5 @@
 // Pure helpers for the page side of the local bridge (no React, no fetch): status mapping, routing, request and save bodies.
-import { BRIDGE_MODEL_PREFIX, BRIDGE_PROTOCOL, HOST_TOOLS_REFUSED, SERVER_NO_CLI, VERCEL_FOLDERS_REFUSED } from "./constants";
+import { BRIDGE_MODEL_PREFIX, BRIDGE_PROTOCOL, isBridgeLocalModel, HOST_TOOLS_REFUSED, SERVER_NO_CLI, VERCEL_FOLDERS_REFUSED } from "./constants";
 import { isChatMode, type ChatMode } from "@/lib/chat/modes";
 
 export type BridgeStatus = "unpaired" | "offline" | "mismatch" | "no-claude" | "ready" | "blocked";
@@ -62,7 +62,7 @@ export function serverHostToolsMissing(folders: FoldersAnswer): boolean | null {
   return !folders.hostTools || folders.reason === VERCEL_FOLDERS_REFUSED || folders.reason === HOST_TOOLS_REFUSED || folders.reason === SERVER_NO_CLI;
 }
 
-export type Route = { to: "server" } | { to: "bridge" } | { to: "blocked"; status: BridgeStatus };
+export type Route = { to: "server" } | { to: "bridge" } | { to: "blocked"; status: BridgeStatus; why?: "model-missing" | "server-unknown" };
 
 /**
  * A claude-code/ model goes to the bridge when the server cannot run it itself (deployed) and the bridge is ready. It stays on
@@ -73,6 +73,24 @@ export function routeTurn(i: { model: string | null | undefined; noHostTools: bo
   // Unknown (the folder answer never came): never guess "server" for a claude-code model, which would answer with another one.
   if (i.noHostTools === null) return { to: "blocked", status: i.status };
   return i.status === "ready" ? { to: "bridge" } : { to: "blocked", status: i.status };
+}
+
+/**
+ * An ollama/ or lmstudio/ model. It stays on the server unless a bridge token is stored (everyone else is unchanged) and the
+ * server does not itself list that model (Vercel cannot see this computer's Ollama). Then the bridge answers it, if it is
+ * ready and lists it: otherwise the send is blocked, because the server would quietly answer with its fallback model.
+ */
+export function routeLocalTurn(i: { hasToken: boolean; serverHasModel: boolean | null; bridgeHasModel: boolean; status: BridgeStatus }): Route {
+  if (!i.hasToken || i.serverHasModel === true) return { to: "server" };
+  if (i.serverHasModel === null) return { to: "blocked", status: i.status, why: "server-unknown" };
+  if (i.status !== "ready") return { to: "blocked", status: i.status };
+  return i.bridgeHasModel ? { to: "bridge" } : { to: "blocked", status: i.status, why: "model-missing" };
+}
+
+/** The sentence for a blocked send. */
+export function blockedText(r: Extract<Route, { to: "blocked" }>, protocol: number | null): string {
+  if (r.why === "model-missing") return "The local bridge does not list this model. Start Ollama or LM Studio on this computer, then try again.";
+  return bridgeProblemText(r.status, protocol) ?? "Could not check whether this server can run this model. Reload the page and try again.";
 }
 
 // ─── Request body for the daemon's /chat ───────────────────────────────────
@@ -157,7 +175,8 @@ export function buildSavePayload(i: { messages: { id: string; role: string; part
   const at = i.messages.length - 1;
   const assistant = i.messages[at];
   if (!assistant || assistant.role !== "assistant") return null;
-  const parts = ((assistant.parts ?? []) as Part[]).map(cleanAssistantPart).filter((p): p is Part => !!p);
+  // A local model has no tools: the server refuses a tool part in its turn.
+  const parts = ((assistant.parts ?? []) as Part[]).map(cleanAssistantPart).filter((p): p is Part => !!p && !(isBridgeLocalModel(i.model) && p.type === "dynamic-tool"));
   if (!parts.length) return null;
   const userMsg = [...i.messages.slice(0, at)].reverse().find((m) => m.role === "user");
   const textParts = userMsg ? ((userMsg.parts ?? []) as Part[]).filter((p) => p.type === "text").slice(0, 50).map((p) => ({ type: "text" as const, text: str(p.text, TEXT_MAX) ?? "" })) : [];

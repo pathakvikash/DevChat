@@ -10,3 +10,7 @@ export const VERCEL_FOLDERS_REFUSED = "Working folders only work when Orrery run
 export const SERVER_NO_CLI = "Claude Code and working folders are not available on this server.";
 /** What /api/folders says to someone who is not the server's owner. */
 export const HOST_TOOLS_REFUSED = "This is only available to the server's owner.";
+
+/** Local models (Ollama, LM Studio) the bridge can serve from this computer: text only, no tools or folder. */
+export const BRIDGE_LOCAL_PREFIXES = ["ollama/", "lmstudio/"] as const;
+export const isBridgeLocalModel = (model: string | null | undefined): boolean => !!model && BRIDGE_LOCAL_PREFIXES.some((p) => model.startsWith(p));

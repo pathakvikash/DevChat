@@ -2,7 +2,9 @@
 
 import { DefaultChatTransport, type ChatTransport, type UIMessage } from "ai";
 import { BRIDGE_ORIGIN } from "@/lib/bridge/constants";
-import { buildBridgeBody, bridgeProblemText, routeTurn, serverHostToolsMissing } from "@/lib/bridge/client";
+import { BRIDGE_MODEL_PREFIX, isBridgeLocalModel } from "@/lib/bridge/constants";
+import { bridgeProblemText, blockedText, buildBridgeBody, routeLocalTurn, routeTurn, serverHostToolsMissing } from "@/lib/bridge/client";
+import { fetchModels } from "@/app/hooks/useModelsApi";
 import { bridgeSnapshot, checkBridge, getBridgeFolder, readBridgeToken } from "@/app/hooks/useBridge";
 import { foldersSnapshot, refetch as loadFolders } from "@/app/hooks/useFolders";
 
@@ -55,8 +57,22 @@ export function createRoutingTransport(opts: {
   return {
     async sendMessages(options) {
       const model = opts.getContext().model;
-      // Anything but a claude-code/ model goes straight to the server, as before.
-      if (!model?.startsWith("claude-code/")) return opts.server.sendMessages(options);
+      if (model && isBridgeLocalModel(model)) {
+        // Without a bridge token this is the server's business, exactly as before: no extra request, no probe.
+        if (!readBridgeToken()) return opts.server.sendMessages(options);
+        // The server's own model list says whether it can reach this model (Vercel cannot see this computer's Ollama).
+        const serverHasModel = await fetchModels().then((l) => l.some((m) => m.id === model), () => null);
+        if (serverHasModel === true) return opts.server.sendMessages(options);
+        await checkBridge(5_000);
+        const s = bridgeSnapshot();
+        const route = routeLocalTurn({ hasToken: true, serverHasModel, bridgeHasModel: s.models.some((m) => m.id === model), status: s.status });
+        if (route.to === "blocked") throw new Error(blockedText(route, s.protocol));
+        if (route.to === "server") return opts.server.sendMessages(options);
+        opts.onBridgeTurn({ model, continuing: options.messages.at(-1)?.role === "assistant" });
+        return bridge.sendMessages(options);
+      }
+      // Anything else but a claude-code/ model goes straight to the server, as before.
+      if (!model?.startsWith(BRIDGE_MODEL_PREFIX)) return opts.server.sendMessages(options);
 
       if (!foldersSnapshot().loaded) await loadFolders();
       const noHostTools = serverHostToolsMissing(foldersSnapshot().data);

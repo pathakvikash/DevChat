@@ -11,6 +11,7 @@ import { ModelInfo, groupModelsByProvider } from "./types";
 import { useBridge } from "@/app/hooks/useBridge";
 import { useFolders } from "@/app/hooks/useFolders";
 import { bridgeProblemText } from "@/lib/bridge/client";
+import { isBridgeLocalModel } from "@/lib/bridge/constants";
 
 interface ModelSelectorProps {
   currentModel: string;
@@ -120,15 +121,18 @@ export default function ModelSelector({
   const bridge = useBridge();
   // Reads the folder answer (and fetches it) only when a bridge token is stored: no /api/folders call for everyone else.
   const { noHostTools } = useFolders(bridge.hasToken, { bridge: true });
-  const bridgeModels: ModelInfo[] =
-    noHostTools === true && bridge.hasToken
-      ? bridge.models.map((m) => ({
+  // Claude Code models only when the server cannot run them itself; local Ollama / LM Studio models whenever the server
+  // does not list them (the de-duplication below), so a local Orrery that sees its own Ollama shows one entry, not two.
+  const bridgeModels: ModelInfo[] = bridge.hasToken
+    ? bridge.models
+        .filter((m) => (isBridgeLocalModel(m.id) ? true : noHostTools === true))
+        .map((m) => ({
           ...m,
           viaBridge: true,
-          supportsTools: true,
+          supportsTools: m.supportsTools ?? true,
           ...(bridge.status === "ready" ? {} : { disabledReason: bridgeProblemText(bridge.status, bridge.protocol) ?? undefined }),
         }))
-      : [];
+    : [];
   const models = [...(modelsData ?? []), ...bridgeModels.filter((b) => !modelsData?.some((m) => m.id === b.id))].filter((m) => !exclude?.(m));
 
   const modelGroups = useMemo(() => {

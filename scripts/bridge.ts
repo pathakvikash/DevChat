@@ -8,6 +8,7 @@
  *   npm run bridge -- --max-mode <chat|plan|agent|ask>   the most the page may do (default plan: read-only; agent edits; ask also runs commands)
  *   npm run bridge -- --no-confirm-shell | --confirm-shell   confirm each command in this terminal (default on)
  *   npm run bridge -- --allow-chat-wide-edits   let the page pre-approve edits for a whole chat (default off)
+ *   npm run bridge -- --ollama-url <url> | --lmstudio-url <url>   where local Ollama / LM Studio listen (loopback hosts only)
  *   npm run bridge -- --print-token    show the token again
  *
  * Folders are only ever added here, never over HTTP. The client sends no argv, env, binary path or permission strings:
@@ -29,6 +30,8 @@ import { normalizeMessageToolParts } from "@/lib/chat/normalizeToolParts";
 import { refuseReason } from "@/lib/files/folderRules";
 import { CHAT_ALLOWABLE_TOOLS } from "@/lib/utils/messageParts";
 import { isEditTool } from "@/lib/bridge/shellTools";
+import { DEFAULT_LMSTUDIO_URL, DEFAULT_OLLAMA_URL, createLocalModels, isLoopbackUrl, loopbackUrlOrThrow, type LocalModelInfo } from "@/lib/bridge/localModels";
+import type { LanguageModel } from "ai";
 
 export const DEFAULT_ORIGIN = "https://dev-chat-beta.vercel.app";
 const VERSION = "0.1.0";
@@ -47,6 +50,9 @@ const ConfigSchema = z.object({
   confirmShell: z.boolean().default(true),
   /** Lets the page pre-approve edits for a whole chat ("Allow for this chat"); off, every edit asks. */
   allowChatWideEdits: z.boolean().default(false),
+  /** Where local Ollama / LM Studio listen. Loopback hosts only: a config naming anything else does not load. */
+  ollamaUrl: z.string().refine(isLoopbackUrl, "must be a loopback URL").optional(),
+  lmstudioUrl: z.string().refine(isLoopbackUrl, "must be a loopback URL").optional(),
 });
 export type BridgeConfig = z.infer<typeof ConfigSchema>;
 
@@ -65,7 +71,7 @@ export function ensureConfig(dir = defaultConfigDir()): { config: BridgeConfig; 
   chmodSync(dir, 0o700);
   const file = configFile(dir);
   if (!existsSync(file)) {
-    const config: BridgeConfig = { token: randomBytes(32).toString("base64url"), origins: [DEFAULT_ORIGIN], folders: [], maxMode: "plan", confirmShell: true, allowChatWideEdits: false };
+    const config: BridgeConfig = { token: randomBytes(32).toString("base64url"), origins: [DEFAULT_ORIGIN], folders: [], maxMode: "plan", confirmShell: true, allowChatWideEdits: false, ollamaUrl: DEFAULT_OLLAMA_URL, lmstudioUrl: DEFAULT_LMSTUDIO_URL };
     writeConfig(dir, config);
     return { config, created: true };
   }
@@ -122,6 +128,9 @@ export interface BridgeDeps {
   /** Ids of installed CLI providers; defaults to a PATH search. */
   findBins?: () => Promise<Set<string>>;
   log?: (line: string) => void;
+  /** Test seams for local models: the fetch that lists them, and the model built for a listed one. */
+  localFetch?: typeof fetch;
+  buildLocalModel?: (info: LocalModelInfo) => LanguageModel;
 }
 
 const claudeDef = CLI_PROVIDERS.find((d) => d.id === PROVIDER_ID)!;
@@ -269,6 +278,14 @@ export function createBridgeServer(config: BridgeConfig | (() => BridgeConfig), 
     };
   });
   let chats = 0;
+  // Re-read per request, so --ollama-url / --lmstudio-url edits apply while the bridge runs (a bad config lists nothing).
+  const local = createLocalModels(
+    () => {
+      const c = getConfig();
+      return { ollamaUrl: c.ollamaUrl ?? DEFAULT_OLLAMA_URL, lmstudioUrl: c.lmstudioUrl ?? DEFAULT_LMSTUDIO_URL };
+    },
+    { fetch: deps.localFetch, build: deps.buildLocalModel && ((info) => deps.buildLocalModel!(info)) },
+  );
 
   const send = (res: ServerResponse, status: number, body: unknown, headers: Record<string, string> = {}) => {
     res.writeHead(status, { "Content-Type": "application/json", "Cache-Control": "no-store", ...headers });
@@ -289,7 +306,13 @@ export function createBridgeServer(config: BridgeConfig | (() => BridgeConfig), 
     if (!parsed.success) return send(res, 400, { error: "Invalid request", issues: parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`) }, cors);
     const b = parsed.data;
     const known = modelList().find((m) => m.id === b.model);
-    if (!known) return send(res, 400, { error: "Unknown model" }, cors);
+    if (!known) {
+      // Not a Claude Code model: only an id the daemon itself just listed from local Ollama / LM Studio is served, and
+      // those get no tools, no folder and no approvals (mode, folder and allowedTools are not read for them).
+      const hit = await local.resolve(b.model);
+      if (!hit) return send(res, 400, { error: "Unknown model" }, cors);
+      return localChat(res, abort, b.messages, hit.model, b.system, cors);
+    }
     // Re-checked every turn: the folder may since have been removed, swapped for a symlink or now match a refuse rule.
     let cwd = "";
     if (b.folder) {
@@ -336,6 +359,16 @@ export function createBridgeServer(config: BridgeConfig | (() => BridgeConfig), 
     });
   }
 
+  async function localChat(res: ServerResponse, abort: AbortController, raw: z.infer<typeof Body>["messages"], model: LanguageModel, system: string | undefined, cors: Record<string, string>) {
+    // Text only: user messages keep text parts; assistant ones lose tool, file, source and data parts (this model has no tools).
+    const keep = new Set(["text", "reasoning", "step-start"]);
+    const messages = raw.map((m) => ({ ...m, parts: m.parts.filter((p) => (m.role === "user" ? p.type === "text" : keep.has(String(p.type)))) })).filter((m) => m.parts.length > 0);
+    const modelMessages = await convertToModelMessages(messages as never);
+    if (res.destroyed) return;
+    const result = streamText({ model, system, messages: modelMessages, maxRetries: 0, abortSignal: abort.signal });
+    result.pipeUIMessageStreamToResponse(res, { headers: cors, onError: (e) => (e instanceof Error ? e.message : String(e)) });
+  }
+
   async function handle(req: IncomingMessage, res: ServerResponse) {
     let cfg: BridgeConfig;
     try {
@@ -368,7 +401,7 @@ export function createBridgeServer(config: BridgeConfig | (() => BridgeConfig), 
       return send(res, 200, { protocol: BRIDGE_PROTOCOL, version: VERSION, claude: (await findBins()).has(PROVIDER_ID) }, cors);
     }
     if (!verdict.ok) return send(res, verdict.status, { error: verdict.reason }, cors);
-    if (req.method === "GET" && url.pathname === "/models") return send(res, 200, { models: modelList() }, cors);
+    if (req.method === "GET" && url.pathname === "/models") return send(res, 200, { models: [...modelList(), ...(await local.list())] }, cors);
     if (req.method === "GET" && url.pathname === "/folders") {
       return send(res, 200, { folders: cfg.folders.map((path) => ({ path, source: "added" })), hostTools: true, reason: null }, cors);
     }
@@ -415,7 +448,11 @@ export async function main(argv = process.argv.slice(2), dir = defaultConfigDir(
   const confirmFlag = argv.includes("--confirm-shell");
   const noConfirmFlag = argv.includes("--no-confirm-shell");
   const chatEditsFlag = argv.includes("--allow-chat-wide-edits");
-  if (add || remove || origin || maxMode || confirmFlag || noConfirmFlag || chatEditsFlag) {
+  const ollamaUrl = arg("--ollama-url");
+  const lmstudioUrl = arg("--lmstudio-url");
+  if (add || remove || origin || maxMode || confirmFlag || noConfirmFlag || chatEditsFlag || ollamaUrl || lmstudioUrl) {
+    if (ollamaUrl) config.ollamaUrl = loopbackUrlOrThrow("--ollama-url", ollamaUrl);
+    if (lmstudioUrl) config.lmstudioUrl = loopbackUrlOrThrow("--lmstudio-url", lmstudioUrl);
     if (maxMode) {
       if (!(CHAT_MODES as readonly string[]).includes(maxMode)) throw new Error(`--max-mode must be one of: ${CHAT_MODES.join(", ")}`);
       config.maxMode = maxMode as ChatMode;

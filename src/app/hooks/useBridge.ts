@@ -5,7 +5,7 @@ import { BRIDGE_ORIGIN } from "@/lib/bridge/constants";
 import { bridgeStatus, type BridgeStatus, type ProbeOutcome } from "@/lib/bridge/client";
 import type { Folder } from "@/app/hooks/useFolders";
 
-export type BridgeModel = { id: string; name: string; provider: string; contextWindow: number };
+export type BridgeModel = { id: string; name: string; provider: string; contextWindow: number; supportsTools?: boolean; supportsVision?: boolean; supportsThinking?: boolean };
 type State = {
   token: string | null;
   status: BridgeStatus;

@@ -2,8 +2,8 @@ import { describe, it, expect, vi } from "vitest";
 
 vi.mock("@/lib/db", () => ({ prisma: {} }));
 
-import { BRIDGE_PROTOCOL, BRIDGE_ORIGIN, VERCEL_FOLDERS_REFUSED, HOST_TOOLS_REFUSED } from "@/lib/bridge/constants";
-import { bridgeProblemText, bridgeStatus, buildBridgeBody, buildSavePayload, routeTurn, serverHostToolsMissing } from "@/lib/bridge/client";
+import { BRIDGE_PROTOCOL, BRIDGE_ORIGIN, VERCEL_FOLDERS_REFUSED, HOST_TOOLS_REFUSED, isBridgeLocalModel } from "@/lib/bridge/constants";
+import { blockedText, routeLocalTurn, bridgeProblemText, bridgeStatus, buildBridgeBody, buildSavePayload, routeTurn, serverHostToolsMissing } from "@/lib/bridge/client";
 import { bridgeTurnSchema } from "@/lib/chat/saveBridgeTurn";
 import { BRIDGE_PORT } from "@/lib/bridge/protocol";
 
@@ -141,5 +141,39 @@ describe("constants", () => {
   it("agree with the daemon", () => {
     expect(BRIDGE_PORT).toBe(47321);
     expect(BRIDGE_ORIGIN).toBe("http://127.0.0.1:47321");
+  });
+});
+
+describe("routeLocalTurn", () => {
+  const base = { hasToken: true, serverHasModel: false, bridgeHasModel: true, status: "ready" as const };
+  it("stays on the server without a bridge token (nothing changes for non-bridge users)", () => {
+    expect(routeLocalTurn({ ...base, hasToken: false })).toEqual({ to: "server" });
+    expect(routeLocalTurn({ ...base, hasToken: false, serverHasModel: null, status: "offline" })).toEqual({ to: "server" });
+  });
+  it("stays on the server when the server lists the model itself", () => {
+    expect(routeLocalTurn({ ...base, serverHasModel: true })).toEqual({ to: "server" });
+    expect(routeLocalTurn({ ...base, serverHasModel: true, status: "offline" })).toEqual({ to: "server" });
+  });
+  it("goes to the bridge when the server lacks the model and the bridge is ready and lists it", () => {
+    expect(routeLocalTurn(base)).toEqual({ to: "bridge" });
+  });
+  it("blocks (never the server's fallback model) when the bridge is not ready, lacks the model, or the server list is unknown", () => {
+    expect(routeLocalTurn({ ...base, status: "offline" })).toEqual({ to: "blocked", status: "offline" });
+    expect(routeLocalTurn({ ...base, status: "unpaired" })).toEqual({ to: "blocked", status: "unpaired" });
+    const missing = routeLocalTurn({ ...base, bridgeHasModel: false });
+    expect(missing).toMatchObject({ to: "blocked", why: "model-missing" });
+    expect(blockedText(missing as never, null)).toMatch(/does not list this model/);
+    expect(routeLocalTurn({ ...base, serverHasModel: null })).toMatchObject({ to: "blocked", why: "server-unknown" });
+    expect(blockedText({ to: "blocked", status: "offline" }, null)).toBe("Start the bridge on this computer: npm run bridge");
+  });
+  it("recognises only ollama/ and lmstudio/ ids as local", () => {
+    expect(isBridgeLocalModel("ollama/a") && isBridgeLocalModel("lmstudio/b")).toBe(true);
+    expect(isBridgeLocalModel("claude-code/x") || isBridgeLocalModel("ollama") || isBridgeLocalModel(null)).toBe(false);
+  });
+  it("buildSavePayload drops tool parts for a local model", () => {
+    const messages = [{ id: "u", role: "user", parts: [{ type: "text", text: "hi" }] }, { id: "a", role: "assistant", parts: [{ type: "dynamic-tool", toolName: "Read", toolCallId: "t", state: "output-available" }, { type: "text", text: "ok" }] }];
+    const p = buildSavePayload({ messages, model: "ollama/x", continuing: false, savedUserIds: new Set() });
+    expect(p?.assistant.parts).toEqual([{ type: "text", text: "ok" }]);
+    expect(bridgeTurnSchema.safeParse(p).success).toBe(true);
   });
 });
