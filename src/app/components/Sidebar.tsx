@@ -20,6 +20,7 @@ import {
 import ProfileDialog from "./ProfileDialog";
 import { useToast } from "@/app/components/Toast";
 import { OrreryMark } from "./OrreryMark";
+import SidebarApps from "./SidebarApps";
 
 interface ConversationItem {
   id: string;
@@ -642,6 +643,7 @@ export default function Sidebar() {
 
       {/* Conversations List */}
       <div className="flex-1 overflow-y-auto px-2 pb-2">
+        <SidebarApps />
         <AnimatePresence initial={false}>
           {pinnedRows.length > 0 && (
             <motion.div

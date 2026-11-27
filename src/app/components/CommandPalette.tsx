@@ -4,7 +4,9 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import * as Dialog from "@radix-ui/react-dialog";
 import { Command } from "cmdk";
 import { useRouter } from "next/navigation";
-import { Boxes, FilePlus, MessageSquareDashed, Settings, Table2, Workflow } from "lucide-react";
+import { appHomeHref } from "@/lib/apps/ui";
+import { useApps } from "@/app/hooks/useApps";
+import { Boxes, ExternalLink, FilePlus, MessageSquareDashed, Settings, Table2, Workflow } from "lucide-react";
 import { useToast } from "./Toast";
 import { createConversation } from "@/app/hooks/useConversationsApi";
 
@@ -41,6 +43,7 @@ export default function CommandPaletteProvider({ children }: { children: React.R
   const [extraGroups, setExtraGroups] = useState<Record<string, CommandPaletteAction[]>>({});
   const router = useRouter();
   const { toast } = useToast();
+  const { apps } = useApps();
   const openRef = useRef(open);
   openRef.current = open;
 
@@ -134,6 +137,21 @@ export default function CommandPaletteProvider({ children }: { children: React.R
               Artifacts
             </Command.Item>
           </Command.Group>
+
+          {apps.length > 0 && (
+            <Command.Group heading="Apps">
+              {apps.map((app) => (
+                <Command.Item
+                  key={app.id}
+                  value={`open-app-${app.id} Open ${app.name}`}
+                  onSelect={() => { window.open(appHomeHref(app.id), "_blank", "noopener"); setOpen(false); }}
+                >
+                  <ExternalLink size={16} />
+                  Open {app.name}
+                </Command.Item>
+              ))}
+            </Command.Group>
+          )}
 
           {Object.entries(extraGroups).map(([group, actions]) => (
             actions.length > 0 ? (
