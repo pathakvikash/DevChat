@@ -3,6 +3,7 @@
 import { useEffect, useState, useMemo, useCallback, useRef } from "react";
 import { generateId, type UIMessage } from "ai";
 import { useToast } from "@/app/components/Toast";
+import { takeModelNote } from "@/app/hooks/useConversationsApi";
 import type { QueuedItem } from "@/app/components/QueuedMessages";
 import { fetchModels } from "@/app/hooks/useModelsApi";
 import { useBridgeProbe } from "@/app/hooks/useBridge";
@@ -455,6 +456,12 @@ export function useChatPane(conversationId: string, { focused, kind, searchProvi
   useEffect(() => {
     fetchModels().then(setModelList).catch(() => {});
   }, []);
+  // A new chat whose saved default model was no longer listed: say which model it uses instead.
+  useEffect(() => {
+    const note = takeModelNote(conversationId);
+    if (note) toast(note, "info");
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- toast is not stable; the note is read once per chat
+  }, [conversationId]);
   // Until the list loads, assume tools: the server still decides by the model's real support.
   const toolsAvailable = !conversation?.chatOnlyMode && modelList.find((m) => m.id === conversation?.model)?.supportsTools !== false;
   const modelLabel = conversation?.model?.split("/")?.pop() || conversation?.model || "";

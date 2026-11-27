@@ -25,7 +25,29 @@ export async function createConversation(payload?: { title?: string; model?: str
     body: JSON.stringify({ title: "New Chat", ...payload }),
   });
   if (!res.ok) throw new Error("Failed to create conversation");
-  return res.json();
+  const conv = await res.json();
+  // The saved default model was not listed any more, so the server picked another. The chat page shows the note
+  // when it opens (a toast from here would be gone before the page changes).
+  if (conv.modelReplaced) {
+    try { sessionStorage.setItem(`${MODEL_NOTE_KEY}${conv.id}`, JSON.stringify(conv.modelReplaced)); } catch {}
+  }
+  return conv;
+}
+
+export const MODEL_NOTE_KEY = "vas:modelNote:";
+
+/** The one-time "your default model is gone" note for this chat, as text, or null. Reading it removes it. */
+export function takeModelNote(id: string): string | null {
+  try {
+    const raw = sessionStorage.getItem(`${MODEL_NOTE_KEY}${id}`);
+    if (!raw) return null;
+    sessionStorage.removeItem(`${MODEL_NOTE_KEY}${id}`);
+    const { from, to } = JSON.parse(raw) as { from: string; to: string };
+    const label = (m: string) => m.split("/").pop() || m;
+    return `Your default model ${label(from)} is not available any more, so this chat uses ${label(to)}. You can change it in Settings.`;
+  } catch {
+    return null;
+  }
 }
 
 export async function updateConversation(id: string, data: Record<string, unknown>): Promise<void> {
