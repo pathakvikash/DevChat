@@ -27,6 +27,9 @@ import {
 import { folderTools } from "@/lib/files/folderTools";
 import { saveUserMessage } from "@/lib/chat/saveUserMessage";
 import type { ModelConfig } from "@/lib/models";
+import { buildAppTools, isAppToolId, LOAD_APP_TOOLS } from "@/lib/apps/chatTools";
+import { callAppTool } from "@/lib/apps/registry";
+import type { AppRecord } from "@/lib/apps/types";
 
 export const BUILTIN_TOOL_IDS = [
   "executeCode",
@@ -84,6 +87,9 @@ export interface BuildToolsOptions {
   workingFolder?: string;
   /** The chat has folder file text in play (a folder now, or folder tool calls in its history): outbound tools ask on every call. */
   askBeforeSendingOut?: boolean;
+  /** Approved apps (with the user's email for the service token). Main chats only: side chats and helpers pass none. */
+  apps?: AppRecord[];
+  userEmail?: string;
 }
 
 /** Convert a JSON Schema object to a Zod schema (supports basic types). */
@@ -129,6 +135,8 @@ export async function buildTools({
   allowedTools = [],
   workingFolder,
   askBeforeSendingOut = false,
+  apps = [],
+  userEmail = "",
 }: BuildToolsOptions): Promise<Record<string, Tool>> {
   const ctx: ToolExecutionContext = { conversationId };
   const aiTools: Record<string, Tool> = {};
@@ -309,11 +317,17 @@ export async function buildTools({
     });
   }
 
+  // App tools are all registered here; the route's prepareStep keeps them inactive until loadAppTools ran.
+  Object.assign(
+    aiTools,
+    buildAppTools({ apps, mode, userId, email: userEmail, conversationId, call: callAppTool, toZod: jsonSchemaToZod }),
+  );
+
   // A chat with folder text in play: anything that can send data out asks every time, in every mode. No "allow for this chat".
   const sendsOut = { sendsOut: true, ...(workingFolder && { folder: path.basename(workingFolder) }) };
   if (askBeforeSendingOut) {
     for (const [id, t] of Object.entries(aiTools))
-      if (id.startsWith("mcp_") || id === "rememberFact" || TOOL_REGISTRY[id]?.outbound)
+      if (id.startsWith("mcp_") || isAppToolId(id) || id === "rememberFact" || TOOL_REGISTRY[id]?.outbound)
         aiTools[id] = { ...t, needsApproval: true, metadata: sendsOut } as Tool;
     // An HTML page auto-opens a preview, and even an isolated page can leak through DNS prefetch or WebRTC, which CSP
     // does not cover: it asks too. Other artifact types keep the mode's rule.
@@ -421,7 +435,11 @@ async function finishSubAgentChild(childId: string, modelId: string, result: Sub
 function helperToolSet(parentTools: Record<string, Tool>, mode: ToolMode): Record<string, Tool> {
   return Object.fromEntries(
     Object.entries(parentTools).filter(
-      ([id, t]) => !(t as { metadata?: { sendsOut?: boolean } }).metadata?.sendsOut && (mode === "agent" || !isMutatingTool(id)),
+      ([id, t]) =>
+        id !== LOAD_APP_TOOLS &&
+        !isAppToolId(id) && // helpers get no app tools: they cannot be loaded or approved there
+        !(t as { metadata?: { sendsOut?: boolean } }).metadata?.sendsOut &&
+        (mode === "agent" || !isMutatingTool(id)),
     ),
   );
 }

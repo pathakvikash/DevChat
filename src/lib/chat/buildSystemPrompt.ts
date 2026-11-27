@@ -12,6 +12,8 @@ import { folderPrompt } from "@/lib/files/folderTools";
 import { GENERATIVE_UI_STUB, shouldInlineUiGuide, uiGuideText } from "@/lib/generativeUi/guide";
 import { loadParentContext, type MainContext } from "./loadParentContext";
 import type { AgentTarget } from "./agentMessages";
+import { appsPromptSection } from "@/lib/apps/chatTools";
+import type { AppRecord } from "@/lib/apps/types";
 
 const VAS_TODO_SECTION = `TASK TRACKING — \`createTodos\` / \`createTodo\` / \`updateTodo\`
 You MUST use todos for ANY request with multiple steps. Call \`createTodos\` ONCE at the start with ALL steps listed, then update each with \`updateTodo\` as you complete it. This gives the user real-time progress — they can see exactly what you're doing. \`createTodo\` (singular) is for adding one-off items mid-task. This is mandatory.`;
@@ -91,6 +93,8 @@ export interface BuildSystemPromptOptions {
   sendsOutGate?: boolean;
   /** A CLI model's side chat sees the main chat's folder line. */
   showFolder?: boolean;
+  /** Approved apps for this chat (none for side chats). Only used with tools. */
+  apps?: AppRecord[];
 }
 
 /** Individual sections of the system prompt, exposed for the Context panel
@@ -111,6 +115,8 @@ export interface SystemPromptSections {
   main?: string | null;
   kb: string | null;
   generativeUi: string | null;
+  /** One line per approved app; null when there are none. */
+  apps?: string | null;
 }
 
 export interface BuildSystemPromptResult {
@@ -220,8 +226,10 @@ export async function buildSystemPrompt(
       ? uiGuideText()
       : null;
 
-  const sections: SystemPromptSections = { base, instructions, persona, skills, tools, folder, memory, compressed, main, kb, generativeUi };
-  const text = [base, instructions, persona, skills, tools, folder, memory, compressed, main, kb, generativeUi]
+  const apps = useTools ? appsPromptSection(opts.apps ?? []) : null;
+
+  const sections: SystemPromptSections = { base, instructions, persona, skills, tools, folder, memory, compressed, main, kb, generativeUi, apps };
+  const text = [base, instructions, persona, skills, tools, folder, memory, compressed, main, kb, generativeUi, apps]
     .filter((s): s is string => Boolean(s))
     .join("\n\n");
 
