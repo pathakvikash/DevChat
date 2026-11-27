@@ -1,6 +1,7 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { prisma } from "@/lib/db";
+import { appFetch } from "@/lib/net/safeFetch";
 
 interface McpTool {
   name: string;
@@ -153,6 +154,7 @@ export async function withMcpClient<T>(
   const req = { signal, timeout: opts.timeoutMs };
   const transport = new StreamableHTTPClientTransport(new URL(url), {
     requestInit: { headers: { "Content-Type": "application/json", ...opts.headers } },
+    fetch: appFetch,
   });
   const client = new Client({ name: "orrery-apps-client", version: "1.0.0" }, { capabilities: {} });
   try {

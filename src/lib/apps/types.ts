@@ -4,6 +4,9 @@ import { z } from "zod";
 export const RESULT_TYPES = ["table", "timeseries", "ohlc", "model3d", "job", "link"] as const;
 export type ResultType = (typeof RESULT_TYPES)[number];
 
+/** A request that conflicts with stored state (HTTP 409). */
+export class ConflictError extends Error {}
+
 export type AppPermission = "read" | "actions";
 export type AppAuth = "none" | "orrery-jwt";
 

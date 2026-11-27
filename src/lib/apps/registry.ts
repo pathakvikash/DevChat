@@ -2,6 +2,7 @@ import { randomBytes } from "node:crypto";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
 import { withMcpClient } from "@/lib/mcp/client";
+import { appFetch } from "@/lib/net/safeFetch";
 import { decryptValue, encryptValue } from "@/lib/settings";
 import { fetchManifest } from "./manifest";
 import { signAppToken } from "./token";
@@ -12,6 +13,7 @@ import {
   type AppRecord,
   type AppRegistry,
   type AppTool,
+  ConflictError,
   type JobStatus,
   type OrreryResult,
 } from "./types";
@@ -148,6 +150,8 @@ async function liveToolsOrEmpty(m: AppManifest, email: string, secret: string): 
 export async function registerApp(url: string, ownerUserId: string, ownerEmail: string): Promise<{ app: AppRecord; secret: string | null }> {
   const { manifest } = await fetchManifest(url);
   const existing: AppRow | null = await db.app.findUnique({ where: { id: manifest.id } });
+  if (existing && new URL(existing.baseUrl).origin !== new URL(manifest.baseUrl).origin)
+    throw new ConflictError(`App "${manifest.id}" is already registered at ${new URL(existing.baseUrl).origin}. Remove it first to register it at a different origin.`);
   const secret = existing ? decryptValue(existing.secretEnc) : randomBytes(32).toString("base64url");
   const tools = await liveToolsOrEmpty(manifest, ownerEmail, secret);
   const data = {
@@ -169,7 +173,9 @@ export async function registerApp(url: string, ownerUserId: string, ownerEmail: 
 
 const toolKey = (tools: AppTool[]) => tools.map((t) => `${t.name}:${t.readOnly}`).sort().join(",");
 
-/** Re-fetch manifest and tools. A changed origin, permission or tool set sets approved=false until the owner re-approves. */
+const linksKey = (l: Record<string, string> | undefined) => JSON.stringify(Object.entries(l ?? {}).sort(([a], [b]) => (a < b ? -1 : 1)));
+
+/** Re-fetch manifest and tools. A changed origin, permission, auth, sso path, deep links or tool set sets approved=false until the owner re-approves. */
 export async function refreshApp(id: string, ownerEmail: string): Promise<{ app: AppRecord; changed: string[] } | null> {
   const row: AppRow | null = await db.app.findUnique({ where: { id } });
   if (!row) return null;
@@ -180,6 +186,11 @@ export async function refreshApp(id: string, ownerEmail: string): Promise<{ app:
   const changed: string[] = [];
   if (new URL(manifest.baseUrl).origin !== new URL(row.baseUrl).origin || new URL(manifest.mcp.url).origin !== new URL(row.mcpUrl).origin) changed.push("origin");
   if (manifest.permission !== row.permission) changed.push("permission");
+  let old: Partial<AppManifest> = {};
+  try { old = JSON.parse(row.manifestJson); } catch {}
+  if (manifest.auth !== row.auth) changed.push("auth");
+  if (manifest.sso?.path !== old.sso?.path) changed.push("sso");
+  if (linksKey(manifest.deepLinks) !== linksKey(old.deepLinks)) changed.push("deepLinks");
   if (tools && toolKey(tools) !== toolKey(parseTools(row.toolsJson))) changed.push("tools");
   const updated: AppRow = await db.app.update({
     where: { id },
@@ -252,8 +263,8 @@ export async function openAppFile(appId: string, email: string, name: string, si
   const url = new URL("/api/orrery/file", row.baseUrl);
   url.searchParams.set("name", name);
   const headers = await authHeaders(m, email, decryptValue(row.secretEnc));
-  // redirect: "manual" keeps the signed bearer on the app's origin.
-  return fetch(url, { headers, redirect: "manual", signal: AbortSignal.any([AbortSignal.timeout(CALL_TIMEOUT_MS), ...(signal ? [signal] : [])]) });
+  // appFetch: redirect "error" keeps the signed bearer on the app's origin; production also blocks private hosts.
+  return appFetch(url, { headers, signal: AbortSignal.any([AbortSignal.timeout(CALL_TIMEOUT_MS), ...(signal ? [signal] : [])]) });
 }
 
 function capText(s: string): string {

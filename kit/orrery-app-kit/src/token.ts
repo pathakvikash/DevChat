@@ -79,6 +79,7 @@ export function verifyOrreryToken(authorizationHeader: string | null | undefined
   if (!m) throw new OrreryAuthError("missing bearer token");
   if (!o.secret) throw new OrreryAuthError("app secret not configured");
   const c = verifyJwt(m[1], o);
+  if (c.purpose !== undefined) throw new OrreryAuthError("handoff token cannot be used as a service token");
   if (o.jtiStore?.seen(c.jti as string)) throw new OrreryAuthError("token already used");
   return { email: c.sub as string, jti: c.jti as string };
 }

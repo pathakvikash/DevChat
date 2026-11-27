@@ -72,15 +72,30 @@ const guardedLookup: typeof dnsLookup = ((host: string, options: { all?: boolean
   });
 }) as unknown as typeof dnsLookup;
 
-/** Early, friendly refusal. The connection re-checks in guardedLookup, which is the check that counts. */
-async function assertPublicUrl(u: URL): Promise<void> {
-  if (u.protocol !== "http:" && u.protocol !== "https:") throw new SafeFetchError(`Only http and https URLs are allowed, not ${u.protocol}`);
-  const host = u.hostname.replace(/^\[|\]$/g, "");
+/** Throws SafeFetchError unless the hostname is a literal public IP or resolves only to public addresses. */
+export async function assertPublicHost(hostname: string): Promise<void> {
+  const host = hostname.replace(/^\[|\]$/g, "");
   if (!host || host === "localhost" || host.endsWith(".localhost")) throw new SafeFetchError(PRIVATE);
   // `new URL` already turned decimal and hex forms (http://2130706433/) into dotted IPv4.
   const addrs = isIP(host) ? [host] : (await resolveAll(host)).map((a) => a.address);
   if (addrs.length === 0 || addrs.some(isBlockedIp)) throw new SafeFetchError(PRIVATE);
 }
+
+/** Early, friendly refusal. The connection re-checks in guardedLookup, which is the check that counts. */
+async function assertPublicUrl(u: URL): Promise<void> {
+  if (u.protocol !== "http:" && u.protocol !== "https:") throw new SafeFetchError(`Only http and https URLs are allowed, not ${u.protocol}`);
+  await assertPublicHost(u.hostname);
+}
+
+/**
+ * `fetch` for calls to registered apps (MCP transport, file proxy): never follows redirects (the signed bearer must
+ * stay on the pinned origin) and, in production, refuses private/loopback/link-local hosts. Development keeps
+ * localhost apps working. ponytail: resolve-then-fetch, so a DNS rebind between the check and the connect is not covered.
+ */
+export const appFetch: typeof fetch = async (input, init) => {
+  if (process.env.NODE_ENV === "production") await assertPublicHost(new URL(input instanceof Request ? input.url : String(input)).hostname);
+  return fetch(input, { ...init, redirect: "error" });
+};
 
 export interface SafeFetchOptions {
   headers?: Record<string, string>;

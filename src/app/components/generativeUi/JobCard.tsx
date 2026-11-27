@@ -48,7 +48,7 @@ export default function JobCard({ appId, jobId, statusTool, title, pollMs }: Pro
       if (stopped) return;
       ac = new AbortController();
       try {
-        const res = await fetch(url, { credentials: "include", signal: ac.signal });
+        const res = await fetch(url, { credentials: "include", headers: { "X-Orrery-Job": "1" }, signal: ac.signal });
         if (!res.ok) throw new Error(`Status check failed (${res.status})`);
         const status = (await res.json()) as JobStatus;
         if (stopped) return;

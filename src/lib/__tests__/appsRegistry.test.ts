@@ -11,6 +11,7 @@ const fetchManifest = vi.hoisted(() => vi.fn());
 vi.mock("@/lib/apps/manifest", () => ({ fetchManifest: (...a: unknown[]) => fetchManifest(...a) }));
 
 import { callAppTool, listAppTools, previewApp, refreshApp, registerApp, shapeResult, MAX_TEXT_BYTES } from "@/lib/apps/registry";
+import { ConflictError } from "@/lib/apps/types";
 import { decryptValue, encryptValue } from "@/lib/settings";
 
 const manifest = {
@@ -112,7 +113,30 @@ describe("registerApp", () => {
   });
 });
 
+describe("registerApp origin change", () => {
+  it("refuses a different origin for an existing id (409)", async () => {
+    const other = { ...manifest, baseUrl: "https://evil.example.com", mcp: { url: "https://evil.example.com/api/mcp" } };
+    fetchManifest.mockResolvedValue({ manifest: other, origin: other.baseUrl });
+    app.findUnique.mockResolvedValue(row());
+    await expect(registerApp("https://evil.example.com", "u1", "o@x.co")).rejects.toBeInstanceOf(ConflictError);
+    expect(app.update).not.toHaveBeenCalled();
+  });
+});
+
 describe("refreshApp", () => {
+  it.each([
+    ["auth", { auth: "none" }, "auth"],
+    ["sso path", { sso: { path: "/sso" } }, "sso"],
+    ["deep links", { deepLinks: { home: "/x" } }, "deepLinks"],
+  ])("un-approves when %s changes", async (_n, over, key) => {
+    app.findUnique.mockResolvedValue(row());
+    mcp({ list: () => ({ tools: wireTools }) });
+    fetchManifest.mockResolvedValue({ manifest: { ...manifest, ...over }, origin: manifest.baseUrl });
+    const r = await refreshApp("printpro3d", "o@x.co");
+    expect(r!.changed).toContain(key);
+    expect(app.update.mock.calls[0][0].data.approved).toBe(false);
+  });
+
   it("un-approves when the tool set changes", async () => {
     fetchManifest.mockResolvedValue({ manifest, origin: manifest.baseUrl });
     app.findUnique.mockResolvedValue(row());

@@ -3,6 +3,7 @@ import { prisma } from "@/lib/db";
 import { requireUserId, UnauthorizedError } from "@/lib/auth";
 import { canUseHostTools } from "@/lib/hostAccess";
 import { ManifestError } from "./manifest";
+import { ConflictError } from "./types";
 
 /** Runs a route body for the signed-in user (401 otherwise). Errors become plain JSON; manifest problems are the caller's 400. */
 export async function withUser(body: (u: { userId: string; email: string }) => Promise<Response>): Promise<Response> {
@@ -17,6 +18,7 @@ export async function withUser(body: (u: { userId: string; email: string }) => P
     const user = await prisma.user.findUnique({ where: { id: userId }, select: { email: true } });
     return await body({ userId, email: user?.email ?? "" });
   } catch (e) {
+    if (e instanceof ConflictError) return NextResponse.json({ error: e.message }, { status: 409 });
     if (e instanceof ManifestError) return NextResponse.json({ error: e.message }, { status: 400 });
     console.error("[apps]", e);
     return NextResponse.json({ error: "Something went wrong. Try again." }, { status: 500 });

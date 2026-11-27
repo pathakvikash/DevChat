@@ -39,7 +39,7 @@ const app = {
   baseUrl: "https://pp.example.com",
   ssoPath: "/sso",
   deepLinks: { quote: "/quote?file={file}" },
-  tools: [{ name: "status", readOnly: true }],
+  tools: [{ name: "status", readOnly: true }, { name: "order", readOnly: false }],
   goodFor: "g",
   permission: "read",
   capabilities: [],
@@ -95,6 +95,12 @@ describe("owner routes", () => {
     expect(h.registerApp).toHaveBeenCalledWith("https://pp.example.com", "u1", "me@x.co");
   });
 
+  it("turns a re-register conflict into a 409", async () => {
+    const { ConflictError } = await import("@/lib/apps/types");
+    h.registerApp.mockRejectedValue(new ConflictError("remove it first"));
+    expect((await register(req("/api/apps", json({ url: "https://x", approve: true })))).status).toBe(409);
+  });
+
   it("turns a manifest problem into a 400", async () => {
     h.previewApp.mockRejectedValue(new ManifestError("baseUrl must be on https://x"));
     const res = await preview(req("/api/apps/preview", json({ url: "https://x" })));
@@ -140,6 +146,15 @@ describe("buildGoUrl", () => {
     await expect(buildGoUrl(app, "quote", null, token)).rejects.toThrow(/Missing param/);
     await expect(buildGoUrl(app, "quote", "[1]", token)).rejects.toThrow(/JSON object/);
   });
+  it.each([null, "home"])("opens the app root for link=%s when there is no home deep link", async (link) => {
+    expect(await buildGoUrl({ ...app, ssoPath: undefined }, link, null, token)).toBe("https://pp.example.com/");
+    const sso = new URL(await buildGoUrl(app, link, null, token));
+    expect(sso.origin + sso.pathname).toBe("https://pp.example.com/sso");
+    expect(sso.searchParams.get("next")).toBe("/");
+  });
+  it("uses the manifest's own home link when it has one", async () => {
+    expect(await buildGoUrl({ ...app, ssoPath: undefined, deepLinks: { home: "/start" } }, "home", null, token)).toBe("https://pp.example.com/start");
+  });
   it("ignores prototype keys as link names", async () => {
     await expect(buildGoUrl(app, "constructor", null, token)).rejects.toThrow(/Unknown link/);
   });
@@ -147,15 +162,21 @@ describe("buildGoUrl", () => {
 
 describe("GET /api/apps/[id]/jobs/[jobId]", () => {
   const c = ctx({ id: "pp", jobId: "j1" });
-  it("calls the app's own status tool with the jobId", async () => {
+  const H = { headers: { "X-Orrery-Job": "1" } };
+  it("calls the app's own read-only status tool with the jobId", async () => {
     h.callAppTool.mockResolvedValue({ text: "", job: { state: "running", progress: 5 } });
-    const res = await job(req("/x?tool=status"), c);
+    const res = await job(req("/x?tool=status", H), c);
     expect(await res.json()).toEqual({ state: "running", progress: 5 });
     expect(h.callAppTool.mock.calls[0].slice(0, 5)).toEqual(["u1", "me@x.co", "pp", "status", { jobId: "j1" }]);
   });
-  it("404s a tool that is not one of the app's tools", async () => {
-    expect((await job(req("/x?tool=deleteEverything"), c)).status).toBe(404);
-    expect((await job(req("/x"), c)).status).toBe(404);
+  it("400s a tool that is unknown or not read-only", async () => {
+    expect((await job(req("/x?tool=deleteEverything", H), c)).status).toBe(400);
+    expect((await job(req("/x?tool=order", H), c)).status).toBe(400);
+    expect((await job(req("/x", H), c)).status).toBe(400);
+    expect(h.callAppTool).not.toHaveBeenCalled();
+  });
+  it("400s without the X-Orrery-Job header", async () => {
+    expect((await job(req("/x?tool=status"), c)).status).toBe(400);
     expect(h.callAppTool).not.toHaveBeenCalled();
   });
 });

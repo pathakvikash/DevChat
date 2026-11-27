@@ -63,6 +63,15 @@ describe("verifyOrreryToken", () => {
   });
 });
 
+describe("token purpose", () => {
+  it("rejects a handoff token used as a service token", () => {
+    expect(() => verifyOrreryToken(bearer(mint({ purpose: "sso" })), opts)).toThrow(/service token/);
+  });
+  it("rejects a service token used as a handoff token", () => {
+    expect(() => verifyHandoffToken(mint({ purpose: "other" }), opts)).toThrow(/purpose/);
+  });
+});
+
 describe("handoff + sso", () => {
   it("requires purpose sso and single use", () => {
     expect(() => verifyHandoffToken(mint(), opts)).toThrow(/purpose/);

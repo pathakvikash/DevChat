@@ -14,7 +14,8 @@ export async function buildGoUrl(
   token: () => Promise<string>,
 ): Promise<string> {
   let path = "/";
-  if (link) {
+  // `home` falls back to the app's root unless the manifest defines its own `home` link.
+  if (link && !(link === "home" && !Object.hasOwn(app.deepLinks, "home"))) {
     const tpl = Object.hasOwn(app.deepLinks, link) ? app.deepLinks[link] : undefined;
     if (!tpl) throw new GoError("Unknown link");
     let params: Record<string, unknown> = {};

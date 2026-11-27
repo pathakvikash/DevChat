@@ -101,7 +101,7 @@ async def mcp(req: Request, authorization: str | None = Header(None)):
     return {"jsonrpc": "2.0", "id": m["id"], "error": {"code": -32601, "message": "Method not found"}}
 ```
 
-(Add `from fastapi import Response`.) For SSO, verify the `?token=` the same way, also require `purpose == "sso"`, reject a reused `jti`, set your own session cookie, and redirect to `next` only if it starts with a single `/`.
+(Add `from fastapi import Response`.) For SSO, verify the `?token=` the same way, also require `purpose == "sso"` (and reject any service token that carries a `purpose` claim), reject a reused `jti`, set your own session cookie, and redirect to `next` only if it starts with a single `/`.
 
 ## Register in Orrery
 
