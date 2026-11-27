@@ -35,6 +35,14 @@ test("a live candle chart shows the Live badge, updates in place, and pauses", a
   });
   expect(seeded.ok()).toBeTruthy();
 
+  // Only Orrery's own app-result save keeps (and signs) `refresh`; the artifact API strips it from anything a client
+  // or the model writes. So the page is shown the artifact as the server would return a signed one.
+  await page.route(`**/api/artifacts/${artifactId}`, async (r) => {
+    const json = await (await r.fetch()).json();
+    const content = JSON.stringify({ ...JSON.parse(json.content), app: "trade", refresh: { tool: "klines", args: { symbol: "BTCUSDT" }, everyMs: 2000 } });
+    return r.fulfill({ json: { ...json, content } });
+  });
+
   let calls = 0;
   const bodies: unknown[] = [];
   await page.route("**/api/apps/refresh-result", (r) => {
