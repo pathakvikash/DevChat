@@ -1,8 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-const MODELS = ["workflowRun", "workflow", "dataTable", "trace", "conversation", "memory", "knowledgeBase", "persona", "mcpServer"];
-// Two users' rows per model; deleteMany honours the where filter like the real thing.
-const rows: Record<string, Array<{ userId: string }>> = {};
+const { MODELS, rows } = vi.hoisted(() => ({
+  MODELS: ["workflowRun", "workflow", "dataTable", "trace", "conversation", "memory", "knowledgeBase", "persona", "mcpServer"],
+  // Two users' rows per model; deleteMany honours the where filter like the real thing.
+  rows: {} as Record<string, Array<{ userId: string }>>,
+}));
 vi.mock("@/lib/db", () => {
   const prisma: any = { $transaction: vi.fn((ops: Promise<unknown>[]) => Promise.all(ops)) };
   for (const m of MODELS) {
