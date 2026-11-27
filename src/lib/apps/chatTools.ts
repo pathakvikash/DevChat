@@ -182,10 +182,12 @@ export async function modelResult(
   const wrap = (t: string) => wrapAppText(ctx.appId, ctx.toolName, t);
   if (!structured) return wrap(r.text || "(no output)");
   const body = dataArtifactBody(structured);
-  if (body && ctx.conversationId && valueCount(structured) > INLINE_VALUE_LIMIT) {
+  // A result that can refresh is always saved: the refresh route finds `refresh` in the stored artifact.
+  if (body && ctx.conversationId && (valueCount(structured) > INLINE_VALUE_LIMIT || "refresh" in structured)) {
     const title = ("title" in structured && structured.title) || ("symbol" in structured ? `${structured.symbol} ${structured.interval}` : `${ctx.toolName} result`);
     // The result itself: CandleChart and Chart read symbol, interval and series from it; parseDataArtifact reads it as `body`.
-    const id = await saveDataArtifact(ctx.conversationId, title, JSON.stringify(structured));
+    // `app` is added by Orrery (never by the app) so the refresh route knows which app produced the result.
+    const id = await saveDataArtifact(ctx.conversationId, title, JSON.stringify({ ...structured, app: ctx.appId }));
     const hint = structured.type === "ohlc" ? "CandleChart" : structured.type === "table" ? "Table" : "Chart";
     return [
       `Saved ${body.rows.length} rows (columns: ${body.columns.join(", ")}) as data artifact artifactId=${id}. You do not see the rows.`,

@@ -8,6 +8,8 @@ import { catalog } from "./catalog";
 import { parseDataArtifact, type DataArtifactTable, type DataCell } from "./data";
 import Chart from "./Chart";
 import { parseOrreryArtifact, tableResultToData } from "./appData";
+import { useLiveResult } from "@/app/hooks/useLiveResult";
+import LiveBadge from "@/app/components/generativeUi/LiveBadge";
 import CandleChart from "@/app/components/generativeUi/CandleChart";
 import DataTable from "@/app/components/generativeUi/DataTable";
 import JobCard from "@/app/components/generativeUi/JobCard";
@@ -267,11 +269,17 @@ export const { registry } = defineRegistry(catalog, {
     },
     Chart: ({ props }) => {
       const { table, orrery, loading, error } = useArtifactData(props.dataArtifactId);
+      const live = useLiveResult(props.dataArtifactId, orrery?.type === "timeseries" ? orrery.refresh : undefined, "timeseries");
       if (loading) return <DataPending />;
       if (error) return <DataError error={error} />;
       if (orrery?.type === "timeseries") {
         const type = props.type === "area" ? "area" : "line";
-        return <Chart type={type} title={props.title ?? orrery.title} series={orrery.series} />;
+        return (
+          <div ref={live.attach}>
+            {live.enabled && <LiveBadge state={live.state} onToggle={live.toggle} />}
+            <Chart type={type} title={props.title ?? orrery.title} series={live.data?.series ?? orrery.series} />
+          </div>
+        );
       }
       if (orrery) return <DataError error={new Error("This artifact is not a timeseries")} />;
       const data = table
