@@ -116,22 +116,40 @@ export function toolWarnings(m: Pick<AppManifest, "permission" | "auth">, tools:
   return w;
 }
 
-/** Fetch the manifest and list tools; stores nothing. Without a secret yet, tools are listed unsigned. */
+const isAuthRefusal = (e: unknown): boolean => {
+  const code = (e as { code?: unknown })?.code;
+  const msg = e instanceof Error ? e.message : String(e);
+  return code === 401 || code === 403 || (e as Error)?.name === "UnauthorizedError" || /unauthori[sz]ed|forbidden|\b40[13]\b/i.test(msg);
+};
+
+/**
+ * Fetch the manifest and list tools; stores nothing. A new app has no secret yet, so its tools are listed unsigned and
+ * `toolsUnavailable` is set when it refuses. An app already registered at the same origin is listed signed, so
+ * re-reviewing it after a change shows the real tools. The signed token never goes to a different origin.
+ */
 export async function previewApp(url: string, ownerEmail: string) {
-  void ownerEmail;
   const { manifest, origin } = await fetchManifest(url);
   const warnings: string[] = [];
   let tools: AppTool[] = [];
-  try {
-    tools = await listLive(manifest.mcp.url, {});
-  } catch (e) {
-    warnings.push(
-      manifest.auth === "orrery-jwt"
-        ? "Could not list tools before the app has its secret; they are listed after registration (use Refresh once ORRERY_APP_SECRET is set)."
-        : `Could not list tools: ${e instanceof Error ? e.message : String(e)}`,
-    );
+  let toolsUnavailable = false;
+  const existing: AppRow | null = manifest.auth === "orrery-jwt" ? await db.app.findUnique({ where: { id: manifest.id } }) : null;
+  let headers: Record<string, string> = {};
+  if (existing && new URL(existing.baseUrl).origin === new URL(manifest.baseUrl).origin) {
+    // A secret that cannot be decrypted falls back to the unsigned preview instead of failing the whole preview.
+    try {
+      headers = await authHeaders(manifest, ownerEmail, decryptValue(existing.secretEnc));
+    } catch {
+      headers = {};
+    }
   }
-  return { manifest, origin, tools, warnings: [...warnings, ...(tools.length ? toolWarnings(manifest, tools) : [])] };
+  try {
+    tools = await listLive(manifest.mcp.url, headers);
+  } catch (e) {
+    warnings.push(`Could not list tools: ${e instanceof Error ? e.message : String(e)}`);
+    // Only an auth refusal means "needs a signed request"; a timeout or a 500 is shown as the warning alone.
+    toolsUnavailable = manifest.auth === "orrery-jwt" && isAuthRefusal(e);
+  }
+  return { manifest, origin, tools, toolsUnavailable, warnings: [...warnings, ...(tools.length ? toolWarnings(manifest, tools) : [])] };
 }
 
 async function liveToolsOrEmpty(m: AppManifest, email: string, secret: string): Promise<AppTool[] | null> {

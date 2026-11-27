@@ -103,8 +103,8 @@ Apps serve files (STL) at `GET {baseUrl}/api/orrery/file?name=<file>` with the s
 ## Decisions made while building the backend
 
 - `permission: "read"` is enforced: `callAppTool` refuses a tool not marked `readOnly` on a read app (preview only warns). Tool names must be in the cached tool list.
-- `POST /api/apps` for an existing id re-approves and keeps the secret (`secret: null`); a new id returns the secret once. `GET /api/apps` includes `approved` only for the owner, who also sees unapproved apps so they can re-approve after a refresh.
-- Preview of an `orrery-jwt` app lists tools unsigned (no secret exists yet) and warns if the app refuses; register then lists with the new secret, falling back to unsigned, and the owner presses Refresh after setting `ORRERY_APP_SECRET`.
+- `POST /api/apps` for an existing id re-approves and keeps the secret (`secret: null`); a new id returns the secret once. `GET /api/apps` includes `approved` and `tools` only for the owner, and `?all=1` (owner only) also lists unapproved apps so they can re-approve after a refresh; without it, and for everyone else, only approved apps come back.
+- Preview of an `orrery-jwt` app lists tools unsigned (no secret exists yet) and sets `toolsUnavailable` if the app refuses (the card then says tools are listed after approval); an app already registered at the same origin is previewed signed; register then lists with the new secret, falling back to unsigned, and the owner presses Refresh after setting `ORRERY_APP_SECRET`.
 - `/jobs/[jobId]?tool=<statusTool>`: the tool must be a read-only tool of the app and `X-Orrery-Job: 1` must be sent; it is called with `{ jobId }`.
 - Owner = `canUseHostTools` (OWNER_EMAILS; unset means everyone in development, no one in production).
 - Localhost apps (http, dev only) skip safeFetch's private-address block for the manifest; MCP and file calls use plain fetch against the origin pinned at registration.

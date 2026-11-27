@@ -88,6 +88,72 @@ describe("previewApp", () => {
   });
 });
 
+describe("previewApp with a token-protected app", () => {
+  const refuse = () => new Error("401 Unauthorized");
+
+  it("says tools are unavailable (not an empty list) when a new orrery-jwt app refuses the unsigned call", async () => {
+    fetchManifest.mockResolvedValue({ manifest, origin: manifest.baseUrl });
+    app.findUnique.mockResolvedValue(null);
+    mcp({ list: refuse });
+    const r = await previewApp("https://pp.example.com", "o@x.co");
+    expect(r.toolsUnavailable).toBe(true);
+    expect(r.tools).toEqual([]);
+    expect(r.warnings).toContain("Could not list tools: 401 Unauthorized");
+    expect(mcp.lastHeaders).toEqual({});
+  });
+
+  it.each([["timeout", "The operation was aborted due to timeout"], ["server error", "Streamable HTTP error: 500 Internal Server Error"]])(
+    "a %s is shown as a warning, not as 'requires a signed request'",
+    async (_n, msg) => {
+      fetchManifest.mockResolvedValue({ manifest, origin: manifest.baseUrl });
+      app.findUnique.mockResolvedValue(null);
+      mcp({ list: () => new Error(msg) });
+      const r = await previewApp("https://pp.example.com", "o@x.co");
+      expect(r.toolsUnavailable).toBe(false);
+      expect(r.warnings).toContain(`Could not list tools: ${msg}`);
+    },
+  );
+
+  it("falls back to the unsigned preview when the stored secret cannot be decrypted", async () => {
+    fetchManifest.mockResolvedValue({ manifest, origin: manifest.baseUrl });
+    app.findUnique.mockResolvedValue(row({ secretEnc: `enc:v1:${Buffer.alloc(40, 1).toString("base64")}` }));
+    mcp({ list: () => ({ tools: wireTools }) });
+    const r = await previewApp("https://pp.example.com", "o@x.co");
+    expect(r.tools).toHaveLength(2);
+    expect(mcp.lastHeaders).toEqual({});
+  });
+
+  it("lists tools signed for an app already registered at the same origin", async () => {
+    fetchManifest.mockResolvedValue({ manifest, origin: manifest.baseUrl });
+    app.findUnique.mockResolvedValue(row());
+    mcp({ list: () => ({ tools: wireTools }) });
+    const r = await previewApp("https://pp.example.com", "o@x.co");
+    expect(r.toolsUnavailable).toBe(false);
+    expect(r.tools).toHaveLength(2);
+    expect(mcp.lastHeaders!.Authorization).toMatch(/^Bearer /);
+  });
+
+  it("never sends the signed token to a different origin", async () => {
+    const other = { ...manifest, baseUrl: "https://evil.example.com", mcp: { url: "https://evil.example.com/api/mcp" } };
+    fetchManifest.mockResolvedValue({ manifest: other, origin: other.baseUrl });
+    app.findUnique.mockResolvedValue(row());
+    mcp({ list: () => ({ tools: wireTools }) });
+    await previewApp("https://evil.example.com", "o@x.co");
+    expect(mcp.lastHeaders).toEqual({});
+  });
+
+  it("after registration the first signed refresh shows the real tools and un-approves for re-approval", async () => {
+    fetchManifest.mockResolvedValue({ manifest, origin: manifest.baseUrl });
+    app.findUnique.mockResolvedValue(row({ toolsJson: "[]", status: "unreachable" }));
+    mcp({ list: () => ({ tools: wireTools }) });
+    const r = await refreshApp("printpro3d", "o@x.co");
+    expect(r!.changed).toEqual(["tools"]);
+    const data = app.update.mock.calls[0][0].data;
+    expect(data.approved).toBe(false);
+    expect(JSON.parse(data.toolsJson).map((t: any) => [t.name, t.readOnly])).toEqual([["search", true], ["order", false]]);
+  });
+});
+
 describe("registerApp", () => {
   it("stores the secret encrypted and returns it once", async () => {
     fetchManifest.mockResolvedValue({ manifest, origin: manifest.baseUrl });

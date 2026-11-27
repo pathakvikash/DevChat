@@ -1,3 +1,7 @@
+import { createServer, type Server } from "node:http";
+import type { AddressInfo } from "node:net";
+import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { test, expect, type Page } from "./fixtures";
 import { createChat, openChat } from "./helpers";
 
@@ -71,4 +75,70 @@ test("the sidebar lists apps and hides the section when there are none", async (
   await page.reload();
   await expect(page.getByRole("button", { name: "Search", exact: true })).toBeVisible();
   await expect(page.getByTestId("sidebar-apps")).toHaveCount(0);
+});
+
+// A real sibling app on localhost (the dev server accepts http://127.0.0.1): manifest plus a stateless MCP endpoint.
+// `requireToken` makes the MCP endpoint answer 401 to unsigned calls, like an `orrery-jwt` app before it has its secret.
+async function startApp(id: string, requireToken: boolean): Promise<{ server: Server; url: string }> {
+  const server = createServer(async (req, res) => {
+    const origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    if (req.url === "/.well-known/orrery-app.json") {
+      res.setHeader("Content-Type", "application/json");
+      return res.end(JSON.stringify({
+        manifestVersion: 1, id, name: `Real ${id}`, baseUrl: origin, description: "A real local app", goodFor: "Tests",
+        mcp: { url: `${origin}/api/mcp` }, auth: requireToken ? "orrery-jwt" : "none", capabilities: [], deepLinks: {}, permission: "read",
+      }));
+    }
+    if (req.url === "/api/mcp") {
+      if (requireToken && !req.headers.authorization) { res.statusCode = 401; return res.end("unauthorized"); }
+      const mcp = new McpServer({ name: id, version: "1.0.0" });
+      mcp.registerTool("lookup", { description: "Look something up", annotations: { readOnlyHint: true } }, async () => ({ content: [{ type: "text", text: "ok" }] }));
+      const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
+      res.on("close", () => { void transport.close(); void mcp.close(); });
+      await mcp.connect(transport);
+      let raw = "";
+      for await (const chunk of req) raw += chunk;
+      return transport.handleRequest(req, res, raw ? JSON.parse(raw) : undefined);
+    }
+    res.statusCode = 404;
+    res.end();
+  });
+  await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
+  return { server, url: `http://127.0.0.1:${(server.address() as AddressInfo).port}` };
+}
+
+test("real /api/apps routes: a registered app lists with its tool count and the page does not crash", async ({ page, request }) => {
+  const upstream = await startApp("e2e-real-app", false);
+  try {
+    await page.goto("/settings/apps");
+    await page.getByLabel("App URL").fill(upstream.url);
+    await page.getByRole("button", { name: "Check app" }).click();
+    const review = page.getByTestId("app-review");
+    await expect(review.getByText("Tools (1)")).toBeVisible();
+    await review.getByRole("button", { name: "Approve and add" }).click();
+    await page.getByTestId("app-secret-box").getByRole("button", { name: "I have saved it" }).click();
+    const row = page.getByTestId("app-row-e2e-real-app");
+    await expect(row).toContainText("1 tool");
+    await page.reload();
+    await expect(page.getByTestId("app-row-e2e-real-app")).toContainText("1 tool");
+  } finally {
+    // Runs even when the test fails, so the app cannot stay registered for later specs.
+    const del = await request.delete("/api/apps/e2e-real-app");
+    expect(del.ok()).toBe(true);
+    upstream.server.close();
+  }
+});
+
+test("real preview: an app that needs a signed request explains how its tools get listed, not Tools (0)", async ({ page }) => {
+  const upstream = await startApp("e2e-signed-app", true);
+  try {
+    await page.goto("/settings/apps");
+    await page.getByLabel("App URL").fill(upstream.url);
+    await page.getByRole("button", { name: "Check app" }).click();
+    const review = page.getByTestId("app-review");
+    await expect(review.getByTestId("tools-unavailable")).toHaveText("This app requires a signed request. Its tools are listed after you register it, set its secret in the app, and press Refresh; you then approve the list.");
+    await expect(review.getByText("Tools (0)")).toHaveCount(0);
+  } finally {
+    upstream.server.close();
+  }
 });
