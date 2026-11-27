@@ -1,6 +1,7 @@
 "use client";
 
 import GoogleConnection from "@/app/components/GoogleConnection";
+import BridgeSettings from "@/app/components/BridgeSettings";
 import { useEffect, useState, useMemo, useRef } from "react";
 import { useSearchParams } from "next/navigation";
 import { Trash2, Save, RotateCcw, Loader2, Cable, Database, ExternalLink, Search, Terminal, Copy, Check, FolderPlus, AppWindow } from "lucide-react";
@@ -611,6 +612,12 @@ export default function SettingsPage() {
                 Folders models may read (or edit in Agent mode). Folders Claude Code has worked in are included automatically.
               </p>
               <FoldersSection />
+            </div>
+
+            {/* Local bridge */}
+            <div className="glass-card rounded-[var(--glass-radius-xl)] p-6">
+              <h2 className="text-xl font-bold mb-3">Local bridge</h2>
+              <BridgeSettings />
             </div>
 
             {/* Google Sheets */}

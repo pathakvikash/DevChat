@@ -813,6 +813,7 @@ export default function ChatInput({
             {onWorkingFolderChange && (
               <div className="min-w-0">
                 <WorkingFolderPicker
+                  conversationId={conversationId}
                   value={workingFolder ?? null}
                   onChange={onWorkingFolderChange}
                   disabled={isLoading}

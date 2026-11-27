@@ -7,6 +7,7 @@ import { isSecretPath } from "@/lib/files/safePath";
 import { loadCtx, refuseReason, secretKind, SECRET_MSG, short } from "@/lib/files/folderRules";
 import { isSanityMode } from "@/lib/sanityMode";
 import { getSettingsKey, setSettingsKey } from "@/lib/settings";
+import { VERCEL_FOLDERS_REFUSED } from "@/lib/bridge/constants";
 
 export type Folder = { path: string; source: "added" | "claude-code" };
 export type Browse = { path: string; parent: string | null; dirs: { name: string; path: string }[]; truncated: boolean };
@@ -18,7 +19,7 @@ const BROWSE_CAP = 500;
 
 const OPEN_SERVER_REFUSED_PROD =
   "Adding folders is off: this server runs in production without OWNER_EMAILS, so anyone signed in could reach any folder. Set OWNER_EMAILS first.";
-const ON_VERCEL_REFUSED = "Working folders only work when Orrery runs on your own machine.";
+const ON_VERCEL_REFUSED = VERCEL_FOLDERS_REFUSED;
 
 const fail = (status: number, error: string) => ({ ok: false as const, status, error });
 // Vercel is never your own machine, so folders stay off there whatever OWNER_EMAILS says.

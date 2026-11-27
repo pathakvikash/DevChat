@@ -3,6 +3,7 @@ import { prisma } from "@/lib/db";
 import { saveUserMessage } from "@/lib/chat/saveUserMessage";
 import { safePersistAssistantMessage } from "@/lib/chat/persistAssistantMessage";
 import { denyOpenApprovals } from "@/lib/utils/messageParts";
+import { BRIDGE_MODEL_PREFIX } from "@/lib/bridge/constants";
 
 /**
  * A "local bridge" turn runs on the user's own machine and never passes through this server, so the
@@ -11,7 +12,7 @@ import { denyOpenApprovals } from "@/lib/utils/messageParts";
  */
 
 export const MAX_BODY_BYTES = 2_000_000;
-export const BRIDGE_MODEL_PREFIX = "claude-code/";
+export { BRIDGE_MODEL_PREFIX };
 
 const id = z.string().min(1).max(128).regex(/^[A-Za-z0-9_.:-]+$/);
 const text = z.string().max(200_000);
@@ -51,7 +52,7 @@ const assistantPart = z.discriminatedUnion("type", [
   dynamicToolPart,
 ]);
 
-const bodySchema = z
+export const bridgeTurnSchema = z
   .object({
     user: z.object({ id, text, parts: z.array(textPart).max(50) }).strict().optional(),
     assistant: z
@@ -70,7 +71,7 @@ export type BridgeSaveResult =
   | { status: 400 | 409 | 500; body: { error: string } };
 
 export async function saveBridgeTurn(conversationId: string, raw: unknown): Promise<BridgeSaveResult> {
-  const parsed = bodySchema.safeParse(raw);
+  const parsed = bridgeTurnSchema.safeParse(raw);
   if (!parsed.success) {
     const issue = parsed.error.issues[0];
     return { status: 400, body: { error: `Invalid bridge turn: ${issue.path.join(".") || "body"}: ${issue.message}` } };

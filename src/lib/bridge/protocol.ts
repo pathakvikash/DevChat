@@ -1,8 +1,10 @@
 import { timingSafeEqual } from "node:crypto";
+import { BRIDGE_PORT, BRIDGE_PROTOCOL } from "./constants";
+
+// The page reads these from ./constants (this file imports node:crypto, so it cannot reach a browser bundle).
+export { BRIDGE_PORT, BRIDGE_PROTOCOL };
 
 // The guard for the local bridge daemon. Pure: no I/O, so it is unit-tested without a socket.
-export const BRIDGE_PORT = 47321;
-export const BRIDGE_PROTOCOL = 1;
 
 export type BridgeRequest = {
   method?: string;

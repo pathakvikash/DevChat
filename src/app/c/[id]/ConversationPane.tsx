@@ -15,6 +15,7 @@ import { isPaneBusy } from "@/lib/splitPanes";
 import ChatMessages from "@/app/components/ChatMessages";
 import MinimapNavigator from "@/app/components/MinimapNavigator";
 import ChatInput from "@/app/components/chatInput";
+import BridgeNotice from "@/app/components/BridgeNotice";
 import Scratchpad from "@/app/components/Scratchpad";
 import ArtifactPanel from "@/app/components/ArtifactPanel";
 import TodoPanel from "@/app/components/TodoPanel";
@@ -509,6 +510,9 @@ export default function ConversationPane({ conversationId, focused, initialPromp
             quote={p.quotes[0]}
             onQuoteRemove={p.removeQuote}
           />
+        )}
+        {!isSub && !isSide && (
+          <BridgeNotice conversationId={conversationId} model={p.conversation.model} saveFailed={p.bridgeSaveFailed} onRetry={() => void p.retryBridgeSave()} />
         )}
         {!isSub && !isSide && (
         <ChatInput
