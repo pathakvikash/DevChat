@@ -11,7 +11,7 @@ import { useSplitViewOptional } from "@/app/c/SplitViewContext";
 import { buildAgentMessagePart, type AgentMessageData } from "@/lib/chat/agentMessages";
 import { AGENT_DELIVERED, AGENT_NOT_OPEN } from "@/lib/utils/agentLink";
 import { setSideQuote, takeSideQuestion, takeSideQuote, usePendingSideQuote } from "@/lib/sideChat";
-import { setStreaming } from "@/lib/streamingState";
+import { setPaneStreaming } from "@/lib/streamingState";
 import { useKeyboardShortcuts } from "@/app/hooks/useKeyboardShortcuts";
 import type { ApprovalAnswer, PlanAnswer } from "@/app/components/ToolAnswers";
 import type { MinimapMessage } from "@/app/components/MinimapNavigator";
@@ -234,8 +234,9 @@ export function useChatPane(conversationId: string, { focused, kind, searchProvi
   // change and is set when a delivery starts a turn, so it is right before React renders `isLoading`.
   const loadingRef = useRef(false);
   useEffect(() => { loadingRef.current = isLoading; }, [isLoading]);
-  useEffect(() => { setStreaming(status === "streaming" || status === "submitted"); }, [status]);
-  useEffect(() => () => setStreaming(false), []);
+  const streamingRef = useRef(false);
+  useEffect(() => { setPaneStreaming(streamingRef, status === "streaming" || status === "submitted"); }, [status]);
+  useEffect(() => { const flag = streamingRef; return () => setPaneStreaming(flag, false); }, []);
   // A user's own send starts this pane's agent count again. Agent messages go through chatSend directly.
   const sendMessage = (...args: Parameters<typeof chatSend>) => {
     split?.resetHop(conversationId);

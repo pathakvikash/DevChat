@@ -10,7 +10,10 @@ export function OrreryMark({
   className = "",
   spinning = true,
   fast,
+  decorative,
 }: {
+  /** Hidden from assistive tech: use where the name "Orrery" is already next to it. */
+  decorative?: boolean;
   size?: number;
   className?: string;
   spinning?: boolean;
@@ -24,8 +27,7 @@ export function OrreryMark({
       width={size}
       height={size}
       viewBox="0 0 22 22"
-      role="img"
-      aria-label="Orrery"
+      {...(decorative ? { "aria-hidden": true } : { role: "img", "aria-label": "Orrery" })}
       className={`shrink-0 rounded-md bg-zinc-900 text-zinc-100 ${className}`}
     >
       <circle cx="11" cy="11" r="6" fill="none" stroke="currentColor" strokeWidth="1.5" />

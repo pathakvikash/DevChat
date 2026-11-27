@@ -17,7 +17,7 @@ export const uiGuideText = () => catalog.prompt({ mode: "inline", customRules: G
 export const GENERATIVE_UI_STUB =
   "You can render tables, charts and forms in the chat. Before writing any ```spec block, call the loadUiGuide tool once and follow its output exactly. Never write a spec without loading the guide first. Plain questions get plain text.";
 
-const UI_KEYWORDS = /\b(table|chart|graph|plot|compare|comparison|visuali[sz]e|dashboard|form|show me|display)\b/i;
+const UI_KEYWORDS = /\b(tables?|charts?|graphs?|plots?|compar(?:e|es|ing|isons?)|visuali[sz](?:e|es|ing)|dashboards?|forms?|show me|display)\b/i;
 
 const partsOf = (m: any): any[] => (Array.isArray(m?.parts) ? m.parts : []);
 const textOf = (m: any): string =>

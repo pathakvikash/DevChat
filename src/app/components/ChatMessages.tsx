@@ -19,7 +19,7 @@ interface ChatMessagesProps {
   onRegenerateMessage?: (messageId: string) => void;
   onOpenArtifact?: (id: string) => void;
   onClarificationAnswer?: (toolCallId: string, answer: string) => void;
-  onUiSubmit?: (text: string) => void;
+  onUiSubmit?: (text: string) => boolean;
   /** Set in Plan mode: offers "Approve plan" under the latest reply when it has no plan card. */
   onApprovePlan?: () => void;
   /** The model can't use tools, so the plan is written out and the button says so. */

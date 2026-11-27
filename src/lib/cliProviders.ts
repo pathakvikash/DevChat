@@ -1376,7 +1376,7 @@ export function createCliModel(def: CliProviderDef, modelArg: string): LanguageM
       return {
         stream: failedStream(
           warnings,
-          `${def.label} needs a working folder: it can read any file on this computer, so DevChat only runs it inside one. Pick a folder for this chat and send again.`,
+          `${def.label} needs a working folder: it can read any file on this computer, so Orrery only runs it inside one. Pick a folder for this chat and send again.`,
         ),
       };
     }

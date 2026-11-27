@@ -28,13 +28,23 @@ export function sanitizeSpec<T extends Spec>(spec: T): T {
 /** State paths bound (`$bindState`) by rendered Input/Checkbox/Select elements: the only values a submit may send. */
 export function boundFieldPaths(spec: Spec | null | undefined): string[] {
   const paths = new Set<string>();
-  for (const el of Object.values(spec?.elements ?? {})) {
-    if (!el.type || !FIELD_TYPES.has(el.type)) continue;
-    for (const key of BOUND_PROPS) {
-      const p = el.props?.[key]?.$bindState;
-      if (typeof p === "string" && p.startsWith("/")) paths.add(p);
+  const elements = spec?.elements ?? {};
+  const seen = new Set<string>();
+  // Only what is reachable from the root and not hidden by a literal `visible: false` is rendered.
+  const walk = (id: unknown) => {
+    if (typeof id !== "string" || seen.has(id)) return;
+    seen.add(id);
+    const el = elements[id];
+    if (!el || el.visible === false) return;
+    if (el.type && FIELD_TYPES.has(el.type)) {
+      for (const key of BOUND_PROPS) {
+        const p = el.props?.[key]?.$bindState;
+        if (typeof p === "string" && p.startsWith("/")) paths.add(p);
+      }
     }
-  }
+    if (Array.isArray(el.children)) el.children.forEach(walk);
+  };
+  walk(spec?.root);
   return [...paths];
 }
 

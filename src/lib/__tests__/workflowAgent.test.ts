@@ -117,7 +117,7 @@ describe("agent card", () => {
     const { calls } = scripted([block({ score: 1, status: "skip", remote: false, tags: [], why: "x" })]);
     await agentCard.run(itemCtx());
     expect(calls[0].system).toBe(workflowSystemPrompt(fields));
-    expect(calls[0].system).toContain("You are one step in a DevChat workflow");
+    expect(calls[0].system).toContain("You are one step in a Orrery workflow");
     expect(calls[0].system).toContain("- status (one of: shortlist, skip): decision");
     const user = JSON.stringify(calls[0].prompt);
     expect(user).toContain("Score ```\\nA\\n```"); // item values in instructions are fenced

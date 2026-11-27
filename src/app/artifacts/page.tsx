@@ -30,17 +30,23 @@ function ago(iso: string) {
 export default function ArtifactsPage() {
   const [items, setItems] = useState<ArtifactRow[] | null>(null);
   const [q, setQ] = useState("");
+  const [failed, setFailed] = useState(false);
+  const [attempt, setAttempt] = useState(0);
 
   useEffect(() => {
     const ctl = new AbortController();
     const t = setTimeout(async () => {
       try {
         const res = await fetch(`/api/artifacts?q=${encodeURIComponent(q)}`, { signal: ctl.signal });
-        if (res.ok) setItems((await res.json()).artifacts);
-      } catch {}
+        if (!res.ok) throw new Error(String(res.status));
+        setItems((await res.json()).artifacts);
+        setFailed(false);
+      } catch {
+        if (!ctl.signal.aborted) setFailed(true);
+      }
     }, q ? 200 : 0);
     return () => { clearTimeout(t); ctl.abort(); };
-  }, [q]);
+  }, [q, attempt]);
 
   return (
     <AppShell>
@@ -62,7 +68,20 @@ export default function ArtifactsPage() {
               className="w-full glass-input rounded-[var(--glass-radius-md)] pl-9 pr-3 py-2 text-sm"
             />
           </div>
-          {items === null ? null : items.length === 0 ? (
+          {failed ? (
+            <div role="alert" className="py-12 text-center text-sm text-zinc-400">
+              <p className="mb-3">Couldn&apos;t load artifacts.</p>
+              <button
+                type="button"
+                onClick={() => { setFailed(false); setItems(null); setAttempt((n) => n + 1); }}
+                className="glass-button rounded-[var(--glass-radius-md)] px-3 py-1.5 text-sm text-[var(--foreground)]"
+              >
+                Retry
+              </button>
+            </div>
+          ) : items === null ? (
+            <p className="text-zinc-500 text-sm py-12 text-center">Loading...</p>
+          ) : items.length === 0 ? (
             <p className="text-zinc-500 text-sm py-12 text-center">
               {q ? "No artifacts match your search." : "No artifacts yet. Ask the model to build something and it will show up here."}
             </p>

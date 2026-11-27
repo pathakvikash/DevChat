@@ -76,7 +76,7 @@ test("The sidebar lists a fork right under its parent, indented", async ({ page,
   await expect(forkRow).toHaveAttribute("data-depth", "1");
   await expect(parentRow).toHaveAttribute("data-depth", "0");
   // The fork is newer, so without nesting it would sit above its parent.
-  const next = parentRow.locator("xpath=following-sibling::*[1]");
+  const next = parentRow.locator("xpath=../following-sibling::*[1]/*[@data-depth]");
   await expect(next).toHaveAttribute("data-depth", "1");
   await expect(next.getByRole("link")).toHaveAttribute("href", `/c/${forkId}`);
   const [p, f] = await Promise.all([parentRow.boundingBox(), forkRow.boundingBox()]);

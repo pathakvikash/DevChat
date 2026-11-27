@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { createContext, useContext, useState } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { Check } from "lucide-react";
 import { defineRegistry, useBoundProp } from "@json-render/react";
@@ -61,17 +61,25 @@ function tableFrom(t: DataArtifactTable, columns: string[] | null) {
   };
 }
 
+/** Set by the submit handler: true only when a submit really went out. */
+export const SubmitOutcomeContext = createContext<{ reset: () => void; sent: () => boolean }>({
+  reset: () => {},
+  sent: () => false,
+});
+
 /** A button with a handler is a one-shot submit: after the press it reads "Sent" and stays disabled. */
 function SubmitButton({ label, secondary, emit, bound }: { label: string; secondary: boolean; emit: (e: string) => void; bound: boolean }) {
   const [sent, setSent] = useState(false);
   const reduce = useReducedMotion();
+  const outcome = useContext(SubmitOutcomeContext);
   return (
     <button
-      aria-label={label}
       disabled={sent}
-      onClick={() => {
-        emit("press");
-        if (bound) setSent(true);
+      onClick={async () => {
+        outcome.reset();
+        // emit is async at runtime (the handler is awaited) though typed void.
+        await (emit("press") as unknown as Promise<void>);
+        if (bound && outcome.sent()) setSent(true);
       }}
       className={`px-3 py-1.5 rounded-[var(--glass-radius-md)] text-sm font-medium transition-all border disabled:cursor-default ${
         secondary ? "glass-button text-zinc-300" : "glass-button-primary text-white"

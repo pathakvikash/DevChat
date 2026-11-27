@@ -52,10 +52,10 @@ export { appOrigin } from "./appOrigin";
 export function buildConnectScript(origin: string): string {
   const providers = PROVIDERS.map(({ id, label, envKey }) => ({ id, label, envKey }));
   return `#!/usr/bin/env node
-// DevChat "connect this computer" — finds API keys that tools on this machine
+// Orrery "connect this computer" — finds API keys that tools on this machine
 // already store (Codex CLI, Claude Code, Gemini CLI, OpenCode, bb, shell
 // profiles), asks you about each one, and sends ONLY the ones you approve to
-// your DevChat account at ${origin}. OAuth logins are never read.
+// your Orrery account at ${origin}. OAuth logins are never read.
 //
 //   node connect.js <pairing-code>          ask about each key
 //   node connect.js <pairing-code> --yes    import everything found
@@ -159,7 +159,7 @@ if (list) process.exit(0);
   });
   const body = await res.json().catch(() => ({}));
   if (!res.ok) { console.error("Failed: " + (body.error || ("HTTP " + res.status))); process.exit(1); }
-  console.log("Imported into DevChat: " + (body.imported || []).join(", ") + "\\nGo back to the browser; Settings will pick them up.");
+  console.log("Imported into Orrery: " + (body.imported || []).join(", ") + "\\nGo back to the browser; Settings will pick them up.");
 })().catch((e) => { console.error(e && e.message ? e.message : e); process.exit(1); });
 `;
 }

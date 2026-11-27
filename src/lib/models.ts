@@ -519,7 +519,7 @@ export function getModel(modelId: string, creds: ProviderCreds = {}, hostTools =
   const cliDef = cliProviderForModel(modelId);
   if (cliDef) {
     if (!detectionAvailable()) {
-      throw new Error(`${cliDef.label} is only available when DevChat runs on your own machine`);
+      throw new Error(`${cliDef.label} is only available when Orrery runs on your own machine`);
     }
     if (!hostTools) throw new Error(`${cliDef.label} is only available to the server's owner`);
     const upstreamId = bareModelId(modelId);

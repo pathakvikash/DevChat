@@ -70,7 +70,9 @@ describe("generative UI submit action", () => {
 
   it("sends only values bound by rendered inputs, read from state, never literals", () => {
     const spec = {
+      root: "r",
       elements: {
+        r: { type: "Stack", children: ["i", "k", "t"] },
         i: { type: "Input", props: { value: { $bindState: "/form/name" } } },
         k: { type: "Checkbox", props: { checked: { $bindState: "/form/ok" } } },
         t: { type: "Text", props: { content: { $bindState: "/form/secret" } } },
@@ -81,6 +83,22 @@ describe("generative UI submit action", () => {
     const state = { form: { name: "Ann", ok: true, secret: "no", injected: "attacker text" } };
     expect(composeUiSubmit(boundValues(state, paths))).toBe("Form submitted:\nform.name: Ann\nform.ok: true");
     expect(composeUiSubmit(boundValues({}, paths))).toBeNull();
+  });
+
+  it("ignores inputs that are orphaned or hidden by visible: false", () => {
+    const input = (p: string, extra = {}) => ({ type: "Input", props: { value: { $bindState: p } }, ...extra });
+    const spec = {
+      root: "r",
+      elements: {
+        r: { type: "Stack", children: ["shown", "hidden", "wrap"] },
+        shown: input("/a"),
+        hidden: input("/b", { visible: false }),
+        wrap: { type: "Stack", visible: false, children: ["inner"] },
+        inner: input("/c"),
+        orphan: input("/d"),
+      },
+    };
+    expect(boundFieldPaths(spec)).toEqual(["/a"]);
   });
 
   it("the submit action takes no params", () => {

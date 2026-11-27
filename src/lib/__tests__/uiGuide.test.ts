@@ -20,6 +20,8 @@ describe("shouldInlineUiGuide", () => {
   it("matches visual keywords in the latest user message", () => {
     expect(shouldInlineUiGuide([user("Compare these two")])).toBe(true);
     expect(shouldInlineUiGuide([user("show me the numbers")])).toBe(true);
+    expect(shouldInlineUiGuide([user("make two charts")])).toBe(true);
+    expect(shouldInlineUiGuide([user("compare these tables")])).toBe(true);
     expect(shouldInlineUiGuide([user("what is a platform?")])).toBe(false);
     expect(shouldInlineUiGuide([user("chart it"), { role: "assistant", parts: [{ type: "text", text: "ok" }] }, user("thanks")])).toBe(false);
   });

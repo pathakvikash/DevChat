@@ -110,6 +110,7 @@ export default function Sidebar() {
     { onError: (e) => console.error("Failed to fetch conversations:", e) },
   );
   const conversations = conversationsData ?? [];
+  const firstLoad = loading && conversationsData === null; // refetches keep the rows on screen
 
   // Rows that are there when the list first loads (or while searching) appear without animation; later ones fade in.
   const [hasLoaded, setHasLoaded] = useState(false);
@@ -554,7 +555,7 @@ export default function Sidebar() {
       {/* Top row */}
       <div className="flex items-center justify-between px-3 pt-3 pb-1">
         <Link href="/" onClick={close} className="flex items-center gap-2 px-1 py-1">
-          <OrreryMark />
+          <OrreryMark decorative />
           <span className="text-sm font-semibold text-[var(--foreground)]">Orrery</span>
         </Link>
         <div className="flex items-center gap-1">
@@ -659,9 +660,9 @@ export default function Sidebar() {
             <span>{view === "archived" ? "Archived" : "Recent"}</span>
             {filterButton}
           </div>
-          {!loading && recentRows.map((row, i) => renderAnimatedRow(row, i === 0))}
+          {!firstLoad && recentRows.map((row, i) => renderAnimatedRow(row, i === 0))}
         </AnimatePresence>
-        {loading ? (
+        {firstLoad ? (
           <div className="p-2 text-zinc-400 text-sm">Loading...</div>
         ) : filteredConversations.length === 0 ? (
           <div className="p-2 text-zinc-400 text-sm">No conversations yet</div>

@@ -66,7 +66,7 @@ describe("mock/talker", () => {
 describe("mock/workflow", () => {
   const system = (fields: string) => ({
     role: "system",
-    content: `You are one step in a DevChat workflow. Work alone.\n${fields}`,
+    content: `You are one step in a Orrery workflow. Work alone.\n${fields}`,
   });
   async function text(prompt: unknown[]) {
     const model = mockModelConfig("mock/workflow")!.model as any;

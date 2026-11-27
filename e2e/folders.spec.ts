@@ -10,7 +10,9 @@ test.afterEach(async ({ request }) => {
   await request.delete("/api/folders", { data: { path: ADDED } }); // 404 when a test already removed it
 });
 
-const picker = (page: Page) => page.getByRole("combobox", { name: "Working folder" });
+// The composer's picker. Model Settings holds a second one with the same name, outside the form.
+const picker = (page: Page) => page.locator("form").getByRole("combobox", { name: "Working folder" });
+const settingsPicker = (page: Page) => page.locator("select[aria-label='Working folder']:not(form select)");
 const dialog = (page: Page) => page.getByRole("dialog", { name: "Choose a folder" });
 const subFolders = (page: Page) => dialog(page).getByRole("list", { name: "Sub-folders" });
 const useFolder = (page: Page) => dialog(page).getByRole("button", { name: "Use this folder" });
@@ -90,7 +92,7 @@ test.describe("at 400px", () => {
     await page.keyboard.press("ControlOrMeta+k");
     await page.getByRole("option", { name: "Model Settings", exact: true }).click();
 
-    await picker(page).selectOption({ label: "Choose folder…" });
+    await settingsPicker(page).selectOption({ label: "Choose folder…" });
     await expect(dialog(page)).toBeVisible();
     await expect(subFolders(page).getByRole("button", { name: "project", exact: true })).toBeVisible();
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);

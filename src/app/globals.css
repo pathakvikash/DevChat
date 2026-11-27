@@ -532,7 +532,6 @@ html:has(#tour) {
 /* Reduced motion: no looping or decorative animation at all (final state shown). */
 @media (prefers-reduced-motion: reduce) {
   .animate-pulse,
-  .animate-spin,
   .animate-bounce,
   .orrery-orbit,
   [style*="shimmer"],

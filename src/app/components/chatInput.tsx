@@ -709,6 +709,10 @@ export default function ChatInput({
             </AnimatePresence>
           </div>
 
+          {isLoading && (
+            <p className="px-1 text-[11px] leading-tight text-zinc-500">Enter queues · the model sees it at its next step</p>
+          )}
+
           {/* Row 2: tools on the left, model and send on the right. */}
           <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1.5">
           <div className="flex min-w-0 items-center gap-1.5">

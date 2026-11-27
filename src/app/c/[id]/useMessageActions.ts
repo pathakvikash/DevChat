@@ -65,11 +65,12 @@ export function useMessageActions({
   );
 
   const handleUiSubmit = useCallback(
-    (text: string) => {
-      if (status === "submitted" || status === "streaming") return;
+    (text: string): boolean => {
+      if (status === "submitted" || status === "streaming") return false;
       sendMessage({ parts: [{ type: "text" as const, text }] }).catch((e: unknown) =>
         console.error("[ui-submit] sendMessage failed:", e),
       );
+      return true;
     },
     [sendMessage, status],
   );

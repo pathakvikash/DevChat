@@ -57,6 +57,7 @@ function ToolCall({
   onClarificationAnswer,
   meta,
 }: ToolInvocationProps & { meta?: string }) {
+  const [collapsed, setCollapsed] = useState(true);
   const toolName = part.type.replace(/^tool-/, "");
   const isArtifact =
     toolName === "createArtifact" || toolName === "updateArtifact";
@@ -144,8 +145,6 @@ function ToolCall({
   const resultErrored = !!resultPart?.errorText;
   // The span cuts a long one with CSS; the title shows it whole.
   const summary = isExec ? "" : toolSummary(part.input, 300);
-
-  const [collapsed, setCollapsed] = useState(true);
 
   if (isExec && code) {
     const output = hasResult

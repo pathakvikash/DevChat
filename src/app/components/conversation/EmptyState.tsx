@@ -37,7 +37,7 @@ export default function EmptyState({ modelName, temporary, sideOf }: EmptyStateP
 
   return (
     <div className="flex-1 flex flex-col items-center justify-center text-zinc-500 px-6">
-      <OrreryMark size={56} className="mb-4" />
+      <OrreryMark decorative size={56}className="mb-4" />
       <h2 className="text-xl font-semibold text-zinc-300 mb-2">
         Start the conversation
       </h2>

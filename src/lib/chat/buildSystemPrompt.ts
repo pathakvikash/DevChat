@@ -157,7 +157,7 @@ export async function buildSystemPrompt(
   const customInstructions = await getSettingsKey(opts.userId, "customInstructions");
   const instructions =
     customInstructions && customInstructions.trim()
-      ? `--- Instructions for DevChat ---\n${customInstructions}`
+      ? `--- Instructions for Orrery ---\n${customInstructions}`
       : null;
 
   const persona =

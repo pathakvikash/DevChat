@@ -38,7 +38,7 @@ interface MessageBubbleProps {
   onRegenerateMessage?: (messageId: string) => void;
   onOpenArtifact?: (id: string) => void;
   onClarificationAnswer?: (toolCallId: string, answer: string) => void;
-  onUiSubmit?: (text: string) => void;
+  onUiSubmit?: (text: string) => boolean;
   /** Plan mode, last reply with no plan card: offers "Approve plan" under it. */
   onApprovePlan?: () => void;
   /** Explains the button for a model without tools. */
