@@ -45,12 +45,12 @@ export const BUILTIN_TOOL_IDS = [
   "calculator",
   "jsonExtract",
   "sendToChat",
+  "loadUiGuide",
 ] as const;
 
 export function resolveActiveToolIds(
   explicitToolIds: string[],
   skillIds: string[],
-  kbId?: string | null,
 ): Set<string> {
   const active = new Set<string>(BUILTIN_TOOL_IDS);
   for (const id of explicitToolIds) active.add(id);
@@ -340,11 +340,7 @@ export type ToolSet = Awaited<ReturnType<typeof buildTools>>;
 const MUTATING_TOOL_IDS = new Set([
   "rememberFact",
   "forgetFact",
-  "createArtifact",
-  "updateArtifact",
-  "createTodo",
-  "createTodos",
-  "updateTodo",
+  ...Object.entries(TOOL_REGISTRY).filter(([, def]) => def.mutates).map(([id]) => id),
 ]);
 const isMutatingTool = (id: string) => MUTATING_TOOL_IDS.has(id) || id.startsWith("mcp_");
 

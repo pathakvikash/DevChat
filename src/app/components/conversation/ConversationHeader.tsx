@@ -4,8 +4,6 @@ import { AlertCircle, Download, GitFork, Keyboard, MoreHorizontal, MessageSquare
 import Link from "next/link";
 import { useState, useRef, useEffect, type KeyboardEvent, type ReactNode } from "react";
 import { useSidebar } from "@/app/contexts/SidebarContext";
-import { useChatMode } from "@/app/contexts/ChatModeContext";
-import ModeToggle from "../ModeToggle";
 import { exportChat } from "@/lib/utils/download";
 import { useToast } from "@/app/components/Toast";
 
@@ -52,7 +50,6 @@ export default function ConversationHeader({
 }: ConversationHeaderProps) {
   const { toggle, toggleCollapsed, collapsed } = useSidebar();
   const { toast } = useToast();
-  const { mode, setMode, modelCaps } = useChatMode();
   const [moreOpen, setMoreOpen] = useState(false);
   const moreRef = useRef<HTMLDivElement>(null);
   const moreButton = useRef<HTMLButtonElement>(null);
@@ -149,7 +146,6 @@ export default function ConversationHeader({
               <span className="hidden @lg:inline">Temporary</span>
             </button>
           )}
-          <ModeToggle mode={mode} onModeChange={setMode} toolsAvailable={modelCaps.toolsAvailable} />
           {activity}
           {launcher}
           <div ref={moreRef} className="relative">

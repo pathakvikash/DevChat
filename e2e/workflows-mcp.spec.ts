@@ -41,7 +41,7 @@ test("MCP tools and a web tool on one card are refused at save, and the editor d
   // the News search card is upstream of the digest, so the steering warning shows too
   await expect(page.getByText("A page could try to steer it")).toBeVisible();
   await expect(page.getByText("Warning:").first()).toBeVisible();
-  await expect(page.getByText("Can change things outside DevChat").first()).toBeVisible();
+  await expect(page.getByText("Can change things outside Orrery").first()).toBeVisible();
   // any model can have a folder, but MCP tools on the card lock the picker
   await expect(page.getByText("Working folder", { exact: true })).toBeVisible();
   await expect(page.getByText("A folder can't be mixed with web tools or MCP tools")).toBeVisible();

@@ -81,11 +81,7 @@ export async function GET(
     const kbId = side ? side.kbId || undefined : conversation.kbId || undefined;
     const memoryDisabled = conversation.memoryDisabled || conversation.temporary || !!side?.temporary;
     const useTools = !!modelConfig?.supportsTools && !chatOnlyMode;
-    const activeToolIds = resolveActiveToolIds(
-      explicitToolIds,
-      skillIds,
-      kbId,
-    );
+    const activeToolIds = resolveActiveToolIds(explicitToolIds, skillIds);
 
     // `retrieveKbContext` (called inside buildSystemPrompt) reads the LAST
     // user message from the messages array to embed. For the panel we want

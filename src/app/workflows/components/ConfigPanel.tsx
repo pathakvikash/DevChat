@@ -156,7 +156,7 @@ export default function ConfigPanel({
   };
   const upstreamWeb = [...ancestorsOf(graph, node.id)].some((a) => {
     const up = graph.nodes.find((n) => n.id === a);
-    return !!up && reachesOpenWeb(up.type, up.config, graph.defaultModel);
+    return !!up && reachesOpenWeb(up.type, up.config);
   });
   const fieldEnv = { ...env, upstreamWeb };
 

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { mkdtempSync, realpathSync, rmSync } from "fs";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import { NextRequest } from "next/server";
@@ -42,6 +42,9 @@ import { GET as sessions } from "@/app/api/claude-system/sessions/route";
 import { GET as system } from "@/app/api/claude-system/route";
 import { POST as systemFile } from "@/app/api/claude-system/file/route";
 import { POST as claudeRun } from "@/app/api/claude-run/route";
+import { POST as ollamaDelete } from "@/app/api/ollama/delete/route";
+import { POST as ollamaPull } from "@/app/api/ollama/pull/route";
+import { GET as ollamaModels } from "@/app/api/ollama/models/route";
 import { DELETE as foldersDelete, GET as foldersGet, POST as foldersPost } from "@/app/api/folders/route";
 import { GET as browse } from "@/app/api/folders/browse/route";
 import { setSettingsKey } from "@/lib/settings";
@@ -109,6 +112,9 @@ describe("routes that reach the server's machine", () => {
     ["GET /api/claude-system/sessions", () => sessions(new Request("http://x/api/claude-system/sessions"))],
     ["GET /api/claude-system", () => system()],
     ["POST /api/claude-system/file", () => systemFile(json("http://x/api/claude-system/file", { path: "/home/owner/.claude/settings.json" }))],
+    ["POST /api/ollama/delete", () => ollamaDelete(json("http://x/api/ollama/delete", { name: "llama3" }))],
+    ["POST /api/ollama/pull", () => ollamaPull(json("http://x/api/ollama/pull", { name: "llama3" }))],
+    ["GET /api/ollama/models", () => ollamaModels()],
     ["POST /api/claude-run", () => claudeRun(json("http://x/api/claude-run", { prompt: "id", cwd: "/home/owner/app" }))],
   ];
 
@@ -119,6 +125,29 @@ describe("routes that reach the server's machine", () => {
       expect((await res.json()).error).toMatch(/server's owner/);
     });
   }
+
+  it("refuses a file reached through a symlink that leaves ~/.claude, even for an owner", async () => {
+    asOwner();
+    const home = realpathSync(mkdtempSync(join(tmpdir(), "home-")));
+    const outside = realpathSync(mkdtempSync(join(tmpdir(), "outside-")));
+    const realHome = process.env.HOME;
+    process.env.HOME = home;
+    try {
+      mkdirSync(join(home, ".claude"));
+      writeFileSync(join(outside, "secret.txt"), "s3cret");
+      symlinkSync(outside, join(home, ".claude", "link"));
+      vi.resetModules();
+      const { POST } = await import("@/app/api/claude-system/file/route");
+      const res = await POST(json("http://x/f", { path: join(home, ".claude", "link", "secret.txt") }));
+      expect(res.status).toBe(403);
+      writeFileSync(join(home, ".claude", "ok.txt"), "fine");
+      expect((await (await POST(json("http://x/f", { path: join(home, ".claude", "ok.txt") }))).json()).content).toBe("fine");
+    } finally {
+      process.env.HOME = realHome;
+      rmSync(home, { recursive: true, force: true });
+      rmSync(outside, { recursive: true, force: true });
+    }
+  });
 
   it("never scans the server's home directory for a user who is not an owner", async () => {
     await detect(json("http://x/api/providers/detect", {}));

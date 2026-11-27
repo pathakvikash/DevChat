@@ -9,7 +9,7 @@ test.beforeEach(async ({ request }) => {
   await deleteAllChats(request);
 });
 
-test("pinning moves a chat into the Pinned tab and to the top after a reload", async ({ page, request }) => {
+test("pinning moves a chat into the Pinned section and to the top after a reload", async ({ page, request }) => {
   const first = await createChat(request, { title: "Older chat" });
   await createChat(request, { title: "Newer chat" });
   await createChat(request, { title: "Newest chat" });
@@ -18,21 +18,19 @@ test("pinning moves a chat into the Pinned tab and to the top after a reload", a
   await row(page, "Older chat").getByTitle("Pin").click();
   await expect(row(page, "Older chat").getByTitle("Unpin")).toBeVisible();
 
-  await page.getByRole("button", { name: "Pinned", exact: true }).click();
-  await expect(titles(page)).toHaveText(["Older chat"]);
-  await page.getByRole("button", { name: "All", exact: true }).click();
+  await expect(page.getByText("Pinned", { exact: true })).toBeVisible();
   await expect(titles(page)).toHaveCount(3);
+  await expect(titles(page).first()).toHaveText("Older chat");
 
   await page.reload();
   await expect(titles(page).first()).toHaveText("Older chat");
 
   await row(page, "Older chat").getByTitle("Unpin").click();
   await expect(row(page, "Older chat").getByTitle("Pin")).toBeVisible();
-  await page.getByRole("button", { name: "Pinned", exact: true }).click();
-  await expect(page.getByText("No conversations yet")).toBeVisible();
+  await expect(page.getByText("Pinned", { exact: true })).toBeHidden();
 });
 
-test("archiving hides a chat from All, shows it under Archived, and can be undone", async ({ page, request }) => {
+test("archiving hides a chat from Recent, shows it under Archived, and can be undone", async ({ page, request }) => {
   const keep = await createChat(request, { title: "Stays put" });
   await createChat(request, { title: "Goes away" });
   await openChat(page, keep);
@@ -42,13 +40,15 @@ test("archiving hides a chat from All, shows it under Archived, and can be undon
   await expect(link(page, "Goes away")).toBeHidden();
   await expect(link(page, "Stays put")).toBeVisible();
 
-  await page.getByRole("button", { name: "Archived", exact: true }).click();
+  await page.getByRole("button", { name: "Filter chats" }).click();
+  await page.getByRole("menuitemradio", { name: "Archived" }).click();
   await expect(titles(page)).toHaveText(["Goes away"]);
 
   await row(page, "Goes away").getByTitle("More actions").click();
   await page.getByRole("button", { name: "Unarchive" }).click();
   await expect(page.getByText("No conversations yet")).toBeVisible();
-  await page.getByRole("button", { name: "All", exact: true }).click();
+  await page.getByRole("button", { name: "Filter chats" }).click();
+  await page.getByRole("menuitemradio", { name: "Recent" }).click();
   await expect(titles(page)).toHaveCount(2);
 
   await page.reload();

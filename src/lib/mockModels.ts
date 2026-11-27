@@ -62,7 +62,7 @@ const echo = (o: CallOptions): Turn => ({
 // A workflow agent card: its system prompt says so (see workflowSystemPrompt). With output fields it answers a JSON
 // block built from them (number 72, choice its first option, text "mock <name>"); without, a one-line digest.
 const isWorkflowStep = ({ prompt }: CallOptions): boolean =>
-  prompt.some((m) => m.role === "system" && textOf(m).startsWith("You are one step in a DevChat workflow"));
+  prompt.some((m) => m.role === "system" && textOf(m).startsWith("You are one step in a Orrery workflow"));
 
 // Slow enough (about 4 s a card) for the editor's 1.5 s poll to catch the card while it is Running, with margin.
 const STEP_MS = 800;
@@ -331,5 +331,5 @@ export function mockModelCatalog(): ModelCatalogEntry[] {
 
 export function mockModelConfig(id: string): ModelConfig | undefined {
   if (!isSanityMode() || !Object.hasOwn(MODELS, id)) return undefined;
-  return { ...entry(id), model: build(id), costPer1kInputTokens: 0, costPer1kOutputTokens: 0, maxTokens: 4096, supportsTools: MODELS[id].tools };
+  return { ...entry(id), model: build(id), maxTokens: 4096, supportsTools: MODELS[id].tools };
 }

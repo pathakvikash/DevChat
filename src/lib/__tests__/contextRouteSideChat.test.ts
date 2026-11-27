@@ -59,7 +59,7 @@ describe("GET /api/conversations/[id]/context for side chats", () => {
     expect(res.status).toBe(200);
     const opts = (buildSystemPrompt as any).mock.calls[0][0];
     expect(opts).toMatchObject({ kbId: "main-kb", mode: "chat", conversationId: "s1" });
-    expect(resolveActiveToolIds).toHaveBeenCalledWith([], [], "main-kb");
+    expect(resolveActiveToolIds).toHaveBeenCalledWith([], []);
     expect((await res.json()).mainContext).toEqual({ shown: 2, total: 5 });
   });
 

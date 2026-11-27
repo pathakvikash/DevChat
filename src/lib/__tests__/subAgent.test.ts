@@ -52,8 +52,6 @@ function scriptedModel(turn: (o: CallOptions) => Turn, supportsTools = true) {
     name: "Mock Sub",
     provider: "Mock",
     model: mock,
-    costPer1kInputTokens: 0,
-    costPer1kOutputTokens: 0,
     maxTokens: 1000,
     contextWindow: 8192,
     supportsTools,

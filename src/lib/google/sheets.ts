@@ -34,7 +34,7 @@ export class SyncError extends Error {
 /** The grant came back without the drive.file scope (the box was unticked). */
 export class ScopeError extends SyncError {
   constructor() {
-    super("Google didn't give DevChat access to the sheets it creates. Try again and keep that box ticked.", 400);
+    super("Google didn't give Orrery access to the sheets it creates. Try again and keep that box ticked.", 400);
   }
 }
 const UNREACHABLE = "Couldn't reach Google. Try again.";

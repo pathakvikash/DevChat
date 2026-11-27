@@ -35,7 +35,6 @@ import { normalizeMessageToolParts } from "@/lib/chat/normalizeToolParts";
 import { dropCompressedMessages } from "@/lib/chat/dropCompressedMessages";
 import { saveUserMessage } from "@/lib/chat/saveUserMessage";
 import {
-  isTransientProviderError,
   friendlyProviderErrorMessage,
   formatMissingApiKeyMessage,
 } from "@/lib/chat/providerErrors";
@@ -54,6 +53,7 @@ import { cliProviderForModel, dropParkedRuns } from "@/lib/cliProviders";
 import { folderGoneMessage, isAllowedFolder } from "@/lib/folders";
 import { reasoningPlan, type ProviderOptions } from "@/lib/reasoning";
 import { recordTrace } from "@/lib/observability";
+import { withFallback } from "@/lib/chat/fallbackModel";
 import { providerOptionsFor } from "@/lib/chat/providerOptions";
 import {
   estimatePromptTokens,
@@ -93,6 +93,11 @@ export async function POST(req: Request) {
     openPanes: bodyOpenPanes,
   } = await req.json();
   let messages = bodyMessages;
+  // v6 UIMessages have parts, not content.
+  const inputChars = () => {
+    const last = messages?.at?.(-1);
+    return last?.role === "user" ? extractText(last).length : undefined;
+  };
   // A Claude Code card left open is closed when the chat sends anything that does not answer it.
   const lastParts = Array.isArray(messages) && messages.at(-1)?.role === "assistant" ? (messages.at(-1).parts ?? []) : [];
   const answeringCli = lastParts.some((p: any) => String(p?.approval?.id ?? "").startsWith("cli-"));
@@ -247,7 +252,8 @@ export async function POST(req: Request) {
     let modelConfig: ReturnType<typeof getModel> | null = null;
     try {
       modelConfig = getModel(servedModel, resolution.creds, hostTools);
-    } catch {
+    } catch (e) {
+      lastError = e;
       console.error(
         `[chat] model config unavailable for ${servedModel} — skipping fallback candidate`,
       );
@@ -260,7 +266,7 @@ export async function POST(req: Request) {
     const maxTokens = settings.maxTokens || (reasoning.providerOptions ? 32_000 : 8192);
     const useTools = modelConfig.supportsTools && !chatOnlyMode;
     const cliProvider = cliProviderForModel(servedModel);
-    const activeToolIds = resolveActiveToolIds(explicitToolIds, skillIds, kbId);
+    const activeToolIds = resolveActiveToolIds(explicitToolIds, skillIds);
 
     const { fileFolder, sendsOutGate, showFolder } = await chatFolderAccess({
       useTools,
@@ -290,17 +296,6 @@ export async function POST(req: Request) {
       sendsOutGate,
       showFolder,
     });
-
-    console.log(
-      `[chat prompt sections] base=${(sections.base?.length || 0)}ch ` +
-        `persona=${(sections.persona?.length || 0)}ch ` +
-        `skills=${(sections.skills?.length || 0)}ch ` +
-        `tools=${(sections.tools?.length || 0)}ch ` +
-        `memory=${(sections.memory?.length || 0)}ch ` +
-        `compressed=${(sections.compressed?.length || 0)}ch ` +
-        `kb=${(sections.kb?.length || 0)}ch ` +
-        `generativeUi=${(sections.generativeUi?.length || 0)}ch`,
-    );
 
     const sanitizedMessages = normalizeMessageToolParts(
       (Array.isArray(messages) ? messages : []).filter(
@@ -376,9 +371,9 @@ export async function POST(req: Request) {
     // Ask lets Claude Code ask per change (its allow-for-chat list rides along).
     if (!cliProvider) releaseCliRuns();
     const cliCwd = folder ?? "";
-    const providerOptions = (providerOptionsFor({
-      modelId: servedModel,
-      numCtx: contextWindowFor(servedModel, modelConfig, contextLength),
+    const optionsFor = (modelId: string, cfg: ReturnType<typeof getModel>, plan: typeof reasoning) => (providerOptionsFor({
+      modelId,
+      numCtx: contextWindowFor(modelId, cfg, contextLength),
       temperature,
       topP,
       maxTokens,
@@ -390,7 +385,8 @@ export async function POST(req: Request) {
       allowedTools: Array.isArray(bodyAllowedTools)
         ? bodyAllowedTools.filter((t: unknown): t is string => typeof t === "string" && CHAT_ALLOWABLE_TOOLS.has(t))
         : [],
-    }) ?? reasoning.providerOptions) as ProviderOptions | undefined;
+    }) ?? plan.providerOptions) as ProviderOptions | undefined;
+    const providerOptions = optionsFor(servedModel, modelConfig, reasoning);
 
     // Only main chats with tools get helpers. A helper runs on this same model, in this mode.
     if (canStartSubAgents(settings.kind, useTools) && conversationId) {
@@ -412,368 +408,313 @@ export async function POST(req: Request) {
     // Built after the tools, so a sub-agent's toModelOutput applies to saved history too.
     const modelMessages = await convertToModelMessages(sanitizedMessages, { tools: aiTools });
 
-    // Per-candidate retry loop (transient errors + Ollama context overflow).
-    const RETRIES_PER_MODEL = 2;
     // A last assistant message means this request continues it (a client-side tool round trip):
     // the reply must replace that message in the client and update its row, not add a copy.
     const lastIncoming = messages[messages.length - 1];
     const continuing = lastIncoming?.role === "assistant" ? lastIncoming : null;
     // The stream starts under this id and the reply is saved under it, so client and DB match.
     const assistantMessageId = continuing?.id ?? generateId();
-    let traceRecorded = false;
     let partialText = "";
     // Captured from streamText's onFinish so the later createUIMessageStream onFinish,
     // which does the persisting, can still record real token usage.
     let capturedFinishEvent: { steps: any[]; totalUsage?: any } | null = null;
+    // The next candidates, tried by the model wrapper only if this one fails before streaming anything.
+    const fallbacks = candidateModels.slice(candidateModels.indexOf(servedModel) + 1).flatMap((id) => {
+      try {
+        const cfg = getModel(id, resolution.creds, hostTools);
+        return [{ id, model: cfg.model, supportsTools: cfg.supportsTools, providerOptions: optionsFor(id, cfg, reasoningPlan(id, reasoningEffort)) }];
+      } catch {
+        return [];
+      }
+    });
+    // Which candidate actually produced the stream: trace, cost and the saved message record this one.
+    let actualModel = servedModel;
+    // Always wrapped: a single candidate still gets the transient-error retry.
+    const streamModel = withFallback(modelConfig.model, {
+            primaryId: servedModel,
+            fallbacks,
+            onServed: (id) => {
+              actualModel = id;
+            },
+            // Ollama rejected the prompt as bigger than num_ctx: move up a tier, as the pre-request check does.
+            onContextOverflow: async (id) => {
+              const nextCtx = id === servedModel && conversationId
+                ? getNextContextTier(contextWindowFor(servedModel, modelConfig, contextLength))
+                : null;
+              if (!nextCtx || !conversationId) return null;
+              contextLength = nextCtx;
+              if (providerOptions && "ollama" in providerOptions && providerOptions.ollama?.options) (providerOptions.ollama.options as { num_ctx?: number }).num_ctx = nextCtx;
+              console.log(`[ctx] ${conversationId} context overflow — retrying with ctx=${nextCtx}`);
+              await prisma.conversation.update({ where: { id: conversationId }, data: { contextLength: nextCtx } });
+              return nextCtx;
+            },
+          });
     const partialToolOutputs = new Map<string, { name: string; input: any; start: number }>();
     // Per-tool observations (name/input/output/latency) collected during streaming.
     const toolCallsSeen: { toolName: string; input?: any; output?: any; ok: boolean; latencyMs?: number }[] = [];
     let firstTokenAt: number | null = null;
-    for (let attempt = 0; attempt < RETRIES_PER_MODEL; attempt++) {
-      try {
-        partialText = "";
-        partialToolOutputs.clear();
-        toolCallsSeen.length = 0;
-        firstTokenAt = null;
-        // Queued messages delivered between steps, and their markers for the reply stream.
-        const injected: QueuedInjection[] = [];
-        const claimedIds: string[] = [];
-        const pendingMarkers: QueuedMarker[] = [];
-        const result = streamText({
-          model: modelConfig.model,
-          system: finalSystemPrompt,
-          messages: modelMessages,
-          temperature: reasoning.allowSampling ? temperature : undefined,
-          topP: reasoning.allowSampling ? topP : undefined,
-          // Signs each approval request so a browser cannot change an approved tool's input.
-          experimental_toolApprovalSecret: process.env.AUTH_SECRET || undefined,
-          // Hard cap on response length: without it a looping model streams
-          // indefinitely and leaves the request permanently pending.
-          maxOutputTokens: maxTokens,
-          prepareStep: async ({ steps, stepNumber, messages: stepMessages }) => {
-            // Queued messages join the history before each step after the first. prepareStep's
-            // messages apply to one step only, so the delivered ones are re-added on every step.
-            if (conversationId && stepNumber > 0) {
-              const claimed = await claimQueued(conversationId);
-              // Stop came while the claim ran: no step will show these, so they go back.
-              if (req.signal.aborted) {
-                await releaseUnshown(claimed.map((q) => q.id), []);
-              } else {
-                for (const q of claimed) {
-                  claimedIds.push(q.id);
-                  const content = q.agent ? agentMessageModelText(q.agent, q.text) : q.text;
-                  injected.push({ at: stepMessages.length, message: { role: "user", content } });
-                  pendingMarkers.push({
-                    type: "data-queued-message",
-                    id: q.id,
-                    data: { queuedId: q.id, text: q.text, ...(q.agent ? { agent: q.agent } : {}) },
-                  });
-                }
-              }
-            }
-            // Forces a text-only step on a loop or the last allowed step, so a turn ends with an answer.
-            const guard = nextStepSettings({ steps, stepNumber, maxSteps: maxToolCalls, toolOnlyLimit: 3 });
-            if (!injected.length && !guard) return undefined;
-            return {
-              ...(injected.length ? { messages: withInjected(stepMessages, injected) } : {}),
-              ...guard,
-            };
-          },
-          // Ends at maxToolCalls, or after a step with no tool results (nothing left to read).
-          // The loop guard in prepareStep forces the answer; this stops only if a provider ignored that.
-          stopWhen: ({ steps }) => {
-            if (steps.length >= maxToolCalls) return true;
-            if (ignoredTextStep(steps, 3)) return true;
-            const last = steps[steps.length - 1] as
-              | { toolResults?: unknown[]; content?: Array<{ type: string }> }
-              | undefined;
-            if (!last) return true;
-            const hadToolResult =
-              (last.toolResults?.length ?? 0) > 0 ||
-              (last.content ?? []).some((p) => (p as { type?: string }).type === "tool-result");
-            return !hadToolResult;
-          },
-          tools: aiTools,
-          toolChoice: "auto",
-          maxRetries: 0,
-          abortSignal: req.signal,
-          ...(providerOptions ? { providerOptions } : {}),
-          onChunk: ({ chunk }) => {
-            if (chunk.type === "text-delta") {
-              partialText += chunk.text;
-              if (firstTokenAt === null) firstTokenAt = Date.now();
-            } else if (chunk.type === "tool-call") {
-              partialToolOutputs.set(chunk.toolCallId, {
-                name: chunk.toolName,
-                input: chunk.input ?? {},
-                start: Date.now(),
-              });
-            } else if (chunk.type === "tool-result" && !chunk.preliminary) {
-              const meta = partialToolOutputs.get(chunk.toolCallId);
-              const latencyMs = meta?.start ? Date.now() - meta.start : undefined;
-              toolCallsSeen.push({
-                toolName: chunk.toolName,
-                input: meta?.input,
-                output: chunk.output,
-                ok: true,
-                latencyMs,
+    // Queued messages delivered between steps, and their markers for the reply stream.
+    const injected: QueuedInjection[] = [];
+    const claimedIds: string[] = [];
+    const pendingMarkers: QueuedMarker[] = [];
+    const result = streamText({
+      model: streamModel,
+      system: finalSystemPrompt,
+      messages: modelMessages,
+      temperature: reasoning.allowSampling ? temperature : undefined,
+      topP: reasoning.allowSampling ? topP : undefined,
+      // Signs each approval request so a browser cannot change an approved tool's input.
+      experimental_toolApprovalSecret: process.env.AUTH_SECRET || undefined,
+      // Hard cap on response length: without it a looping model streams
+      // indefinitely and leaves the request permanently pending.
+      maxOutputTokens: maxTokens,
+      prepareStep: async ({ steps, stepNumber, messages: stepMessages }) => {
+        // Queued messages join the history before each step after the first. prepareStep's
+        // messages apply to one step only, so the delivered ones are re-added on every step.
+        if (conversationId && stepNumber > 0) {
+          const claimed = await claimQueued(conversationId);
+          // Stop came while the claim ran: no step will show these, so they go back.
+          if (req.signal.aborted) {
+            await releaseUnshown(claimed.map((q) => q.id), []);
+          } else {
+            for (const q of claimed) {
+              claimedIds.push(q.id);
+              const content = q.agent ? agentMessageModelText(q.agent, q.text) : q.text;
+              injected.push({ at: stepMessages.length, message: { role: "user", content } });
+              pendingMarkers.push({
+                type: "data-queued-message",
+                id: q.id,
+                data: { queuedId: q.id, text: q.text, ...(q.agent ? { agent: q.agent } : {}) },
               });
             }
-          },
-          onFinish: (event) => {
-            if (!conversationId) return;
-            capturedFinishEvent = event;
-            // Persistence happens in createUIMessageStream's onFinish below, on the
-            // post-pipeJsonRender split — this raw text would reload as JSONL lines.
-
-            const text = (event as { text?: string }).text ?? "";
-            const stepCount =
-              (event as { steps?: unknown[] }).steps?.length ?? 0;
-            const hadAnyToolCall = (event as { steps?: Array<{ toolCalls?: unknown[] }> })
-              .steps?.some((s) => (s.toolCalls?.length ?? 0) > 0) ?? false;
-            if (text.trim().length < 40 && stepCount > 1) {
-              console.warn(
-                `[chat] SUSPECTED TRUNCATED RESPONSE: model=${servedModel} ` +
-                  `steps=${stepCount} textLen=${text.length} ` +
-                  `text="${text.slice(0, 80).replace(/\n/g, " ")}" ` +
-                  `finishReason=${(event as { finishReason?: string }).finishReason ?? "?"} ` +
-                  `— model likely emitted a stop token right after a tool result. ` +
-                  `Check system prompt COMPLETION RULES and tool modelDescription.`,
-              );
-            }
-            if (text.trim().length < 10 && !hadAnyToolCall) {
-              console.warn(
-                `[chat] EMPTY/EMPTYISH RESPONSE WITH NO TOOL CALL: model=${servedModel} ` +
-                  `steps=${stepCount} textLen=${text.length} ` +
-                  `text="${text.slice(0, 80).replace(/\n/g, " ")}" ` +
-                  `— model refused or failed to produce output. The user's request ` +
-                  `may require a tool the model didn't choose to call. ` +
-                  `Check tool modelDescription strength and model capability.`,
-              );
-            }
-
-            // ─── Record observability trace ──────────────────────────────────
-            if (!traceRecorded) {
-              traceRecorded = true;
-              const ev = event as any;
-              const tu = ev.totalUsage;
-              const inTok = tu?.inputTokens ?? (ev.steps || []).reduce((s: number, st: any) => s + (st.usage?.inputTokens ?? 0), 0);
-              const outTok = tu?.outputTokens ?? (ev.steps || []).reduce((s: number, st: any) => s + (st.usage?.outputTokens ?? 0), 0);
-              const finishReason = (ev.finishReason as string) || (ev.finishReason === undefined ? "unknown" : String(ev.finishReason));
-              let status: "success" | "error" | "aborted" | "truncated" = "success";
-              if (finishReason === "abort") status = "aborted";
-              else if (finishReason === "error") status = "error";
-              else if (text.trim().length < 40 && stepCount > 1) status = "truncated";
-              const lastMsg = messages[messages.length - 1];
-              const inputChars = lastMsg?.role === "user" ? (lastMsg.content || "").length : undefined;
-              recordTrace({
-                conversationId,
-                userId,
-                model: servedModel,
-                promptTokens: inTok,
-                completionTokens: outTok,
-                latencyMs: Date.now() - requestStartedAt,
-                firstTokenMs: firstTokenAt ? firstTokenAt - requestStartedAt : null,
-                steps: stepCount,
-                finishReason,
-                status,
-                inputChars,
-                outputChars: text.length,
-                toolCalls: toolCallsSeen,
-              });
-            }
-          },
-        });
-
-        console.log(
-          `[chat] model=${servedModel} tools=${Object.keys(aiTools).join(",")} ` +
-            `kbId=${kbId || "none"} activeToolIds=${[...activeToolIds].join(",")} ` +
-            `mode=${toolMode} chatOnlyMode=${chatOnlyMode} ` +
-            `supportsTools=${modelConfig.supportsTools} useTools=${useTools}`,
-        );
-
-        // The AI SDK swallows stream errors into a generic "An error
-        // occurred." by default so server error details aren't leaked to the
-        // client. Auth failures happen mid-stream (after headers are already
-        // sent, so the try/catch below never sees them) — surface a message
-        // the user can actually act on instead of a silent/opaque toast.
-        const onStreamError = (streamError: unknown) => {
-          const rawMsg =
-            streamError instanceof Error ? streamError.message : String(streamError);
-          console.error(`[chat] stream error on ${servedModel}:`, rawMsg);
-          return friendlyProviderErrorMessage(rawMsg, { servedModel, isOllama }) ?? rawMsg;
-        };
-
-        // Generative UI is always on, so every response goes through pipeJsonRender,
-        // which splits prose from JSONL patches into `text`/`data-spec` parts.
-        const response = createUIMessageStreamResponse({
-          stream: createUIMessageStream({
-            execute: ({ writer }) => {
-              // The inner stream's onFinish runs after the inner stream closes, so it can't write
-              // to it: it writes its "compressing" status to this outer one, which is still open.
-              writer.merge(
-                createUIMessageStream({
-                  execute: ({ writer: inner }) => {
-                    // `toUIMessageStream` needs its own onError: it turns `error` parts into
-                    // text itself, so createUIMessageStream's onError never sees them.
-                    inner.merge(
-                      pipeJsonRender(
-                        result
-                          .toUIMessageStream({ onError: onStreamError })
-                          .pipeThrough(queuedMarkerTransform(pendingMarkers)),
-                      ),
-                    );
-                  },
-                  onError: onStreamError,
-                  generateId: () => assistantMessageId,
-                  // Starts the stream under the continued message's id and builds its parts from it.
-                  originalMessages: messages,
-                  // Runs on a normal finish, an error and an abort (Stop). It is the only place the
-                  // reply is saved, and it is awaited: the stream closes only after the save and
-                  // any auto-compress, so the client's refresh sees the new compressedAt.
-                  onFinish: async ({ messages: finishedMessages, isAborted }) => {
-                    if (!conversationId) return;
-                    const last = finishedMessages[finishedMessages.length - 1];
-                    // Stopped before anything streamed: there is no reply to save.
-                    const nothingToSave = isAborted && !last?.parts.some((p) => p.type !== "step-start");
-                    // No captured event means the stream errored before finishing.
-                    const event = { steps: [], ...capturedFinishEvent };
-                    const saved =
-                      !nothingToSave &&
-                      (await safePersistAssistantMessage(event, {
-                        conversationId,
-                        model: servedModel,
-                        systemPrompt: finalSystemPrompt,
-                        messageId: assistantMessageId,
-                        updateExisting: !!continuing,
-                        // A stopped reply saves its open approval cards as denied, so they can't be answered later.
-                        overrideParts: isAborted ? denyOpenApprovals(last?.parts ?? []) : (last?.parts ?? []),
-                      }));
-                    // A claimed message counts as delivered only if the saved reply holds its marker;
-                    // a failed save releases every claim.
-                    await releaseUnshown(claimedIds, saved ? (last?.parts ?? []) : []).catch((e) =>
-                      console.error("[queue] releasing unshown messages failed:", e),
-                    );
-                    if (saved && canAutoCompress(event, isAborted)) {
-                      const window = modelConfig ? contextWindowFor(servedModel, modelConfig, contextLength) : null;
-                      await autoCompress(
-                        conversationId,
-                        autoCompressThreshold ?? 85,
-                        window,
-                        () =>
-                        writer.write({ type: "data-compressing", data: true, transient: true }),
-                        // What the folder adds to the sent prompt, which the estimate would miss.
-                        [sections.folder, window && fileFolder ? await folderToolSpecs(fileFolder, window) : ""].filter(Boolean).join("\n") || undefined,
-                      );
-                    }
-                  },
-                }),
-              );
-            },
-            onError: onStreamError,
-          }),
-        });
-
-        // Stop: onFinish above saves the partial reply. This only records the trace, since
-        // streamText's own onFinish doesn't run on an abort.
-        if (conversationId && req.signal) {
-          req.signal.addEventListener(
-            "abort",
-            () => {
-              if (!traceRecorded) {
-                traceRecorded = true;
-                const lastMsg = messages[messages.length - 1];
-                const inputChars = lastMsg?.role === "user" ? (lastMsg.content || "").length : undefined;
-                recordTrace({
-                  conversationId,
-                  userId,
-                  model: servedModel,
-                  promptTokens: 0,
-                  completionTokens: 0,
-                  latencyMs: Date.now() - requestStartedAt,
-                  firstTokenMs: firstTokenAt ? firstTokenAt - requestStartedAt : null,
-                  steps: undefined,
-                  finishReason: "abort",
-                  status: "aborted",
-                  inputChars,
-                  outputChars: partialText.length,
-                  toolCalls: toolCallsSeen,
-                });
-              }
-            },
-            { once: true },
-          );
-        }
-
-        // Add debug headers visible in the browser network tab so you can
-        // see what settings the server is actually using for this request.
-        const debugHeaders = new Headers(response.headers);
-        debugHeaders.set("X-Debug-Model", servedModel);
-        debugHeaders.set("X-Debug-Chat-Only-Mode", String(chatOnlyMode));
-        debugHeaders.set("X-Debug-Tool-Mode", toolMode);
-        debugHeaders.set("X-Debug-Supports-Tools", String(modelConfig.supportsTools));
-        debugHeaders.set("X-Debug-Use-Tools", String(useTools));
-        debugHeaders.set(
-          "X-Debug-Tools",
-          Object.keys(aiTools).join(",") || "none",
-        );
-        debugHeaders.set(
-          "X-Debug-Active-Tool-Ids",
-          [...activeToolIds].join(",") || "none",
-        );
-
-        return new Response(response.body, {
-          status: response.status,
-          statusText: response.statusText,
-          headers: debugHeaders,
-        });
-      } catch (err: unknown) {
-        lastError = err;
-        const errMsg = err instanceof Error ? err.message : String(err);
-        if (
-          isOllama &&
-          attempt === 0 &&
-          conversationId &&
-          errMsg.includes("available context size")
-        ) {
-          const nextCtx = getNextContextTier(contextWindowFor(servedModel, modelConfig, contextLength));
-          if (nextCtx) {
-            contextLength = nextCtx;
-            // The same object the stream's providerOptions holds, so the retry sees the larger window.
-            if (providerOptions && "ollama" in providerOptions && providerOptions.ollama?.options) (providerOptions.ollama.options as { num_ctx?: number }).num_ctx = nextCtx;
-            console.log(
-              `[ctx] ${conversationId} context overflow — retrying with ctx=${nextCtx}`,
-            );
-            await prisma.conversation.update({
-              where: { id: conversationId },
-              data: { contextLength: nextCtx },
-            });
-            continue;
           }
         }
-        // Auth/invalid-key errors → friendly message instead of raw 401
-        const friendlyAuthMsg = friendlyProviderErrorMessage(errMsg, { servedModel, isOllama });
-        if (friendlyAuthMsg) {
-          lastError = new Error(friendlyAuthMsg);
-          break;
+        // Forces a text-only step on a loop or the last allowed step, so a turn ends with an answer.
+        const guard = nextStepSettings({ steps, stepNumber, maxSteps: maxToolCalls, toolOnlyLimit: 3 });
+        if (!injected.length && !guard) return undefined;
+        return {
+          ...(injected.length ? { messages: withInjected(stepMessages, injected) } : {}),
+          ...guard,
+        };
+      },
+      // Ends at maxToolCalls, or after a step with no tool results (nothing left to read).
+      // The loop guard in prepareStep forces the answer; this stops only if a provider ignored that.
+      stopWhen: ({ steps }) => {
+        if (steps.length >= maxToolCalls) return true;
+        if (ignoredTextStep(steps, 3)) return true;
+        const last = steps[steps.length - 1] as
+          | { toolResults?: unknown[]; content?: Array<{ type: string }> }
+          | undefined;
+        if (!last) return true;
+        const hadToolResult =
+          (last.toolResults?.length ?? 0) > 0 ||
+          (last.content ?? []).some((p) => (p as { type?: string }).type === "tool-result");
+        return !hadToolResult;
+      },
+      tools: aiTools,
+      toolChoice: "auto",
+      maxRetries: 0,
+      abortSignal: req.signal,
+      ...(providerOptions ? { providerOptions } : {}),
+      onChunk: ({ chunk }) => {
+        if (chunk.type === "text-delta") {
+          partialText += chunk.text;
+          if (firstTokenAt === null) firstTokenAt = Date.now();
+        } else if (chunk.type === "tool-call") {
+          partialToolOutputs.set(chunk.toolCallId, {
+            name: chunk.toolName,
+            input: chunk.input ?? {},
+            start: Date.now(),
+          });
+        } else if (chunk.type === "tool-result" && !chunk.preliminary) {
+          const meta = partialToolOutputs.get(chunk.toolCallId);
+          const latencyMs = meta?.start ? Date.now() - meta.start : undefined;
+          toolCallsSeen.push({
+            toolName: chunk.toolName,
+            input: meta?.input,
+            output: chunk.output,
+            ok: true,
+            latencyMs,
+          });
         }
-        // Transient provider errors (rate limit, timeout, 5xx, network blip):
-        // back off and retry the SAME candidate before giving up on it.
-        if (isTransientProviderError(errMsg) && attempt < RETRIES_PER_MODEL - 1) {
-          const delay = 400 * Math.pow(2, attempt);
-          console.warn(
-            `[chat] transient error on ${servedModel} (attempt ${attempt + 1}) — ` +
-              `retrying in ${delay}ms: ${errMsg.slice(0, 160)}`,
+      },
+      onFinish: (event) => {
+        if (!conversationId) return;
+        capturedFinishEvent = event;
+        // Persistence happens in createUIMessageStream's onFinish below, on the
+        // post-pipeJsonRender split — this raw text would reload as JSONL lines.
+            const text = (event as { text?: string }).text ?? "";
+            const stepCount = (event as { steps?: unknown[] }).steps?.length ?? 0;
+
+
+        // ─── Record observability trace ──────────────────────────────────
+        if (!traceRecorded) {
+          traceRecorded = true;
+          const ev = event as any;
+          const tu = ev.totalUsage;
+          const inTok = tu?.inputTokens ?? (ev.steps || []).reduce((s: number, st: any) => s + (st.usage?.inputTokens ?? 0), 0);
+          const outTok = tu?.outputTokens ?? (ev.steps || []).reduce((s: number, st: any) => s + (st.usage?.outputTokens ?? 0), 0);
+          const finishReason = (ev.finishReason as string) || (ev.finishReason === undefined ? "unknown" : String(ev.finishReason));
+          let status: "success" | "error" | "aborted" | "truncated" = "success";
+          if (finishReason === "abort") status = "aborted";
+          else if (finishReason === "error") status = "error";
+          else if (text.trim().length < 40 && stepCount > 1) status = "truncated";
+          recordTrace({
+            conversationId,
+            userId,
+            model: actualModel,
+            promptTokens: inTok,
+            completionTokens: outTok,
+            latencyMs: Date.now() - requestStartedAt,
+            firstTokenMs: firstTokenAt ? firstTokenAt - requestStartedAt : null,
+            steps: stepCount,
+            finishReason,
+            status,
+            inputChars: inputChars(),
+            outputChars: text.length,
+            toolCalls: toolCallsSeen,
+          });
+        }
+      },
+    });
+
+    console.log(
+      `[chat] model=${servedModel} tools=${Object.keys(aiTools).join(",")} ` +
+        `kbId=${kbId || "none"} activeToolIds=${[...activeToolIds].join(",")} ` +
+        `mode=${toolMode} chatOnlyMode=${chatOnlyMode} ` +
+        `supportsTools=${modelConfig.supportsTools} useTools=${useTools}`,
+    );
+
+    // The AI SDK swallows stream errors into a generic "An error
+    // occurred." by default so server error details aren't leaked to the
+    // client. Auth failures happen mid-stream (after headers are already
+    // sent, so the try/catch below never sees them) — surface a message
+    // the user can actually act on instead of a silent/opaque toast.
+    const onStreamError = (streamError: unknown) => {
+      const rawMsg =
+        streamError instanceof Error ? streamError.message : String(streamError);
+      console.error(`[chat] stream error on ${servedModel}:`, rawMsg);
+      return friendlyProviderErrorMessage(rawMsg, { servedModel, isOllama }) ?? rawMsg;
+    };
+
+    // Generative UI is always on, so every response goes through pipeJsonRender,
+    // which splits prose from JSONL patches into `text`/`data-spec` parts.
+    const response = createUIMessageStreamResponse({
+      stream: createUIMessageStream({
+        execute: ({ writer }) => {
+          // The inner stream's onFinish runs after the inner stream closes, so it can't write
+          // to it: it writes its "compressing" status to this outer one, which is still open.
+          writer.merge(
+            createUIMessageStream({
+              execute: ({ writer: inner }) => {
+                // `toUIMessageStream` needs its own onError: it turns `error` parts into
+                // text itself, so createUIMessageStream's onError never sees them.
+                inner.merge(
+                  pipeJsonRender(
+                    result
+                      .toUIMessageStream({ onError: onStreamError })
+                      .pipeThrough(queuedMarkerTransform(pendingMarkers)),
+                  ),
+                );
+              },
+              onError: onStreamError,
+              generateId: () => assistantMessageId,
+              // Starts the stream under the continued message's id and builds its parts from it.
+              originalMessages: messages,
+              // Runs on a normal finish, an error and an abort (Stop). It is the only place the
+              // reply is saved, and it is awaited: the stream closes only after the save and
+              // any auto-compress, so the client's refresh sees the new compressedAt.
+              onFinish: async ({ messages: finishedMessages, isAborted }) => {
+                if (!conversationId) return;
+                const last = finishedMessages[finishedMessages.length - 1];
+                // Stopped before anything streamed: there is no reply to save.
+                const nothingToSave = isAborted && !last?.parts.some((p) => p.type !== "step-start");
+                // No captured event means the stream errored before finishing.
+                const event = { steps: [], ...capturedFinishEvent };
+                const saved =
+                  !nothingToSave &&
+                  (await safePersistAssistantMessage(event, {
+                    conversationId,
+                    model: actualModel,
+                    systemPrompt: finalSystemPrompt,
+                    messageId: assistantMessageId,
+                    updateExisting: !!continuing,
+                    // A stopped reply saves its open approval cards as denied, so they can't be answered later.
+                    overrideParts: isAborted ? denyOpenApprovals(last?.parts ?? []) : (last?.parts ?? []),
+                  }));
+                // A claimed message counts as delivered only if the saved reply holds its marker;
+                // a failed save releases every claim.
+                await releaseUnshown(claimedIds, saved ? (last?.parts ?? []) : []).catch((e) =>
+                  console.error("[queue] releasing unshown messages failed:", e),
+                );
+                if (saved && canAutoCompress(event, isAborted)) {
+                  const window = modelConfig ? contextWindowFor(servedModel, modelConfig, contextLength) : null;
+                  await autoCompress(
+                    conversationId,
+                    autoCompressThreshold ?? 85,
+                    window,
+                    () =>
+                    writer.write({ type: "data-compressing", data: true, transient: true }),
+                    // What the folder adds to the sent prompt, which the estimate would miss.
+                    [sections.folder, window && fileFolder ? await folderToolSpecs(fileFolder, window) : ""].filter(Boolean).join("\n") || undefined,
+                  );
+                }
+              },
+            }),
           );
-          await new Promise((r) => setTimeout(r, delay));
-          continue;
-        }
-        console.error(`[chat] ${servedModel} failed after retries:`, errMsg);
-        break;
-      }
+        },
+        onError: onStreamError,
+      }),
+    });
+
+    // Stop: onFinish above saves the partial reply. This only records the trace, since
+    // streamText's own onFinish doesn't run on an abort.
+    if (conversationId && req.signal) {
+      req.signal.addEventListener(
+        "abort",
+        () => {
+          if (!traceRecorded) {
+            traceRecorded = true;
+            recordTrace({
+              conversationId,
+              userId,
+              model: actualModel,
+              promptTokens: 0,
+              completionTokens: 0,
+              latencyMs: Date.now() - requestStartedAt,
+              firstTokenMs: firstTokenAt ? firstTokenAt - requestStartedAt : null,
+              steps: undefined,
+              finishReason: "abort",
+              status: "aborted",
+              inputChars: inputChars(),
+              outputChars: partialText.length,
+              toolCalls: toolCallsSeen,
+            });
+          }
+        },
+        { once: true },
+      );
     }
+
+    // Add debug headers visible in the browser network tab so you can
+    // see what settings the server is actually using for this request.
+    const debugHeaders = new Headers(response.headers);
+    debugHeaders.set("X-Debug-Model", servedModel);
+    debugHeaders.set("X-Debug-Tool-Mode", toolMode);
+    // The tool list is internal detail: dev and test only.
+    if (process.env.NODE_ENV !== "production") {
+      debugHeaders.set("X-Debug-Supports-Tools", String(modelConfig.supportsTools));
+      debugHeaders.set("X-Debug-Use-Tools", String(useTools));
+      debugHeaders.set("X-Debug-Tools", Object.keys(aiTools).join(",") || "none");
     }
-    throw lastError;
+
+    return new Response(response.body, {
+      status: response.status,
+      statusText: response.statusText,
+      headers: debugHeaders,
+    });
+    }
+    throw lastError ?? new Error("No usable model");
   } catch (error) {
     releaseCliRuns();
     console.error("Chat API error:", error);
@@ -789,9 +730,7 @@ export async function POST(req: Request) {
         latencyMs: Date.now() - requestStartedAt,
         status: "error",
         errorMsg: msg,
-        inputChars: messages?.[messages.length - 1]?.role === "user"
-          ? (messages[messages.length - 1].content || "").length
-          : undefined,
+        inputChars: inputChars(),
       }).catch(() => {});
     }
     return new Response(

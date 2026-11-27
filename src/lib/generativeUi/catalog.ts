@@ -32,7 +32,8 @@ export const catalog = defineCatalog(schema, {
         label: z.string(),
         variant: z.union([z.literal("primary"), z.literal("secondary")]).nullable(),
       }),
-      description: "A clickable button. Not wired to any action yet — purely presentational.",
+      description:
+        "A clickable button. A Button with `\"on\": { \"press\": { \"action\": \"submit\" } }` sends the current values of the form inputs above it to the chat; bind each Input/Checkbox/Select with `{ \"$bindState\": \"/form/<field>\" }`. Do not pass params: the values are read from the inputs. Without `on.press` it is only decorative.",
     },
     List: {
       props: z.object({
@@ -126,7 +127,12 @@ export const catalog = defineCatalog(schema, {
         "A chart. Use 'bar' to compare values across categories, 'line' for a trend over an ordered sequence, 'pie' for parts of a whole. Prefer `dataArtifactId` (id of a saved data artifact) with `labelColumn`/`valueColumn` naming which of its columns to plot; use inline `data` only for a few hand-typed points. Keep to 3-8 points for readability.",
     },
   },
-  actions: {},
+  actions: {
+    submit: {
+      params: z.object({}),
+      description: "Send the current values of the bound form inputs to the chat. Takes no params.",
+    },
+  },
 });
 
 export type GenerativeUiCatalog = typeof catalog;

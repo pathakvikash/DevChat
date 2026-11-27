@@ -45,7 +45,7 @@ function scripted(replies: string[], id = "mock/wf") {
     },
     doGenerate: async (o) => ({ content: [{ type: "text", text: next(o) }], finishReason: { unified: "stop", raw: undefined }, usage, warnings: [] }),
   });
-  getModel.mockReturnValue({ id, name: "wf", provider: "Mock", model: mock, costPer1kInputTokens: 0, costPer1kOutputTokens: 0, maxTokens: 1000, contextWindow: 8192, supportsTools: true });
+  getModel.mockReturnValue({ id, name: "wf", provider: "Mock", model: mock, maxTokens: 1000, contextWindow: 8192, supportsTools: true });
   return { calls };
 }
 
@@ -117,7 +117,7 @@ describe("agent card", () => {
     const { calls } = scripted([block({ score: 1, status: "skip", remote: false, tags: [], why: "x" })]);
     await agentCard.run(itemCtx());
     expect(calls[0].system).toBe(workflowSystemPrompt(fields));
-    expect(calls[0].system).toContain("You are one step in a DevChat workflow");
+    expect(calls[0].system).toContain("You are one step in a Orrery workflow");
     expect(calls[0].system).toContain("- status (one of: shortlist, skip): decision");
     const user = JSON.stringify(calls[0].prompt);
     expect(user).toContain("Score ```\\nA\\n```"); // item values in instructions are fenced

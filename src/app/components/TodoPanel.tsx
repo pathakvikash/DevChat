@@ -98,6 +98,7 @@ export default function TodoPanel({ isOpen, onClose, conversationId, onRefresh }
         body: JSON.stringify({ todoId, status: newStatus }),
       });
       if (res.ok) {
+        window.dispatchEvent(new Event("vas:todos-updated"));
         setTodos((prev) =>
           (prev ?? []).map((t) => (t.id === todoId ? { ...t, status: newStatus, updatedAt: new Date().toISOString() } : t)),
         );

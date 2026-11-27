@@ -58,6 +58,16 @@ describe("canUseHostTools", () => {
     expect(find).toHaveBeenCalledTimes(2);
   });
 
+  it("fails closed in production when OWNER_EMAILS is unset or blank", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    process.env = { ...process.env, NODE_ENV: "production" };
+    expect(await canUseHostTools("u1")).toBe(false);
+    process.env.OWNER_EMAILS = "  ";
+    expect(await canUseHostTools("u1")).toBe(false);
+    expect(find).not.toHaveBeenCalled();
+    warn.mockRestore();
+  });
+
   it("warns once, only in a production build, when OWNER_EMAILS is unset", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     await canUseHostTools("u1");

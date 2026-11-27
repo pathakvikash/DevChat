@@ -133,7 +133,7 @@ export default function DescribeBox({
       <div className={`glass-card mx-auto space-y-3 rounded-[var(--glass-radius-lg)] p-4 ${empty ? "max-w-2xl" : "max-w-3xl"}`}>
         <div className="flex items-center gap-2">
           <Sparkles size={16} className="text-zinc-300" aria-hidden="true" />
-          <h2 className="flex-1 text-sm font-medium text-zinc-200">{empty ? "Describe what you want done and DevChat lays out the cards" : "Describe your flow"}</h2>
+          <h2 className="flex-1 text-sm font-medium text-zinc-200">{empty ? "Describe what you want done and Orrery lays out the cards" : "Describe your flow"}</h2>
           {!empty && (
             <button type="button" aria-label="Collapse" title="Collapse" disabled={busy} onClick={() => setOpen(false)} className="focus-ring flex h-7 w-7 items-center justify-center rounded-[var(--glass-radius-sm)] text-zinc-400 hover:bg-[var(--glass-bg-hover)]">
               <ChevronDown size={14} />

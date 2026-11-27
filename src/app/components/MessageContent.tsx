@@ -8,8 +8,10 @@ import {
   type AnyPart,
   type ToolPart,
 } from "@/lib/utils/messageParts";
-import { useJsonRenderMessage, Renderer } from "@json-render/react";
-import { registry } from "@/lib/generativeUi/registry";
+import { useEffect, useMemo, useRef } from "react";
+import { useJsonRenderMessage, Renderer, StateProvider, ActionProvider, useStateStore } from "@json-render/react";
+import { boundFieldPaths, boundValues, composeUiSubmit, sanitizeSpec } from "@/lib/generativeUi/composeSubmit";
+import { registry, SubmitOutcomeContext } from "@/lib/generativeUi/registry";
 import { splitQuoteBlocks } from "@/lib/utils/quoteReply";
 import { cutNotesIn } from "@/lib/utils/fileMentions";
 import { AlertTriangle } from "lucide-react";
@@ -22,10 +24,42 @@ interface MessageContentProps {
   isStreaming: boolean;
   onOpenArtifact?: (id: string) => void;
   onClarificationAnswer?: (toolCallId: string, answer: string) => void;
+  /** Generative-UI form submit; set only on the last assistant message while idle. */
+  onUiSubmit?: (text: string) => boolean;
   /** Side chat: tool calls fold to one line, and prose has no width cap. */
   compact?: boolean;
   /** A user-role message that is formatted text (a workflow's "Post to a chat"): drawn as markdown, with diagrams. */
   markdown?: boolean;
+}
+
+/** Inside the message's StateProvider: a submit reads the bound inputs from that state and ignores the action's params. */
+function UiRenderer({ spec, loading, onSubmit }: { spec: any; loading: boolean; onSubmit?: (text: string) => boolean }) {
+  const { getSnapshot } = useStateStore();
+  // Whether the last submit actually sent something; the Button reads it after its press resolves.
+  const sentRef = useRef(false);
+  const outcome = useMemo(() => ({ reset: () => { sentRef.current = false; }, sent: () => sentRef.current }), []);
+  // ActionProvider keeps only its first `handlers`, so route through a ref.
+  const ref = useRef({ spec, onSubmit, getSnapshot });
+  useEffect(() => {
+    ref.current = { spec, onSubmit, getSnapshot };
+  });
+  const handlers = useMemo(
+    () => ({
+      submit: () => {
+        const { spec, onSubmit, getSnapshot } = ref.current;
+        const text = composeUiSubmit(boundValues(getSnapshot(), boundFieldPaths(spec)));
+        sentRef.current = !!text && onSubmit?.(text) === true;
+      },
+    }),
+    [],
+  );
+  return (
+    <ActionProvider handlers={handlers}>
+      <SubmitOutcomeContext.Provider value={outcome}>
+        <Renderer spec={spec} registry={registry} loading={loading} />
+      </SubmitOutcomeContext.Provider>
+    </ActionProvider>
+  );
 }
 
 export default function MessageContent({
@@ -36,6 +70,7 @@ export default function MessageContent({
   isStreaming,
   onOpenArtifact,
   onClarificationAnswer,
+  onUiSubmit,
   compact = false,
   markdown = false,
 }: MessageContentProps) {
@@ -46,6 +81,7 @@ export default function MessageContent({
   // below, so they just fall through and render nothing — this hook is only
   // for reconstructing the spec for the Renderer, not for text extraction.
   const { spec, hasSpec } = useJsonRenderMessage(allParts as any);
+  const safeSpec = useMemo(() => (spec ? sanitizeSpec(spec) : spec), [spec]);
 
   return (
     <>
@@ -112,7 +148,9 @@ export default function MessageContent({
       })}
       {isAssistant && hasSpec && spec && (
         <div className="max-w-2xl">
-          <Renderer spec={spec} registry={registry} loading={isStreaming} />
+          <StateProvider>
+            <UiRenderer spec={safeSpec} loading={isStreaming} onSubmit={onUiSubmit} />
+          </StateProvider>
         </div>
       )}
       {isStreaming && !toolParts?.length && (

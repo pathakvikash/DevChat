@@ -7,6 +7,7 @@ import { useToast } from "@/app/components/Toast";
 import { fetchConversations } from "@/app/hooks/useConversationsApi";
 import { createSideChat, listSideChats, queueSideQuestion } from "@/lib/sideChat";
 import type { ModelCaps } from "@/app/contexts/ChatModeContext";
+import { modeLabel } from "@/lib/chat/modes";
 import {
   MAX_AGENT_HOPS,
   buildAgentMessagePart,
@@ -91,7 +92,7 @@ async function waitForHandle(map: Map<string, AgentPaneHandle>, id: string): Pro
 export interface PaneWarning {
   otherId: string;
   otherTitle: string;
-  mode: "Agent" | "Ask";
+  mode: "Agent" | "Ask" | "Plan";
   folder: string;
 }
 
@@ -229,7 +230,7 @@ export function SplitViewProvider({ children }: { children: React.ReactNode }) {
     };
   }, [loadInfo]);
 
-  // Each pane's mode lives in the same per-chat storage ChatModeContext writes; there is no event, so poll while split.
+  // Each pane's mode lives in the same per-chat storage ChatModeContext writes; re-read when a pane announces a change.
   useEffect(() => {
     if (ids.length < 2) return;
     const read = () => {
@@ -244,8 +245,8 @@ export function SplitViewProvider({ children }: { children: React.ReactNode }) {
       setModes((prev) => (JSON.stringify(prev) === JSON.stringify(next) ? prev : next));
     };
     read();
-    const timer = setInterval(read, 1000);
-    return () => clearInterval(timer);
+    window.addEventListener("vas:pane-info-changed", read);
+    return () => window.removeEventListener("vas:pane-info-changed", read);
   }, [ids]);
 
   const limit = windowWidth ? maxPanesForWidth(windowWidth) : 3;
@@ -263,7 +264,7 @@ export function SplitViewProvider({ children }: { children: React.ReactNode }) {
       out[id] = {
         otherId: other,
         otherTitle: info[other]?.title ?? "Chat",
-        mode: modes[other] === "ask" ? "Ask" : "Agent",
+        mode: modeLabel(modes[other]),
         folder: basename(folder),
       };
     }

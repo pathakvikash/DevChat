@@ -116,7 +116,7 @@ export default function MarkdownMessage({ content, streaming = false, fromWorkfl
   // Absurdly nested quotes or lists would crash the parser: show them as they are.
   if (tooDeeplyNested(content)) return <div className="whitespace-pre-wrap break-words">{content}</div>;
   return (
-    <div className="prose prose-invert max-w-none min-w-0 overflow-hidden">
+    <div className={`prose prose-invert max-w-none min-w-0 overflow-hidden${streaming ? " md-stream" : ""}`}>
       <OpenFence.Provider value={streaming ? openFenceBody(content) : null}>
         <ReactMarkdown components={fromWorkflow ? workflowComponents : components}>{content}</ReactMarkdown>
       </OpenFence.Provider>

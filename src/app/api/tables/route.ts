@@ -14,13 +14,13 @@ export async function GET() {
       select: { id: true, name: true, privateFrom: true, updatedAt: true, _count: { select: { rows: true } } },
     });
     // A table's own updatedAt only moves when its columns do, so the newest row counts too.
-    const list = await Promise.all(
-      rows.map(async (t) => {
-        const last = await prisma.dataTableRow.findFirst({ where: { tableId: t.id }, orderBy: { updatedAt: "desc" }, select: { updatedAt: true } });
-        const updatedAt = last && last.updatedAt > t.updatedAt ? last.updatedAt : t.updatedAt;
-        return { id: t.id, name: t.name, private: parseKinds(t.privateFrom).length > 0, privateKinds: parseKinds(t.privateFrom), rowCount: t._count.rows, updatedAt };
-      }),
-    );
+    const newest = await prisma.dataTableRow.groupBy({ by: ["tableId"], where: { tableId: { in: rows.map((t) => t.id) } }, _max: { updatedAt: true } });
+    const lastRow = new Map(newest.map((g) => [g.tableId, g._max.updatedAt]));
+    const list = rows.map((t) => {
+      const last = lastRow.get(t.id);
+      const updatedAt = last && last > t.updatedAt ? last : t.updatedAt;
+      return { id: t.id, name: t.name, private: parseKinds(t.privateFrom).length > 0, privateKinds: parseKinds(t.privateFrom), rowCount: t._count.rows, updatedAt };
+    });
     list.sort((a, b) => b.updatedAt.getTime() - a.updatedAt.getTime());
     return NextResponse.json(list);
   });

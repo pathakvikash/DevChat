@@ -2,13 +2,15 @@
 
 import type { ChatMode } from "@/app/components/conversation/types";
 import { useEffect, useRef, useState, useCallback } from "react";
-import { Plus, Upload, Globe, BookOpen, Settings, X, Slash, Mic, MicOff, ArrowRight, Loader2, Paperclip, AtSign, FileText } from "lucide-react";
-import { AnimatePresence, motion } from "framer-motion";
+import { Plus, Upload, Globe, BookOpen, Settings, X, Slash, Mic, MicOff, ArrowRight, ArrowUp, Square, Loader2, Paperclip, AtSign, FileText } from "lucide-react";
+import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import AttachmentChip from "./AttachmentChip";
 import QuoteCards from "./QuoteCards";
 import QueuedMessages, { type QueuedItem } from "./QueuedMessages";
 import DragOverlay from "./DragOverlay";
 import ContextUsageCircle from "./ContextUsageCircle";
+import ModeToggle from "./ModeToggle";
+import { useChatModeOptional } from "@/app/contexts/ChatModeContext";
 import ModelSelector from "./conversation/ModelSelector";
 import WorkingFolderPicker from "./conversation/WorkingFolderPicker";
 import { isCliModelId } from "@/lib/providers";
@@ -24,8 +26,6 @@ import { findMentionQuery, formatSize, matchMentionFiles } from "@/lib/utils/fil
 
 /** Max composer height before it starts scrolling. */
 const MAX_INPUT_HEIGHT = 200;
-/** Above this the text has wrapped — one line measures ~32px. */
-const SINGLE_LINE_HEIGHT = 40;
 
 interface ChatInputProps {
   /** The pane's mode. The sidebar and header toggles switch it. */
@@ -132,12 +132,20 @@ export default function ChatInput({
   onQueueRetry = () => {},
   toolsAvailable = true,
 }: ChatInputProps) {
+  const modeCtx = useChatModeOptional();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const [expanded, setExpanded] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
-  const [, setDragCounter] = useState(0);
+  const dragCounter = useRef(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [plusOpen, setPlusOpen] = useState(false);
+  const reduceMotion = useReducedMotion();
+  // False until the first paint is done, so nothing animates on load.
+  const [settled, setSettled] = useState(false);
+  useEffect(() => {
+    const t = setTimeout(() => setSettled(true), 0);
+    return () => clearTimeout(t);
+  }, []);
+  const popIn = !settled || reduceMotion ? false : { opacity: 0, scale: 0.6 };
   const [compressedDismissed, setCompressedDismissed] = useState(false);
   const plusRef = useRef<HTMLDivElement>(null);
 
@@ -303,7 +311,7 @@ export default function ChatInput({
 
   const handleDragEnter = useCallback((e: React.DragEvent) => {
     e.preventDefault();
-    setDragCounter((prev) => prev + 1);
+    dragCounter.current += 1;
     if (e.dataTransfer.items && e.dataTransfer.items.length > 0) {
       setIsDragging(true);
     }
@@ -311,13 +319,8 @@ export default function ChatInput({
 
   const handleDragLeave = useCallback((e: React.DragEvent) => {
     e.preventDefault();
-    setDragCounter((prev) => {
-      const newCounter = prev - 1;
-      if (newCounter === 0) {
-        setIsDragging(false);
-      }
-      return newCounter;
-    });
+    dragCounter.current -= 1;
+    if (dragCounter.current === 0) setIsDragging(false);
   }, []);
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
@@ -327,7 +330,7 @@ export default function ChatInput({
   const handleDrop = useCallback(
     (e: React.DragEvent) => {
       e.preventDefault();
-      setDragCounter(0);
+      dragCounter.current = 0;
       setIsDragging(false);
       const dropped = Array.from(e.dataTransfer.files);
       addFiles(dropped);
@@ -380,11 +383,19 @@ export default function ChatInput({
   useEffect(() => {
     const el = textareaRef.current;
     if (!el) return;
+    const prev = el.offsetHeight;
+    el.style.transition = "none";
     el.style.height = "auto";
-    const content = el.scrollHeight;
-    el.style.height = `${Math.min(content, MAX_INPUT_HEIGHT)}px`;
-    // Once it wraps, go full width and let the buttons drop underneath.
-    setExpanded(content > SINGLE_LINE_HEIGHT);
+    const next = Math.min(el.scrollHeight, MAX_INPUT_HEIGHT);
+    if (settled && !reduceMotion && prev && prev !== next) {
+      // Start from the old height, then let the new one ease in.
+      el.style.height = `${prev}px`;
+      void el.offsetHeight;
+      el.style.transition = "height 120ms ease-out";
+    }
+    el.style.height = `${next}px`;
+    // settled is read, not a trigger: only a change of text resizes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [input]);
 
   return (
@@ -460,18 +471,16 @@ export default function ChatInput({
                 </div>
                 <div role="list" aria-label="Files" className="flex flex-wrap gap-2">
                   {files.map((file, index) => (
-                    <AttachmentChip
-                      key={`${file.name}-${file.size}-${index}`}
-                      file={file}
-                      onRemove={() => removeFile(index)}
-                    />
+                    <ChipIn key={`${file.name}-${file.size}-${index}`} animate={settled && !reduceMotion}>
+                      <AttachmentChip file={file} onRemove={() => removeFile(index)} />
+                    </ChipIn>
                   ))}
                   {mentions.map((path) => {
                     const cut = mentionCuts[path];
                     const modelName = model.split("/").pop() || model;
                     return (
+                      <ChipIn key={`@${path}`} animate={settled && !reduceMotion}>
                       <AttachmentChip
-                        key={`@${path}`}
                         file={{ name: path }}
                         note={
                           cut && {
@@ -481,6 +490,7 @@ export default function ChatInput({
                         }
                         onRemove={() => setMentions((prev) => prev.filter((p) => p !== path))}
                       />
+                      </ChipIn>
                     );
                   })}
                 </div>
@@ -496,7 +506,7 @@ export default function ChatInput({
           onDragOver={handleDragOver}
           onDrop={handleDrop}
           className={`
-            relative flex flex-wrap items-end gap-x-2 gap-y-1.5 rounded-[var(--glass-radius-xl)] glass px-3 py-2 transition-all duration-200
+            relative flex flex-col gap-1 rounded-[var(--glass-radius-xl)] glass px-3 pt-2 pb-2 transition-all duration-200
             ${
               isDragging
                 ? "shadow-[var(--glass-shadow-glow)] border-[var(--glass-accent)]"
@@ -572,8 +582,8 @@ export default function ChatInput({
             </div>
           )}
 
-          {/* One row until the text wraps, then the input takes the full width. */}
-          <div className={`relative min-w-0 flex flex-col ${expanded ? "order-1 w-full" : "order-2 flex-1"}`}>
+          {/* Row 1: the text. */}
+          <div className="relative flex w-full min-w-0 flex-col">
             <textarea
               ref={textareaRef}
               aria-label="Message"
@@ -592,12 +602,12 @@ export default function ChatInput({
                   : temporary
                     ? "Temporary chat. Not saved after you leave."
                     : mode === "agent"
-                    ? "Agent mode: can make changes without asking"
+                    ? "Agent: can make changes without asking"
                     : mode === "ask"
-                      ? isCliModelId(model) && !model.startsWith("claude-code/") ? "Ask mode: OpenCode and Codex can't ask before editing; read-only here" : "Ask mode: changes need your OK"
+                      ? isCliModelId(model) && !model.startsWith("claude-code/") ? "Agent: OpenCode and Codex can't ask before editing; read-only here" : "Agent: changes need your OK"
                       : mode === "plan"
                         ? "Describe the task. You'll get a plan to approve."
-                        : "Type a message, / for commands, or drop files..."
+                        : "Message Orrery, or type / for commands"
               }
               className={`w-full resize-none bg-transparent text-sm text-[var(--foreground)] outline-none placeholder:text-zinc-500 placeholder:truncate disabled:opacity-50 py-1.5 overflow-y-auto ${showSuggestion ? "pr-7" : ""}`}
               rows={1}
@@ -699,24 +709,38 @@ export default function ChatInput({
             </AnimatePresence>
           </div>
 
-          <div className={`relative shrink-0 ${expanded ? "order-2" : "order-1"}`} ref={plusRef}>
+          {isLoading && (
+            <p className="px-1 text-[11px] leading-tight text-zinc-500">Enter queues · the model sees it at its next step</p>
+          )}
+
+          {/* Row 2: tools on the left, model and send on the right. */}
+          <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1.5">
+          <div className="flex min-w-0 items-center gap-1.5">
+          <div className="relative shrink-0" ref={plusRef}>
             <button
               type="button"
               onClick={() => setPlusOpen(!plusOpen)}
-              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[var(--glass-radius-md)] glass-button text-zinc-400"
+              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-zinc-400 transition hover:bg-[var(--glass-bg-hover)] hover:text-[var(--foreground)]"
               aria-label="Add files, web search, or knowledge base"
             >
               <Plus size={18} />
             </button>
+            <AnimatePresence>
             {plusOpen && (
-              <div className="absolute bottom-full left-0 mb-2 w-52 glass-panel rounded-[var(--glass-radius-md)] shadow-lg border border-[var(--glass-border)] z-50 overflow-hidden">
+              <motion.div
+                initial={reduceMotion ? false : { opacity: 0, scale: 0.96 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={reduceMotion ? undefined : { opacity: 0, transition: { duration: 0.1 } }}
+                transition={{ duration: 0.15, ease: "easeOut" }}
+                style={{ transformOrigin: "bottom left" }}
+                className="absolute bottom-full left-0 mb-2 w-52 glass-panel rounded-[var(--glass-radius-md)] shadow-lg border border-[var(--glass-border)] z-50 overflow-hidden">
                 <button
                   type="button"
                   onClick={handleFileSelect}
                   className="flex w-full items-center gap-3 px-4 py-3 text-sm text-zinc-200 hover:bg-[var(--glass-bg-hover)] transition"
                 >
                   <Upload size={16} className="text-zinc-400" />
-                  <span>Upload File</span>
+                  <span>Add files</span>
                   {files.length > 0 && (
                     <span className="ml-auto text-xs text-zinc-500">{files.length}</span>
                   )}
@@ -732,7 +756,7 @@ export default function ChatInput({
                   <Globe size={16} className={
                     searchProvider === "tavily" ? "text-emerald-400" : "text-zinc-400"
                   } />
-                  <span>Web Search</span>
+                  <span>Web search</span>
                   <span className="ml-auto text-xs text-zinc-500">
                     {searchProvider === "tavily" ? "Tavily" : "DDG"}
                   </span>
@@ -746,7 +770,7 @@ export default function ChatInput({
                   className="flex w-full items-center gap-3 px-4 py-3 text-sm text-zinc-200 hover:bg-[var(--glass-bg-hover)] transition border-b border-[var(--glass-border)]"
                 >
                   <Settings size={16} className="text-zinc-400" />
-                  <span>Model Settings</span>
+                  <span>Model settings</span>
                 </button>
                 <button
                   type="button"
@@ -765,15 +789,16 @@ export default function ChatInput({
                   }`}
                 >
                   <BookOpen size={16} className={kbId ? "text-blue-400" : "text-zinc-400"} />
-                  <span>Knowledge Base</span>
+                  <span>Knowledge base</span>
                   {kbId ? (
                     <span className="ml-auto text-xs text-blue-400">Active</span>
                   ) : (
                     <span className="ml-auto text-xs text-zinc-500">Off</span>
                   )}
                 </button>
-              </div>
+              </motion.div>
             )}
+            </AnimatePresence>
           </div>
 
           <input
@@ -785,39 +810,8 @@ export default function ChatInput({
             accept="image/*,.pdf,.doc,.docx,.txt,.md"
           />
 
-          <div className="order-3 ml-auto flex items-center gap-1.5">
-            {/* Reads like a second placeholder when the box is empty. */}
-            {input.length > 0 && (
-              <span className="text-[11px] text-zinc-400 hidden md:block mr-1 whitespace-nowrap">
-                {isLoading
-                  ? toolsAvailable
-                    ? "Enter queues · the model sees it at its next step"
-                    : "Enter queues · sends when the reply finishes"
-                  : "Enter to send · Shift+Enter for newline"}
-              </span>
-            )}
-            {contextUsage && (
-              <ContextUsageCircle
-                usedTokens={contextUsage.usedTokens}
-                maxContextTokens={contextUsage.maxContextTokens}
-                contextPercent={contextUsage.contextPercent}
-                onClick={onContextClick}
-                className="mr-0.5 hidden md:flex"
-              />
-            )}
-
-            <div className="hidden md:block">
-              <ModelSelector
-                currentModel={model}
-                onModelChange={onModelChange}
-                onOpenSettings={onOpenSettings}
-                disabled={isLoading}
-                size="sm"
-              />
-            </div>
-
             {onWorkingFolderChange && (
-              <div className="hidden md:block">
+              <div className="min-w-0">
                 <WorkingFolderPicker
                   value={workingFolder ?? null}
                   onChange={onWorkingFolderChange}
@@ -832,24 +826,50 @@ export default function ChatInput({
                 />
               </div>
             )}
+          </div>
+
+          <div className="ml-auto flex items-center gap-1.5">
+            {contextUsage && (
+              <ContextUsageCircle
+                usedTokens={contextUsage.usedTokens}
+                maxContextTokens={contextUsage.maxContextTokens}
+                contextPercent={contextUsage.contextPercent}
+                onClick={onContextClick}
+                className="mr-0.5"
+              />
+            )}
+
+            <div className="min-w-0">
+              <ModelSelector
+                currentModel={model}
+                onModelChange={onModelChange}
+                onOpenSettings={onOpenSettings}
+                disabled={isLoading}
+                size="sm"
+              />
+            </div>
+
+            {modeCtx && <ModeToggle mode={mode} onModeChange={modeCtx.setMode} toolsAvailable={modeCtx.modelCaps.toolsAvailable} />}
 
             {voiceSupported && (
               <button
                 type="button"
                 onClick={() => dictateTo(null)}
                 disabled={isLoading}
-                className={`flex h-9 w-9 items-center justify-center rounded-[var(--glass-radius-md)] transition-all ${
+                className={`flex h-8 w-8 items-center justify-center rounded-full transition-all ${
                   isListening && voiceTarget === null
                     ? "glass-button-primary text-white"
-                    : "glass-button text-zinc-400"
+                    : "text-zinc-400 hover:bg-[var(--glass-bg-hover)] hover:text-[var(--foreground)]"
                 } disabled:opacity-50`}
                 style={isListening && voiceTarget === null ? { animation: "mic-pulse 2s ease-in-out infinite" } : undefined}
                 title={isListening && voiceTarget === null ? "Stop dictation" : "Voice dictation"}
               >
                 {isListening && voiceTarget === null ? (
                   <Mic size={16} className="animate-pulse" />
-                ) : (
+                ) : isLoading ? (
                   <MicOff size={16} />
+                ) : (
+                  <Mic size={16} />
                 )}
               </button>
             )}
@@ -857,13 +877,16 @@ export default function ChatInput({
             {isLoading ? (
               <>
                 {input.trim() && (
-                  <button
+                  <motion.button
                     type="button"
                     onClick={onQueue}
-                    className="flex h-9 items-center justify-center rounded-[var(--glass-radius-md)] glass-button px-3 text-sm font-medium text-[var(--foreground)]"
+                    initial={popIn}
+                    animate={{ opacity: 1, scale: 1 }}
+                    transition={{ duration: 0.15, ease: "easeOut" }}
+                    className="flex h-8 items-center justify-center rounded-full glass-button px-3 text-xs font-medium text-[var(--foreground)]"
                   >
                     Queue
-                  </button>
+                  </motion.button>
                 )}
                 <button
                   type="button"
@@ -872,23 +895,44 @@ export default function ChatInput({
                     // Stop puts the undelivered text back in the box; the cursor ends up at its end.
                     textareaRef.current?.focus();
                   }}
-                  className="flex h-9 items-center justify-center rounded-[var(--glass-radius-md)] glass-button-danger px-3 text-sm font-medium text-red-200"
+                  aria-label="Stop"
+                  className="flex h-8 w-8 items-center justify-center rounded-full glass-button-danger text-red-200"
                 >
-                  Stop
+                  <motion.span initial={popIn} animate={{ opacity: 1, scale: 1 }} transition={{ duration: 0.15, ease: "easeOut" }} className="flex">
+                    <Square size={12} fill="currentColor" aria-hidden />
+                  </motion.span>
                 </button>
               </>
             ) : (
               <button
                 type="submit"
                 disabled={!canSubmit}
-                className="flex h-9 items-center justify-center rounded-[var(--glass-radius-md)] glass-button-primary px-3 text-sm font-medium text-white disabled:opacity-50 disabled:cursor-not-allowed"
+                aria-label="Send"
+                className="flex h-8 w-8 items-center justify-center rounded-full glass-button-primary text-white disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                Send
+                <motion.span initial={popIn} animate={{ opacity: 1, scale: 1 }} transition={{ duration: 0.15, ease: "easeOut" }} className="flex">
+                  <ArrowUp size={16} aria-hidden />
+                </motion.span>
               </button>
             )}
+          </div>
           </div>
         </form>
       </div>
     </>
+  );
+}
+
+/** An attached file's chip fades and scales in; the wrapper is presentational so the list keeps its items. */
+function ChipIn({ animate, children }: { animate: boolean; children: React.ReactNode }) {
+  return (
+    <motion.div
+      role="presentation"
+      initial={animate ? { opacity: 0, scale: 0.9 } : false}
+      animate={{ opacity: 1, scale: 1 }}
+      transition={{ duration: 0.15, ease: "easeOut" }}
+    >
+      {children}
+    </motion.div>
   );
 }

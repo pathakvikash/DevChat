@@ -2,6 +2,8 @@
 
 import { Loader2, CheckCircle2, XCircle, Check, ChevronDown, ChevronRight } from "lucide-react";
 import { useState } from "react";
+import { motion } from "framer-motion";
+import { DUR, FADE, SPRING } from "@/lib/motion";
 import { toolSummary } from "@/lib/chat/sideChatLabels";
 import { ALLOWED_FOR_CHAT, NOT_ANSWERED, type ToolPart } from "@/lib/utils/messageParts";
 import ApprovalCard from "./ApprovalCard";
@@ -55,6 +57,7 @@ function ToolCall({
   onClarificationAnswer,
   meta,
 }: ToolInvocationProps & { meta?: string }) {
+  const [collapsed, setCollapsed] = useState(true);
   const toolName = part.type.replace(/^tool-/, "");
   const isArtifact =
     toolName === "createArtifact" || toolName === "updateArtifact";
@@ -143,8 +146,6 @@ function ToolCall({
   // The span cuts a long one with CSS; the title shows it whole.
   const summary = isExec ? "" : toolSummary(part.input, 300);
 
-  const [collapsed, setCollapsed] = useState(true);
-
   if (isExec && code) {
     const output = hasResult
       ? resultErrored
@@ -170,7 +171,23 @@ function ToolCall({
   }
 
   return (
-    <div className="my-2 glass-card rounded-[var(--glass-radius-md)] overflow-hidden">
+    <motion.div
+      initial={{ opacity: 0, y: 6 }}
+      animate={{ opacity: 1, y: 0, x: errored || resultErrored ? [0, -4, 4, -3, 3, 0] : 0 }}
+      transition={{ ...FADE, x: { duration: DUR.slow } }}
+      className="relative my-2 glass-card rounded-[var(--glass-radius-md)] overflow-hidden"
+    >
+      {running && !hasResult && (
+        <div
+          aria-hidden
+          className="pointer-events-none absolute inset-x-0 top-0 h-0.5"
+          style={{
+            background: "linear-gradient(90deg, transparent, var(--glass-accent, #3b82f6), transparent)",
+            backgroundSize: "200% 100%",
+            animation: "shimmer 1.5s linear infinite",
+          }}
+        />
+      )}
       <button
         onClick={() => setCollapsed((v) => !v)}
         className="flex select-none items-center gap-2 w-full px-3 py-2 bg-[var(--glass-bg-elevated)] text-xs text-left hover:bg-[var(--glass-bg-hover)] transition-colors"
@@ -185,7 +202,9 @@ function ToolCall({
         ) : errored || resultErrored ? (
           <XCircle size={14} className="text-red-400" />
         ) : (
-          <CheckCircle2 size={14} className="text-green-400" />
+          <motion.span initial={{ scale: 0.5, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} transition={{ ...SPRING, duration: DUR.slow }} className="inline-flex">
+            <CheckCircle2 size={14} className="text-green-400" />
+          </motion.span>
         )}
         <span className="font-medium text-zinc-200">
           {isExec ? `Executed ${lang || "code"}` : `Tool: ${toolName}`}
@@ -223,6 +242,6 @@ function ToolCall({
           )}
         </>
       )}
-    </div>
+    </motion.div>
   );
 }

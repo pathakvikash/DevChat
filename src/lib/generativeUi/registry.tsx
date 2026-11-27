@@ -1,3 +1,6 @@
+import { createContext, useContext, useState } from "react";
+import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
+import { Check } from "lucide-react";
 import { defineRegistry, useBoundProp } from "@json-render/react";
 import { useResource } from "@/app/hooks/useResource";
 import { catalog } from "./catalog";
@@ -58,6 +61,52 @@ function tableFrom(t: DataArtifactTable, columns: string[] | null) {
   };
 }
 
+/** Set by the submit handler: true only when a submit really went out. */
+export const SubmitOutcomeContext = createContext<{ reset: () => void; sent: () => boolean }>({
+  reset: () => {},
+  sent: () => false,
+});
+
+/** A button with a handler is a one-shot submit: after the press it reads "Sent" and stays disabled. */
+function SubmitButton({ label, secondary, emit, bound }: { label: string; secondary: boolean; emit: (e: string) => void; bound: boolean }) {
+  const [sent, setSent] = useState(false);
+  const reduce = useReducedMotion();
+  const outcome = useContext(SubmitOutcomeContext);
+  return (
+    <button
+      disabled={sent}
+      onClick={async () => {
+        outcome.reset();
+        // emit is async at runtime (the handler is awaited) though typed void.
+        await (emit("press") as unknown as Promise<void>);
+        if (bound && outcome.sent()) setSent(true);
+      }}
+      className={`px-3 py-1.5 rounded-[var(--glass-radius-md)] text-sm font-medium transition-all border disabled:cursor-default ${
+        secondary ? "glass-button text-zinc-300" : "glass-button-primary text-white"
+      }`}
+    >
+      <AnimatePresence mode="wait" initial={false}>
+        <motion.span
+          key={sent ? "sent" : "label"}
+          className="inline-flex items-center gap-1.5"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          transition={{ duration: reduce ? 0 : 0.075 }}
+        >
+          {sent ? (
+            <>
+              <Check size={14} aria-hidden /> Sent
+            </>
+          ) : (
+            label
+          )}
+        </motion.span>
+      </AnimatePresence>
+    </button>
+  );
+}
+
 const HEADING_CLASSES: Record<1 | 2 | 3, string> = {
   1: "text-xl font-semibold text-zinc-100",
   2: "text-lg font-semibold text-zinc-100",
@@ -104,15 +153,8 @@ export const { registry } = defineRegistry(catalog, {
       return <Tag className={HEADING_CLASSES[level]}>{props.text}</Tag>;
     },
     Text: ({ props }) => <p className="text-sm text-zinc-300">{props.content}</p>,
-    Button: ({ props, emit }) => (
-      <button
-        onClick={() => emit("press")}
-        className={`px-3 py-1.5 rounded-[var(--glass-radius-md)] text-sm font-medium transition-all border ${
-          props.variant === "secondary" ? "glass-button text-zinc-300" : "glass-button-primary text-white"
-        }`}
-      >
-        {props.label}
-      </button>
+    Button: ({ props, emit, on }) => (
+      <SubmitButton label={props.label} secondary={props.variant === "secondary"} emit={emit} bound={on("press").bound} />
     ),
     List: ({ props }) => (
       <ul className="list-disc list-inside text-sm text-zinc-300 space-y-1">
@@ -254,4 +296,6 @@ export const { registry } = defineRegistry(catalog, {
       return <Chart type={props.type} title={props.title} data={data} />;
     },
   },
+  // Real handler is supplied by MessageContent's ActionProvider (per message).
+  actions: { submit: async () => {} },
 });

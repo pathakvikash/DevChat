@@ -1,32 +1,30 @@
+import { prisma } from "@/lib/db";
+
 const OLLAMA_URL = process.env.OLLAMA_BASE_URL || "http://localhost:11434";
 const EMBED_MODEL = process.env.EMBED_MODEL || "nomic-embed-text";
 
 /**
- * Real semantic embedding via Ollama. Falls back to the deterministic
- * char-code embedding if Ollama is unreachable, the model isn't pulled,
- * or the request hangs past the 8s timeout — keeps retrieval working
- * (poorly) instead of stalling the whole chat.
+ * Real semantic embedding via Ollama. Throws when Ollama is unreachable, the model isn't pulled, or the
+ * request hangs past 8s: a made-up vector would sit in the KB next to real ones and rank as garbage.
  */
 export async function embed(text: string): Promise<number[]> {
+  let res: Response;
   try {
-    const res = await fetch(`${OLLAMA_URL}/api/embeddings`, {
+    res = await fetch(`${OLLAMA_URL}/api/embeddings`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ model: EMBED_MODEL, prompt: text }),
       signal: AbortSignal.timeout(8000),
     });
-    if (!res.ok) throw new Error(`Ollama embed HTTP ${res.status}`);
-    const data = (await res.json()) as { embedding?: number[] };
-    if (!Array.isArray(data.embedding) || data.embedding.length === 0) {
-      throw new Error("Ollama returned no embedding vector");
-    }
-    return data.embedding;
   } catch (err) {
-    console.warn(
-      `[rag] Falling back to simpleEmbed (${(err as Error).message}). Run \`ollama pull ${EMBED_MODEL}\` for real semantic retrieval.`
-    );
-    return simpleEmbed(text);
+    throw new Error(`Embedding failed (${(err as Error).message}). Is Ollama running? Run \`ollama pull ${EMBED_MODEL}\`.`);
   }
+  if (!res.ok) throw new Error(`Embedding failed: Ollama HTTP ${res.status}. Run \`ollama pull ${EMBED_MODEL}\`.`);
+  const data = (await res.json()) as { embedding?: number[] };
+  if (!Array.isArray(data.embedding) || data.embedding.length === 0) {
+    throw new Error("Embedding failed: Ollama returned no embedding vector");
+  }
+  return data.embedding;
 }
 
 // Simple tokenizer - count words as tokens
@@ -75,6 +73,7 @@ export function simpleEmbed(text: string): number[] {
 
 // Cosine similarity
 export function cosineSimilarity(a: number[], b: number[]): number {
+  if (a.length !== b.length) return 0;
   let dotProduct = 0;
   let normA = 0;
   let normB = 0;
@@ -103,11 +102,17 @@ export interface ScoredChunk {
 export function scoreDocumentChunks(
   doc: { filename: string; chunks: string },
   queryEmbedding: number[],
+  /** Counts chunks skipped because their vector length differs from the query's (a different embedding model). */
+  stats?: { mismatched: number },
 ): ScoredChunk[] {
   const chunks: Array<{ text: string; embedding: number[] }> = JSON.parse(doc.chunks);
   const scored: ScoredChunk[] = [];
   chunks.forEach((chunk, i) => {
     if (!chunk.embedding || !Array.isArray(chunk.embedding)) return;
+    if (chunk.embedding.length !== queryEmbedding.length) {
+      if (stats) stats.mismatched++;
+      return;
+    }
     scored.push({
       text: chunk.text,
       source: `${doc.filename}#chunk${i}`,
@@ -117,3 +122,31 @@ export function scoreDocumentChunks(
   return scored;
 }
 
+
+export const REINGEST_NOTE = "Note: some documents were embedded with a different model; re-ingest them.";
+const warnedKbs = new Set<string>();
+
+/** Top-k chunks of a knowledge base for a query, best first. Documents with malformed chunk data are skipped;
+ *  `mismatched` counts chunks skipped for a vector of another size (embedded with a different model). */
+export async function searchKb(
+  kbId: string,
+  query: string,
+  k: number,
+): Promise<{ docCount: number; chunks: ScoredChunk[]; mismatched: number }> {
+  const queryEmbedding = await embed(query);
+  const documents = await prisma.document.findMany({ where: { kbId }, select: { id: true, filename: true, chunks: true } });
+  const scored: ScoredChunk[] = [];
+  const stats = { mismatched: 0 };
+  for (const doc of documents) {
+    try {
+      scored.push(...scoreDocumentChunks(doc, queryEmbedding, stats));
+    } catch {
+      // malformed chunk JSON
+    }
+  }
+  if (stats.mismatched && !warnedKbs.has(kbId)) {
+    warnedKbs.add(kbId);
+    console.warn(`[rag] knowledge base ${kbId}: ${stats.mismatched} chunk(s) skipped, embedded with a different model. Re-ingest them.`);
+  }
+  return { docCount: documents.length, chunks: scored.sort((a, b) => b.score - a.score).slice(0, k), mismatched: stats.mismatched };
+}

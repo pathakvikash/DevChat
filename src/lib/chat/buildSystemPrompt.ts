@@ -1,5 +1,5 @@
 import { prisma } from "@/lib/db";
-import { embed, scoreDocumentChunks, type ScoredChunk } from "@/lib/rag";
+import { searchKb } from "@/lib/rag";
 import { getMemoryBlock } from "@/lib/memory";
 import { getCompressedContext } from "@/lib/compression";
 import { TOOL_REGISTRY, getSkill } from "@/lib/registry";
@@ -9,7 +9,7 @@ import { MODE_POLICY } from "./modes";
 import { countTokens } from "@/lib/tokens";
 import { getSettingsKey } from "@/lib/settings";
 import { folderPrompt } from "@/lib/files/folderTools";
-import { catalog as generativeUiCatalog } from "@/lib/generativeUi/catalog";
+import { GENERATIVE_UI_STUB, shouldInlineUiGuide, uiGuideText } from "@/lib/generativeUi/guide";
 import { loadParentContext, type MainContext } from "./loadParentContext";
 import type { AgentTarget } from "./agentMessages";
 
@@ -50,7 +50,7 @@ You are planning. Look around with read-only tools, if you have them. Do not cha
 ${withTools ? "End by calling presentPlan with a short title and the steps in order. The user approves the plan or asks for changes." : "End with a numbered list of concrete steps. The user approves it with a button."}`;
 
 const VAS_READ_ONLY_SECTION = `--- Read-only mode ---
-You are in Chat mode, so only read-only tools are available. You CANNOT create or
+You are in Ask mode, so only read-only tools are available. You CANNOT create or
 update artifacts, create or update todos, save or forget memories, or call MCP
 servers right now.
 
@@ -67,16 +67,6 @@ export function openChatsSection(targets: AgentTarget[]): string | null {
     'A message labelled "From <chat>" is from another chat, not from the user.',
   ].join("\n");
 }
-
-/** Extra rules appended to the json-render catalog prompt. Exported so tests
- *  exercise the same wording the chat route ships. */
-export const GENERATIVE_UI_RULES = [
-  "When the user asks for a table, chart, graph, comparison, or anything visual, render it with the `Table` / `Chart` components. Never draw charts with Python/matplotlib, never print ASCII tables, and never describe a chart in prose instead of rendering it.",
-  "Get the facts with tools first (`webSearch` etc.) when you don't already have them — tools and UI components work together in the same turn.",
-  'HARD LIMIT: never type more than 12 values (cells or chart points) into a spec, and never put the same dataset in two components. Past that — including data you got from a tool result or already know — first save it once: `executeCode` with `saveAs: { title }` (the code MUST print the dataset as its last statement: `print(json.dumps({"columns": [...], "rows": [[...]]}))` or CSV — only stdout is captured, so returning or assigning it saves nothing) or `createArtifact` type "data". Both return an artifact id; reference it from every component with `dataArtifactId` (Chart also takes `labelColumn`/`valueColumn`; Table takes `columns` to pick a subset), and let one Table and one Chart share that id instead of each carrying its own copy of the rows.',
-  "Only generate a UI component when it clearly helps — e.g. the user asks to see/show/display something structured. Plain questions get plain text answers.",
-  "The JSONL patch fence MUST be exactly a markdown code fence: an opening line of exactly ```spec and a closing line of exactly ``` (three backticks, nothing else on those lines). Do NOT use any other wrapper — no <spec> tags, no other XML/HTML-style tags, no custom delimiters. Only ```spec ... ``` is recognized; anything else will be shown to the user as literal broken text.",
-];
 
 export interface BuildSystemPromptOptions {
   useTools: boolean;
@@ -167,7 +157,7 @@ export async function buildSystemPrompt(
   const customInstructions = await getSettingsKey(opts.userId, "customInstructions");
   const instructions =
     customInstructions && customInstructions.trim()
-      ? `--- Instructions for DevChat ---\n${customInstructions}`
+      ? `--- Instructions for Orrery ---\n${customInstructions}`
       : null;
 
   const persona =
@@ -223,10 +213,12 @@ export async function buildSystemPrompt(
 
   const kb = await retrieveKbContext({ kbId, ragContext, messages });
 
-  const generativeUi = generativeUiCatalog.prompt({
-    mode: "inline",
-    customRules: GENERATIVE_UI_RULES,
-  });
+  // Tool models load the guide on demand (loadUiGuide); the rest get it inline only when it is likely needed.
+  const generativeUi = useTools
+    ? GENERATIVE_UI_STUB
+    : shouldInlineUiGuide(messages)
+      ? uiGuideText()
+      : null;
 
   const sections: SystemPromptSections = { base, instructions, persona, skills, tools, folder, memory, compressed, main, kb, generativeUi };
   const text = [base, instructions, persona, skills, tools, folder, memory, compressed, main, kb, generativeUi]
@@ -258,24 +250,9 @@ async function retrieveKbContext({
     try {
       const lastUserMessage = extractText(messages[messages.length - 1] as any);
       if (!lastUserMessage) return null;
-      const queryEmbedding = await embed(lastUserMessage);
-      const documents = await prisma.document.findMany({
-        where: { kbId },
-        select: { id: true, filename: true, chunks: true },
-      });
+      const { chunks: sorted } = await searchKb(kbId, lastUserMessage, Infinity);
 
-      const scored: ScoredChunk[] = [];
-      documents.forEach((doc) => {
-        try {
-          scored.push(...scoreDocumentChunks(doc, queryEmbedding));
-        } catch {
-          // Skip documents with malformed chunk data.
-        }
-      });
-
-      if (scored.length === 0) return null;
-
-      const sorted = scored.sort((a, b) => b.score - a.score);
+      if (sorted.length === 0) return null;
 
       // Take chunks in score order until we run out of token budget. Each
       // chunk also pays a small fixed overhead for the citation header and

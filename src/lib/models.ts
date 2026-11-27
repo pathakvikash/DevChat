@@ -25,8 +25,6 @@ export interface ModelConfig {
   name: string;
   provider: string;
   model: any;
-  costPer1kInputTokens: number;
-  costPer1kOutputTokens: number;
   maxTokens: number;
   contextWindow: number;
   supportsTools: boolean;
@@ -167,8 +165,6 @@ function createOllamaModelConfig(modelInfo: OllamaModelInfo): ModelConfig {
       model: ollama(modelName),
       middleware: { specificationVersion: "v3", transformParams: async ({ params }) => withDefaultNumCtx({ ...params, prompt: deniedAsErrorText(params.prompt) }, contextWindow) },
     }),
-    costPer1kInputTokens: 0,
-    costPer1kOutputTokens: 0,
     maxTokens: 4096,
     contextWindow,
     supportsTools: getSupportsTools(modelName),
@@ -301,8 +297,6 @@ function cliModelConfig(e: CliCatalogEntry): ModelConfig {
     name: e.name,
     provider: e.provider,
     model: e.model,
-    costPer1kInputTokens: 0,
-    costPer1kOutputTokens: 0,
     maxTokens: 4096,
     contextWindow: e.contextWindow,
     // DevChat's tools reach the CLI through a prompt protocol (see
@@ -448,8 +442,6 @@ function toModelConfig(
   return {
     ...entry,
     model: client(bareModelId(entry.id)),
-    costPer1kInputTokens: 0,
-    costPer1kOutputTokens: 0,
     maxTokens: 4096,
     supportsTools: entry.supportsTools ?? true,
   };
@@ -527,7 +519,7 @@ export function getModel(modelId: string, creds: ProviderCreds = {}, hostTools =
   const cliDef = cliProviderForModel(modelId);
   if (cliDef) {
     if (!detectionAvailable()) {
-      throw new Error(`${cliDef.label} is only available when DevChat runs on your own machine`);
+      throw new Error(`${cliDef.label} is only available when Orrery runs on your own machine`);
     }
     if (!hostTools) throw new Error(`${cliDef.label} is only available to the server's owner`);
     const upstreamId = bareModelId(modelId);

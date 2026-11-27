@@ -21,7 +21,7 @@ const SECRET_HOME_DIRS = [
 
 const OPEN_SERVER_REFUSED_PROD =
   "Adding folders is off: this server runs in production without OWNER_EMAILS, so anyone signed in could reach any folder. Set OWNER_EMAILS first.";
-const ON_VERCEL_REFUSED = "Working folders only work when DevChat runs on your own machine.";
+const ON_VERCEL_REFUSED = "Working folders only work when Orrery runs on your own machine.";
 
 const short = (p: string) => (p.startsWith(homedir() + sep) ? "~" + p.slice(homedir().length) : p);
 const fail = (status: number, error: string) => ({ ok: false as const, status, error });
@@ -136,7 +136,7 @@ async function resolveFolder(raw: unknown): Promise<Result<{ real: string }>> {
   try {
     real = await realpath(/*turbopackIgnore: true*/ p);
   } catch (e) {
-    return (e as NodeJS.ErrnoException).code === "EACCES" ? fail(403, `DevChat can't read ${p}`) : fail(404, `No folder at ${p}`);
+    return (e as NodeJS.ErrnoException).code === "EACCES" ? fail(403, `Orrery can't read ${p}`) : fail(404, `No folder at ${p}`);
   }
   const st = await stat(/*turbopackIgnore: true*/ real).catch(() => null);
   if (!st) return fail(404, `No folder at ${p}`);
@@ -186,7 +186,7 @@ export async function browseFolder(userId: string, raw: string | null, hidden: b
   const ctx = await loadCtx();
   if ((await secretKind(real, ctx)) === "inside") return fail(403, SECRET_MSG(real));
   const entries = await readdir(/*turbopackIgnore: true*/ real, { withFileTypes: true }).catch(() => null);
-  if (!entries) return fail(403, `DevChat can't read ${real}`);
+  if (!entries) return fail(403, `Orrery can't read ${real}`);
   const names = entries
     .filter((e) => e.isDirectory() && (hidden || !e.name.startsWith(".")) && !isSecretPath(e.name))
     .map((e) => e.name)

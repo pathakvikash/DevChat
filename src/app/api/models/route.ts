@@ -11,12 +11,12 @@ export async function GET() {
   const { models, status } = await listModels(creds, await canUseHostTools(userId));
 
   return NextResponse.json({
-    // Strip the runtime `model` instance and cost fields; the client only
+    // Strip the runtime `model` instance; the client only
     // needs the catalog shape.
     models: [
       ...mockModelCatalog(), // sanity suite only; empty otherwise
       ...models.map(
-        ({ model: _m, costPer1kInputTokens: _i, costPer1kOutputTokens: _o, maxTokens: _t, ...entry }) =>
+        ({ model: _m, maxTokens: _t, ...entry }) =>
           entry,
       ),
     ],

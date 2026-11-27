@@ -64,6 +64,17 @@ export function useMessageActions({
     [addToolResult, sendMessage, messages.length, setMessages, status],
   );
 
+  const handleUiSubmit = useCallback(
+    (text: string): boolean => {
+      if (status === "submitted" || status === "streaming") return false;
+      sendMessage({ parts: [{ type: "text" as const, text }] }).catch((e: unknown) =>
+        console.error("[ui-submit] sendMessage failed:", e),
+      );
+      return true;
+    },
+    [sendMessage, status],
+  );
+
   async function handleEditMessage(messageId: string, content: string) {
     const snapshot = messages;
     try {
@@ -283,6 +294,7 @@ export function useMessageActions({
     regenModal,
     setRegenModal,
     handleClarificationAnswer,
+    handleUiSubmit,
     handleEditMessage,
     handleDeleteMessage,
     handleCopyMessage,

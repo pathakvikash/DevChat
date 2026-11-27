@@ -1,5 +1,21 @@
 import { describe, it, expect } from "vitest";
-import { chunkText, cosineSimilarity, simpleEmbed } from "@/lib/rag";
+import { chunkText, cosineSimilarity, simpleEmbed, scoreDocumentChunks } from "@/lib/rag";
+
+describe("scoreDocumentChunks dimension mismatch", () => {
+  it("skips chunks of another vector size and counts them", () => {
+    const doc = {
+      filename: "a.md",
+      chunks: JSON.stringify([
+        { text: "ok", embedding: [1, 0] },
+        { text: "old", embedding: [1, 0, 0] },
+      ]),
+    };
+    const stats = { mismatched: 0 };
+    const out = scoreDocumentChunks(doc, [1, 0], stats);
+    expect(out.map((c) => c.text)).toEqual(["ok"]);
+    expect(stats.mismatched).toBe(1);
+  });
+});
 
 describe("chunkText", () => {
   it("handles empty text gracefully", () => {
@@ -109,6 +125,11 @@ describe("cosineSimilarity", () => {
     const a = [0, 0, 0];
     const b = [1, 2, 3];
     expect(cosineSimilarity(a, b)).toBe(0);
+  });
+
+  it("returns 0 for vectors of different dimensions", () => {
+    expect(cosineSimilarity([1, 2, 3], [1, 2, 3, 4])).toBe(0);
+    expect(cosineSimilarity(new Array(384).fill(1), new Array(768).fill(1))).toBe(0);
   });
 
   it("handles empty vectors", () => {

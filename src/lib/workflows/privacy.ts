@@ -19,11 +19,11 @@ export function kindsText(kinds: PrivateKind[]): string {
 }
 
 /** The kinds of private data a card reads by itself (not through a table). */
-export function privateKindsOf(type: string, config: Record<string, unknown>, defaultModel = ""): PrivateKind[] {
+export function privateKindsOf(type: string, config: Record<string, unknown>): PrivateKind[] {
   const out: PrivateKind[] = [];
   if (readsChats(type, config)) out.push("chats");
   if (usesMcp(type, config)) out.push("mcp");
-  if (hasFolder(type, config, defaultModel)) out.push("folder");
+  if (hasFolder(type, config)) out.push("folder");
   return out;
 }
 
@@ -39,7 +39,7 @@ export function kindsBefore(graph: WorkflowGraph, id: string, tableKinds: Map<st
   for (const a of ancestorsOf(graph, id)) {
     const m = graph.nodes.find((x) => x.id === a);
     if (!m) continue;
-    for (const k of privateKindsOf(m.type, m.config, graph.defaultModel)) out.add(k);
+    for (const k of privateKindsOf(m.type, m.config)) out.add(k);
     for (const k of tableKinds.get(readsTable(m)) ?? []) out.add(k);
   }
   return out;
@@ -74,7 +74,7 @@ export function planKinds(graph: WorkflowGraph, current: Map<string, PrivateKind
 export const webAfter = (graph: WorkflowGraph, id: string, kinds: PrivateKind[]): FlowNode[] => {
   const mcpOnly = kinds.length === 1 && kinds[0] === "mcp";
   const reaches = mcpOnly ? reachesOpenWeb : reachesWeb;
-  return graph.nodes.filter((m) => m.id !== id && reaches(m.type, m.config, graph.defaultModel) && ancestorsOf(graph, m.id).has(id));
+  return graph.nodes.filter((m) => m.id !== id && reaches(m.type, m.config) && ancestorsOf(graph, m.id).has(id));
 };
 
 /** The refusal for a card that reads a private table with a web card after it. */

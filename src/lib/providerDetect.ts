@@ -5,7 +5,7 @@ import { PROVIDERS, ENV_ALIASES } from "./providers";
 export { ENV_ALIASES };
 import { findCliBins } from "./cliProviders";
 
-/** Finds API keys other local tools already store, so DevChat can offer to reuse them.
+/** Finds API keys other local tools already store, so Orrery can offer to reuse them.
  *  API keys only — OAuth tokens are never read: their terms bind them to the issuing tool. */
 export interface DetectedCredential {
   providerId: string;
@@ -137,8 +137,8 @@ export function describeTools(
             tool: "Claude Code",
             status: "oauth",
             detail: cli.has("claude-code")
-              ? "Signed in with a Claude subscription. DevChat can use it anyway: pick a Claude Code model in the model selector and DevChat runs the claude command for you. (A raw API key would also work: console.anthropic.com/settings/keys.)"
-              : "Signed in with a Claude subscription. That login only works inside Claude Code and can't be reused here. To use Anthropic in DevChat, create an API key at console.anthropic.com/settings/keys.",
+              ? "Signed in with a Claude subscription. Orrery can use it anyway: pick a Claude Code model in the model selector and Orrery runs the claude command for you. (A raw API key would also work: console.anthropic.com/settings/keys.)"
+              : "Signed in with a Claude subscription. That login only works inside Claude Code and can't be reused here. To use Anthropic in Orrery, create an API key at console.anthropic.com/settings/keys.",
           },
     );
   } else out.push({ tool: "Claude Code", status: "absent", detail: "Not installed." });
@@ -152,8 +152,8 @@ export function describeTools(
               tool: "Codex CLI",
               status: "oauth",
               detail: cli.has("codex")
-                ? "Signed in with ChatGPT. DevChat can use it anyway: pick the Codex model in the model selector and DevChat runs the codex command for you."
-                : "Signed in with ChatGPT. That login only works inside Codex, and the codex command isn't installed here. To use OpenAI in DevChat, create an API key at platform.openai.com/api-keys.",
+                ? "Signed in with ChatGPT. Orrery can use it anyway: pick the Codex model in the model selector and Orrery runs the codex command for you."
+                : "Signed in with ChatGPT. That login only works inside Codex, and the codex command isn't installed here. To use OpenAI in Orrery, create an API key at platform.openai.com/api-keys.",
             }
           : { tool: "Codex CLI", status: "none", detail: "Installed, but no API key is saved." },
     );
@@ -174,7 +174,7 @@ export function describeTools(
               tool: "OpenCode",
               status: "none",
               detail: cli.has("opencode")
-                ? "No provider API key is saved, but the opencode command is installed, so every model OpenCode lists is available in the model selector; DevChat runs OpenCode for you."
+                ? "No provider API key is saved, but the opencode command is installed, so every model OpenCode lists is available in the model selector; Orrery runs OpenCode for you."
                 : "Installed, but no provider API key is saved (opencode auth login was never run with a key). If it works through environment variables, export them in ~/.zshrc or ~/.zprofile and scan again.",
             },
     );
@@ -189,7 +189,7 @@ export function describeTools(
               tool: "Gemini CLI",
               status: "oauth",
               detail:
-                "Signed in with Google. That login only works inside Gemini CLI. To use Gemini in DevChat, create a key at aistudio.google.com/apikey.",
+                "Signed in with Google. That login only works inside Gemini CLI. To use Gemini in Orrery, create a key at aistudio.google.com/apikey.",
             }
           : { tool: "Gemini CLI", status: "none", detail: "Installed, but no API key is saved in ~/.gemini/.env." },
     );

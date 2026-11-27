@@ -38,6 +38,7 @@ interface MessageBubbleProps {
   onRegenerateMessage?: (messageId: string) => void;
   onOpenArtifact?: (id: string) => void;
   onClarificationAnswer?: (toolCallId: string, answer: string) => void;
+  onUiSubmit?: (text: string) => boolean;
   /** Plan mode, last reply with no plan card: offers "Approve plan" under it. */
   onApprovePlan?: () => void;
   /** Explains the button for a model without tools. */
@@ -68,6 +69,7 @@ function MessageBubble({
   onRegenerateMessage,
   onOpenArtifact,
   onClarificationAnswer,
+  onUiSubmit,
   onApprovePlan,
   planCaption,
   feedback,
@@ -184,6 +186,7 @@ function MessageBubble({
               isStreaming={isStreaming}
               onOpenArtifact={onOpenArtifact}
               onClarificationAnswer={onClarificationAnswer}
+              onUiSubmit={onUiSubmit}
               compact={compact}
               markdown={agentSender?.from === "workflow"}
             />
@@ -310,6 +313,7 @@ const MessageBubbleMemo = memo(MessageBubble, (prev, next) => {
     prev.onRegenerateMessage === next.onRegenerateMessage &&
     prev.onOpenArtifact === next.onOpenArtifact &&
     prev.onClarificationAnswer === next.onClarificationAnswer &&
+    prev.onUiSubmit === next.onUiSubmit &&
     prev.onApprovePlan === next.onApprovePlan &&
     prev.planCaption === next.planCaption
   );

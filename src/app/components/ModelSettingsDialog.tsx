@@ -366,7 +366,7 @@ export default function ModelSettingsDialog({
             />
             <p className="text-xs text-zinc-400 mt-1">
               {isCliModel
-                ? "In Chat mode it can read and search this folder; in Agent mode it can also edit files. It never runs shell commands."
+                ? "In Ask mode it can read and search this folder; in Agent mode it can also edit files. It never runs shell commands."
                 : "Used for @ file mentions. The model only sees files you attach."}
             </p>
           </section>

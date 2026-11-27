@@ -126,7 +126,7 @@ function cardConflict(n: FlowNode, defaultModel: string): string | null {
   const label = n.ui.label || n.id;
   if (n.type === "agent" && isCodexModelId(String(n.config.model || defaultModel))) return `${label}: ${CODEX_BLOCKED}`;
   if (n.type === "agent" && hasToolConflict(n.config.tools, n.config.mcpTools)) return `${label}: ${TOOL_CONFLICT_MESSAGE}`;
-  if (leaksTo(n, n, defaultModel)) return `${label} reads private data (chats, MCP or a folder) and reaches the web itself. Untick one, so a web page can't make it send your data out.`;
+  if (leaksTo(n, n)) return `${label} reads private data (chats, MCP or a folder) and reaches the web itself. Untick one, so a web page can't make it send your data out.`;
   return null;
 }
 
@@ -134,8 +134,8 @@ function cardConflict(n: FlowNode, defaultModel: string): string | null {
 export function chatLeaks(graph: WorkflowGraph): { nodeId: string; message: string }[] {
   const out: { nodeId: string; message: string }[] = [];
   for (const n of graph.nodes) {
-    if (!readsPrivate(n.type, n.config, graph.defaultModel)) continue;
-    const downstream = graph.nodes.some((m) => m.id !== n.id && ancestorsOf(graph, m.id).has(n.id) && leaksTo(n, m, graph.defaultModel));
+    if (!readsPrivate(n.type, n.config)) continue;
+    const downstream = graph.nodes.some((m) => m.id !== n.id && ancestorsOf(graph, m.id).has(n.id) && leaksTo(n, m));
     if (downstream) out.push({ nodeId: n.id, message: PRIVATE_LEAK_MESSAGE(n.ui.label || n.id) });
   }
   return out;
@@ -201,9 +201,9 @@ export function checkGraph(graph: WorkflowGraph): GraphIssue[] {
     }
     const ancestors = ancestorsOf(graph, n.id);
     if (usesMcp(n.type, config)) {
-      const web = reachesOpenWeb(n.type, config, graph.defaultModel) || [...ancestors].some((a) => {
+      const web = reachesOpenWeb(n.type, config) || [...ancestors].some((a) => {
         const up = graph.nodes.find((x) => x.id === a);
-        return !!up && reachesOpenWeb(up.type, up.config, graph.defaultModel);
+        return !!up && reachesOpenWeb(up.type, up.config);
       });
       if (web) issues.push({ nodeId: n.id, field: n.type === "agent" ? "mcpTools" : "tool", warning: true, message: `${label}: ${MCP_WEB_WARNING}` });
       if ([...ancestors].some((a) => { const up = graph.nodes.find((x) => x.id === a); return !!up && usesMcp(up.type, up.config); })) {
@@ -298,8 +298,6 @@ export interface CardRun {
   partial?: { total: number; results: Record<string, Record<string, unknown>>; usage: { inputTokens: number; outputTokens: number } };
 }
 
-export const TERMINAL_STATES: RunState[] = ["succeeded", "failed", "cancelled", "interrupted"];
-export const ACTIVE_STATES: RunState[] = ["running", "waiting"];
 
 // ─── Canvas (phase 4) ───
 

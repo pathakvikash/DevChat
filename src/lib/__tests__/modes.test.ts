@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { effectiveToolMode, isChatMode, MODE_POLICY, needsApproval, storedChatMode, toolsWithAnsweredApproval } from "@/lib/chat/modes";
+import { effectiveToolMode, isChatMode, MODE_POLICY, modeLabel, modeSegment, needsApproval, segmentToMode, storedChatMode, toggleConfirm, togglePlan, toolsWithAnsweredApproval } from "@/lib/chat/modes";
 
 describe("effective tool mode", () => {
   it("runs Ask as Chat when no approval secret can sign the requests", () => {
@@ -56,6 +56,32 @@ describe("mode -> tool set", () => {
     expect(needsApproval("ask", "createTodo", allowed)).toBe(true);
     expect(needsApproval("agent", "createTodo", allowed)).toBe(false);
     expect(needsApproval("plan", "createTodo", allowed)).toBe(false);
+  });
+});
+
+describe("Ask | Agent switch", () => {
+  it("labels stored modes: chat is Ask, plan is Plan, ask and agent are Agent", () => {
+    expect(["chat", "plan", "ask", "agent"].map(modeLabel)).toEqual(["Ask", "Plan", "Agent", "Agent"]);
+    expect(modeLabel(undefined)).toBe("Ask");
+  });
+
+  it("lights Ask for chat, Agent for ask and agent, neither for plan", () => {
+    expect((["chat", "plan", "ask", "agent"] as const).map(modeSegment)).toEqual(["ask", null, "agent", "agent"]);
+  });
+
+  it("segment clicks keep the stored values: Ask stays read-only, Agent keeps confirm on", () => {
+    expect(segmentToMode("ask", "agent")).toBe("chat");
+    expect(segmentToMode("agent", "chat")).toBe("agent");
+    expect(segmentToMode("agent", "plan")).toBe("agent");
+    expect(segmentToMode("agent", "ask")).toBe("ask");
+  });
+
+  it("Confirm each change flips agent and ask; Plan first flips plan and chat", () => {
+    expect(toggleConfirm("agent")).toBe("ask");
+    expect(toggleConfirm("ask")).toBe("agent");
+    expect(toggleConfirm("chat")).toBe("ask");
+    expect(togglePlan("chat")).toBe("plan");
+    expect(togglePlan("plan")).toBe("chat");
   });
 });
 
