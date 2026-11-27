@@ -92,10 +92,25 @@ describe("honest replies", () => {
   it("tool claims follow the request: none without tools", async () => {
     const none = (await buildSystemPrompt(opts())).text;
     expect(none).toContain("no tools in this request");
-    expect(none).not.toContain("only the tools defined in this request");
+    expect(none).toContain("attached files and saved memory shown here");
+    expect(none).not.toContain("the tools defined in this request");
     const some = (await buildSystemPrompt(opts({ useTools: true }))).text;
-    expect(some).toContain("only the tools defined in this request");
+    expect(some).toContain("the tools defined in this request");
     expect(some).not.toContain("no tools in this request");
+  });
+
+  it("names no specific model when a fallback may serve, and does not promise fetchUrl", async () => {
+    const t = (await buildSystemPrompt(opts({ useTools: true, modelId: "primary-1", mayFallBack: true, activeToolIds: new Set(["fetchUrl"]) }))).text;
+    expect(t).not.toContain("primary-1");
+    expect(t).not.toContain("open it with fetchUrl before answering");
+    expect(t).toContain("if you have one; otherwise say you can't open links");
+  });
+
+  it("a CLI provider prompt does not list this request's tools", async () => {
+    const t = (await buildSystemPrompt(opts({ useTools: true, cli: true, modelId: "cli/x" }))).text;
+    expect(t).not.toContain("the tools defined in this request");
+    expect(t).not.toContain("no tools in this request");
+    expect(t).toContain('"cli/x"');
   });
 
   it("non-tool models still get honesty lines with or without the inlined guide", async () => {
@@ -110,7 +125,7 @@ describe("honest replies", () => {
     expect(withTool).toContain("open it with fetchUrl before answering");
     expect(withTool).not.toContain("ask them to paste the content");
     const noTool = (await buildSystemPrompt(opts({ useTools: true, activeToolIds: new Set(["webSearch"]) }))).text;
-    expect(noTool).toContain("no tool in this request can open it");
+    expect(noTool).toContain("if you have one; otherwise say you can't open links");
     expect(noTool).toContain("never describe a page from its URL or name");
     const chatOnly = (await buildSystemPrompt(opts())).text;
     expect(chatOnly).toContain("say you can't open links here and ask them to paste the content");

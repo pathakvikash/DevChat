@@ -292,6 +292,8 @@ export async function POST(req: Request) {
     const { text: finalSystemPrompt, sections } = await buildSystemPrompt({
       useTools,
       modelId: servedModel,
+      mayFallBack: candidateModels.indexOf(servedModel) < candidateModels.length - 1,
+      cli: !!cliProvider,
       systemPrompt,
       skillIds,
       activeToolIds,
@@ -341,6 +343,7 @@ export async function POST(req: Request) {
           mode: toolMode,
           memoryDisabled,
           agentTargets,
+          gateUntrusted: true,
           allowedTools: Array.isArray(bodyAllowedTools)
             ? bodyAllowedTools.filter((t: unknown): t is string => typeof t === "string" && !answeredNow.has(t))
             : [],

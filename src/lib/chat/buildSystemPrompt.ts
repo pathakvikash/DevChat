@@ -59,19 +59,44 @@ servers right now.
 Never claim to have done any of those things. If the user asks for one, say it
 needs Agent mode and offer to do the read-only part now.`;
 
+export interface HonestyOptions {
+  modelId?: string;
+  useTools: boolean;
+  /** fetchUrl is among this request's tools. */
+  fetchUrl?: boolean;
+  /** A fallback model may serve this request, possibly without tools. */
+  mayFallBack?: boolean;
+  /** A CLI provider: it brings its own tools. */
+  cli?: boolean;
+}
+
 /** Always-on honesty rules, first in every prompt (before any user text), for every provider and model. */
-export function honestyBase(modelId: string | undefined, useTools: boolean, canFetchUrl = false): string {
-  const links = canFetchUrl
-    ? "When the user gives a link, open it with fetchUrl before answering."
-    : `When the user gives a link${useTools ? " and no tool in this request can open it" : ""}, say you can't open links here and ask them to paste the content; never describe a page from its URL or name.`;
+export function honestyBase({ modelId, useTools, fetchUrl, mayFallBack, cli }: HonestyOptions): string {
+  // With a fallback the serving model is not known yet, so none is named and tools are not promised.
+  const model = modelId && !mayFallBack ? `"${modelId}"` : "whichever serves this request, and you may not know which";
+  const known = "You can use only what is in this conversation and prompt (including any attached files and saved memory shown here)";
+  // A CLI provider brings its own tools, so this request's list says nothing about it.
+  const tools = cli
+    ? null
+    : useTools
+      ? `${known} and the tools defined in this request; never name or claim a tool you don't have. No browsing or app access unless a tool for it is present.`
+      : `You have no tools in this request: no browsing, code execution or app access. ${known}.`;
+  const asks = "When the user asks about a linked page,";
+  const cannot = "say you can't open links here and ask them to paste the content; never describe a page from its URL or name.";
+  const links =
+    fetchUrl && !mayFallBack && !cli
+      ? `${asks} open it with fetchUrl before answering.`
+      : useTools || cli
+        ? `${asks} open it with fetchUrl or another tool if you have one; otherwise ${cannot}`
+        : `${asks} ${cannot}`;
   return [
-    `You are an assistant inside Orrery, a chat app. The underlying model is ${modelId ? `"${modelId}"` : "whichever the user picked (you do not know which)"}; never claim to be another model.`,
-    useTools
-      ? "You have only the tools defined in this request; never name or claim any other. No browsing, files, memory or app access unless such a tool is present."
-      : "You have no tools in this request: no browsing, code execution, files, memory or app access.",
+    `You are an assistant inside Orrery, a chat app. The underlying model is ${model}; never claim to be a model you are not sure of.`,
+    tools,
     links,
     'Say "I don\'t know" or "I can\'t check that" instead of guessing. Never invent numbers, quotes, sources, URLs or results.',
-  ].join("\n");
+  ]
+    .filter(Boolean)
+    .join("\n");
 }
 
 /** The chats a model can message with sendToChat. Empty when none is open or the model has no tools. */
@@ -110,6 +135,10 @@ export interface BuildSystemPromptOptions {
   showFolder?: boolean;
   /** The model id actually served for this request, named in the base prompt. */
   modelId?: string;
+  /** A fallback model may serve: the prompt names no specific model and does not promise tools. */
+  mayFallBack?: boolean;
+  /** A CLI provider brings its own tools: the prompt does not list this request's. */
+  cli?: boolean;
   /** Approved apps for this chat (none for side chats). Only used with tools. */
   apps?: AppRecord[];
 }
@@ -174,7 +203,7 @@ export async function buildSystemPrompt(
   if (openChats) baseSections.push(openChats);
   // Without tools Ask is Chat; Plan still needs its instructions.
   const base = [
-    honestyBase(opts.modelId, useTools, useTools && activeToolIds.has("fetchUrl")),
+    honestyBase({ modelId: opts.modelId, useTools, fetchUrl: useTools && activeToolIds.has("fetchUrl"), mayFallBack: opts.mayFallBack, cli: opts.cli }),
     ...(useTools ? baseSections : [VAS_SYSTEM_PROMPT_CHAT_ONLY, planNote]),
   ]
     .filter(Boolean)

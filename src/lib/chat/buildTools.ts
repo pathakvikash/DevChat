@@ -29,6 +29,7 @@ import { saveUserMessage } from "@/lib/chat/saveUserMessage";
 import type { ModelConfig } from "@/lib/models";
 import { buildAppTools, isAppToolId, LOAD_APP_TOOLS } from "@/lib/apps/chatTools";
 import { callAppTool } from "@/lib/apps/registry";
+import { hasExternalText, userSentUrl } from "@/lib/chat/untrustedGate";
 import type { AppRecord } from "@/lib/apps/types";
 
 export const BUILTIN_TOOL_IDS = [
@@ -91,6 +92,9 @@ export interface BuildToolsOptions {
   /** Approved apps (with the user's email for the service token). Main chats only: side chats and helpers pass none. */
   apps?: AppRecord[];
   userEmail?: string;
+  /** Chat route only (a person can answer the card): fetchUrl asks for any URL the user did not type, and tools that
+   *  write, send or read other chats ask once external text (a page, search, MCP or app result) is in the conversation. */
+  gateUntrusted?: boolean;
 }
 
 /** Convert a JSON Schema object to a Zod schema (supports basic types). */
@@ -138,6 +142,7 @@ export async function buildTools({
   askBeforeSendingOut = false,
   apps = [],
   userEmail = "",
+  gateUntrusted = false,
 }: BuildToolsOptions): Promise<Record<string, Tool>> {
   const ctx: ToolExecutionContext = { conversationId };
   const aiTools: Record<string, Tool> = {};
@@ -323,6 +328,26 @@ export async function buildTools({
     aiTools,
     buildAppTools({ apps, mode, userId, email: userEmail, conversationId, call: callAppTool, toZod: jsonSchemaToZod }),
   );
+
+  if (gateUntrusted) {
+    const fetchTool = aiTools.fetchUrl;
+    if (fetchTool) {
+      aiTools.fetchUrl = {
+        ...fetchTool,
+        needsApproval: (input: { url?: unknown }, o: { messages?: Parameters<typeof userSentUrl>[0] }) => !userSentUrl(o?.messages, input?.url),
+      } as Tool;
+    }
+    // Page text can carry instructions: after one is read, writing or sending asks first. App tools of an `actions` app already always ask.
+    for (const [id, t] of Object.entries(aiTools)) {
+      if (!(id.startsWith("mcp_") || ["rememberFact", "forgetFact", "searchChats", "readChat"].includes(id))) continue;
+      const base = t.needsApproval;
+      aiTools[id] = {
+        ...t,
+        needsApproval: async (input: unknown, o: { messages?: Parameters<typeof hasExternalText>[0] }) =>
+          hasExternalText(o?.messages) || (typeof base === "function" ? await (base as (i: unknown, o: unknown) => boolean | Promise<boolean>)(input, o) : !!base),
+      } as Tool;
+    }
+  }
 
   // A chat with folder text in play: anything that can send data out asks every time, in every mode. No "allow for this chat".
   const sendsOut = { sendsOut: true, ...(workingFolder && { folder: path.basename(workingFolder) }) };
