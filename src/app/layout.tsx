@@ -6,6 +6,7 @@ import CommandPaletteProvider from "@/app/components/CommandPalette";
 import { ThemeProvider } from "@/app/components/ThemeProvider";
 import { SessionProvider } from "@/app/components/SessionProvider";
 import GenerativeUiProviders from "@/app/components/GenerativeUiProviders";
+import { SITE_DESCRIPTION, SITE_NAME, SITE_TAGLINE, siteUrl } from "@/lib/site";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -18,8 +19,19 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Orrery",
-  description: "Orrery: a self-hostable AI chat workspace",
+  metadataBase: siteUrl(),
+  title: { default: `${SITE_NAME}: ${SITE_TAGLINE}`, template: `%s | ${SITE_NAME}` },
+  description: SITE_DESCRIPTION,
+  applicationName: SITE_NAME,
+  keywords: ["AI chat", "multi-model", "LLM workspace", "local models", "AI agents"],
+  openGraph: {
+    type: "website",
+    siteName: SITE_NAME,
+    title: `${SITE_NAME}: ${SITE_TAGLINE}`,
+    description: SITE_DESCRIPTION,
+  },
+  twitter: { card: "summary_large_image", title: `${SITE_NAME}: ${SITE_TAGLINE}`, description: SITE_DESCRIPTION },
+  robots: { index: true, follow: true },
 };
 
 export default function RootLayout({

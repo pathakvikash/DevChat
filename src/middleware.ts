@@ -16,7 +16,8 @@ const { auth } = NextAuth({
 });
 
 export default auth((req) => {
-  if (!req.auth) {
+  // "/" is public: its page renders the landing for signed-out visitors and the app home for signed-in ones.
+  if (!req.auth && req.nextUrl.pathname !== "/") {
     if (req.nextUrl.pathname.startsWith("/api/")) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
@@ -30,6 +31,6 @@ export const config = {
   // pair/redeem and pair/script are called from a terminal with no session; the one-time
   // pairing code is their auth (see src/lib/providerPair.ts).
   matcher: [
-    "/((?!api/auth|api/providers/pair/redeem|api/providers/pair/script|login|_next/static|_next/image|favicon.ico).*)",
+    "/((?!api/auth|api/providers/pair/redeem|api/providers/pair/script|login|robots.txt|sitemap.xml|opengraph-image|twitter-image|icon.svg|apple-icon.png|_next/static|_next/image|favicon.ico).*)",
   ],
 };

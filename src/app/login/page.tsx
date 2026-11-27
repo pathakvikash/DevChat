@@ -1,7 +1,10 @@
+import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import { auth, signIn } from "@/lib/auth";
 import { isSanityMode, SANITY_PROVIDER_ID } from "@/lib/sanityMode";
 import { MessageSquare } from "lucide-react";
+
+export const metadata: Metadata = { title: "Sign in", robots: { index: false, follow: true } };
 
 export default async function LoginPage({
   searchParams,
