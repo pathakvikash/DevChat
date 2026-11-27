@@ -4,7 +4,7 @@ import { DefaultChatTransport, type ChatTransport, type UIMessage } from "ai";
 import { BRIDGE_ORIGIN } from "@/lib/bridge/constants";
 import { BRIDGE_MODEL_PREFIX, isBridgeLocalModel } from "@/lib/bridge/constants";
 import { bridgeProblemText, blockedText, buildBridgeBody, routeLocalTurn, routeTurn, serverHostToolsMissing } from "@/lib/bridge/client";
-import { fetchModels } from "@/app/hooks/useModelsApi";
+import { serverListsModel } from "@/app/hooks/useModelsApi";
 import { bridgeSnapshot, checkBridge, getBridgeFolder, readBridgeToken } from "@/app/hooks/useBridge";
 import { foldersSnapshot, refetch as loadFolders } from "@/app/hooks/useFolders";
 
@@ -61,7 +61,7 @@ export function createRoutingTransport(opts: {
         // Without a bridge token this is the server's business, exactly as before: no extra request, no probe.
         if (!readBridgeToken()) return opts.server.sendMessages(options);
         // The server's own model list says whether it can reach this model (Vercel cannot see this computer's Ollama).
-        const serverHasModel = await fetchModels().then((l) => l.some((m) => m.id === model), () => null);
+        const serverHasModel = await serverListsModel(model);
         if (serverHasModel === true) return opts.server.sendMessages(options);
         await checkBridge(5_000);
         const s = bridgeSnapshot();

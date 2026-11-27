@@ -2,7 +2,7 @@
 import type { LanguageModel } from "ai";
 import { createOllama } from "ollama-ai-provider-v2";
 import { PROVIDERS, isChatModel } from "@/lib/providers";
-import { getDefaultContextWindow, getSupportsThinking, getSupportsVision, ollamaLanguageModel, providerClient } from "@/lib/models";
+import { getDefaultContextWindow, getSupportsThinking, ollamaLanguageModel, providerClient } from "@/lib/models";
 
 export const DEFAULT_OLLAMA_URL = "http://127.0.0.1:11434";
 export const DEFAULT_LMSTUDIO_URL = "http://127.0.0.1:1234/v1";
@@ -11,7 +11,7 @@ const CACHE_MS = 5000;
 const MAX_MODELS = 200;
 
 export type LocalUrls = { ollamaUrl: string; lmstudioUrl: string };
-export type LocalModelInfo = { id: string; name: string; provider: string; contextWindow: number; supportsTools: false; supportsVision?: boolean; supportsThinking?: boolean };
+export type LocalModelInfo = { id: string; name: string; provider: string; contextWindow: number; supportsTools: false; supportsVision: false; supportsThinking?: boolean };
 
 /**
  * The only hosts a local-model URL may name. The bridge fetches these URLs on the page's behalf, so anything else
@@ -51,7 +51,7 @@ async function listOllama(url: string, fetchImpl: typeof fetch): Promise<LocalMo
       provider: "Ollama",
       contextWindow: getDefaultContextWindow(n),
       supportsTools: false as const,
-      supportsVision: getSupportsVision(n),
+      supportsVision: false as const, // the bridge drops image parts
       supportsThinking: getSupportsThinking(n),
     }));
 }
@@ -68,7 +68,7 @@ async function listLmStudio(url: string, fetchImpl: typeof fetch): Promise<Local
       provider: "LM Studio",
       contextWindow: 32_768, // same default as the server's provider entry
       supportsTools: false as const,
-      supportsVision: getSupportsVision(id),
+      supportsVision: false as const,
       supportsThinking: getSupportsThinking(id),
     }));
 }
@@ -86,11 +86,13 @@ export async function listLocalModels(urls: LocalUrls, fetchImpl: typeof fetch =
  * Builds the model the way the server does: Ollama through `ollamaLanguageModel` (models.ts, the same wrapper as
  * createOllamaModelConfig), LM Studio through `providerClient` (models.ts, the same client with reasoning_content handling).
  */
-export function buildLocalModel(info: LocalModelInfo, urls: LocalUrls): LanguageModel {
+export function buildLocalModel(info: LocalModelInfo, urls: LocalUrls, fetchImpl: typeof fetch = fetch): LanguageModel {
   const bare = info.id.slice(info.id.indexOf("/") + 1);
-  if (info.id.startsWith("ollama/")) return ollamaLanguageModel(createOllama({ baseURL: `${urls.ollamaUrl}/api` }), bare, info.contextWindow);
+  // redirect: "error" here too: a loopback server must not bounce a chat request to another host.
+  const noRedirect = ((input: Parameters<typeof fetch>[0], init?: RequestInit) => fetchImpl(input, { ...init, redirect: "error" })) as typeof fetch;
+  if (info.id.startsWith("ollama/")) return ollamaLanguageModel(createOllama({ baseURL: `${urls.ollamaUrl}/api`, fetch: noRedirect }), bare, info.contextWindow);
   const def = PROVIDERS.find((p) => p.id === "lmstudio")!;
-  return providerClient(def, { apiKey: def.fallbackKey ?? "", baseUrl: urls.lmstudioUrl })(bare);
+  return providerClient(def, { apiKey: def.fallbackKey ?? "", baseUrl: urls.lmstudioUrl }, noRedirect)(bare);
 }
 
 /** A few-seconds cache of the list, and the lookup /chat uses: a model id the daemon did not just list is unknown. */
@@ -110,7 +112,7 @@ export function createLocalModels(getUrls: () => LocalUrls, opts: { fetch?: type
       const info = (await list()).find((m) => m.id === id);
       if (!info) return null;
       const urls = getUrls();
-      return { info, model: (opts.build ?? buildLocalModel)(info, urls) };
+      return { info, model: opts.build ? opts.build(info, urls) : buildLocalModel(info, urls, opts.fetch) };
     },
   };
 }

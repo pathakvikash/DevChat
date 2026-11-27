@@ -94,7 +94,8 @@ async function probe(): Promise<BridgeStatus> {
   const h = bridgeStatus(true, outcome);
   let models = current().models;
   let folders: Folder[] = [];
-  if (h.status === "ready") {
+  // no-claude: the bridge has no Claude Code, but it still lists and serves local models.
+  if (h.status === "ready" || h.status === "no-claude") {
     const get = (path: string) => bridgeFetch(path, { signal: AbortSignal.timeout(4000) }, token).then((r) => (r.ok ? r.json() : null)).catch(() => null);
     const [m, f] = await Promise.all([get("/models"), get("/folders")]);
     models = Array.isArray(m?.models) ? m.models : [];

@@ -130,7 +130,9 @@ export default function ModelSelector({
           ...m,
           viaBridge: true,
           supportsTools: m.supportsTools ?? true,
-          ...(bridge.status === "ready" ? {} : { disabledReason: bridgeProblemText(bridge.status, bridge.protocol) ?? undefined }),
+          ...(isBridgeLocalModel(m.id) ? { supportsVision: false } : {}),
+          // Without `claude` the bridge still serves local models; only the claude-code entries stay disabled.
+          ...(bridge.status === "ready" || (bridge.status === "no-claude" && isBridgeLocalModel(m.id)) ? {} : { disabledReason: bridgeProblemText(bridge.status, bridge.protocol) ?? undefined }),
         }))
     : [];
   const models = [...(modelsData ?? []), ...bridgeModels.filter((b) => !modelsData?.some((m) => m.id === b.id))].filter((m) => !exclude?.(m));

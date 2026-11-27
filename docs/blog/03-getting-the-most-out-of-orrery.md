@@ -8,7 +8,7 @@ Steps for the things I use most: models, modes, links, charts, workflows and the
 2. For local models, run Ollama or LM Studio on your computer. With Ollama, `ollama pull <model>` and it shows up in the model picker.
 3. Pick the model from the model picker.
 
-On the hosted site, the server cannot reach Ollama or LM Studio on your laptop. Claude Code can, through the local bridge (step 6).
+On the hosted site, the server cannot reach Ollama or LM Studio on your laptop. The local bridge can (step 6): it lists your Claude Code, Ollama and LM Studio models.
 
 ## 2. Pick Ask or Agent
 
@@ -54,7 +54,7 @@ A workflow runs only when you press Run. Scheduled runs are not built yet.
 1. In your clone of the repo, run `npm install` and then `npm run bridge`. Copy the token it prints.
 2. Add a project folder: `npm run bridge -- --add /path/to/project`.
 3. In Orrery, open Settings > Local bridge and paste the token.
-4. Pick a Claude Code model and the folder in the chat.
+4. Pick a Claude Code model and the folder in the chat, or an Ollama or LM Studio model marked via local bridge.
 
 The bridge starts in plan mode, which is read-only. `npm run bridge -- --max-mode agent` allows edits. `--max-mode ask` also allows commands, and each command must be confirmed by typing yes in the bridge's terminal. Use Chrome or Firefox; Safari blocks the page from reaching the bridge.
 

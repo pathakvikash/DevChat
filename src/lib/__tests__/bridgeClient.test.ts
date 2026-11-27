@@ -163,7 +163,17 @@ describe("routeLocalTurn", () => {
     const missing = routeLocalTurn({ ...base, bridgeHasModel: false });
     expect(missing).toMatchObject({ to: "blocked", why: "model-missing" });
     expect(blockedText(missing as never, null)).toMatch(/does not list this model/);
-    expect(routeLocalTurn({ ...base, serverHasModel: null })).toMatchObject({ to: "blocked", why: "server-unknown" });
+  });
+  it("serves local models when the bridge has no claude CLI (no-claude), blocks other bad states", () => {
+    expect(routeLocalTurn({ ...base, status: "no-claude" })).toEqual({ to: "bridge" });
+    expect(routeLocalTurn({ ...base, status: "no-claude", bridgeHasModel: false })).toMatchObject({ to: "blocked", why: "model-missing" });
+    expect(routeLocalTurn({ ...base, status: "mismatch" })).toMatchObject({ to: "blocked", status: "mismatch" });
+  });
+  it("when the server's model list cannot be read: the bridge if it lists the model, else the server as before", () => {
+    expect(routeLocalTurn({ ...base, serverHasModel: null })).toEqual({ to: "bridge" });
+    expect(routeLocalTurn({ ...base, serverHasModel: null, status: "no-claude" })).toEqual({ to: "bridge" });
+    expect(routeLocalTurn({ ...base, serverHasModel: null, bridgeHasModel: false })).toEqual({ to: "server" });
+    expect(routeLocalTurn({ ...base, serverHasModel: null, status: "offline" })).toEqual({ to: "server" });
     expect(blockedText({ to: "blocked", status: "offline" }, null)).toBe("Start the bridge on this computer: npm run bridge");
   });
   it("recognises only ollama/ and lmstudio/ ids as local", () => {

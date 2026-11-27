@@ -6,7 +6,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawn } from "child_process";
 import { createBridgeServer, main, type BridgeConfig } from "../../../scripts/bridge";
-import { isLoopbackUrl, listLocalModels, loopbackUrlOrThrow } from "@/lib/bridge/localModels";
+import { generateText } from "ai";
+import { buildLocalModel, isLoopbackUrl, listLocalModels, loopbackUrlOrThrow } from "@/lib/bridge/localModels";
 
 vi.mock("child_process", async (importOriginal) => ({ ...(await importOriginal<typeof import("child_process")>()), spawn: vi.fn() }));
 
@@ -17,6 +18,7 @@ const json = (body: unknown, ok = true) => ({ ok, status: ok ? 200 : 500, json: 
 let server: Server;
 let port = 0;
 let prompts: unknown[] = [];
+let optionsSeen: any[] = [];
 let fetchMock: ReturnType<typeof vi.fn>;
 let cfg: BridgeConfig;
 
@@ -24,6 +26,7 @@ const model = () =>
   new MockLanguageModelV3({
     doStream: async (o: any) => {
       prompts.push(o.prompt);
+      optionsSeen.push(o);
       return {
         stream: new ReadableStream({
           start(c) {
@@ -41,6 +44,7 @@ const model = () =>
 
 beforeEach(async () => {
   prompts = [];
+  optionsSeen = [];
   vi.mocked(spawn).mockClear();
   fetchMock = vi.fn(async (url: string) => {
     if (url === "http://127.0.0.1:11434/api/tags") return json({ models: [{ name: "llama3:latest" }, { name: "qwen3:8b" }] });
@@ -135,6 +139,46 @@ describe("bridge local models", () => {
     expect(sent).toContain("next");
     expect(sent).not.toContain("secret");
     expect(sent).not.toContain("169.254");
+  });
+
+  it("serves local models when the claude CLI is absent (/health says claude:false)", async () => {
+    await new Promise((r) => server.close(r));
+    server = createBridgeServer(() => cfg, { log: () => {}, findBins: async () => new Set(), localFetch: fetchMock as never, buildLocalModel: () => model() as never });
+    await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
+    port = (server.address() as { port: number }).port;
+    expect(JSON.parse((await call("GET", "/health")).text).claude).toBe(false);
+    const ids = JSON.parse((await call("GET", "/models")).text).models.map((m: { id: string }) => m.id);
+    expect(ids).toEqual(expect.arrayContaining(["ollama/llama3:latest", "lmstudio/my-model"]));
+    const r = await call("POST", "/chat", { messages: [user("Hi")], model: "ollama/llama3:latest" });
+    expect(deltas(r.text)).toBe("Hi from local");
+    expect(spawn).not.toHaveBeenCalled();
+  });
+
+  it("lists local models without vision (the bridge drops image parts)", async () => {
+    const models = JSON.parse((await call("GET", "/models")).text).models.filter((m: { id: string }) => /^(ollama|lmstudio)\//.test(m.id));
+    expect(models.length).toBeGreaterThan(0);
+    for (const m of models) expect(m.supportsVision).toBe(false);
+  });
+
+  it("never passes providerOptions, effort or other page-supplied options to the model call", async () => {
+    await call("POST", "/chat", { messages: [user("Hi")], model: "ollama/llama3:latest", providerOptions: { ollama: { options: { num_ctx: 999999 } } }, effort: "max", temperature: 5 });
+    expect(optionsSeen[0].providerOptions).toBeUndefined();
+    expect(optionsSeen[0].temperature).toBeUndefined();
+  });
+
+  it("the real builder talks to the configured loopback base: Ollama /api/chat, LM Studio {base}/chat/completions, no redirects", async () => {
+    const seen: { url: string; redirect?: string }[] = [];
+    const stub = (async (input: string | URL | Request, init?: RequestInit) => {
+      seen.push({ url: String(input), redirect: init?.redirect });
+      return new Response("nope", { status: 500 });
+    }) as typeof fetch;
+    const urls = { ollamaUrl: "http://127.0.0.1:12345", lmstudioUrl: "http://localhost:4321/v1" };
+    for (const id of ["ollama/llama3:latest", "lmstudio/my-model"]) {
+      const m = buildLocalModel({ id, name: id, provider: "x", contextWindow: 8192, supportsTools: false, supportsVision: false }, urls, stub);
+      await generateText({ model: m, prompt: "hi", maxRetries: 0 }).catch(() => undefined);
+    }
+    expect(seen.map((s) => s.url)).toEqual(["http://127.0.0.1:12345/api/chat", "http://localhost:4321/v1/chat/completions"]);
+    expect(seen.every((s) => s.redirect === "error")).toBe(true);
   });
 
   it("only accepts loopback hosts for the Ollama and LM Studio URLs", async () => {

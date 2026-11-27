@@ -62,7 +62,7 @@ export function serverHostToolsMissing(folders: FoldersAnswer): boolean | null {
   return !folders.hostTools || folders.reason === VERCEL_FOLDERS_REFUSED || folders.reason === HOST_TOOLS_REFUSED || folders.reason === SERVER_NO_CLI;
 }
 
-export type Route = { to: "server" } | { to: "bridge" } | { to: "blocked"; status: BridgeStatus; why?: "model-missing" | "server-unknown" };
+export type Route = { to: "server" } | { to: "bridge" } | { to: "blocked"; status: BridgeStatus; why?: "model-missing" };
 
 /**
  * A claude-code/ model goes to the bridge when the server cannot run it itself (deployed) and the bridge is ready. It stays on
@@ -82,8 +82,11 @@ export function routeTurn(i: { model: string | null | undefined; noHostTools: bo
  */
 export function routeLocalTurn(i: { hasToken: boolean; serverHasModel: boolean | null; bridgeHasModel: boolean; status: BridgeStatus }): Route {
   if (!i.hasToken || i.serverHasModel === true) return { to: "server" };
-  if (i.serverHasModel === null) return { to: "blocked", status: i.status, why: "server-unknown" };
-  if (i.status !== "ready") return { to: "blocked", status: i.status };
+  // A bridge without the `claude` CLI still serves local models.
+  const usable = i.status === "ready" || i.status === "no-claude";
+  // The server's list could not be read: the bridge takes it if it lists the model, otherwise it is the server's, as before.
+  if (i.serverHasModel === null) return usable && i.bridgeHasModel ? { to: "bridge" } : { to: "server" };
+  if (!usable) return { to: "blocked", status: i.status };
   return i.bridgeHasModel ? { to: "bridge" } : { to: "blocked", status: i.status, why: "model-missing" };
 }
 

@@ -410,6 +410,8 @@ type LanguageModelV3 = Exclude<LanguageModel, string>;
 export function providerClient(
   def: ProviderDef,
   cred: { apiKey: string; baseUrl: string },
+  /** The bridge passes a fetch that refuses redirects; server callers leave it out. */
+  fetchImpl?: typeof fetch,
 ): (upstreamId: string) => LanguageModelV3 {
   if (def.native === "anthropic") {
     const client = createAnthropic({ baseURL: cred.baseUrl, apiKey: cred.apiKey });
@@ -421,7 +423,7 @@ export function providerClient(
     name: def.id,
     headers: def.headers?.(cred.apiKey),
     // LM Studio streams a reasoning model's thinking as reasoning_content, which the SDK drops.
-    fetch: def.id === "lmstudio" ? withReasoningContent(fetch) : undefined,
+    fetch: def.id === "lmstudio" ? withReasoningContent(fetchImpl ?? fetch) : fetchImpl,
   });
   // Responses only on OpenAI's own hosts (api.openai.com and its us/eu residency subdomains): a proxy or vLLM behind OPENAI_BASE_URL may speak just Chat Completions.
   if (def.native === "openai" && URL.canParse(cred.baseUrl) && /(^|\.)api\.openai\.com$/.test(new URL(cred.baseUrl).hostname)) {
