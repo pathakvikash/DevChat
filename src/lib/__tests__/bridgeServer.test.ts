@@ -41,6 +41,12 @@ async function until(cond: () => boolean) {
   expect(cond()).toBe(true);
 }
 
+// Every server under test lists local models through this, never the real fetch: a developer's own Ollama or
+// LM Studio on 127.0.0.1 must not change what /models returns.
+const noLocalServers = (async () => {
+  throw new Error("no local model server in tests");
+}) as typeof fetch;
+
 const ORIGIN = "https://dev-chat-beta.vercel.app";
 const TOKEN = "k".repeat(43);
 let spawned: FakeChild[] = [];
@@ -66,7 +72,7 @@ beforeEach(async () => {
   folder = realpathSync(mkdtempSync(join(tmpdir(), "bridge-folder-")));
   cfg = { token: TOKEN, origins: [ORIGIN], folders: [folder], maxMode: "ask", confirmShell: true, allowChatWideEdits: false };
   confirmImpl = vi.fn(async () => true);
-  server = createBridgeServer(() => cfg, { log: (l) => logs.push(l), findBins: async () => new Set(["claude-code"]), confirm: (q) => confirmImpl(q) });
+  server = createBridgeServer(() => cfg, { log: (l) => logs.push(l), findBins: async () => new Set(["claude-code"]), localFetch: noLocalServers, confirm: (q) => confirmImpl(q) });
   await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
   port = (server.address() as { port: number }).port;
 });
@@ -335,7 +341,7 @@ describe("bridge server", () => {
         if (broken) throw new SyntaxError(`Unexpected token in {"token":"${TOKEN}"`);
         return cfg;
       },
-      { log: (l) => lines.push(l), findBins: async () => new Set(["claude-code"]), confirm: async () => true },
+      { log: (l) => lines.push(l), findBins: async () => new Set(["claude-code"]), localFetch: noLocalServers, confirm: async () => true },
     );
     await new Promise<void>((r) => s2.listen(0, "127.0.0.1", r));
     const p2 = (s2.address() as { port: number }).port;
@@ -542,7 +548,7 @@ describe("bridge config", () => {
     expect(() => readConfig(dir)).toThrow(ConfigMissingError);
     expect(existsSync(file)).toBe(false); // nothing was created
     const lines: string[] = [];
-    const s2 = createBridgeServer(() => readConfig(dir), { log: (l) => lines.push(l), confirm: async () => true });
+    const s2 = createBridgeServer(() => readConfig(dir), { log: (l) => lines.push(l), localFetch: noLocalServers, confirm: async () => true });
     await new Promise<void>((r) => s2.listen(0, "127.0.0.1", r));
     const p2 = (s2.address() as { port: number }).port;
     const res = await new Promise<{ status: number; text: string }>((resolve, reject) => {
