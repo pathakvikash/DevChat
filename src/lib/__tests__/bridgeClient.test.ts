@@ -3,7 +3,7 @@ import { describe, it, expect, vi } from "vitest";
 vi.mock("@/lib/db", () => ({ prisma: {} }));
 
 import { BRIDGE_PROTOCOL, BRIDGE_ORIGIN, VERCEL_FOLDERS_REFUSED, HOST_TOOLS_REFUSED, isBridgeLocalModel } from "@/lib/bridge/constants";
-import { blockedText, routeLocalTurn, bridgeProblemText, bridgeStatus, buildBridgeBody, buildSavePayload, routeTurn, serverHostToolsMissing } from "@/lib/bridge/client";
+import { bridgeDisabledReason, blockedText, routeLocalTurn, bridgeProblemText, bridgeStatus, buildBridgeBody, buildSavePayload, routeTurn, serverHostToolsMissing } from "@/lib/bridge/client";
 import { bridgeTurnSchema } from "@/lib/chat/saveBridgeTurn";
 import { BRIDGE_PORT } from "@/lib/bridge/protocol";
 
@@ -185,5 +185,19 @@ describe("routeLocalTurn", () => {
     const p = buildSavePayload({ messages, model: "ollama/x", continuing: false, savedUserIds: new Set() });
     expect(p?.assistant.parts).toEqual([{ type: "text", text: "ok" }]);
     expect(bridgeTurnSchema.safeParse(p).success).toBe(true);
+  });
+});
+
+describe("bridgeDisabledReason", () => {
+  it("with no-claude, a local entry is enabled and a claude-code entry is disabled", () => {
+    expect(bridgeDisabledReason("ollama/llama3", "no-claude")).toBeNull();
+    expect(bridgeDisabledReason("lmstudio/x", "no-claude")).toBeNull();
+    expect(bridgeDisabledReason("claude-code/sonnet", "no-claude")).toBe("Claude Code is not installed on this computer (or not on PATH)");
+  });
+  it("is enabled for everything when ready, and disabled for everything when offline", () => {
+    for (const id of ["claude-code/sonnet", "ollama/a", "lmstudio/b"]) {
+      expect(bridgeDisabledReason(id, "ready")).toBeNull();
+      expect(bridgeDisabledReason(id, "offline")).toBe("Start the bridge on this computer: npm run bridge");
+    }
   });
 });

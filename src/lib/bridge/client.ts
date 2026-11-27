@@ -78,7 +78,9 @@ export function routeTurn(i: { model: string | null | undefined; noHostTools: bo
 /**
  * An ollama/ or lmstudio/ model. It stays on the server unless a bridge token is stored (everyone else is unchanged) and the
  * server does not itself list that model (Vercel cannot see this computer's Ollama). Then the bridge answers it, if it is
- * ready and lists it: otherwise the send is blocked, because the server would quietly answer with its fallback model.
+ * usable (ready, or no-claude: no Claude Code, local models still work) and lists it. If it is not usable or does not list it,
+ * the send is blocked, because the server would quietly answer with its fallback model. If the server's list could not be read
+ * at all, the bridge takes the model when it lists it, and otherwise the server gets it, as before.
  */
 export function routeLocalTurn(i: { hasToken: boolean; serverHasModel: boolean | null; bridgeHasModel: boolean; status: BridgeStatus }): Route {
   if (!i.hasToken || i.serverHasModel === true) return { to: "server" };
@@ -88,6 +90,12 @@ export function routeLocalTurn(i: { hasToken: boolean; serverHasModel: boolean |
   if (i.serverHasModel === null) return usable && i.bridgeHasModel ? { to: "bridge" } : { to: "server" };
   if (!usable) return { to: "blocked", status: i.status };
   return i.bridgeHasModel ? { to: "bridge" } : { to: "blocked", status: i.status, why: "model-missing" };
+}
+
+/** Why a bridge-listed model cannot be picked now (null: it can). Local models stay enabled when only the `claude` CLI is missing. */
+export function bridgeDisabledReason(modelId: string, status: BridgeStatus, protocol: number | null = null): string | null {
+  if (status === "ready" || (status === "no-claude" && isBridgeLocalModel(modelId))) return null;
+  return bridgeProblemText(status, protocol);
 }
 
 /** The sentence for a blocked send. */

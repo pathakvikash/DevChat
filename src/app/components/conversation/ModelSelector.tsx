@@ -10,7 +10,7 @@ import { fetchModels as apiFetchModels, fetchModelUsage } from "@/app/hooks/useM
 import { ModelInfo, groupModelsByProvider } from "./types";
 import { useBridge } from "@/app/hooks/useBridge";
 import { useFolders } from "@/app/hooks/useFolders";
-import { bridgeProblemText } from "@/lib/bridge/client";
+import { bridgeDisabledReason } from "@/lib/bridge/client";
 import { isBridgeLocalModel } from "@/lib/bridge/constants";
 
 interface ModelSelectorProps {
@@ -132,7 +132,7 @@ export default function ModelSelector({
           supportsTools: m.supportsTools ?? true,
           ...(isBridgeLocalModel(m.id) ? { supportsVision: false } : {}),
           // Without `claude` the bridge still serves local models; only the claude-code entries stay disabled.
-          ...(bridge.status === "ready" || (bridge.status === "no-claude" && isBridgeLocalModel(m.id)) ? {} : { disabledReason: bridgeProblemText(bridge.status, bridge.protocol) ?? undefined }),
+          disabledReason: bridgeDisabledReason(m.id, bridge.status, bridge.protocol) ?? undefined,
         }))
     : [];
   const models = [...(modelsData ?? []), ...bridgeModels.filter((b) => !modelsData?.some((m) => m.id === b.id))].filter((m) => !exclude?.(m));

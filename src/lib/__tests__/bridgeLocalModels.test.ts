@@ -7,6 +7,7 @@ import { join } from "node:path";
 import { spawn } from "child_process";
 import { createBridgeServer, main, type BridgeConfig } from "../../../scripts/bridge";
 import { generateText } from "ai";
+import { getSupportsVision } from "@/lib/models";
 import { buildLocalModel, isLoopbackUrl, listLocalModels, loopbackUrlOrThrow } from "@/lib/bridge/localModels";
 
 vi.mock("child_process", async (importOriginal) => ({ ...(await importOriginal<typeof import("child_process")>()), spawn: vi.fn() }));
@@ -47,8 +48,8 @@ beforeEach(async () => {
   optionsSeen = [];
   vi.mocked(spawn).mockClear();
   fetchMock = vi.fn(async (url: string) => {
-    if (url === "http://127.0.0.1:11434/api/tags") return json({ models: [{ name: "llama3:latest" }, { name: "qwen3:8b" }] });
-    if (url === "http://127.0.0.1:1234/v1/models") return json({ data: [{ id: "my-model" }, { id: "text-embedding-nomic" }] });
+    if (url === "http://127.0.0.1:11434/api/tags") return json({ models: [{ name: "llama3:latest" }, { name: "qwen3:8b" }, { name: "llava:7b" }] });
+    if (url === "http://127.0.0.1:1234/v1/models") return json({ data: [{ id: "my-model" }, { id: "qwen2-vl-7b" }, { id: "text-embedding-nomic" }] });
     throw new Error(`unexpected ${url}`);
   });
   cfg = { token: TOKEN, origins: [ORIGIN], folders: [], maxMode: "ask", confirmShell: true, allowChatWideEdits: false };
@@ -156,7 +157,9 @@ describe("bridge local models", () => {
 
   it("lists local models without vision (the bridge drops image parts)", async () => {
     const models = JSON.parse((await call("GET", "/models")).text).models.filter((m: { id: string }) => /^(ollama|lmstudio)\//.test(m.id));
-    expect(models.length).toBeGreaterThan(0);
+    // the fixtures include names the server's heuristic treats as vision models
+    expect([getSupportsVision("llava:7b"), getSupportsVision("qwen2-vl-7b")]).toEqual([true, true]);
+    expect(models.map((m: { id: string }) => m.id)).toEqual(expect.arrayContaining(["ollama/llava:7b", "lmstudio/qwen2-vl-7b"]));
     for (const m of models) expect(m.supportsVision).toBe(false);
   });
 
