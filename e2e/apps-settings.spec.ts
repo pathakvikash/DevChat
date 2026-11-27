@@ -1,4 +1,5 @@
 import { test, expect, type Page } from "./fixtures";
+import { createChat, openChat } from "./helpers";
 
 const tool = (name: string, readOnly: boolean) => ({ name, description: `${name} tool`, inputSchema: {}, readOnly });
 const app = {
@@ -30,7 +31,7 @@ test("owner adds an app: review card, then the secret is shown once", async ({ p
   const review = page.getByTestId("app-review");
   await expect(review.getByText("Print Pro 3D")).toBeVisible();
   await expect(review.getByText("Can take actions")).toBeVisible();
-  await expect(review.getByText("order_print")).toBeVisible();
+  await expect(review.getByText("order_print", { exact: true })).toBeVisible();
   await expect(review.getByText("Icon is missing")).toBeVisible();
 
   const post = page.waitForRequest((r) => r.url().endsWith("/api/apps") && r.method() === "POST");
@@ -57,9 +58,10 @@ test("a 403 on management calls turns the page read-only", async ({ page }) => {
   await expect(page.getByRole("button", { name: "Remove Print Pro 3D" })).toHaveCount(0);
 });
 
-test("the sidebar lists apps and hides the section when there are none", async ({ page }) => {
+test("the sidebar lists apps and hides the section when there are none", async ({ page, request }) => {
   await page.route("**/api/apps", (r) => r.fulfill({ json: [app] }));
-  await page.goto("/");
+  // The sidebar is only on chat pages; the home page hides it.
+  await openChat(page, await createChat(request, { title: "Apps sidebar" }));
   const link = page.getByTestId("sidebar-apps").getByRole("link", { name: /Print Pro 3D/ });
   await expect(link).toHaveAttribute("href", "/api/apps/printpro3d/go?link=home");
   await expect(link).toHaveAttribute("target", "_blank");
