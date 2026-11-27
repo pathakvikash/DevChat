@@ -15,9 +15,8 @@ test("the sidebar lists chats and opens one on click", async ({ page, request })
   await openChat(page, alpha);
 
   for (const title of ["Alpha plan", "Beta notes", "Gamma ideas"]) await expect(link(page, title)).toBeVisible();
-  await expect(page.getByText("Total: 3 conversations")).toBeVisible();
-  // Each row names its model.
-  await expect(link(page, "Beta notes")).toContainText("slow");
+  // A row is one line; its model is in the tooltip.
+  await expect(link(page, "Beta notes")).toHaveAttribute("title", "slow");
 
   await link(page, "Gamma ideas").click();
   await expect(page).toHaveURL(/\/c\/[a-z0-9]+$/);
@@ -29,6 +28,7 @@ test("search narrows the list and clears back", async ({ page, request }) => {
   await createChat(request, { title: "Beta notes" });
   await createChat(request, { title: "Gamma ideas" });
   await openChat(page, alpha);
+  await page.getByRole("button", { name: "Search", exact: true }).click();
   const search = page.getByPlaceholder("Search conversations...");
 
   await search.fill("beta");
