@@ -7,10 +7,8 @@ import { usePathname } from "next/navigation";
 import { Plus, Search, Trash2, Edit2, Sparkles, Loader2, Pin, Archive, X, MoreHorizontal, CheckSquare, Square, CheckCheck, User as UserIcon, Columns2, Workflow, Table2 } from "lucide-react";
 import { useSession } from "next-auth/react";
 import { useSidebar } from "@/app/contexts/SidebarContext";
-import { useChatModeOptional } from "@/app/contexts/ChatModeContext";
 import { CHAT_DRAG_TYPE, useSplitViewOptional } from "@/app/c/SplitViewContext";
 import { buildSidebarTree, type TreeRow } from "@/lib/sidebarTree";
-import ModeToggle from "./ModeToggle";
 import { useResource } from "@/app/hooks/useResource";
 import {
   createConversation,
@@ -83,7 +81,6 @@ function OnScreenMark({ label, focused }: { label: string | null; focused: boole
 
 export default function Sidebar() {
   const { close } = useSidebar();
-  const chatMode = useChatModeOptional();
   const { data: session } = useSession();
   const [searchInput, setSearchInput] = useState("");
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -334,12 +331,6 @@ export default function Sidebar() {
             </div>
             <span className="text-sm font-bold text-[var(--foreground)]">Dev</span>
           </Link>
-          {/* Null outside a conversation (/kb, /settings, ...). */}
-          {chatMode && (
-            <div className="ml-auto shrink-0">
-              <ModeToggle mode={chatMode.mode} onModeChange={chatMode.setMode} compact toolsAvailable={chatMode.modelCaps.toolsAvailable} />
-            </div>
-          )}
         </div>
         <motion.button
           whileHover={{ scale: 1.02 }}
