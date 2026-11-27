@@ -45,6 +45,7 @@ export const BUILTIN_TOOL_IDS = [
   "calculator",
   "jsonExtract",
   "sendToChat",
+  "loadUiGuide",
 ] as const;
 
 export function resolveActiveToolIds(
