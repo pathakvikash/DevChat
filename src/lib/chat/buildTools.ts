@@ -34,6 +34,7 @@ import type { AppRecord } from "@/lib/apps/types";
 export const BUILTIN_TOOL_IDS = [
   "executeCode",
   "webSearch",
+  "fetchUrl",
   "rememberFact",
   "forgetFact",
   "searchChats",

@@ -117,6 +117,13 @@ describe("honest replies", () => {
     expect(chatOnly).not.toContain("fetchUrl");
   });
 
+  it("a default tool-model chat includes fetchUrl and the 'open it with fetchUrl' line", async () => {
+    const active = resolveActiveToolIds([], []);
+    expect(active.has("fetchUrl")).toBe(true);
+    const t = (await buildSystemPrompt(opts({ useTools: true, activeToolIds: active }))).text;
+    expect(t).toContain("open it with fetchUrl before answering");
+  });
+
   it("persona wording says Orrery, not VAS", async () => {
     expect((await buildSystemPrompt(opts({ useTools: true }))).text).not.toContain("You are VAS");
     expect((await buildSystemPrompt(opts())).text).not.toContain("You are VAS");
