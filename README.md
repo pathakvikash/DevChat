@@ -32,6 +32,12 @@ feature branches: preview builds run `prisma migrate deploy` against the product
 - **Tool approval cards:** approve or deny tool calls, with Stop handled mid-call.
 - **Home page:** scroll tour with smooth scrolling (Lenis); reduced-motion safe.
 
+## Blog
+
+- [One chat, four apps](https://0xpathak.hashnode.dev/one-chat-four-apps): how Orrery calls StatMesh, Print Pro 3D and Trade MVP over MCP.
+- [Using local Claude Code from a deployed web app](https://0xpathak.hashnode.dev/using-local-claude-code-from-a-deployed-web-app): the local bridge and what the security reviews changed.
+- [Orrery: a short how-to](https://0xpathak.hashnode.dev/orrery-a-short-how-to): models, modes, links, charts, workflows and the bridge.
+
 ## What's next
 
 - Header title truncates on very narrow phones (about 400px).
