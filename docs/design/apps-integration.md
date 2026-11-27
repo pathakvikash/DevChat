@@ -79,3 +79,5 @@ Large data (table/timeseries/ohlc over ~12 values) is saved by Orrery once as a 
 ## Sidebar
 
 An "Apps" group lists approved apps (icon + name, opens `/go` in a new tab) with an unreachable dot; also CommandPalette entries; Settings > Apps registers and removes apps (owner).
+
+Launcher: the sidebar and palette link to `/api/apps/{id}/go?link=home`. The `/go` route must treat a missing or `home` link as "open the app's baseUrl root" (still through the SSO handoff when the app has `sso`). The settings page asks `GET /api/apps?all=1` so the owner also sees apps with `approved=false` (Needs approval + Review); other users get approved apps only.
