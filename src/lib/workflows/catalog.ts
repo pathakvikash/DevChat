@@ -150,7 +150,7 @@ const toolList = (c: Cfg): string[] => (Array.isArray(c.tools) ? (c.tools as str
 /** An agent card with this `preset` (the "Explain a project folder" template) is checked for a folder. */
 export const FOLDER_PRESET = "explain-folder";
 /** An agent card with a folder reads it, on any model (a CLI model itself, others through the folder tools). A CLI card runs with its own web tools off (`web: false`). */
-export const hasFolder = (type: string, config: Cfg, _defaultModel = ""): boolean => type === "agent" && !!config.folder;
+export const hasFolder = (type: string, config: Cfg): boolean => type === "agent" && !!config.folder;
 
 /** Whether the card reads chats (an agent with a chat-reading tool). */
 export const readsChats = (type: string, config: Cfg): boolean => type === "agent" && toolList(config).some((t) => CHAT_READ_TOOLS.includes(t));
@@ -159,22 +159,22 @@ export const readsChats = (type: string, config: Cfg): boolean => type === "agen
 export const usesMcp = (type: string, config: Cfg): boolean => type === "mcpTool" || (type === "agent" && mcpToolIds(config).length > 0);
 
 /** Private data a card can read: chats, MCP servers, or a folder. */
-export const readsPrivate = (type: string, config: Cfg, defaultModel = ""): boolean =>
-  readsChats(type, config) || usesMcp(type, config) || hasFolder(type, config, defaultModel);
+export const readsPrivate = (type: string, config: Cfg): boolean =>
+  readsChats(type, config) || usesMcp(type, config) || hasFolder(type, config);
 
 /** The open web: a search, fetch or job boards card, or an agent with a web tool. */
-export const reachesOpenWeb = (type: string, config: Cfg, _defaultModel = ""): boolean =>
+export const reachesOpenWeb = (type: string, config: Cfg): boolean =>
   type === "webSearch" || type === "fetch" || type === "jobBoards" || (type === "agent" && toolList(config).some((t) => OUTBOUND_TOOLS.includes(t)));
 
 /** Can send data out: the open web, or MCP (servers can make network calls). */
-export const reachesWeb = (type: string, config: Cfg, defaultModel = ""): boolean => reachesOpenWeb(type, config, defaultModel) || usesMcp(type, config);
+export const reachesWeb = (type: string, config: Cfg): boolean => reachesOpenWeb(type, config) || usesMcp(type, config);
 
 /** Whether `later` may come after `earlier` (reader). A private reader must not feed a card that reaches the web,
  *  except MCP followed by MCP: both are servers the user set up themselves. */
-export const leaksTo = (earlier: { type: string; config: Cfg }, later: { type: string; config: Cfg }, defaultModel = ""): boolean => {
-  if (!readsPrivate(earlier.type, earlier.config, defaultModel) || !reachesWeb(later.type, later.config, defaultModel)) return false;
+export const leaksTo = (earlier: { type: string; config: Cfg }, later: { type: string; config: Cfg }): boolean => {
+  if (!readsPrivate(earlier.type, earlier.config) || !reachesWeb(later.type, later.config)) return false;
   const mcpToMcp =
-    !readsChats(earlier.type, earlier.config) && !hasFolder(earlier.type, earlier.config, defaultModel) && !reachesOpenWeb(later.type, later.config, defaultModel);
+    !readsChats(earlier.type, earlier.config) && !hasFolder(earlier.type, earlier.config) && !reachesOpenWeb(later.type, later.config);
   return !mcpToMcp;
 };
 
@@ -476,7 +476,6 @@ const pickRows: CardDef = {
 export const pickStatuses = (c: Record<string, unknown>): string[] => [...new Set(String(c.statuses ?? "").split(",").map((s) => s.trim()).filter(Boolean))];
 
 export const CATALOG: Record<CardType, CardDef> = { trigger, webSearch, agent, chatMessage, mcpTool, fetch: fetchCard, filter: filterCard, table: tableCard, jobBoards, pickRows, sheetSync: sheetSyncCard };
-export const CARD_TYPES = Object.keys(CATALOG) as CardType[];
 /** Cards the user can add (the trigger is created with the workflow). */
 export const ADDABLE_TYPES: CardType[] = ["webSearch", "fetch", "agent", "filter", "table", "mcpTool", "chatMessage", "jobBoards", "pickRows", "sheetSync"];
 

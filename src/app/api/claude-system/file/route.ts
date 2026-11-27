@@ -1,15 +1,26 @@
 import { NextRequest, NextResponse } from "next/server";
-import { readFileSync, writeFileSync, existsSync } from "fs";
+import { readFileSync, writeFileSync, existsSync, realpathSync } from "fs";
 import { homedir } from "os";
-import { join, resolve, sep } from "path";
+import { basename, dirname, join, resolve, sep } from "path";
 import { requireUserId } from "@/lib/auth";
 import { canUseHostTools, HOST_TOOLS_REFUSED } from "@/lib/hostAccess";
 
 const CLAUDE_DIR = resolve(join(homedir(), ".claude"));
 
+/** Follows symlinks (of the file, or for a new file its parent) so a link inside ~/.claude can't point out of it. */
+function real(p: string): string {
+  try {
+    return realpathSync(p);
+  } catch {
+    const parent = dirname(p);
+    return parent === p ? p : join(real(parent), basename(p));
+  }
+}
+
 function isInsideClaude(filePath: string): boolean {
-  const resolved = resolve(filePath);
-  return resolved === CLAUDE_DIR || resolved.startsWith(CLAUDE_DIR + sep);
+  const resolved = real(resolve(filePath));
+  const root = real(CLAUDE_DIR);
+  return resolved === root || resolved.startsWith(root + sep);
 }
 
 export async function POST(req: NextRequest) {

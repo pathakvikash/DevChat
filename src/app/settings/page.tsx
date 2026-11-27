@@ -46,6 +46,7 @@ function defaultBaseUrls(): Record<string, string> {
 export default function SettingsPage() {
   const [analytics, setAnalytics] = useState<Analytics | null>(null);
   const [loading, setLoading] = useState(true);
+  const [clearError, setClearError] = useState<string | null>(null);
 
   // Provider API keys (server-side, encrypted). Display values are masked.
   const [keyDisplay, setKeyDisplay] = useState<Record<string, string | null>>({});
@@ -282,19 +283,13 @@ export default function SettingsPage() {
   async function clearAllData() {
     if (!confirm("Delete all data? This cannot be undone.")) return;
 
+    setClearError(null);
     try {
-      const res = await fetch("/api/conversations");
-      if (!res.ok) throw new Error("Failed to fetch conversations");
-      const conversations = await res.json();
-      for (const conv of conversations) {
-        const delRes = await fetch(`/api/conversations/${conv.id}`, { method: "DELETE" });
-        if (!delRes.ok) {
-          console.error(`Failed to delete conversation ${conv.id}: ${delRes.status}`);
-        }
-      }
+      const res = await fetch("/api/settings/data", { method: "DELETE" });
+      if (!res.ok) throw new Error(((await res.json().catch(() => null)) as { error?: string } | null)?.error ?? `Request failed (${res.status})`);
       fetchAnalytics();
     } catch (error) {
-      console.error("Failed to clear data:", error);
+      setClearError(error instanceof Error ? error.message : "Failed to clear data");
     }
   }
 
@@ -686,30 +681,9 @@ export default function SettingsPage() {
                     Clear All Data
                   </button>
                   <p className="text-sm text-zinc-400 mt-3">
-                    This will permanently delete all conversations and messages.
+                    This permanently deletes your conversations, memories, knowledge bases, traces, workflows, tables, personas and MCP servers. Your account and API keys stay.
                   </p>
-                </div>
-
-                {/* API Info */}
-                <div className="glass-card rounded-[var(--glass-radius-xl)] p-6">
-                  <h2 className="text-xl font-bold mb-4">API Endpoints</h2>
-                  <div className="space-y-3 text-sm font-mono">
-                    <div className="text-zinc-300">
-                      <span className="text-green-400">GET</span> /api/conversations
-                    </div>
-                    <div className="text-zinc-300">
-                      <span className="text-green-400">POST</span> /api/chat
-                    </div>
-                    <div className="text-zinc-300">
-                      <span className="text-green-400">GET</span> /api/personas
-                    </div>
-                    <div className="text-zinc-300">
-                      <span className="text-green-400">GET</span> /api/analytics
-                    </div>
-                    <div className="text-zinc-300">
-                      <span className="text-green-400">GET</span> /api/search?q=query
-                    </div>
-                  </div>
+                  {clearError && <p className="text-sm text-red-400 mt-2" role="alert">{clearError}</p>}
                 </div>
               </>
             ) : (

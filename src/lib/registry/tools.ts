@@ -1,7 +1,7 @@
 import { z } from "zod";
 import type { ToolDefinition } from "./types";
 import { prisma } from "@/lib/db";
-import { embed, scoreDocumentChunks, type ScoredChunk } from "@/lib/rag";
+import { searchKb } from "@/lib/rag";
 import { parseDataArtifact } from "@/lib/generativeUi/data";
 import { evaluate } from "mathjs";
 import { safeFetch } from "@/lib/net/safeFetch";
@@ -362,32 +362,16 @@ export const TOOL_REGISTRY: Record<string, ToolDefinition> = {
           return "No knowledge base attached to this conversation. Tell the user to open Model Settings and pick a KB from the Knowledge Base dropdown, then ask their question again.";
         }
 
-        const queryEmb = await embed(query);
-        const documents = await prisma.document.findMany({
-          where: { kbId: conv.kbId },
-          select: { id: true, filename: true, chunks: true },
-        });
+        const { docCount, chunks } = await searchKb(conv.kbId, query, topK);
 
-        if (documents.length === 0) {
+        if (docCount === 0) {
           return "The knowledge base is empty. Tell the user to upload documents at /kb.";
         }
-
-        const scored: ScoredChunk[] = [];
-        for (const doc of documents) {
-          try {
-            scored.push(...scoreDocumentChunks(doc, queryEmb));
-          } catch {
-            return `Error: document '${doc.filename}' has malformed chunk data.`;
-          }
-        }
-
-        if (scored.length === 0) {
+        if (chunks.length === 0) {
           return "No embedded chunks found. The documents may not have been indexed — try re-uploading.";
         }
 
-        return scored
-          .sort((a, b) => b.score - a.score)
-          .slice(0, topK)
+        return chunks
           .map((c) => `[source: ${c.source} | score=${c.score.toFixed(3)}]\n${c.text}`)
           .join("\n\n---\n\n");
       } catch (err) {

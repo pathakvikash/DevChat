@@ -11,6 +11,8 @@ npm run dev     # http://127.0.0.1:3000
 npm run sanity  # typecheck, eslint, vitest, build, Playwright (functional + visual)
 ```
 
+**Production:** `OWNER_EMAILS` (comma-separated emails) is required for host tools (CLI models, working folders, Ollama manager); when it is unset in production they are refused for everyone.
+
 Locally it uses SQLite; production uses Postgres (Neon). Avoid Prisma migrations in
 feature branches: preview builds run `prisma migrate deploy` against the production DB.
 

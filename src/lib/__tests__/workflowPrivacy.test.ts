@@ -101,7 +101,7 @@ describe("kinds from phase 6 readers", () => {
     expect(privateKindsOf("mcpTool", {})).toEqual(["mcp"]);
     expect(privateKindsOf("agent", { mcpTools: ["mcp__s1__x"] })).toEqual(["mcp"]);
     expect(privateKindsOf("agent", { folder: "/p", model: "claude-code/default" })).toEqual(["folder"]);
-    expect(privateKindsOf("agent", { folder: "/p", model: "" }, "claude-code/default")).toEqual(["folder"]); // the workflow's default model
+    expect(privateKindsOf("agent", { folder: "/p", model: "" })).toEqual(["folder"]); // the workflow's default model
     expect(privateKindsOf("agent", { folder: "/p", model: "openai/gpt" })).toEqual(["folder"]); // any model that has a folder reads it
     expect(privateKindsOf("agent", { model: "openai/gpt" })).toEqual([]);
     expect(privateKindsOf("agent", { tools: ["readChat"], mcpTools: ["mcp__s1__x"] }).sort()).toEqual(["chats", "mcp"]);
@@ -129,7 +129,7 @@ describe("an API agent with a folder", () => {
   const folderAgent = node("read", "agent", ["trigger"], 1, { instructions: "x", model: "gpt-4o", folder: "/work/app" });
 
   it("is a private reader of kind folder", () => {
-    expect(privateKindsOf("agent", folderAgent.config, "m")).toEqual(["folder"]);
+    expect(privateKindsOf("agent", folderAgent.config)).toEqual(["folder"]);
   });
 
   it("before a Web search card is a leak", () => {

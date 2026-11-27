@@ -111,6 +111,11 @@ describe("cosineSimilarity", () => {
     expect(cosineSimilarity(a, b)).toBe(0);
   });
 
+  it("returns 0 for vectors of different dimensions", () => {
+    expect(cosineSimilarity([1, 2, 3], [1, 2, 3, 4])).toBe(0);
+    expect(cosineSimilarity(new Array(384).fill(1), new Array(768).fill(1))).toBe(0);
+  });
+
   it("handles empty vectors", () => {
     expect(cosineSimilarity([], [])).toBe(0);
   });

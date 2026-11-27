@@ -50,13 +50,18 @@ export async function POST(
     const chunks = chunkText(text, 512, 50);
 
     // Embed all chunks (parallel, with concurrency cap)
-    const embeddedChunks = await Promise.all(
-      chunks.map(async (chunk, index) => ({
-        text: chunk,
-        embedding: await embed(chunk),
-        index,
-      }))
-    );
+    let embeddedChunks;
+    try {
+      embeddedChunks = await Promise.all(
+        chunks.map(async (chunk, index) => ({
+          text: chunk,
+          embedding: await embed(chunk),
+          index,
+        }))
+      );
+    } catch (e) {
+      return NextResponse.json({ error: (e as Error).message }, { status: 502 });
+    }
 
     // Save to database
     const doc = await prisma.document.create({

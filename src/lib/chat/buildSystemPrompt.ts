@@ -1,5 +1,5 @@
 import { prisma } from "@/lib/db";
-import { embed, scoreDocumentChunks, type ScoredChunk } from "@/lib/rag";
+import { searchKb } from "@/lib/rag";
 import { getMemoryBlock } from "@/lib/memory";
 import { getCompressedContext } from "@/lib/compression";
 import { TOOL_REGISTRY, getSkill } from "@/lib/registry";
@@ -258,24 +258,9 @@ async function retrieveKbContext({
     try {
       const lastUserMessage = extractText(messages[messages.length - 1] as any);
       if (!lastUserMessage) return null;
-      const queryEmbedding = await embed(lastUserMessage);
-      const documents = await prisma.document.findMany({
-        where: { kbId },
-        select: { id: true, filename: true, chunks: true },
-      });
+      const { chunks: sorted } = await searchKb(kbId, lastUserMessage, Infinity);
 
-      const scored: ScoredChunk[] = [];
-      documents.forEach((doc) => {
-        try {
-          scored.push(...scoreDocumentChunks(doc, queryEmbedding));
-        } catch {
-          // Skip documents with malformed chunk data.
-        }
-      });
-
-      if (scored.length === 0) return null;
-
-      const sorted = scored.sort((a, b) => b.score - a.score);
+      if (sorted.length === 0) return null;
 
       // Take chunks in score order until we run out of token budget. Each
       // chunk also pays a small fixed overhead for the citation header and

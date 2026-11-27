@@ -2,7 +2,7 @@ import { prisma } from "@/lib/db";
 
 /** Tools that run on the server's own machine (Claude Code and the other CLIs, its folders, its home
  *  directory) belong to the server's owner. OWNER_EMAILS (comma-separated) lists who that is; unset means
- *  everyone signed in, which is right for one developer on their own laptop and wrong on a shared server. */
+ *  everyone signed in in development (one developer, own laptop) and no one in production. */
 function ownerEmails(): Set<string> | null {
   const raw = process.env.OWNER_EMAILS;
   if (raw === undefined || !raw.trim()) return null;
@@ -17,9 +17,12 @@ let warned = false;
 export async function canUseHostTools(userId: string): Promise<boolean> {
   const owners = ownerEmails();
   if (!owners) {
-    if (!warned && process.env.NODE_ENV === "production") {
-      warned = true;
-      console.warn("[hostAccess] OWNER_EMAILS is unset: every signed-in user can use this server's CLI tools and folders. Set it on a shared server.");
+    if (process.env.NODE_ENV === "production") {
+      if (!warned) {
+        warned = true;
+        console.warn("[hostAccess] OWNER_EMAILS is unset: host tools are refused for everyone in production. Set it to the server owner's email.");
+      }
+      return false;
     }
     return true;
   }

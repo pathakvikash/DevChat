@@ -28,22 +28,26 @@ export async function GET() {
   return withUser(async (userId) => {
     await sweepOrphans(userId);
     const rows = await prisma.workflow.findMany({ where: { userId }, orderBy: { updatedAt: "desc" } });
-    const list = await Promise.all(
-      rows.map(async (w) => {
-        const last = await prisma.workflowRun.findFirst({
-          where: { workflowId: w.id },
+    const newest = await prisma.workflowRun.groupBy({ by: ["workflowId"], where: { workflowId: { in: rows.map((w) => w.id) } }, _max: { startedAt: true } });
+    const startedAts = newest.flatMap((g) => (g._max.startedAt ? [g._max.startedAt] : []));
+    const runs = startedAts.length
+      ? await prisma.workflowRun.findMany({
+          where: { workflowId: { in: rows.map((w) => w.id) }, startedAt: { in: startedAts } },
           orderBy: { startedAt: "desc" },
-          select: { id: true, state: true, startedAt: true, endedAt: true },
-        });
-        let cardCount = 0;
-        try {
-          cardCount = parseGraph(w.graph).nodes.length;
-        } catch {
-          // a damaged graph still lists, with no count
-        }
-        return { id: w.id, name: w.name, updatedAt: w.updatedAt, cardCount, lastRun: last };
-      }),
-    );
+          select: { id: true, workflowId: true, state: true, startedAt: true, endedAt: true },
+        })
+      : [];
+    const lastRun = new Map<string, { id: string; state: string; startedAt: Date; endedAt: Date | null }>();
+    for (const { workflowId, ...run } of runs) if (!lastRun.has(workflowId)) lastRun.set(workflowId, run);
+    const list = rows.map((w) => {
+      let cardCount = 0;
+      try {
+        cardCount = parseGraph(w.graph).nodes.length;
+      } catch {
+        // a damaged graph still lists, with no count
+      }
+      return { id: w.id, name: w.name, updatedAt: w.updatedAt, cardCount, lastRun: lastRun.get(w.id) ?? null };
+    });
     return NextResponse.json(list);
   });
 }
