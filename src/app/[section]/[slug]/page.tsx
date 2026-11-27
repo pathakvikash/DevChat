@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import MarketingPageView from "@/app/components/marketing/MarketingPage";
 import { MARKETING_PAGES, findPage, pagePath } from "@/lib/marketing/pages";
-import { SITE_NAME } from "@/lib/site";
+import { SITE_NAME, siteUrl } from "@/lib/site";
 
 // Only the pages in the data file exist; any other /x/y is a 404 (static routes such as /c/[id] still win).
 export const dynamicParams = false;
@@ -19,9 +19,10 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   return {
     title: { absolute: title },
     description,
-    alternates: { canonical: pagePath(page) },
+    // No canonical when the site's address is unknown: a relative one would resolve against another host.
+    alternates: siteUrl() ? { canonical: pagePath(page) } : undefined,
     // The share image comes from opengraph-image.tsx and twitter-image.tsx next to this file.
-    openGraph: { type: "website", siteName: SITE_NAME, url: pagePath(page), title, description },
+    openGraph: { type: "website", siteName: SITE_NAME, ...(siteUrl() && { url: pagePath(page) }), title, description },
     twitter: { card: "summary_large_image", title, description },
   };
 }

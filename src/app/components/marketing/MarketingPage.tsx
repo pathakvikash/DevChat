@@ -52,7 +52,7 @@ const ld = (data: unknown) => JSON.stringify(data).replace(/</g, "\\u003c");
 
 export default function MarketingPageView({ page }: { page: Page }) {
   const base = siteUrl();
-  const abs = (p: string) => new URL(p, base).href;
+  const abs = (p: string) => (base ? new URL(p, base).href : p);
   const jsonLd = {
     "@context": "https://schema.org",
     "@graph": [

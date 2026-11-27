@@ -39,7 +39,7 @@ export default function Landing() {
     "@type": "SoftwareApplication",
     name: SITE_NAME,
     description: SITE_DESCRIPTION,
-    url: siteUrl().href,
+    ...(siteUrl() && { url: siteUrl()!.href }),
     applicationCategory: "DeveloperApplication",
     operatingSystem: "Web",
     offers: { "@type": "Offer", price: "0", priceCurrency: "USD" },

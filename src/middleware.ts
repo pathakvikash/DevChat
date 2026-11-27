@@ -17,7 +17,11 @@ const { auth } = NextAuth({
 });
 
 export default auth((req) => {
-  // "/" is public: its page renders the landing for signed-out visitors and the app home for signed-in ones.
+  // "/" is public: signed-in requests render the app home, signed-out ones are rewritten (not redirected) to the
+  // static landing page, so the address stays "/" and no auth() call or skeleton is involved in serving it.
+  if (req.nextUrl.pathname === "/") {
+    return req.auth ? undefined : NextResponse.rewrite(new URL("/welcome", req.url));
+  }
   // The marketing pages (src/lib/marketing/pages.ts) are public too, by exact path.
   if (!req.auth && !isPublicPath(req.nextUrl.pathname)) {
     if (req.nextUrl.pathname.startsWith("/api/")) {
@@ -33,6 +37,7 @@ export const config = {
   // pair/redeem and pair/script are called from a terminal with no session; the one-time
   // pairing code is their auth (see src/lib/providerPair.ts).
   matcher: [
-    "/((?!api/auth|api/providers/pair/redeem|api/providers/pair/script|login|robots.txt|sitemap.xml|opengraph-image|twitter-image|icon.svg|apple-icon.png|_next/static|_next/image|favicon.ico).*)",
+    // Anchored: a folder is excluded with what is under it, a file only by its exact name.
+    "/((?!(?:api/auth|api/providers/pair/redeem|api/providers/pair/script|login|_next/static|_next/image)(?:/|$)|(?:robots\\.txt|sitemap\\.xml|opengraph-image(?:-[a-z0-9]+)?|twitter-image(?:-[a-z0-9]+)?|icon\\.svg|apple-icon\\.png|favicon\\.ico)$).*)",
   ],
 };

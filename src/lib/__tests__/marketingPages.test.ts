@@ -49,7 +49,7 @@ describe("marketing pages data", () => {
       });
 
       it("is in the sitemap and open to signed-out visitors, with its share images", () => {
-        expect(sitemap().map((e) => e.url)).toContain(new URL(pagePath(page), siteUrl()).href);
+        expect(sitemap().map((e) => e.url)).toContain(new URL(pagePath(page), siteUrl()!).href);
         expect(isPublicPath(pagePath(page))).toBe(true);
         expect(isPublicPath(`${pagePath(page)}/opengraph-image`)).toBe(true);
         expect(isPublicPath(`${pagePath(page)}/twitter-image`)).toBe(true);
@@ -74,6 +74,9 @@ describe("marketing pages data", () => {
       expect(isPublicPath(p), p).toBe(false);
     }
     expect(isPublicPath("/")).toBe(true);
+    expect(isPublicPath("/welcome")).toBe(true);
+    expect(isPublicPath("/settings/opengraph-image")).toBe(false);
+    expect(isPublicPath("/features/agents/opengraph-image-1a2b")).toBe(true);
   });
 
   it("is not covered by robots.txt or the noindex header", async () => {
