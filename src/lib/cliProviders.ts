@@ -7,7 +7,7 @@ import { delimiter, join, resolve } from "path";
 import { createInterface } from "readline";
 import { parseEnv } from "util";
 import type { LanguageModel } from "ai";
-import { PROVIDERS, ENV_ALIASES } from "./providers";
+import { PROVIDERS, ENV_ALIASES, providerOf } from "./providers";
 import { editInsideCwd } from "./editScope";
 import { CHAT_ALLOWABLE_TOOLS } from "./utils/messageParts";
 
@@ -317,6 +317,17 @@ export const defuseMentions = (text: string, cwd?: string) =>
 
 const withSystem = (system: string, user: string) => (system ? `System instructions:\n${system}\n\n${user}` : user);
 
+/** Claude Code's tool and permission flags for a working folder, a mode and whether the network is off. */
+export function claudeAccessFlags(o: { cwd?: string; access?: string; bridged: boolean; offline: boolean; allow: string[] }): string[] {
+  const { cwd, access, bridged, offline, allow } = o;
+  const toolsFor = (full: string[]) => (offline ? [...allow, "--strict-mcp-config"] : full);
+  // No --mcp-config is given without a folder, so none of the user's MCP servers start.
+  if (!cwd) return ["--tools", "", "--strict-mcp-config", ...(access === "plan" ? [] : ["--permission-mode", "manual"])];
+  if (access === "agent") return [...toolsFor(["--tools", "default"]), "--permission-mode", "acceptEdits"];
+  if (bridged) return [...toolsFor(["--tools", "default"]), "--permission-mode", "default", "--permission-prompt-tool", "stdio"];
+  return ["--tools", "Read", "Glob", "Grep", ...(offline ? ["--strict-mcp-config"] : ["WebSearch", "WebFetch"]), ...(access === "plan" ? [] : ["--permission-mode", "manual"])];
+}
+
 export const CLI_PROVIDERS: readonly CliProviderDef[] = [
   {
     id: "claude-code",
@@ -351,13 +362,7 @@ export const CLI_PROVIDERS: readonly CliProviderDef[] = [
           "--disable-slash-commands",
           // Nobody answers prompts, so anything not pre-approved is denied. Ask mode is the exception: the bridge below answers.
           ...(bridged ? [] : ["--permission-prompts", "none"]),
-          ...(!cwd
-            ? ["--tools", "", "--strict-mcp-config", ...(access === "plan" ? [] : ["--permission-mode", "manual"])] // no --mcp-config given: none of the user's MCP servers start
-            : access === "agent"
-              ? [...(offline ? [...allow, "--strict-mcp-config"] : ["--tools", "default"]), "--permission-mode", "acceptEdits"]
-              : bridged
-                ? [...(offline ? [...allow, "--strict-mcp-config"] : ["--tools", "default"]), "--permission-mode", "default", "--permission-prompt-tool", "stdio"]
-                : ["--tools", "Read", "Glob", "Grep", ...(offline ? ["--strict-mcp-config"] : ["WebSearch", "WebFetch"]), ...(access === "plan" ? [] : ["--permission-mode", "manual"])]),
+          ...claudeAccessFlags({ cwd, access, bridged, offline, allow }),
           ...(access === "plan" ? ["--permission-mode", "plan"] : []),
           ...(system ? ["--system-prompt", defuseMentions(system, cwd || CLI_SCRATCH)] : []),
           ...(model !== "default" ? ["--model", model] : []),
@@ -461,8 +466,7 @@ export const CLI_PROVIDERS: readonly CliProviderDef[] = [
 ];
 
 export function cliProviderForModel(modelId: string): CliProviderDef | undefined {
-  const slash = modelId.indexOf("/");
-  const prefix = slash < 0 ? "" : modelId.slice(0, slash);
+  const prefix = providerOf(modelId);
   return CLI_PROVIDERS.find((d) => d.id === prefix);
 }
 

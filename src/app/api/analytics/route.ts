@@ -1,7 +1,6 @@
 import { prisma } from "@/lib/db";
 import { NextResponse } from "next/server";
-import { getModel } from "@/lib/models";
-import { resolveProviderCreds } from "@/lib/apiKeys";
+import { estimateCost } from "@/lib/observability";
 import { requireUserId } from "@/lib/auth";
 
 export async function GET() {
@@ -25,28 +24,16 @@ export async function GET() {
     };
 
     // Calculate model usage and costs
-    const creds = await resolveProviderCreds(userId);
     for (const conv of conversations) {
       if (!stats.modelUsage[conv.model]) {
         stats.modelUsage[conv.model] = 0;
       }
       stats.modelUsage[conv.model] += conv.totalTokens;
 
-      // Estimate cost
-      try {
-        const modelConfig = getModel(conv.model, creds);
-        const messages = conv.messages;
-        const inputTokens = messages.reduce((sum, m) => sum + m.inputTokens, 0);
-        const outputTokens = messages.reduce((sum, m) => sum + m.outputTokens, 0);
-
-        const cost =
-          (inputTokens / 1000) * modelConfig.costPer1kInputTokens +
-          (outputTokens / 1000) * modelConfig.costPer1kOutputTokens;
-
-        stats.estimatedCost += cost;
-      } catch {
-        // Model not found, skip cost calculation
-      }
+      // Unpriced models count as $0.
+      const inputTokens = conv.messages.reduce((sum, m) => sum + m.inputTokens, 0);
+      const outputTokens = conv.messages.reduce((sum, m) => sum + m.outputTokens, 0);
+      stats.estimatedCost += estimateCost(conv.model, inputTokens, outputTokens) ?? 0;
     }
 
     return NextResponse.json(stats);

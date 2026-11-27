@@ -133,18 +133,20 @@ export const ENV_ALIASES: Record<string, string> = {
 /** Model-id prefixes of CLI-backed providers (see cliProviders.ts); client-safe. */
 export const CLI_PROVIDER_IDS = ["claude-code", "codex", "opencode"] as const;
 
-export function isCliModelId(modelId: string): boolean {
+/** The provider prefix of a model id ("openai" in "openai/gpt-4o"), or "" when there is none (bare Ollama ids). */
+export function providerOf(modelId: string): string {
   const slash = modelId.indexOf("/");
-  const prefix = slash < 0 ? "" : modelId.slice(0, slash);
-  return (CLI_PROVIDER_IDS as readonly string[]).includes(prefix);
+  return slash < 0 ? "" : modelId.slice(0, slash);
+}
+
+export function isCliModelId(modelId: string): boolean {
+  return (CLI_PROVIDER_IDS as readonly string[]).includes(providerOf(modelId));
 }
 
 /** The provider that owns a model id, or undefined for Ollama/unknown ids. */
 export function providerForModel(modelId: string): ProviderDef | undefined {
-  const slash = modelId.indexOf("/");
-  if (slash < 0) return undefined;
-  const prefix = modelId.slice(0, slash);
-  return PROVIDERS.find((p) => p.id === prefix);
+  const prefix = providerOf(modelId);
+  return prefix ? PROVIDERS.find((p) => p.id === prefix) : undefined;
 }
 
 /** Upstream model id with the DevChat provider prefix removed. */

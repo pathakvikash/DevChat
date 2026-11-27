@@ -45,7 +45,7 @@ function scripted(replies: string[], id = "mock/wf") {
     },
     doGenerate: async (o) => ({ content: [{ type: "text", text: next(o) }], finishReason: { unified: "stop", raw: undefined }, usage, warnings: [] }),
   });
-  getModel.mockReturnValue({ id, name: "wf", provider: "Mock", model: mock, costPer1kInputTokens: 0, costPer1kOutputTokens: 0, maxTokens: 1000, contextWindow: 8192, supportsTools: true });
+  getModel.mockReturnValue({ id, name: "wf", provider: "Mock", model: mock, maxTokens: 1000, contextWindow: 8192, supportsTools: true });
   return { calls };
 }
 

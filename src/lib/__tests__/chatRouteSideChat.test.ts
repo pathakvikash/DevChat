@@ -49,6 +49,8 @@ import { buildTools } from "@/lib/chat/buildTools";
 import { buildSystemPrompt } from "@/lib/chat/buildSystemPrompt";
 import { cliProviderForModel } from "@/lib/cliProviders";
 import { isAllowedFolder } from "@/lib/folders";
+import { recordTrace } from "@/lib/observability";
+import { streamText } from "ai";
 const db = prisma as any;
 
 /** One row serves both the ownership check and resolveChatSettings. */
@@ -170,5 +172,21 @@ describe("POST /api/chat for side chats", () => {
     const res = await send("a1", "chat");
     expect(res.status).toBe(400);
     expect(buildTools).not.toHaveBeenCalled();
+  });
+
+  it("records the length of a v6 user message (parts, no content) as inputChars", async () => {
+    db.conversation.findUnique.mockResolvedValue(chat());
+    await POST(
+      new Request("http://localhost/api/chat", {
+        method: "POST",
+        body: JSON.stringify({
+          conversationId: "c1",
+          model: "mock/chat",
+          messages: [{ id: "m1", role: "user", parts: [{ type: "text", text: "hello there" }] }],
+        }),
+      }) as any,
+    );
+    (vi.mocked(streamText).mock.calls[0][0] as any).onFinish({ text: "ok", steps: [{}], finishReason: "stop", totalUsage: {} });
+    expect(recordTrace).toHaveBeenCalledWith(expect.objectContaining({ inputChars: 11 }));
   });
 });

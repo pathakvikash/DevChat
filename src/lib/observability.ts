@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/db";
+import { bareModelId, providerOf } from "@/lib/providers";
 
 /**
  * Lightweight, dependency-free observability for chat completions.
@@ -62,18 +63,13 @@ export interface TraceObservation {
 }
 
 function deriveProvider(model: string): string | null {
-  if (model.includes("/")) return model.split("/")[0];
-  return null;
-}
-
-/** Strip a provider prefix to improve price-table lookup hits. */
-function bareModel(model: string): string {
-  return model.includes("/") ? model.split("/").pop()! : model;
+  return providerOf(model) || null;
 }
 
 export function estimateCost(model: string, inTok: number, outTok: number): number | null {
   if (model.startsWith("ollama/")) return 0;
-  const key = bareModel(model);
+  // The last path segment, so "openrouter/anthropic/claude-3.5-sonnet" still finds its price.
+  const key = bareModelId(model).split("/").pop()!;
   const price = PRICING[model] ?? PRICING[key];
   if (!price) return null;
   return (inTok / 1000) * price[0] + (outTok / 1000) * price[1];

@@ -141,7 +141,7 @@ function fakeModel(id: string) {
       return { stream: simulateReadableStream({ chunks: parts, initialDelayInMs: null, chunkDelayInMs: null }) };
     },
   });
-  getModel.mockReturnValue({ id, name: id, provider: "Mock", model: mock, costPer1kInputTokens: 0, costPer1kOutputTokens: 0, maxTokens: 1000, contextWindow: 8192, supportsTools: true });
+  getModel.mockReturnValue({ id, name: id, provider: "Mock", model: mock, maxTokens: 1000, contextWindow: 8192, supportsTools: true });
   return calls;
 }
 const agentCtx = (config: Record<string, unknown>, model: string): CardCtx => ({
