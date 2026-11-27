@@ -331,5 +331,5 @@ export function mockModelCatalog(): ModelCatalogEntry[] {
 
 export function mockModelConfig(id: string): ModelConfig | undefined {
   if (!isSanityMode() || !Object.hasOwn(MODELS, id)) return undefined;
-  return { ...entry(id), model: build(id), costPer1kInputTokens: 0, costPer1kOutputTokens: 0, maxTokens: 4096, supportsTools: MODELS[id].tools };
+  return { ...entry(id), model: build(id), maxTokens: 4096, supportsTools: MODELS[id].tools };
 }
