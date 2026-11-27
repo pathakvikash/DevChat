@@ -8,7 +8,7 @@ import { useToolAnswers } from "./ToolAnswers";
 import { useFolders } from "@/app/hooks/useFolders";
 import { isBridgeModel } from "@/lib/bridge/client";
 import { isShellTool } from "@/lib/bridge/shellTools";
-import { approvalDetails, approvalTitle, CHAT_ALLOWABLE_TOOLS, hiddenRuns, showHidden } from "@/lib/utils/messageParts";
+import { approvalDetails, approvalTitle, askedByUntrustedGate, CHAT_ALLOWABLE_TOOLS, hiddenRuns, showHidden } from "@/lib/utils/messageParts";
 
 /** Past this many lines the block says how long it is. */
 const LONG_BLOCK = 12;
@@ -132,7 +132,7 @@ export default function ApprovalCard({
           Deny
         </button>
         {/* App tools (app_<id>_<tool>) that need OK ask on every call (appToolNeedsApproval ignores the chat's allow list). */}
-        {!sendsOut?.sendsOut && !toolName.startsWith("app_") && (!approvalId.startsWith("cli-") || CHAT_ALLOWABLE_TOOLS.has(toolName)) && (
+        {!sendsOut?.sendsOut && !toolName.startsWith("app_") && !askedByUntrustedGate(toolName, input) && (!approvalId.startsWith("cli-") || CHAT_ALLOWABLE_TOOLS.has(toolName)) && (
           <button
             type="button"
             disabled={answered}

@@ -4,7 +4,7 @@ import { POST } from "@/app/api/chat/route";
 vi.mock("@/lib/db", () => ({
   prisma: {
     conversation: { findUnique: vi.fn(), update: vi.fn() },
-    message: { findMany: vi.fn().mockResolvedValue([]) },
+    message: { findMany: vi.fn().mockResolvedValue([]), findFirst: vi.fn().mockResolvedValue(null) },
     knowledgeBase: { findUnique: vi.fn() },
     user: { findUnique: vi.fn() },
   },

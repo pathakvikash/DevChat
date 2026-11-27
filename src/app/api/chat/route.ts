@@ -20,6 +20,7 @@ import {
   type ToolSet,
   type ToolMode,
 } from "@/lib/chat/buildTools";
+import { storedTaint } from "@/lib/chat/untrustedGate";
 import { askAfterExternalText, canStartSubAgents, messageAgentTool, runAgentTool, type SubAgentToolOptions } from "@/lib/chat/buildTools";
 import {
   agentMessageModelText,
@@ -339,6 +340,9 @@ export async function POST(req: Request) {
       }
     }
 
+    // External text in the STORED history (compression drops those results from the prompt, not their text from the summary).
+    // A side chat carries its parent's transcript in its prompt, so the parent's outside text counts too.
+  const tainted = useTools && ((await storedTaint(conversationId)) || (!!parentId && (await storedTaint(parentId))));
     // A tool answered in this request keeps needing approval for it (see toolsWithAnsweredApproval).
     const answeredNow = new Set(toolsWithAnsweredApproval(sanitizedMessages));
     const aiTools: ToolSet = useTools
@@ -350,7 +354,7 @@ export async function POST(req: Request) {
           mode: toolMode,
           memoryDisabled,
           agentTargets,
-          gateUntrusted: true,
+          gateUntrusted: { tainted },
           allowedTools: Array.isArray(bodyAllowedTools)
             ? bodyAllowedTools.filter((t: unknown): t is string => typeof t === "string" && !answeredNow.has(t))
             : [],
@@ -427,8 +431,8 @@ export async function POST(req: Request) {
         maxParallel: cliProvider ? 1 : 3,
         activeChildren: new Set<string>(),
       };
-      aiTools.runAgent = askAfterExternalText(runAgentTool(aiTools, subAgents));
-      aiTools.messageAgent = askAfterExternalText(messageAgentTool(aiTools, subAgents));
+      aiTools.runAgent = askAfterExternalText(runAgentTool(aiTools, subAgents), tainted);
+      aiTools.messageAgent = askAfterExternalText(messageAgentTool(aiTools, subAgents), tainted);
     }
 
     // Built after the tools, so a sub-agent's toModelOutput applies to saved history too.

@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { z } from "zod";
 
-vi.mock("@/lib/db", () => ({ prisma: { artifact: { create: vi.fn() }, mcpServer: { findMany: vi.fn().mockResolvedValue([]) } } }));
+vi.mock("@/lib/db", () => ({ prisma: { artifact: { create: vi.fn(), update: vi.fn() }, mcpServer: { findMany: vi.fn().mockResolvedValue([]) } } }));
 vi.mock("@/lib/apps/registry", () => ({ callAppTool: vi.fn(), listApps: vi.fn(), getApp: vi.fn() }));
 
 import { prisma } from "@/lib/db";
@@ -16,6 +16,7 @@ import {
   modelResult,
   wrapAppText,
 } from "@/lib/apps/chatTools";
+import { refreshSig } from "@/lib/apps/refreshSig";
 import { buildTools, canStartSubAgents } from "@/lib/chat/buildTools";
 import { parseDataArtifact } from "@/lib/generativeUi/data";
 import { parseOrreryArtifact } from "@/lib/generativeUi/appData";
@@ -137,6 +138,20 @@ describe("modelResult", () => {
     expect(out).toContain("CandleChart dataArtifactId=art1");
     expect(parseOrreryArtifact(saved(1))).toMatchObject({ type: "ohlc", symbol: "BTC", interval: "1h" }); // CandleChart's reader
     expect(parseDataArtifact(saved(1)).columns).toEqual(["t", "o", "h", "l", "c", "v"]);
+  });
+  it("signs a saved result that can refresh, and keeps a small table with refresh inline", async () => {
+    process.env.AUTH_SECRET = "s";
+    const refresh = { tool: "klines", args: { s: "B" } };
+    await modelResult({ text: "", structured: { orrery: 1, type: "ohlc", symbol: "B", interval: "1m", candles: [{ t: 1, o: 1, h: 2, l: 0, c: 1 }], refresh } }, ctx);
+    const upd = vi.mocked(prisma.artifact.update).mock.calls[0][0] as any;
+    expect(upd.where).toEqual({ id: "art1" });
+    const saved = JSON.parse(upd.data.content);
+    expect(saved.sig).toBe(refreshSig("art1", "statmesh", refresh));
+    expect(saved.app).toBe("statmesh");
+    vi.mocked(prisma.artifact.create).mockClear();
+    const out = await modelResult({ text: "t", structured: { orrery: 1, type: "table", columns: ["a"], rows: [[1]], refresh } }, ctx);
+    expect(prisma.artifact.create).not.toHaveBeenCalled();
+    expect(out).toContain('"rows":[[1]]');
   });
   it("keeps small tables and link results inline as compact JSON", async () => {
     const r = { orrery: 1, type: "link", label: "Open", link: "quote" } as const;

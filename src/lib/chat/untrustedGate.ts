@@ -1,3 +1,4 @@
+import { prisma } from "@/lib/db";
 import { isAppToolId } from "@/lib/apps/chatTools";
 
 type Msg = { role?: string; content?: unknown };
@@ -37,15 +38,36 @@ export function userSentUrl(messages: readonly Msg[] | undefined, url: unknown):
   return false;
 }
 
-/** A result with text from outside is in the conversation: a fetched page, web search, MCP or app tool. */
+/** Tools whose result carries text from outside: a page, search, MCP, app, helper or another chat. One list for the live
+ *  check (below) and the stored-history check (`storedTaint`). */
+export const isExternalTextTool = (n: string): boolean =>
+  ["fetchUrl", "webSearch", "runAgent", "messageAgent", "readChat", "searchChats"].includes(n) || n.startsWith("mcp_") || isAppToolId(n);
+
+/** A result with text from outside is in the conversation. */
 export function hasExternalText(messages: readonly Msg[] | undefined): boolean {
   return (messages ?? []).some(
     (m) =>
       m.role === "tool" &&
       Array.isArray(m.content) &&
-      (m.content as Part[]).some((p) => {
-        const n = p?.type === "tool-result" ? String(p.toolName ?? "") : "";
-        return n === "fetchUrl" || n === "webSearch" || n.startsWith("mcp_") || isAppToolId(n);
-      }),
+      (m.content as Part[]).some((p) => p?.type === "tool-result" && isExternalTextTool(String(p.toolName ?? ""))),
   );
+}
+
+const EXACT = ["fetchUrl", "webSearch", "runAgent", "messageAgent", "readChat", "searchChats"];
+/** Substrings of a stored `parts` JSON that mean an external-text tool part (static `tool-<name>` or `dynamic-tool`). */
+const STORED_MARKERS = [
+  ...EXACT.flatMap((n) => [`"type":"tool-${n}"`, `"toolName":"${n}"`]),
+  ...["mcp_", "app_"].flatMap((p) => [`"type":"tool-${p}`, `"toolName":"${p}`]),
+];
+
+/** True when any STORED assistant message of this chat has an external-text tool part. Compression drops those results
+ *  from the prompt but keeps their text in the summary, so the live check alone would miss them. One indexed query,
+ *  `parts` matched in SQL and never loaded; a false positive only means one more card. */
+export async function storedTaint(conversationId: string | undefined): Promise<boolean> {
+  if (!conversationId) return false;
+  const hit = await prisma.message.findFirst({
+    where: { conversationId, role: "assistant", OR: STORED_MARKERS.map((contains) => ({ parts: { contains } })) },
+    select: { id: true },
+  });
+  return !!hit;
 }

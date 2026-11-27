@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/db";
 import { NextRequest, NextResponse } from "next/server";
 import { requireUserId } from "@/lib/auth";
+import { stripRefreshKeys } from "@/lib/apps/refreshSig";
 
 export async function GET(
   req: NextRequest,
@@ -57,7 +58,8 @@ export async function POST(
     }
 
     const artifact = await prisma.artifact.create({
-      data: { conversationId: id, type, title, content },
+      // executeCode saveAs lands here: code output must not carry the keys of a signed app result.
+      data: { conversationId: id, type, title, content: typeof content === "string" ? stripRefreshKeys(content) : content },
     });
 
     return NextResponse.json(artifact, { status: 201 });
