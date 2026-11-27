@@ -26,7 +26,7 @@ async function call<T>(url: string, init?: RequestInit): Promise<T> {
 function PermissionBadge({ permission }: { permission: AppRecord["permission"] }) {
   const actions = permission === "actions";
   return (
-    <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium ${actions ? "bg-amber-900/40 text-amber-300" : "bg-emerald-900/40 text-emerald-300"}`}>
+    <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium ${actions ? "bg-[var(--warn-bg)] text-[var(--warn-text)]" : "bg-[var(--ok-bg)] text-[var(--ok-text)]"}`}>
       {actions ? <ShieldAlert size={12} /> : <ShieldCheck size={12} />}
       {permissionCopy(permission).label}
     </span>
@@ -40,7 +40,7 @@ function ToolList({ tools }: { tools: AppTool[] }) {
     <li key={t.name} className={`p-2 rounded-[var(--glass-radius-md)] border text-sm ${ro ? "border-emerald-900/50 bg-emerald-500/10" : "border-amber-900/50 bg-amber-500/10"}`}>
       <div className="flex items-center gap-2">
         <span className="font-medium font-mono truncate">{t.name}</span>
-        <span className={`ml-auto shrink-0 text-xs ${ro ? "text-emerald-300" : "text-amber-300"}`}>{ro ? "Read only" : "Asks first"}</span>
+        <span className={`ml-auto shrink-0 text-xs ${ro ? "text-[var(--ok-text)]" : "text-[var(--warn-text)]"}`}>{ro ? "Read only" : "Asks first"}</span>
       </div>
       {t.description && <p className="text-xs text-zinc-400 mt-0.5">{t.description}</p>}
     </li>
@@ -57,7 +57,7 @@ function SecretBox({ secret, onDone }: { secret: string; onDone: () => void }) {
   return (
     <div className="glass-card rounded-[var(--glass-radius-xl)] p-5 border border-amber-900/50 space-y-3" data-testid="app-secret-box">
       <h3 className="text-lg font-semibold">App added. Copy its secret now.</h3>
-      <p className="text-sm text-amber-300 flex items-start gap-2"><ShieldAlert size={16} className="shrink-0 mt-0.5" />
+      <p className="text-sm text-[var(--warn-text)] flex items-start gap-2"><ShieldAlert size={16} className="shrink-0 mt-0.5" />
         This secret will not be shown again. Paste these two lines into the app&apos;s environment variables and redeploy it.</p>
       <pre className="rounded-[var(--glass-radius-md)] bg-zinc-800/60 border border-zinc-700/50 p-3 text-xs font-mono overflow-x-auto select-all" data-testid="app-secret-text">{snippet}</pre>
       <div className="flex justify-end gap-2">
@@ -184,7 +184,7 @@ function AppsContent() {
           <div className="flex items-center justify-center py-16"><Loader2 size={28} className="animate-spin text-zinc-500" /></div>
         ) : loadError ? (
           <div className="glass-card rounded-[var(--glass-radius-xl)] p-6 text-center">
-            <p className="text-sm text-red-400 flex items-center justify-center gap-1 mb-3"><XCircle size={14} /> {loadError}</p>
+            <p className="text-sm text-[var(--danger-text)] flex items-center justify-center gap-1 mb-3"><XCircle size={14} /> {loadError}</p>
             <button onClick={() => { setLoading(true); void load(); }} className="glass-button text-zinc-300 rounded-[var(--glass-radius-md)] px-4 py-2 text-sm">Try again</button>
           </div>
         ) : apps.length === 0 ? (
@@ -208,13 +208,13 @@ function AppsContent() {
                         {app.status === "ok" ? "Reachable" : "Unreachable"}
                       </span>
                       {app.approved === false && (
-                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-amber-900/40 text-amber-300">Needs approval</span>
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-[var(--warn-bg)] text-[var(--warn-text)]">Needs approval</span>
                       )}
                     </div>
                     <p className="text-sm text-zinc-400 font-mono truncate">{app.baseUrl}</p>
                     {app.tools && <p className="text-xs text-zinc-400 mt-1">{app.tools.length} tool{app.tools.length === 1 ? "" : "s"}</p>}
                     {app.approved === false && (
-                      <p className="text-xs text-amber-400 mt-1">Its origin, permission or tools changed. Review it before chats can use it again.</p>
+                      <p className="text-xs text-[var(--warn-text)] mt-1">Its origin, permission or tools changed. Review it before chats can use it again.</p>
                     )}
                   </div>
                   {!readOnlyMode && (
@@ -229,7 +229,7 @@ function AppsContent() {
                         {busyId === app.id ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />} Refresh
                       </button>
                       <button onClick={() => remove(app)} disabled={busyId === app.id}
-                        className="glass-button-danger text-red-200 rounded-[var(--glass-radius-md)] px-3 py-2 text-xs flex items-center gap-1.5 disabled:opacity-50"
+                        className="glass-button-danger text-[var(--danger-btn-text)] rounded-[var(--glass-radius-md)] px-3 py-2 text-xs flex items-center gap-1.5 disabled:opacity-50"
                         aria-label={`Remove ${app.name}`} title="Remove">
                         <Trash2 size={14} /> Remove
                       </button>
@@ -254,7 +254,7 @@ function AppsContent() {
               </button>
             </form>
             <p className="text-xs text-zinc-400">Paste the app&apos;s base URL. Orrery reads <span className="font-mono">/.well-known/orrery-app.json</span> from it and shows what it will allow before anything is saved.</p>
-            {previewError && <p role="alert" className="text-sm text-red-400 flex items-center gap-1"><XCircle size={14} /> {previewError}</p>}
+            {previewError && <p role="alert" className="text-sm text-[var(--danger-text)] flex items-center gap-1"><XCircle size={14} /> {previewError}</p>}
 
             {preview && perm && (
               <div className="rounded-[var(--glass-radius-lg)] border border-zinc-700/50 p-4 space-y-4" data-testid="app-review">
@@ -272,7 +272,7 @@ function AppsContent() {
                 </div>
                 <div>
                   {preview.toolsUnavailable ? (
-                    <p className="text-sm text-amber-400" data-testid="tools-unavailable">This app requires a signed request. Its tools are listed after you register it, set its secret in the app, and press Refresh; you then approve the list.</p>
+                    <p className="text-sm text-[var(--warn-text)]" data-testid="tools-unavailable">This app requires a signed request. Its tools are listed after you register it, set its secret in the app, and press Refresh; you then approve the list.</p>
                   ) : (
                     <>
                       <h4 className="text-sm font-medium mb-2">Tools ({preview.tools.length})</h4>
@@ -282,7 +282,7 @@ function AppsContent() {
                 </div>
                 {preview.warnings.length > 0 && (
                   <ul className="space-y-1" aria-label="Warnings">
-                    {preview.warnings.map((w) => <li key={w} className="text-xs text-amber-400 flex items-start gap-1"><ShieldAlert size={12} className="shrink-0 mt-0.5" /> {w}</li>)}
+                    {preview.warnings.map((w) => <li key={w} className="text-xs text-[var(--warn-text)] flex items-start gap-1"><ShieldAlert size={12} className="shrink-0 mt-0.5" /> {w}</li>)}
                   </ul>
                 )}
                 <div className="flex justify-end gap-2">
