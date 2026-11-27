@@ -97,7 +97,15 @@ function AppsContent() {
     } finally { setLoading(false); }
   }, []);
 
-  useEffect(() => { void load(); }, [load]);
+  // First load: state is set from the promise callbacks (not in the effect body), `load` is for refreshes.
+  useEffect(() => {
+    let alive = true;
+    call<AppRecord[] | { apps: AppRecord[] }>("/api/apps?all=1")
+      .then((data) => { if (alive) { setApps(Array.isArray(data) ? data : data.apps); setLoadError(null); } })
+      .catch((e) => { if (alive) setLoadError(e instanceof Error ? e.message : "Failed to load apps"); })
+      .finally(() => { if (alive) setLoading(false); });
+    return () => { alive = false; };
+  }, []);
 
   function fail(e: unknown, fallback: string) {
     if ((e as { status?: number }).status === 403) setReadOnlyMode(true);
