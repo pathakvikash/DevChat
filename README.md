@@ -1,7 +1,11 @@
-# DevChat
+# Orrery
+
+Orrery: a self-hostable AI chat workspace with workflows, tables, knowledge bases and agents.
 
 A bring-your-own-key chat app built on Next.js 16 (App Router), AI SDK v6 and Prisma.
 Chat with hosted or local models, run workflows, and work in your own folders.
+
+**Naming:** the product was renamed from DevChat. Internal package and directory names remain `devchat` for now.
 
 ## Getting Started
 
@@ -36,18 +40,18 @@ feature branches: preview builds run `prisma migrate deploy` against the product
 
 ## LLM providers
 
-DevChat is bring-your-own-key. It discovers which providers you have access to
+Orrery is bring-your-own-key. It discovers which providers you have access to
 and fetches their live model lists.
 
 OpenAI (Responses API, via `@ai-sdk/openai`) and Anthropic (Messages API, via
 `@ai-sdk/anthropic`) use their native SDKs, because the OpenAI-compatible
-endpoints hide what DevChat needs: reasoning summaries, effort levels, and tool
+endpoints hide what Orrery needs: reasoning summaries, effort levels, and tool
 calls on the newest models (Anthropic's compat layer also hides adaptive
 thinking). Every other provider goes through the OpenAI Chat Completions format.
 The conversation's "Reasoning effort" setting drives all of these.
 
 **LM Studio** runs on your own machine: start its local server, load a model, and
-DevChat lists the models it has loaded (embedding models are left out). Nothing
+Orrery lists the models it has loaded (embedding models are left out). Nothing
 is hard-coded. A reasoning model's thinking (`reasoning_content`, e.g. Qwen 3.5)
 shows as the thinking block. Its tokens count against the output limit, so keep
 Max tokens generous for these models.
@@ -107,18 +111,18 @@ reply, a suggested next message appears greyed in the box; press → or the
 "Use suggestion" button to fill it in. Suggestions come from the conversation's
 own model.
 
-**Using Claude Code, Codex or OpenCode directly.** When DevChat runs on your
+**Using Claude Code, Codex or OpenCode directly.** When Orrery runs on your
 own machine and one of those commands is installed, it shows up as a provider in
 the model selector (Claude Code: Default/Sonnet/Opus/Haiku; Codex: your default;
-OpenCode: whatever `opencode models` lists). DevChat launches the tool in
+OpenCode: whatever `opencode models` lists). Orrery launches the tool in
 headless mode for each turn and streams its reply, so the tool uses its own
 login, including a Claude or ChatGPT subscription, and no API key is involved.
 This is how [bb](https://github.com/get-bb/bb) works too. Details:
 
 - By default the tool runs sandboxed: its own file, shell and web tools are off
-  and it sits in an empty scratch directory. DevChat's own tools (web search,
+  and it sits in an empty scratch directory. Orrery's own tools (web search,
   knowledge bases, todos, MCP, ...) still work: they are described to the model
-  in the prompt, a reply ending in a ```tool_call block is run by DevChat, and
+  in the prompt, a reply ending in a ```tool_call block is run by Orrery, and
   the result goes back in the next turn. Each tool step is a fresh run of the
   CLI, so tool-heavy turns are slower than with an API provider.
 - **Working folder** (model settings dialog, CLI models only): pick one of the
@@ -129,9 +133,9 @@ This is how [bb](https://github.com/get-bb/bb) works too. Details:
   are never allowed, other folders are denied by Claude Code itself, and every
   tool call the CLI makes is shown in the message. OpenCode and Codex get the
   same policy through their own permission settings.
-- Claude Code is started with your hooks and settings skipped and DevChat's
+- Claude Code is started with your hooks and settings skipped and Orrery's
   system prompt in place of its coding-agent prompt.
-- DevChat's own provider keys from `.env` are kept out of the tool's
+- Orrery's own provider keys from `.env` are kept out of the tool's
   environment, so the tool always uses its own login. (Claude Code otherwise
   prefers `ANTHROPIC_API_KEY` and retries a bad key forever.) A tool that
   prints nothing for two minutes, or keeps retrying its API, is stopped with a
@@ -144,7 +148,7 @@ This is how [bb](https://github.com/get-bb/bb) works too. Details:
 - The Codex adapter follows Codex's documented `codex exec --json` output but
   hasn't been exercised here; report issues if it misbehaves.
 - This is for personal use on your own machine and is subject to each tool's
-  own terms. Never expose such a DevChat instance to other users: they would be
+  own terms. Never expose such a Orrery instance to other users: they would be
   chatting on your subscriptions.
 
 To add another hosted provider, append one entry to `PROVIDERS` in

@@ -271,7 +271,7 @@ export default function ProfileDialog({
               </div>
 
               <div className="glass-card rounded-[var(--glass-radius-xl)] p-5">
-                <h3 className="text-sm font-bold mb-1">Instructions for DevChat</h3>
+                <h3 className="text-sm font-bold mb-1">Instructions for Orrery</h3>
                 <p className="text-xs text-zinc-500 mb-3">
                   Always included as part of the system prompt, on top of any
                   per-conversation instructions.

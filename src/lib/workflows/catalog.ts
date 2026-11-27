@@ -135,8 +135,8 @@ export const AGENT_TOOL_CHOICES: { id: (typeof AGENT_TOOL_IDS)[number]; label: s
 export const isCodexModelId = (id: string): boolean => id.startsWith("codex/");
 /** Its offline flags are unverified until a live check runs, so a workflow card can't use it yet (lift this in `cardConflict`). */
 export const CODEX_BLOCKED = "Codex can't run workflow cards yet. Pick another model.";
-/** What an MCP tool card and an agent card with MCP tools can do outside DevChat (8.5). */
-export const MCP_WARNING = "Can change things outside DevChat";
+/** What an MCP tool card and an agent card with MCP tools can do outside Orrery (8.5). */
+export const MCP_WARNING = "Can change things outside Orrery";
 export const MCP_WEB_WARNING = "This card reads web pages and can act through MCP. A page could try to steer it.";
 export const mcpToolIds = (config: Record<string, unknown>): string[] => (Array.isArray(config.mcpTools) ? (config.mcpTools as string[]) : []);
 
@@ -233,7 +233,7 @@ const chatMessage: CardDef = {
   label: "Send to chat",
   category: "Output",
   icon: "MessageSquare",
-  description: "Posts a message to a DevChat chat.",
+  description: "Posts a message to a Orrery chat.",
   schema: z.object({
     chat: z.string().default("new"),
     title: z.string().default("{{workflow.name}} — {{run.date}}"),
@@ -320,7 +320,7 @@ const tableCard: CardDef = {
   label: "Save to table",
   category: "Table",
   icon: "Table2",
-  description: "Adds items to a DevChat table, or updates rows already in it. Rows are matched by a key such as the URL.",
+  description: "Adds items to a Orrery table, or updates rows already in it. Rows are matched by a key such as the URL.",
   schema: z.object({
     tableId: z.string().default(""),
     action: z.enum(["upsert", "update"]).default("upsert"),
@@ -376,14 +376,14 @@ const mcpTool: CardDef = {
   summary: (c) => (c.tool ? `Calls ${trim(c.tool, 40)}` : "No tool picked yet"),
 };
 
-// Phase 7. Config is only the table: the sheet it writes to is DataTable.sheetId, created by DevChat on the first sync.
+// Phase 7. Config is only the table: the sheet it writes to is DataTable.sheetId, created by Orrery on the first sync.
 // Nothing here can name a sheet, an id, a URL or a range.
 const sheetSyncCard: CardDef = {
   type: "sheetSync",
   label: "Sync to Google Sheet",
   category: "Table",
   icon: "Sheet",
-  description: "Copies every row of a DevChat table to its own Google Sheet, replacing what the sheet held. DevChat creates the sheet on the first sync, and can only touch sheets it created.",
+  description: "Copies every row of a Orrery table to its own Google Sheet, replacing what the sheet held. Orrery creates the sheet on the first sync, and can only touch sheets it created.",
   schema: z.object({ tableId: z.string().default("") }),
   defaults: () => ({ tableId: "" }),
   fields: [{ key: "tableId", label: "Table", kind: "table" }],

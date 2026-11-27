@@ -29,7 +29,7 @@ export default async function LoginPage({
           <div className="size-14 rounded-full glass-surface flex items-center justify-center">
             <MessageSquare size={28} className="text-zinc-300" />
           </div>
-          <h1 className="text-xl font-bold">Sign in to DevChat</h1>
+          <h1 className="text-xl font-bold">Sign in to Orrery</h1>
           <p className="text-sm text-zinc-500">
             Use your Google account to continue.
           </p>

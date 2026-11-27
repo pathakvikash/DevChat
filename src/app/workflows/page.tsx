@@ -134,7 +134,7 @@ export default function WorkflowsPage() {
           ) : rows.length === 0 ? (
             <div className="glass-card rounded-[var(--glass-radius-xl)] border-dashed p-12 text-center">
               <Workflow size={32} className="mx-auto mb-3 text-zinc-500" aria-hidden="true" />
-              <p className="text-sm text-zinc-400">No workflows yet. Start from a template, or describe what you want done and DevChat lays out the cards.</p>
+              <p className="text-sm text-zinc-400">No workflows yet. Start from a template, or describe what you want done and Orrery lays out the cards.</p>
             </div>
           ) : (
             <ul className="space-y-3">

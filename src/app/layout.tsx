@@ -18,8 +18,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "DevChat",
-  description: "DevChat - AI chat platform",
+  title: "Orrery",
+  description: "Orrery: a self-hostable AI chat workspace",
 };
 
 export default function RootLayout({
