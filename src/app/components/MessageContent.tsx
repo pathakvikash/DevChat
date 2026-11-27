@@ -9,8 +9,8 @@ import {
   type ToolPart,
 } from "@/lib/utils/messageParts";
 import { useEffect, useMemo, useRef } from "react";
-import { useJsonRenderMessage, Renderer, StateProvider, ActionProvider } from "@json-render/react";
-import { composeUiSubmit } from "@/lib/generativeUi/composeSubmit";
+import { useJsonRenderMessage, Renderer, StateProvider, ActionProvider, useStateStore } from "@json-render/react";
+import { boundFieldPaths, boundValues, composeUiSubmit, sanitizeSpec } from "@/lib/generativeUi/composeSubmit";
 import { registry } from "@/lib/generativeUi/registry";
 import { splitQuoteBlocks } from "@/lib/utils/quoteReply";
 import { cutNotesIn } from "@/lib/utils/fileMentions";
@@ -32,6 +32,31 @@ interface MessageContentProps {
   markdown?: boolean;
 }
 
+/** Inside the message's StateProvider: a submit reads the bound inputs from that state and ignores the action's params. */
+function UiRenderer({ spec, loading, onSubmit }: { spec: any; loading: boolean; onSubmit?: (text: string) => void }) {
+  const { getSnapshot } = useStateStore();
+  // ActionProvider keeps only its first `handlers`, so route through a ref.
+  const ref = useRef({ spec, onSubmit, getSnapshot });
+  useEffect(() => {
+    ref.current = { spec, onSubmit, getSnapshot };
+  });
+  const handlers = useMemo(
+    () => ({
+      submit: () => {
+        const { spec, onSubmit, getSnapshot } = ref.current;
+        const text = composeUiSubmit(boundValues(getSnapshot(), boundFieldPaths(spec)));
+        if (text) onSubmit?.(text);
+      },
+    }),
+    [],
+  );
+  return (
+    <ActionProvider handlers={handlers}>
+      <Renderer spec={spec} registry={registry} loading={loading} />
+    </ActionProvider>
+  );
+}
+
 export default function MessageContent({
   role,
   allParts,
@@ -51,20 +76,7 @@ export default function MessageContent({
   // below, so they just fall through and render nothing — this hook is only
   // for reconstructing the spec for the Renderer, not for text extraction.
   const { spec, hasSpec } = useJsonRenderMessage(allParts as any);
-  // ActionProvider keeps only its first `handlers`, so route through a ref.
-  const submitRef = useRef(onUiSubmit);
-  useEffect(() => {
-    submitRef.current = onUiSubmit;
-  });
-  const handlers = useMemo(
-    () => ({
-      submit: (params: unknown) => {
-        const text = composeUiSubmit((params as { values?: unknown } | undefined)?.values);
-        if (text) submitRef.current?.(text);
-      },
-    }),
-    [],
-  );
+  const safeSpec = useMemo(() => (spec ? sanitizeSpec(spec) : spec), [spec]);
 
   return (
     <>
@@ -132,9 +144,7 @@ export default function MessageContent({
       {isAssistant && hasSpec && spec && (
         <div className="max-w-2xl">
           <StateProvider>
-            <ActionProvider handlers={handlers}>
-              <Renderer spec={spec} registry={registry} loading={isStreaming} />
-            </ActionProvider>
+            <UiRenderer spec={safeSpec} loading={isStreaming} onSubmit={onUiSubmit} />
           </StateProvider>
         </div>
       )}

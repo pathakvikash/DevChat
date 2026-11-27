@@ -33,7 +33,7 @@ export const catalog = defineCatalog(schema, {
         variant: z.union([z.literal("primary"), z.literal("secondary")]).nullable(),
       }),
       description:
-        "A clickable button. To send form values to the chat, bind it: `\"on\": { \"press\": { \"action\": \"submit\", \"params\": { \"values\": { \"$state\": \"/form\" } } } }` and bind each Input/Checkbox/Select with `{ \"$bindState\": \"/form/<field>\" }`. Without `on.press` it is only decorative.",
+        "A clickable button. A Button with `\"on\": { \"press\": { \"action\": \"submit\" } }` sends the current values of the form inputs above it to the chat; bind each Input/Checkbox/Select with `{ \"$bindState\": \"/form/<field>\" }`. Do not pass params: the values are read from the inputs. Without `on.press` it is only decorative.",
     },
     List: {
       props: z.object({
@@ -129,8 +129,8 @@ export const catalog = defineCatalog(schema, {
   },
   actions: {
     submit: {
-      params: z.object({ values: z.record(z.string(), z.unknown()).nullable() }),
-      description: "Send the form values to the chat",
+      params: z.object({}),
+      description: "Send the current values of the bound form inputs to the chat. Takes no params.",
     },
   },
 });

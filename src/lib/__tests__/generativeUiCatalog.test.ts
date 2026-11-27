@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { catalog } from "@/lib/generativeUi/catalog";
-import { composeUiSubmit } from "@/lib/generativeUi/composeSubmit";
+import { boundFieldPaths, boundValues, composeUiSubmit, sanitizeSpec } from "@/lib/generativeUi/composeSubmit";
 
 // `catalog.data` is the definition object handed to defineCatalog, so the raw
 // zod4 prop schemas are reachable without exporting them separately.
@@ -51,6 +51,41 @@ describe("generative UI submit action", () => {
 
   it("composes client-side text from values", () => {
     expect(composeUiSubmit({ name: "Ann", ok: true })).toBe("Form submitted:\nname: Ann\nok: true");
+  });
+
+  it("sanitizeSpec strips watch everywhere and keeps only a Button's press -> submit", () => {
+    const spec = sanitizeSpec({
+      elements: {
+        i: { type: "Input", props: { value: { $bindState: "/f/a" } }, watch: { "/f/a": { action: "submit" } }, on: { press: { action: "submit" } } },
+        b: { type: "Button", props: {}, watch: { "/f/a": { action: "submit" } }, on: { press: { action: "submit", params: { values: { x: "evil" } } }, change: { action: "submit" } } },
+        c: { type: "Button", props: {}, on: { press: { action: "setState" } } },
+      },
+    });
+    expect(spec.elements.i.watch).toBeUndefined();
+    expect(spec.elements.i.on).toBeUndefined();
+    expect(spec.elements.b.watch).toBeUndefined();
+    expect(spec.elements.b.on).toEqual({ press: { action: "submit" } });
+    expect(spec.elements.c.on).toBeUndefined();
+  });
+
+  it("sends only values bound by rendered inputs, read from state, never literals", () => {
+    const spec = {
+      elements: {
+        i: { type: "Input", props: { value: { $bindState: "/form/name" } } },
+        k: { type: "Checkbox", props: { checked: { $bindState: "/form/ok" } } },
+        t: { type: "Text", props: { content: { $bindState: "/form/secret" } } },
+      },
+    };
+    const paths = boundFieldPaths(spec);
+    expect(paths.sort()).toEqual(["/form/name", "/form/ok"]);
+    const state = { form: { name: "Ann", ok: true, secret: "no", injected: "attacker text" } };
+    expect(composeUiSubmit(boundValues(state, paths))).toBe("Form submitted:\nform.name: Ann\nform.ok: true");
+    expect(composeUiSubmit(boundValues({}, paths))).toBeNull();
+  });
+
+  it("the submit action takes no params", () => {
+    expect(catalog.data.actions.submit.params.safeParse({}).success).toBe(true);
+    expect(catalog.prompt()).not.toContain('"values"');
   });
 
   it("caps values and total, rejects non-objects", () => {
