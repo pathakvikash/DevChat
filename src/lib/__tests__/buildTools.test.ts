@@ -34,6 +34,8 @@ vi.mock("@/lib/rag", () => ({
   cosineSimilarity: vi.fn(),
 }));
 
+vi.mock("@/lib/apps/registry", () => ({ callAppTool: vi.fn(), listApps: vi.fn(), getApp: vi.fn() }));
+
 vi.mock("@/lib/mcp/client", () => ({
   listServerTools: vi.fn().mockResolvedValue([]),
   callServerTool: vi.fn(),
