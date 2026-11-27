@@ -18,3 +18,6 @@ export function permissionCopy(p: AppPermission): { label: string; detail: strin
 
 /** Where the sidebar and palette send the user: the backend turns `home` into the app's base URL. */
 export const appHomeHref = (id: string) => `/api/apps/${encodeURIComponent(id)}/go?link=home`;
+
+/** Icons are served through Orrery: the CSP blocks images from the app's own origin. */
+export const appIconHref = (id: string) => `/api/apps/${encodeURIComponent(id)}/icon`;
