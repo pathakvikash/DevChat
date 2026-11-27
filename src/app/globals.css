@@ -11,6 +11,10 @@
   --background: #09090b;
   --foreground: #fafaf9;
 
+  /* Flat sidebar rows */
+  --row-hover: rgba(255, 255, 255, 0.06);
+  --row-active: rgba(255, 255, 255, 0.10);
+
   /* Glass surfaces */
   --glass-bg: rgba(255, 255, 255, 0.04);
   --glass-bg-hover: rgba(255, 255, 255, 0.08);
@@ -56,6 +60,8 @@
 [data-theme="light"] {
   --background: #fafaf9;
   --foreground: #09090b;
+  --row-hover: rgba(0, 0, 0, 0.05);
+  --row-active: rgba(0, 0, 0, 0.08);
 
   --glass-bg: rgba(255, 255, 255, 0.6);
   --glass-bg-hover: rgba(255, 255, 255, 0.75);
@@ -486,4 +492,39 @@ html:has(#tour) {
 [data-theme="light"] .glass-button-primary:focus-visible {
   outline: 2px solid #1d4ed8;
   outline-offset: 2px;
+}
+
+/* Flat sidebar rows and section labels (no glass, no blur) */
+.nav-row {
+  display: flex;
+  align-items: center;
+  gap: 0.625rem;
+  height: 2.25rem;
+  padding: 0 0.625rem;
+  border-radius: 8px;
+  font-size: 0.875rem;
+  width: 100%;
+  text-align: left;
+}
+.nav-row:hover { background: var(--row-hover); }
+.nav-row[aria-current="page"],
+.nav-row[data-active="true"] { background: var(--row-active); }
+.nav-section {
+  font-size: 11px;
+  color: #71717a;
+  padding: 0.75rem 0.625rem 0.25rem;
+}
+
+/* Orrery mark: the body circles the orbit. Rotation is about the SVG centre. */
+@keyframes orrery-orbit {
+  to { transform: rotate(360deg); }
+}
+.orrery-orbit {
+  transform-origin: 50% 50%;
+  transform-box: view-box;
+  animation: orrery-orbit 8s linear infinite;
+}
+.orrery-orbit-fast { animation-duration: 1.6s; }
+@media (prefers-reduced-motion: reduce) {
+  .orrery-orbit { animation: none; }
 }

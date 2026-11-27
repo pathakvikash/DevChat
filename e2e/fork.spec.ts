@@ -83,6 +83,7 @@ test("The sidebar lists a fork right under its parent, indented", async ({ page,
   expect(f!.x - p!.x).toBeCloseTo(20, 0);
 
   // A search shows a flat list.
+  await page.getByRole("button", { name: "Search", exact: true }).click();
   await page.getByPlaceholder("Search conversations...").fill("Tree source");
   await expect(forkRow).toHaveAttribute("data-depth", "0");
 });
