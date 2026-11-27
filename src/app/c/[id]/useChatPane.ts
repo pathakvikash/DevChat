@@ -230,7 +230,7 @@ export function useChatPane(conversationId: string, { focused, kind, searchProvi
     onSendToChatRef,
   });
 
-  const { messages, setMessages, sendMessage: chatSend, status, stop: stopStream, regenerate, error, addToolResult, addToolApprovalResponse, setRequestBody, isLoading, runExecuteCode, bridgeSaveFailed, retryBridgeSave } = chatTransport;
+  const { messages, setMessages, sendMessage: chatSend, status, stop: stopStream, regenerate, error, addToolResult, addToolApprovalResponse, setRequestBody, isLoading, runExecuteCode, bridgeSaveFailed, bridgeSaveDropped, retryBridgeSave } = chatTransport;
   // Choosing (or opening a chat with) a bridge model is what first probes the local bridge; the page never probes on load.
   useBridgeProbe(isBridgeModel(conversation?.model));
   const isSubagent = conversation?.kind === "subagent";
@@ -1131,7 +1131,7 @@ export function useChatPane(conversationId: string, { focused, kind, searchProvi
     handleClarificationAnswer, handleUiSubmit, handleEditMessage, handleDeleteMessage, handleCopyMessage, handleForkMessage,
     handleRegenerateMessage, handleRegenExecute, regenModal, setRegenModal,
     queued, queueMessage, editQueued, removeQueued, retryQueued,
-    handleSubmit, isSubagent, sendToPane, bridgeSaveFailed, retryBridgeSave,
+    handleSubmit, isSubagent, sendToPane, bridgeSaveFailed, bridgeSaveDropped, retryBridgeSave,
     minimapMessages,
     isDialogOpen, closeTopDialog,
   };

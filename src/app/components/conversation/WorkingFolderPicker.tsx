@@ -4,6 +4,7 @@ import { useState } from "react";
 import { FolderOpen } from "lucide-react";
 import { shortenHome, useFolders } from "@/app/hooks/useFolders";
 import { setBridgeFolder, useBridgeFolder } from "@/app/hooks/useBridge";
+import { SERVER_NO_CLI } from "@/lib/bridge/constants";
 import FolderBrowserDialog from "./FolderBrowserDialog";
 
 interface WorkingFolderPickerProps {
@@ -85,7 +86,7 @@ export default function WorkingFolderPicker({ value: serverValue, onChange: serv
           {canChoose && !viaBridge && (
             <>
               <hr />
-              <option value={CHOOSE} disabled={!!reason}>
+              <option value={CHOOSE} disabled={!!reason && reason !== SERVER_NO_CLI}>
                 Choose folder…
               </option>
             </>

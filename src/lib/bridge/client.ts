@@ -1,5 +1,5 @@
 // Pure helpers for the page side of the local bridge (no React, no fetch): status mapping, routing, request and save bodies.
-import { BRIDGE_MODEL_PREFIX, BRIDGE_PROTOCOL, HOST_TOOLS_REFUSED, VERCEL_FOLDERS_REFUSED } from "./constants";
+import { BRIDGE_MODEL_PREFIX, BRIDGE_PROTOCOL, HOST_TOOLS_REFUSED, SERVER_NO_CLI, VERCEL_FOLDERS_REFUSED } from "./constants";
 import { isChatMode, type ChatMode } from "@/lib/chat/modes";
 
 export type BridgeStatus = "unpaired" | "offline" | "mismatch" | "no-claude" | "ready" | "blocked";
@@ -59,7 +59,7 @@ type FoldersAnswer = { hostTools: boolean; reason: string | null } | null | unde
  */
 export function serverHostToolsMissing(folders: FoldersAnswer): boolean | null {
   if (!folders) return null;
-  return !folders.hostTools || folders.reason === VERCEL_FOLDERS_REFUSED || folders.reason === HOST_TOOLS_REFUSED;
+  return !folders.hostTools || folders.reason === VERCEL_FOLDERS_REFUSED || folders.reason === HOST_TOOLS_REFUSED || folders.reason === SERVER_NO_CLI;
 }
 
 export type Route = { to: "server" } | { to: "bridge" } | { to: "blocked"; status: BridgeStatus };

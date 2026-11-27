@@ -512,7 +512,7 @@ export default function ConversationPane({ conversationId, focused, initialPromp
           />
         )}
         {!isSub && !isSide && (
-          <BridgeNotice conversationId={conversationId} model={p.conversation.model} saveFailed={p.bridgeSaveFailed} onRetry={() => void p.retryBridgeSave()} />
+          <BridgeNotice conversationId={conversationId} model={p.conversation.model} saveFailed={p.bridgeSaveFailed} saveDropped={p.bridgeSaveDropped} onRetry={() => void p.retryBridgeSave()} />
         )}
         {!isSub && !isSide && (
         <ChatInput

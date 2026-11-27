@@ -1,13 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireUserId } from "@/lib/auth";
-import { addFolder, allowedFolders, folderAccess, removeFolder } from "@/lib/folders";
+import { addFolder, allowedFolders, folderAccessForPage, removeFolder } from "@/lib/folders";
 
 export const runtime = "nodejs";
 
 export async function GET() {
   try {
     const userId = await requireUserId();
-    const [folders, access] = await Promise.all([allowedFolders(userId), folderAccess(userId)]);
+    const [folders, access] = await Promise.all([allowedFolders(userId), folderAccessForPage(userId)]);
     return NextResponse.json({ folders, ...access });
   } catch (error) {
     console.error("Failed to list folders:", error);

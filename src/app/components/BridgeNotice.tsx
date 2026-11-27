@@ -5,7 +5,7 @@ import { useBridge, useBridgeFolder } from "@/app/hooks/useBridge";
 import { useFolders } from "@/app/hooks/useFolders";
 
 /** One status line above the composer for a chat on a local-bridge model: bridge problems, no folder, and "Reply not saved". */
-export default function BridgeNotice({ conversationId, model, saveFailed, onRetry }: { conversationId: string; model: string; saveFailed: boolean; onRetry: () => void }) {
+export default function BridgeNotice({ conversationId, model, saveFailed, saveDropped, onRetry }: { conversationId: string; model: string; saveFailed: boolean; saveDropped: boolean; onRetry: () => void }) {
   const bridge = useBridge();
   const folder = useBridgeFolder(conversationId);
   const { noHostTools } = useFolders(true, { bridge: true });
@@ -25,6 +25,13 @@ export default function BridgeNotice({ conversationId, model, saveFailed, onRetr
     );
   } else if (active && !folder) {
     lines.push(<span key="folder">No folder selected: Claude Code runs with no tools.</span>);
+  }
+  if (saveDropped) {
+    lines.push(
+      <span key="dropped" className="text-amber-300">
+        One reply could not be saved: the server refused it.
+      </span>,
+    );
   }
   if (saveFailed) {
     lines.push(

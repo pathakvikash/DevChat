@@ -3,6 +3,19 @@
 // it, so order holds) until `retry`. Pure: the caller supplies the POST.
 import type { SavePayload } from "./client";
 
+/** A save the server answered with an error status. */
+export class SaveHttpError extends Error {
+  constructor(public status: number) {
+    super(`HTTP ${status}`);
+  }
+}
+
+/** Worth trying again: no answer at all (network), 408, 429 and 5xx. Any other 4xx will fail the same way every time. */
+export const retryable = (e: unknown): boolean => {
+  const status = (e as { status?: unknown } | null)?.status;
+  return typeof status !== "number" || status === 408 || status === 429 || status >= 500;
+};
+
 export interface SaveJob {
   conversationId: string;
   payload: SavePayload;
@@ -13,6 +26,8 @@ export function createSaveQueue(o: {
   post: (job: SaveJob) => Promise<void>;
   /** True while a failed save waits for a retry; false again once the queue is empty. */
   onFailed: (failed: boolean) => void;
+  /** A job the server refused for good (a 4xx other than 408/429): it is dropped and the queue goes on. */
+  onDropped?: (job: SaveJob, e: unknown) => void;
 }) {
   const jobs: SaveJob[] = [];
   let failed = false;
@@ -23,7 +38,11 @@ export function createSaveQueue(o: {
       try {
         await o.post(jobs[0]);
         jobs.shift();
-      } catch {
+      } catch (e) {
+        if (!retryable(e)) {
+          o.onDropped?.(jobs.shift()!, e);
+          continue;
+        }
         failed = true;
         o.onFailed(true);
         return;

@@ -7,7 +7,8 @@ import { isSecretPath } from "@/lib/files/safePath";
 import { loadCtx, refuseReason, secretKind, SECRET_MSG, short } from "@/lib/files/folderRules";
 import { isSanityMode } from "@/lib/sanityMode";
 import { getSettingsKey, setSettingsKey } from "@/lib/settings";
-import { VERCEL_FOLDERS_REFUSED } from "@/lib/bridge/constants";
+import { SERVER_NO_CLI, VERCEL_FOLDERS_REFUSED } from "@/lib/bridge/constants";
+import { detectionAvailable } from "@/lib/providerDetect";
 
 export type Folder = { path: string; source: "added" | "claude-code" };
 export type Browse = { path: string; parent: string | null; dirs: { name: string; path: string }[]; truncated: boolean };
@@ -31,6 +32,16 @@ export const folderGoneMessage = (path: string) =>
 export async function folderAccess(userId: string): Promise<{ hostTools: boolean; reason: string | null }> {
   if (!(await canUseHostTools(userId))) return { hostTools: false, reason: HOST_TOOLS_REFUSED };
   return { hostTools: true, reason: !openServer() ? null : process.env.VERCEL ? ON_VERCEL_REFUSED : OPEN_SERVER_REFUSED_PROD };
+}
+
+/**
+ * What GET /api/folders tells the page: `folderAccess`, plus a reason when this server cannot run CLIs at all (self-hosted
+ * production without CLI detection), so a claude-code model goes to the local bridge instead of being refused. Local
+ * development (detection on) is unchanged. Adding folders is still decided by `folderAccess`.
+ */
+export async function folderAccessForPage(userId: string): Promise<{ hostTools: boolean; reason: string | null }> {
+  const access = await folderAccess(userId);
+  return access.hostTools && !access.reason && !detectionAvailable() ? { hostTools: true, reason: SERVER_NO_CLI } : access;
 }
 
 async function readAdded(userId: string): Promise<string[]> {

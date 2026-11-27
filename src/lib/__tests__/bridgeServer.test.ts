@@ -3,11 +3,11 @@ import { EventEmitter } from "events";
 import { PassThrough, Writable } from "stream";
 import { spawn } from "child_process";
 import { request, type Server } from "node:http";
-import { mkdtempSync, mkdirSync, realpathSync, statSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, realpathSync, statSync, readFileSync, writeFileSync, rmSync, existsSync } from "node:fs";
 import { tmpdir, homedir } from "node:os";
 import { join } from "node:path";
 import { controlResponse, killAllCliRuns, setShellConfirm } from "@/lib/cliProviders";
-import { createBridgeServer, ensureConfig, main, modeNote, terminalConfirm, type BridgeConfig } from "../../../scripts/bridge";
+import { ConfigMissingError, createBridgeServer, ensureConfig, main, modeNote, readConfig, startupWarning, terminalConfirm, visibleLine, type BridgeConfig } from "../../../scripts/bridge";
 
 vi.mock("child_process", async (importOriginal) => ({ ...(await importOriginal<typeof import("child_process")>()), spawn: vi.fn() }));
 
@@ -153,6 +153,10 @@ describe("bridge server", () => {
     const agentArgv = vi.mocked(spawn).mock.calls[0][1] as string[];
     expect(agentArgv).toContain("acceptEdits");
     expect(agentArgv).not.toContain("--permission-prompt-tool");
+    // Agent mode has an explicit tool list and no command tools: acceptEdits would auto-allow mkdir, rm, mv, cp, sed.
+    expect(agentArgv.join(" ")).not.toContain("--tools default");
+    expect(agentArgv.slice(agentArgv.indexOf("--tools") + 1, agentArgv.indexOf("--tools") + 10)).toEqual(["Read", "Glob", "Grep", "Edit", "Write", "MultiEdit", "NotebookEdit", "WebSearch", "WebFetch"]);
+    expect(agentArgv.slice(agentArgv.indexOf("--disallowedTools") + 1, agentArgv.indexOf("--disallowedTools") + 5)).toEqual(["Bash", "Monitor", "PowerShell", "Tmux"]);
     // maxMode plan: an agent request is lowered to plan.
     cfg = { ...cfg, maxMode: "plan" };
     await call("POST", "/chat", { body: chatBody({ mode: "agent" }) });
@@ -227,6 +231,44 @@ describe("bridge server", () => {
       expect(w.response.response.behavior).toBe("deny");
       expect(w.response.response.message).toMatch(/no terminal/);
     });
+    it("also asks for any tool that can run code (Monitor, an unknown tool) and for an edit outside the folder or in .git", async () => {
+      const cases: [string, Record<string, unknown>, string][] = [
+        ["Monitor", { command: "tail -f x" }, "tail -f x"],
+        ["Frobnicate", { x: 1 }, '{"x":1}'],
+        ["Edit", { file_path: "/etc/hosts" }, "Edit /etc/hosts"],
+        ["Write", { file_path: `${folder}/.git/hooks/pre-commit` }, `Write ${folder}/.git/hooks/pre-commit`],
+      ];
+      for (const [tool, input, shown] of cases) {
+        spawned = [];
+        confirmImpl = vi.fn(async () => false);
+        const w = JSON.parse(await approveFromPage(tool, input));
+        expect(confirmImpl).toHaveBeenCalledWith({ tool, command: shown, folder });
+        expect(w.response.response.behavior).toBe("deny");
+      }
+    });
+
+    it("denies and kills when the page leaves while the terminal waits", async () => {
+      let answer!: (v: boolean) => void;
+      confirmImpl = vi.fn(() => new Promise<boolean>((r) => (answer = r)));
+      autoReply = null;
+      const first = call("POST", "/chat", { body: chatBody({ mode: "ask" }) });
+      await until(() => spawned.length === 1);
+      const c = spawned[0];
+      const input = { command: "ls" };
+      c.say({ type: "control_request", request_id: "req_s", request: { subtype: "can_use_tool", tool_name: "Bash", input, tool_use_id: "toolu_s" } });
+      const asked = chunks((await first).text).find((x) => x.type === "tool-approval-request");
+      const assistant = { id: "a1", role: "assistant", parts: [{ type: "dynamic-tool", toolName: "Bash", toolCallId: "toolu_s", providerExecuted: true, state: "approval-responded", input, approval: { id: asked.approvalId, approved: true } }] };
+      const req = request({ host: "127.0.0.1", port, method: "POST", path: "/chat", headers: { Origin: ORIGIN, Authorization: `Bearer ${TOKEN}`, "Content-Type": "application/json" } });
+      req.on("error", () => undefined);
+      req.end(JSON.stringify(chatBody({ mode: "ask", messages: [user("Hi"), assistant] })));
+      await until(() => confirmImpl.mock.calls.length === 1);
+      req.destroy();
+      for (let i = 0; i < 25; i++) await pause();
+      answer(true);
+      await until(() => c.kill.mock.calls.length > 0);
+      expect(c.written.join("")).not.toContain('"behavior":"allow"');
+    });
+
     it("does not ask when confirmShell is off, or for an edit", async () => {
       cfg = { ...cfg, confirmShell: false };
       expect(await approveFromPage("Bash", { command: "ls" })).toBe(controlResponse("req_s", { behavior: "allow" }));
@@ -463,9 +505,72 @@ describe("bridge config", () => {
     };
     const q = { tool: "Bash", command: "ls\u001b[2J", folder: "/p" };
     expect(await terminalConfirm({ stdin: new PassThrough() as never, stdout: new PassThrough() as never })(q)).toBe("no-tty");
-    expect(await terminalConfirm(tty("y"))(q)).toBe(true);
+    expect(await terminalConfirm(tty("yes"))(q)).toBe(true);
+    expect(await terminalConfirm(tty("y"))(q)).toBe(false); // the full word, not y
     expect(await terminalConfirm(tty("n"))(q)).toBe(false);
     expect(await terminalConfirm({ ...tty(), timeoutMs: 20 })(q)).toBe(false);
+  });
+
+  it("terminalConfirm: lines typed before a question are discarded, the command is one escaped line with counts, and over 4000 characters is refused", async () => {
+    const stdin = Object.assign(new PassThrough(), { isTTY: true });
+    const out = new PassThrough();
+    let shown = "";
+    out.on("data", (d) => (shown += d));
+    const ask = terminalConfirm({ stdin: stdin as never, stdout: out as never, timeoutMs: 200 });
+    // First question answered; a "yes" typed afterwards, with nothing pending, must not answer the next one.
+    const first = ask({ tool: "Bash", command: "echo \u202eevil\nsecond line", folder: "/p" });
+    await pause();
+    stdin.write("yes\n");
+    expect(await first).toBe(true);
+    stdin.write("yes\n");
+    await pause();
+    expect(await ask({ tool: "Bash", command: "ls", folder: "/p" })).toBe(false); // times out: the stray yes was dropped
+    expect(shown).toContain('"echo \\u{202e}evil\\nsecond line"'); // one JSON line, format character written out
+    expect(shown).toContain("(");
+    expect(shown).toMatch(/\(\d+ characters, 2 lines\)/);
+    expect(await ask({ tool: "Bash", command: "x".repeat(4001), folder: "/p" })).toBe("too-long");
+    expect(visibleLine("a\u0085b\u200bc")).toBe('"a\\u{85}b\\u{200b}c"');
+  });
+
+  it("a config that vanishes is never recreated: readConfig throws and the daemon answers 500 once, no token minted", async () => {
+    const dir = join(mkdtempSync(join(tmpdir(), "bridge-cfg-")), ".orrery-bridge");
+    expect(() => readConfig(dir)).toThrow(ConfigMissingError);
+    ensureConfig(dir);
+    const file = join(dir, "config.json");
+    const first = readConfig(dir);
+    rmSync(file);
+    expect(() => readConfig(dir)).toThrow(ConfigMissingError);
+    expect(existsSync(file)).toBe(false); // nothing was created
+    const lines: string[] = [];
+    const s2 = createBridgeServer(() => readConfig(dir), { log: (l) => lines.push(l), confirm: async () => true });
+    await new Promise<void>((r) => s2.listen(0, "127.0.0.1", r));
+    const p2 = (s2.address() as { port: number }).port;
+    const res = await new Promise<{ status: number; text: string }>((resolve, reject) => {
+      const rq = request({ host: "127.0.0.1", port: p2, path: "/health", headers: { Origin: ORIGIN, Authorization: `Bearer ${first.token}` } }, (r) => {
+        let text = "";
+        r.on("data", (d) => (text += d));
+        r.on("end", () => resolve({ status: r.statusCode!, text }));
+      });
+      rq.on("error", reject);
+      rq.end();
+    });
+    expect(res.status).toBe(500);
+    expect(res.text).toContain("bridge config missing; restart the bridge");
+    expect(lines.filter((l) => l.startsWith("error:"))).toEqual(["error: bridge config missing; restart the bridge"]);
+    expect(existsSync(file)).toBe(false);
+    await new Promise((r) => s2.close(r));
+  });
+
+  it("warns at start when the stored max mode can change files or run commands", () => {
+    const base = { token: TOKEN, origins: [ORIGIN], folders: [], confirmShell: true, allowChatWideEdits: false };
+    expect(startupWarning({ ...base, maxMode: "plan" })).toBeNull();
+    expect(startupWarning({ ...base, maxMode: "chat" })).toBeNull();
+    const ask = startupWarning({ ...base, maxMode: "ask" })!;
+    expect(ask).toContain("Max mode ask");
+    expect(ask).toContain("shell commands");
+    expect(ask).not.toContain("\n");
+    expect(startupWarning({ ...base, maxMode: "agent" })).toContain("Max mode agent");
+    expect(modeNote("agent")).toMatch(/package\.json scripts.*git hooks/);
   });
 
   it("--add stores the real path, refuses home, --remove drops it, and the token prints only on request", async () => {

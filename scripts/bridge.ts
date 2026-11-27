@@ -22,12 +22,13 @@ import { isAbsolute, join } from "node:path";
 import { convertToModelMessages, streamText } from "ai";
 import { z } from "zod";
 import { BRIDGE_PORT, BRIDGE_PROTOCOL, checkBridgeRequest, corsHeaders } from "@/lib/bridge/protocol";
-import { createInterface } from "node:readline";
+import { createInterface, type Interface } from "node:readline";
 import { CLI_PROVIDERS, createCliModel, findCliBins, killAllCliRuns, setShellConfirm } from "@/lib/cliProviders";
 import { CHAT_MODES, MODE_POLICY, type ChatMode } from "@/lib/chat/modes";
 import { normalizeMessageToolParts } from "@/lib/chat/normalizeToolParts";
 import { refuseReason } from "@/lib/files/folderRules";
 import { CHAT_ALLOWABLE_TOOLS } from "@/lib/utils/messageParts";
+import { isEditTool } from "@/lib/bridge/shellTools";
 
 export const DEFAULT_ORIGIN = "https://dev-chat-beta.vercel.app";
 const VERSION = "0.1.0";
@@ -70,6 +71,21 @@ export function ensureConfig(dir = defaultConfigDir()): { config: BridgeConfig; 
   }
   if (statSync(file).mode & 0o077) chmodSync(file, 0o600);
   return { config: ConfigSchema.parse(JSON.parse(readFileSync(file, "utf8"))), created: false };
+}
+
+/** Thrown when config.json is gone while the daemon runs: it must not quietly make a new one (with a new token). */
+export class ConfigMissingError extends Error {}
+
+/** Reads the existing config; unlike `ensureConfig` it never creates one. */
+export function readConfig(dir = defaultConfigDir()): BridgeConfig {
+  const file = configFile(dir);
+  if (!existsSync(file)) throw new ConfigMissingError("config.json is missing");
+  return ConfigSchema.parse(JSON.parse(readFileSync(file, "utf8")));
+}
+
+/** One line at start for a mode that can change files or run commands, or null. */
+export function startupWarning(config: BridgeConfig): string | null {
+  return config.maxMode === "agent" || config.maxMode === "ask" ? `Warning: ${modeNote(config.maxMode)} Lower it with: npm run bridge -- --max-mode plan` : null;
 }
 
 /** Resolves a typed path to a real folder the refuse rules accept (same rules as the web app's Choose folder). */
@@ -118,36 +134,69 @@ export function modeNote(mode: ChatMode): string {
   const what: Record<ChatMode, string> = {
     chat: "Claude Code answers without tools.",
     plan: "read-only: Claude Code can read and search the allowed folders and change nothing.",
-    agent: "Claude Code can also create and edit files in the allowed folders without asking. It cannot run commands.",
-    ask: "Claude Code can also run shell commands in the allowed folders; every edit or command needs approval in the page, and every command is confirmed here in this terminal.",
+    agent: "Claude Code can create and edit any file in the allowed folders without asking, including files that run later (package.json scripts, Makefile, git hooks). It has no command tools. Plan is the safe default.",
+    ask: "Claude Code can also run shell commands in the allowed folders: every edit or command needs approval in the page, and every command (or tool that can run code, or an edit outside the folder or in .git, .husky, .githooks, .claude) is also confirmed here in this terminal by typing yes.",
   };
   return `Max mode ${mode}: ${what[mode]}`;
 }
 
-export type ConfirmShell = (q: { tool: string; command: string; folder: string }) => Promise<boolean | "no-tty">;
+export type ConfirmShell = (q: { tool: string; command: string; folder: string }) => Promise<boolean | "no-tty" | "too-long">;
 
-/** y/N on the daemon's own stdin, one question at a time. No answer within `timeoutMs` (60 s) is a no; no TTY is "no-tty". */
+/** Longest command put to the terminal; anything longer is refused (nobody reads 4000 characters before typing yes). */
+export const MAX_CONFIRM_CHARS = 4000;
+
+/** One line a person can trust: JSON-quoted, with format characters (direction marks, zero-width) and C1 controls written out. */
+export const visibleLine = (s: string): string =>
+  JSON.stringify(s).replace(/[\p{Cf}\u007f-\u009f]/gu, (c) => `\\u{${c.codePointAt(0)!.toString(16)}}`);
+
+/**
+ * "Type yes" on the daemon's own stdin. One readline for the daemon's life: lines typed while no question is pending are
+ * discarded, and what is half-typed is cleared when a question appears. One question at a time. The answer must be the whole
+ * word `yes`; anything else, and no answer in `timeoutMs` (60 s), is a no. No TTY is "no-tty".
+ */
 export function terminalConfirm(io: { stdin?: NodeJS.ReadStream; stdout?: NodeJS.WriteStream; timeoutMs?: number } = {}): ConfirmShell {
   const stdin = io.stdin ?? process.stdin;
   const stdout = io.stdout ?? process.stdout;
+  let rl: Interface | null = null;
+  let pending: ((line: string) => void) | null = null;
   let queue: Promise<unknown> = Promise.resolve();
+  const reader = () => {
+    if (!rl) {
+      rl = createInterface({ input: stdin, output: stdout });
+      rl.on("line", (line) => {
+        const answer = pending;
+        pending = null;
+        answer?.(line); // no question pending: the line is dropped
+      });
+    }
+    return rl;
+  };
   const ask: ConfirmShell = async ({ tool, command, folder }) => {
     if (!stdin.isTTY) return "no-tty";
-    // The command is the model's text: control characters (escape sequences) must not redraw this prompt.
-    const clean = (s: string) => s.replace(/[\u0000-\u0008\u000b-\u001f\u007f]/g, "?");
-    stdout.write(`\nClaude Code wants to run (${tool}) in ${clean(folder)}:\n  ${clean(command).split("\n").join("\n  ")}\n`);
-    const rl = createInterface({ input: stdin, output: stdout });
+    const chars = [...command].length;
+    if (chars > MAX_CONFIRM_CHARS) {
+      stdout.write(`\nRefused: ${tool} wants to run ${chars} characters in ${visibleLine(folder)} (over ${MAX_CONFIRM_CHARS}).\n`);
+      return "too-long";
+    }
+    stdout.write(`\nClaude Code wants to run (${tool}) in ${visibleLine(folder)}:\n  ${visibleLine(command)}\n  (${chars} characters, ${command.split("\n").length} lines)\n`);
+    const r = reader();
+    try {
+      r.write(null, { ctrl: true, name: "u" }); // whatever was typed before the question is not an answer
+    } catch {
+      // not a terminal-mode readline
+    }
     return new Promise<boolean>((resolve) => {
       const timer = setTimeout(() => {
+        pending = null;
         stdout.write("\nNo answer in 60 s: denied.\n");
-        rl.close();
         resolve(false);
       }, io.timeoutMs ?? 60_000);
-      rl.question("Run it? [y/N] ", (a) => {
+      pending = (line) => {
         clearTimeout(timer);
-        rl.close();
-        resolve(/^y(es)?$/i.test(a.trim()));
-      });
+        resolve(/^yes$/i.test(line.trim()));
+      };
+      r.setPrompt("Type yes to allow it (anything else denies): ");
+      r.prompt();
     });
   };
   return (q) => {
@@ -181,9 +230,21 @@ async function readBody(req: IncomingMessage): Promise<unknown> {
 /** `config` may be a function so edits made with --add while the bridge runs apply on the next request. */
 export function createBridgeServer(config: BridgeConfig | (() => BridgeConfig), deps: BridgeDeps = {}): Server {
   const getConfig = typeof config === "function" ? config : () => config;
-  const log = deps.log ?? ((l: string) => console.log(l));
+  const rawLog = deps.log ?? ((l: string) => console.log(l));
+  // Log lines wait while a question is on the terminal, so they cannot scroll it away or sit between it and the answer.
+  let asking = 0;
+  const held: string[] = [];
+  const log = (l: string) => (asking ? void held.push(l) : rawLog(l));
   const findBins = deps.findBins ?? findCliBins;
-  const confirm = deps.confirm ?? terminalConfirm();
+  const confirmRaw = deps.confirm ?? terminalConfirm();
+  const confirm: ConfirmShell = async (q) => {
+    asking++;
+    try {
+      return await confirmRaw(q);
+    } finally {
+      if (--asking === 0) for (const l of held.splice(0)) rawLog(l);
+    }
+  };
   // Config problems are logged without the file's content (it holds the token).
   const originsOf = new WeakMap<IncomingMessage, readonly string[]>();
   // A shell approval from the page is not enough: the person at this terminal confirms the command too.
@@ -193,15 +254,18 @@ export function createBridgeServer(config: BridgeConfig | (() => BridgeConfig), 
     } catch {
       return { ok: false, message: "The bridge's config could not be read, so the command was not run." };
     }
-    const i = (input ?? {}) as { command?: unknown };
-    const answer = await confirm({ tool: toolName, command: typeof i.command === "string" ? i.command : JSON.stringify(input), folder: cwd });
+    const i = (input ?? {}) as { command?: unknown; file_path?: unknown; notebook_path?: unknown };
+    const what = typeof i.command === "string" ? i.command : isEditTool(toolName) ? `${toolName} ${String(i.file_path ?? i.notebook_path ?? "")}` : JSON.stringify(input);
+    const answer = await confirm({ tool: toolName, command: what, folder: cwd });
     if (answer === true) return { ok: true };
     return {
       ok: false,
       message:
         answer === "no-tty"
-          ? "This command needs confirmation in the bridge's terminal, but the bridge has no terminal. Start it from a terminal, or run `npm run bridge -- --no-confirm-shell`."
-          : "The command was not confirmed in the bridge's terminal.",
+          ? "This needs confirmation in the bridge's terminal, but the bridge has no terminal. Start it from a terminal, or run `npm run bridge -- --no-confirm-shell`."
+          : answer === "too-long"
+            ? "The bridge refused it: it is over 4000 characters."
+            : "It was not confirmed in the bridge's terminal.",
     };
   });
   let chats = 0;
@@ -261,6 +325,8 @@ export function createBridgeServer(config: BridgeConfig | (() => BridgeConfig), 
           allowedTools: cfg.allowChatWideEdits ? b.allowedTools.filter((t) => CHAT_ALLOWABLE_TOOLS.has(t)) : [],
           // No user-scope MCP servers or connectors in a bridge run.
           strictMcp: true,
+          // Agent mode gets an explicit tool list with no command tools.
+          noCommands: true,
         },
       },
     });
@@ -276,6 +342,10 @@ export function createBridgeServer(config: BridgeConfig | (() => BridgeConfig), 
       cfg = getConfig();
     } catch (e) {
       // A half-written or broken config.json: answer 500 (no CORS headers, no config content) and keep serving.
+      if (e instanceof ConfigMissingError) {
+        log("error: bridge config missing; restart the bridge");
+        return send(res, 500, { error: "bridge config missing; restart the bridge" });
+      }
       log(`error: config.json is unreadable (${e instanceof Error ? e.name : "error"}): fix or delete it`);
       return send(res, 500, { error: "Bridge config is unreadable" });
     }
@@ -379,7 +449,10 @@ export async function main(argv = process.argv.slice(2), dir = defaultConfigDir(
     return writeConfig(dir, config);
   }
   if (created) console.log(pairing(config.token));
-  const server = createBridgeServer(() => ensureConfig(dir).config, {});
+  const warning = startupWarning(config);
+  if (warning) console.log(warning);
+  // Per request, but never creating: a config that vanished must not turn into a new token.
+  const server = createBridgeServer(() => readConfig(dir), {});
   server.on("error", (e) => {
     console.error(`Could not listen on 127.0.0.1:${BRIDGE_PORT}: ${e.message}`);
     process.exit(1);
