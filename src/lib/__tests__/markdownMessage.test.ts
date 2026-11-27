@@ -13,6 +13,14 @@ async function render(content: string, streaming?: boolean) {
 const CLOSED = "```mermaid\nflowchart TD\n  A-->B\n```";
 const OPEN = "```mermaid\nflowchart TD\n  A-->";
 
+describe("MarkdownMessage soft line breaks", () => {
+  it("keeps single newlines in a paragraph as line breaks (pre-line), and leaves code alone", async () => {
+    const html = await render("one\ntwo\nthree\n\n```ts\na\nb\n```");
+    expect(html).toContain('<p class="mb-2 leading-relaxed whitespace-pre-line">one\ntwo\nthree</p>');
+    expect(html.match(/whitespace-pre-line/g)).toHaveLength(1); // only the paragraph, not the code block
+  });
+});
+
 describe("MarkdownMessage mermaid fences", () => {
   it("draws a closed fence", async () => {
     expect(await render(CLOSED)).toContain("data-mermaid");

@@ -52,7 +52,9 @@ const components: Components = {
   h3: ({ children }) => (
     <h3 className="text-lg font-bold mt-2 mb-1">{children}</h3>
   ),
-  p: ({ children }) => <p className="mb-2 leading-relaxed">{children}</p>,
+  // pre-line: a single newline inside a paragraph (a soft break) shows as a line break, as models other than
+  // Claude often write lists and addresses that way. Code blocks and tables are not <p>, so they are unaffected.
+  p: ({ children }) => <p className="mb-2 leading-relaxed whitespace-pre-line">{children}</p>,
   ul: ({ children }) => (
     <ul className="list-disc list-inside mb-2 space-y-1">{children}</ul>
   ),
