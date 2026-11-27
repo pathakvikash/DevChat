@@ -37,6 +37,7 @@ export default defineConfig({
   use: {
     baseURL: `http://${HOST}:${PORT}`,
     locale: "en-US",
+    reducedMotion: "reduce",
     timezoneId: "UTC",
     trace: "retain-on-failure",
     screenshot: "only-on-failure",
