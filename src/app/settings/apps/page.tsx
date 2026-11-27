@@ -12,7 +12,7 @@ import { AppIcon } from "@/app/components/AppIcon";
 import type { AppManifest, AppRecord, AppTool } from "@/lib/apps/types";
 import { envSnippet, groupTools, permissionCopy } from "@/lib/apps/ui";
 
-interface Preview { manifest: AppManifest; origin: string; tools: AppTool[]; warnings: string[] }
+interface Preview { manifest: AppManifest; origin: string; tools: AppTool[]; toolsUnavailable?: boolean; warnings: string[] }
 
 const JSON_HEADERS = { "Content-Type": "application/json" };
 
@@ -206,19 +206,19 @@ function AppsContent() {
                         <span aria-hidden="true" className={`size-1.5 rounded-full ${app.status === "ok" ? "bg-emerald-400" : "bg-red-400"}`} />
                         {app.status === "ok" ? "Reachable" : "Unreachable"}
                       </span>
-                      {!app.approved && (
+                      {app.approved === false && (
                         <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-amber-900/40 text-amber-300">Needs approval</span>
                       )}
                     </div>
                     <p className="text-sm text-zinc-400 font-mono truncate">{app.baseUrl}</p>
-                    <p className="text-xs text-zinc-400 mt-1">{app.tools.length} tool{app.tools.length === 1 ? "" : "s"}</p>
-                    {!app.approved && (
+                    {app.tools && <p className="text-xs text-zinc-400 mt-1">{app.tools.length} tool{app.tools.length === 1 ? "" : "s"}</p>}
+                    {app.approved === false && (
                       <p className="text-xs text-amber-400 mt-1">Its origin, permission or tools changed. Review it before chats can use it again.</p>
                     )}
                   </div>
                   {!readOnlyMode && (
                     <div className="flex items-center gap-2 shrink-0">
-                      {!app.approved && (
+                      {app.approved === false && (
                         <button onClick={() => { setUrl(app.baseUrl); void runPreview(app.baseUrl); }}
                           className="glass-button-primary text-white rounded-[var(--glass-radius-md)] px-3 py-2 text-xs font-medium">Review</button>
                       )}
@@ -270,8 +270,14 @@ function AppsContent() {
                   <p className="text-zinc-300 mt-2">{perm.detail}</p>
                 </div>
                 <div>
-                  <h4 className="text-sm font-medium mb-2">Tools ({preview.tools.length})</h4>
-                  <ToolList tools={preview.tools} />
+                  {preview.toolsUnavailable ? (
+                    <p className="text-sm text-amber-400" data-testid="tools-unavailable">Tools are listed after you approve the app (this app requires a signed request).</p>
+                  ) : (
+                    <>
+                      <h4 className="text-sm font-medium mb-2">Tools ({preview.tools.length})</h4>
+                      <ToolList tools={preview.tools} />
+                    </>
+                  )}
                 </div>
                 {preview.warnings.length > 0 && (
                   <ul className="space-y-1" aria-label="Warnings">

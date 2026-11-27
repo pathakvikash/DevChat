@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import robots from "@/app/robots";
 import sitemap from "@/app/sitemap";
 import nextConfig from "../../../next.config";
-import { siteUrl } from "@/lib/site";
+import { SITE_DESCRIPTION, siteUrl } from "@/lib/site";
 
 describe("seo", () => {
   it("robots allows the site, blocks the app and api, and links the sitemap", () => {
@@ -15,6 +15,11 @@ describe("seo", () => {
     expect(rule.disallow).not.toContain("/login$");
     expect(rule.disallow).not.toContain("/login/");
     expect(r.sitemap).toBe(new URL("/sitemap.xml", siteUrl()!).href);
+  });
+
+  it("the site meta description is 140 to 160 characters", () => {
+    expect(SITE_DESCRIPTION.length).toBeGreaterThanOrEqual(140);
+    expect(SITE_DESCRIPTION.length).toBeLessThanOrEqual(160);
   });
 
   it("sitemap starts with the landing page (marketing pages: marketingPages.test.ts)", () => {

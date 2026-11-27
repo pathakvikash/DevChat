@@ -116,22 +116,25 @@ export function toolWarnings(m: Pick<AppManifest, "permission" | "auth">, tools:
   return w;
 }
 
-/** Fetch the manifest and list tools; stores nothing. Without a secret yet, tools are listed unsigned. */
+/**
+ * Fetch the manifest and list tools; stores nothing. A new app has no secret yet, so its tools are listed unsigned and
+ * `toolsUnavailable` is set when it refuses. An app already registered at the same origin is listed signed, so
+ * re-reviewing it after a change shows the real tools. The signed token never goes to a different origin.
+ */
 export async function previewApp(url: string, ownerEmail: string) {
-  void ownerEmail;
   const { manifest, origin } = await fetchManifest(url);
   const warnings: string[] = [];
   let tools: AppTool[] = [];
+  let toolsUnavailable = false;
+  const existing: AppRow | null = manifest.auth === "orrery-jwt" ? await db.app.findUnique({ where: { id: manifest.id } }) : null;
+  const headers = existing && new URL(existing.baseUrl).origin === new URL(manifest.baseUrl).origin ? await authHeaders(manifest, ownerEmail, decryptValue(existing.secretEnc)) : {};
   try {
-    tools = await listLive(manifest.mcp.url, {});
+    tools = await listLive(manifest.mcp.url, headers);
   } catch (e) {
-    warnings.push(
-      manifest.auth === "orrery-jwt"
-        ? "Could not list tools before the app has its secret; they are listed after registration (use Refresh once ORRERY_APP_SECRET is set)."
-        : `Could not list tools: ${e instanceof Error ? e.message : String(e)}`,
-    );
+    if (manifest.auth === "orrery-jwt") toolsUnavailable = true;
+    else warnings.push(`Could not list tools: ${e instanceof Error ? e.message : String(e)}`);
   }
-  return { manifest, origin, tools, warnings: [...warnings, ...(tools.length ? toolWarnings(manifest, tools) : [])] };
+  return { manifest, origin, tools, toolsUnavailable, warnings: [...warnings, ...(tools.length ? toolWarnings(manifest, tools) : [])] };
 }
 
 async function liveToolsOrEmpty(m: AppManifest, email: string, secret: string): Promise<AppTool[] | null> {

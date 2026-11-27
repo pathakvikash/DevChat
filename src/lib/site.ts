@@ -5,7 +5,7 @@ import { MARKETING_PATHS } from "./marketing/pages";
 export const SITE_NAME = "Orrery";
 export const SITE_TAGLINE = "A multi-model AI chat workspace";
 export const SITE_DESCRIPTION =
-  "Orrery is a multi-model AI chat workspace. Chat with Anthropic, OpenAI, Gemini and local models, switch between Ask and Agent modes, run workflows, and keep artifacts and connected apps in one place.";
+  "Orrery is a multi-model AI chat workspace. Chat with Anthropic, OpenAI, Gemini and local models, switch between Ask and Agent modes, and run workflows.";
 
 /**
  * SITE_URL wins, then the Vercel production host, then localhost outside production. In production with neither

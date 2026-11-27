@@ -72,7 +72,7 @@ describe("owner gating", () => {
 
   it("lets a normal user list only approved apps, without the approved flag", async () => {
     h.listApps.mockResolvedValue([app]);
-    const res = await list();
+    const res = await list(req("/api/apps"));
     expect(h.listApps).toHaveBeenCalledWith("u1", { includeUnapproved: false });
     const body = await res.json();
     expect(body[0]).not.toHaveProperty("approved");
@@ -84,7 +84,7 @@ describe("owner routes", () => {
   it("returns 401 without a session", async () => {
     const { UnauthorizedError } = await import("@/lib/auth");
     h.requireUserId.mockRejectedValue(new UnauthorizedError());
-    expect((await list()).status).toBe(401);
+    expect((await list(req("/api/apps"))).status).toBe(401);
   });
 
   it("registers only with approve: true", async () => {

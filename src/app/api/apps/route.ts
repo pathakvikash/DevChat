@@ -3,10 +3,12 @@ import { canUseHostTools } from "@/lib/hostAccess";
 import { listApps, registerApp } from "@/lib/apps/registry";
 import { withOwner, withUser } from "@/lib/apps/http";
 
-export async function GET() {
+export async function GET(req: NextRequest) {
   return withUser(async ({ userId }) => {
     const owner = await canUseHostTools(userId);
-    const apps = await listApps(userId, { includeUnapproved: owner });
+    // `all=1` (Settings > Apps) adds apps waiting for approval, for the owner only; everyone else gets approved apps.
+    const includeUnapproved = owner && req.nextUrl.searchParams.get("all") === "1";
+    const apps = await listApps(userId, { includeUnapproved });
     return NextResponse.json(
       apps.map((a) => ({
         id: a.id,
@@ -17,7 +19,8 @@ export async function GET() {
         permission: a.permission,
         capabilities: a.capabilities,
         status: a.status,
-        ...(owner ? { approved: a.approved } : {}),
+        // Owner view: the review state and the tool list the Settings page shows (names and schemas, never the secret).
+        ...(owner ? { approved: a.approved, tools: a.tools ?? [] } : {}),
       })),
     );
   });
