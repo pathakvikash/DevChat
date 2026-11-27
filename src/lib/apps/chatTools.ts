@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { tool, type Tool } from "ai";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
-import { parseDataArtifact } from "@/lib/generativeUi/data";
+import { orreryTable, parseDataArtifact } from "@/lib/generativeUi/data";
 import { MODE_POLICY, type ChatMode } from "@/lib/chat/modes";
 import type { AppRecord, AppTool, OrreryResult, ResultType } from "./types";
 
@@ -164,16 +164,7 @@ function valueCount(r: OrreryResult): number {
 }
 
 /** The data-artifact body ({columns, rows}) for a tabular result. */
-export function dataArtifactBody(r: OrreryResult): { columns: string[]; rows: unknown[][] } | null {
-  if (r.type === "table") return { columns: r.columns, rows: r.rows };
-  if (r.type === "ohlc") return { columns: ["t", "o", "h", "l", "c", "v"], rows: r.candles.map((c) => [c.t, c.o, c.h, c.l, c.c, c.v ?? null]) };
-  if (r.type === "timeseries") {
-    const times = [...new Set(r.series.flatMap((s) => s.points.map((p) => p[0])))].sort((a, b) => a - b);
-    const maps = r.series.map((s) => new Map(s.points));
-    return { columns: ["time", ...r.series.map((s) => s.name)], rows: times.map((t) => [t, ...maps.map((m) => m.get(t) ?? null)]) };
-  }
-  return null;
-}
+export const dataArtifactBody = orreryTable;
 
 /** Same row the createArtifact tool writes for `type: "data"`. */
 async function saveDataArtifact(conversationId: string, title: string, content: string): Promise<string> {
@@ -193,7 +184,8 @@ export async function modelResult(
   const body = dataArtifactBody(structured);
   if (body && ctx.conversationId && valueCount(structured) > INLINE_VALUE_LIMIT) {
     const title = ("title" in structured && structured.title) || ("symbol" in structured ? `${structured.symbol} ${structured.interval}` : `${ctx.toolName} result`);
-    const id = await saveDataArtifact(ctx.conversationId, title, JSON.stringify(body));
+    // The result itself: CandleChart and Chart read symbol, interval and series from it; parseDataArtifact reads it as `body`.
+    const id = await saveDataArtifact(ctx.conversationId, title, JSON.stringify(structured));
     const hint = structured.type === "ohlc" ? "CandleChart" : structured.type === "table" ? "Table" : "Chart";
     return [
       `Saved ${body.rows.length} rows (columns: ${body.columns.join(", ")}) as data artifact artifactId=${id}. You do not see the rows.`,

@@ -1,5 +1,7 @@
 /** Shape for `type: "data"` artifacts — a tabular `executeCode` result a Chart or Table can
  *  reference by id. Content is `{columns, rows}`, an array of flat objects, or CSV/TSV. */
+import { orreryResultSchema, type OrreryResult } from "@/lib/apps/types";
+
 export type DataCell = string | number | null;
 
 export interface DataArtifactTable {
@@ -42,7 +44,19 @@ function splitDelimited(text: string, delim: string): string[][] {
   return rows;
 }
 
-/** Parses a data-artifact body. Throws if it isn't tabular. */
+/** columns/rows for a tabular app result (table, timeseries as time x series, ohlc as t,o,h,l,c,v); null otherwise. */
+export function orreryTable(r: OrreryResult): { columns: string[]; rows: unknown[][] } | null {
+  if (r.type === "table") return { columns: r.columns, rows: r.rows };
+  if (r.type === "ohlc") return { columns: ["t", "o", "h", "l", "c", "v"], rows: r.candles.map((c) => [c.t, c.o, c.h, c.l, c.c, c.v ?? null]) };
+  if (r.type === "timeseries") {
+    const times = [...new Set(r.series.flatMap((s) => s.points.map((p) => p[0])))].sort((a, b) => a - b);
+    const maps = r.series.map((s) => new Map(s.points));
+    return { columns: ["time", ...r.series.map((s) => s.name)], rows: times.map((t) => [t, ...maps.map((m) => m.get(t) ?? null)]) };
+  }
+  return null;
+}
+
+/** Parses a data-artifact body. Throws if it isn't tabular. An app result (OrreryResult) is read as its table. */
 export function parseDataArtifact(content: string): DataArtifactTable {
   const text = (content ?? "").trim();
   if (!text) throw new Error("Data artifact is empty");
@@ -62,7 +76,9 @@ export function parseDataArtifact(content: string): DataArtifactTable {
       const columns = [...new Set(json.flatMap((r) => Object.keys(r as object)))];
       return { columns, rows: json.map((r) => columns.map((c) => cell((r as Record<string, unknown>)[c]))) };
     }
-    const obj = json as { columns?: unknown; rows?: unknown };
+    const app = orreryResultSchema.safeParse(json);
+    const fromApp = app.success ? orreryTable(app.data) : null;
+    const obj = (fromApp ?? json) as { columns?: unknown; rows?: unknown };
     if (!Array.isArray(obj.columns) || !Array.isArray(obj.rows)) {
       throw new Error("Data artifact must have `columns` and `rows` arrays");
     }

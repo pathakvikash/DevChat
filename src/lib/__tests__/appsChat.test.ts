@@ -17,6 +17,8 @@ import {
   wrapAppText,
 } from "@/lib/apps/chatTools";
 import { buildTools, canStartSubAgents } from "@/lib/chat/buildTools";
+import { parseDataArtifact } from "@/lib/generativeUi/data";
+import { parseOrreryArtifact } from "@/lib/generativeUi/appData";
 import type { AppRecord } from "@/lib/apps/types";
 
 const app = (over: Partial<AppRecord> = {}): AppRecord => ({
@@ -125,12 +127,16 @@ describe("modelResult", () => {
     expect(out).toContain("Table dataArtifactId=art1");
     expect(out).not.toContain("[9,18]");
   });
-  it("saves timeseries as time x series and ohlc as candles", async () => {
+  it("saves timeseries and ohlc as the app result, which the Chart/CandleChart readers and parseDataArtifact accept", async () => {
+    const saved = (i: number) => (vi.mocked(prisma.artifact.create).mock.calls[i][0].data as any).content as string;
     const points = (n: number) => Array.from({ length: n }, (_, i) => [i, i] as [number, number]);
     await modelResult({ text: "", structured: { orrery: 1, type: "timeseries", series: [{ name: "x", points: points(8) }, { name: "y", points: points(8) }] } }, ctx);
-    expect(JSON.parse((vi.mocked(prisma.artifact.create).mock.calls[0][0].data as any).content).columns).toEqual(["time", "x", "y"]);
+    expect(parseOrreryArtifact(saved(0))?.type).toBe("timeseries"); // Chart's reader (useArtifactData)
+    expect(parseDataArtifact(saved(0)).columns).toEqual(["time", "x", "y"]); // artifact panel
     const out = await modelResult({ text: "", structured: { orrery: 1, type: "ohlc", symbol: "BTC", interval: "1h", candles: Array.from({ length: 20 }, (_, t) => ({ t, o: 1, h: 2, l: 0, c: 1 })) } }, ctx);
     expect(out).toContain("CandleChart dataArtifactId=art1");
+    expect(parseOrreryArtifact(saved(1))).toMatchObject({ type: "ohlc", symbol: "BTC", interval: "1h" }); // CandleChart's reader
+    expect(parseDataArtifact(saved(1)).columns).toEqual(["t", "o", "h", "l", "c", "v"]);
   });
   it("keeps small tables and link results inline as compact JSON", async () => {
     const r = { orrery: 1, type: "link", label: "Open", link: "quote" } as const;
