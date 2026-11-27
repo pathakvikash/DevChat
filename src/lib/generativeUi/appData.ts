@@ -109,3 +109,10 @@ export function binaryStlTriangles(buf: ArrayBuffer): number | undefined {
   const n = new DataView(buf).getUint32(80, true);
   return 84 + n * 50 === buf.byteLength ? n : undefined;
 }
+
+/** Volume bars to push after a live refresh. update() may not go back in time, so only bars at or after the last volume
+ *  bar shown are sent; with none shown yet (the last candles had no volume) the series is set whole. */
+export function volumeUpdate<T extends { time: number }>(shown: readonly T[], next: readonly T[]): { set: boolean; bars: T[] } {
+  const last = shown.at(-1)?.time;
+  return last === undefined ? { set: true, bars: [...next] } : { set: false, bars: next.filter((d) => d.time >= last) };
+}

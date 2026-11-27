@@ -5,7 +5,7 @@ import { ShieldQuestion } from "lucide-react";
 import { motion } from "framer-motion";
 import { FADE } from "@/lib/motion";
 import { useToolAnswers } from "./ToolAnswers";
-import { approvalDetails, approvalTitle, CHAT_ALLOWABLE_TOOLS, hiddenRuns, showHidden } from "@/lib/utils/messageParts";
+import { approvalDetails, approvalTitle, askedByUntrustedGate, CHAT_ALLOWABLE_TOOLS, hiddenRuns, showHidden } from "@/lib/utils/messageParts";
 
 /** Past this many lines the block says how long it is. */
 const LONG_BLOCK = 12;
@@ -124,7 +124,8 @@ export default function ApprovalCard({
         <button type="button" disabled={answered} onClick={() => answer(false)} className={`h-8 px-3 text-xs rounded-[var(--glass-radius-sm)] glass-button ${focus}`}>
           Deny
         </button>
-        {!sendsOut?.sendsOut && (!approvalId.startsWith("cli-") || CHAT_ALLOWABLE_TOOLS.has(toolName)) && (
+        {/* App tools (app_<id>_<tool>) that need OK ask on every call (appToolNeedsApproval ignores the chat's allow list). */}
+        {!sendsOut?.sendsOut && !toolName.startsWith("app_") && !askedByUntrustedGate(toolName, input) && (!approvalId.startsWith("cli-") || CHAT_ALLOWABLE_TOOLS.has(toolName)) && (
           <button
             type="button"
             disabled={answered}

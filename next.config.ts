@@ -1,4 +1,5 @@
 import type { NextConfig } from "next";
+import { PRIVATE_SEGMENTS } from "./src/lib/site";
 
 const nextConfig: NextConfig = {
   // The sanity suite builds elsewhere so it can run beside `next dev` in this checkout.
@@ -17,6 +18,11 @@ const nextConfig: NextConfig = {
           { key: "X-Content-Type-Options", value: "nosniff" },
           { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
         ],
+      },
+      // The signed-in app and the API are never indexed, whatever a page's own metadata says.
+      {
+        source: `/(${PRIVATE_SEGMENTS.join("|")})/:path*`,
+        headers: [{ key: "X-Robots-Tag", value: "noindex, nofollow" }],
       },
       // After the entry above, so it wins for this path (the last matching entry does). A model-written page
       // runs with no origin, no network and no frames.

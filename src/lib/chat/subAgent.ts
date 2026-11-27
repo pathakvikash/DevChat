@@ -5,6 +5,7 @@ import type { ToolMode } from "@/lib/chat/buildTools";
 import { normalizeMessageToolParts, normalizeToolParts } from "@/lib/chat/normalizeToolParts";
 import { nextStepSettings } from "@/lib/chat/loopGuard";
 import { quotePastChat } from "@/lib/chat/quotePastChat";
+import { isAppToolId, LOAD_APP_TOOLS } from "@/lib/apps/chatTools";
 
 type ProviderOptions = NonNullable<Parameters<typeof streamText>[0]["providerOptions"]>;
 
@@ -54,6 +55,8 @@ export interface RunSubAgentOptions {
   timeoutMs?: number;
   /** Report cap in characters; default 8,000. Workflow cards pass a larger one so a long JSON block keeps its closing fence. */
   maxReportChars?: number;
+  /** Workflow cards pass explicit tool lists and no gate, so they keep whatever they ticked. A chat helper never gets private-data tools next to fetchUrl or webSearch. */
+  keepPrivateWithWeb?: boolean;
   /** Replaces the helper prompt (workflow cards bring their own). */
   system?: string;
   /** A follow-up run: the helper's saved messages, then `message` as the new user turn (`brief` is unused). */
@@ -110,8 +113,20 @@ export function helperProviderOptions(options: ProviderOptions | undefined, mode
   );
 }
 
-function helperTools(tools: Record<string, Tool>): Record<string, Tool> {
-  return Object.fromEntries(Object.entries(tools).filter(([name]) => !STRIPPED_TOOLS.has(name)));
+/** Tools that read or change the user's private data or reach outside. A helper that can fetch a page or search the web
+ *  gets none of them: its fetches are ungated (no card can be answered), so page text could steer them. */
+const isPrivateTool = (name: string) =>
+  name.startsWith("mcp_") || isAppToolId(name) || name === LOAD_APP_TOOLS || ["searchChats", "readChat", "rememberFact", "forgetFact", "sendToChat", "searchKnowledgeBase"].includes(name);
+
+export function helperTools(tools: Record<string, Tool>, keepPrivateWithWeb = false): Record<string, Tool> {
+  const webHelper = !keepPrivateWithWeb && ("fetchUrl" in tools || "webSearch" in tools);
+  // The chat's URL and taint gates (buildTools gateUntrusted) need a person to answer a card; a helper has none, so they would stall it.
+  const gated = (name: string) => name === "fetchUrl" || name.startsWith("mcp_") || ["rememberFact", "forgetFact", "searchChats", "readChat"].includes(name);
+  return Object.fromEntries(
+    Object.entries(tools)
+      .filter(([name]) => !STRIPPED_TOOLS.has(name) && !(webHelper && isPrivateTool(name)))
+      .map(([name, t]) => [name, gated(name) && typeof t.needsApproval === "function" ? ({ ...t, needsApproval: undefined } as Tool) : t]),
+  );
 }
 
 /** The report cap: a report, or a saved turn that is resent to a resumed helper, is cut to REPORT_MAX_CHARS. */
@@ -186,7 +201,7 @@ export async function runSubAgent(opts: RunSubAgentOptions): Promise<SubAgentRes
   const timeout = AbortSignal.timeout(timeoutMs);
   const signal = AbortSignal.any([opts.abortSignal, timeout]);
   // Models that cannot take tools get one text step, whatever the caller passed.
-  const tools = model.supportsTools ? helperTools(opts.tools) : {};
+  const tools = model.supportsTools ? helperTools(opts.tools, opts.keepPrivateWithWeb) : {};
   const hasTools = Object.keys(tools).length > 0;
 
   let last: UIMessage | undefined;

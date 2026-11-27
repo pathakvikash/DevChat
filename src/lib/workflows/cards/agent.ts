@@ -248,6 +248,7 @@ export const agentCard: CardImpl = {
         abortSignal: c.signal,
         system,
         maxReportChars: OUTPUT_CAP_BYTES,
+        keepPrivateWithWeb: true,
         timeoutMs,
         onProgress: (e) => {
           progress = applySubAgentProgress(progress, e);

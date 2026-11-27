@@ -61,8 +61,9 @@ export function manifestUrlFor(input: string): URL {
 }
 
 async function getText(u: URL): Promise<string> {
-  if (isLocal(u.hostname)) {
-    // safeFetch refuses loopback on purpose; this branch only exists outside production (assertAllowedUrl).
+  if (dev() && isLocal(u.hostname)) {
+    // safeFetch refuses loopback on purpose; development only. In production an https://localhost URL passes
+    // assertAllowedUrl, so it must still go through safeFetch, which refuses it.
     const res = await fetch(u, { signal: AbortSignal.timeout(MANIFEST_TIMEOUT_MS), redirect: "error" });
     if (!res.ok) throw new ManifestError(`Manifest request failed (${res.status})`);
     const text = await res.text();

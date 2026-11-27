@@ -151,8 +151,8 @@ describe("showHidden, wider set", () => {
 });
 
 describe("the card for a call that sends data out", () => {
-  const card = (sendsOut?: { sendsOut?: boolean; folder?: string }) =>
-    text(renderToStaticMarkup(createElement(ApprovalCard, { toolName: "fetchUrl", approvalId: "ap1", input: { url: "https://a.test" }, sendsOut })));
+  const card = (sendsOut?: { sendsOut?: boolean; folder?: string }, toolName = "fetchUrl") =>
+    text(renderToStaticMarkup(createElement(ApprovalCard, { toolName, approvalId: "ap1", input: { url: "https://a.test" }, sendsOut })));
 
   it("says Sends data out, gives the reason with the folder name, and has no Allow for this chat", () => {
     const out = card({ sendsOut: true, folder: "project" });
@@ -164,9 +164,21 @@ describe("the card for a call that sends data out", () => {
   });
 
   it("an ordinary Ask card is unchanged", () => {
-    const out = card();
+    const out = card(undefined, "createArtifact");
     expect(out).toContain("Confirm each change");
     expect(out).toContain("Allow for this chat");
     expect(out).not.toContain("Check what is being sent");
+  });
+
+  it("a call the untrusted gate asks about (fetchUrl, mcp_, rememberFact...) offers no Allow for this chat", () => {
+    for (const t of ["fetchUrl", "mcp_s_t", "rememberFact", "readChat", "runAgent"]) expect(card(undefined, t)).not.toContain("Allow for this chat");
+  });
+});
+
+describe("an app tool that needs OK", () => {
+  it("offers no \"Allow for this chat\": the server asks on every call of an app's non-read-only tool", () => {
+    const card = (toolName: string) => renderToStaticMarkup(createElement(ApprovalCard, { toolName, approvalId: "ap_1", input: { prompt: "a cube" } }));
+    expect(card("app_printpro3d_generate_model")).not.toContain("Allow for this chat");
+    expect(card("createArtifact")).toContain("Allow for this chat");
   });
 });

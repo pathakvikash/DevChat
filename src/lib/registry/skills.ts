@@ -6,7 +6,7 @@ import type { SkillDefinition } from "./types";
  * ─────────────────────────────────────────────────────────────────────────
  *  A skill is a prompt fragment + a bundle of tool ids it auto-enables.
  *  When a skill is toggled on, its systemPrompt is appended after the
- *  base VAS prompt and any persona prompt, and each tool in `toolIds` is
+ *  base Orrery prompt and any persona prompt, and each tool in `toolIds` is
  *  enabled for that conversation.
  *
  *  Tool ids must match keys in lib/registry/tools.ts.

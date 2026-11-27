@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { catalog } from "@/lib/generativeUi/catalog";
 import { uiGuideText } from "@/lib/generativeUi/guide";
 import {
-  STL_MAX_BYTES, binaryStlTriangles, cleanSeries, downsample, goHref, modelUrl, parseOrreryArtifact, stlGuard, tableResultToData, toLwcData,
+  STL_MAX_BYTES, binaryStlTriangles, cleanSeries, downsample, goHref, modelUrl, parseOrreryArtifact, stlGuard, tableResultToData, toLwcData, volumeUpdate,
 } from "@/lib/generativeUi/appData";
 import { JOB_BACKOFF_CAP_MS, clampProgress, isTerminal, jobStatusUrl, pollDelay, timedOut, JOB_TIMEOUT_MS } from "@/lib/generativeUi/jobPoll";
 import { buildLayout, formatValue, nearestIndex, niceTicks } from "@/lib/generativeUi/timeSeries";
@@ -134,5 +134,16 @@ describe("time series layout", () => {
     expect(nearestIndex([10], 99)).toBe(0);
     expect(niceTicks(0, 100, 4)).toEqual([0, 50, 100]);
     expect(formatValue(12345.6)).toBe((12346).toLocaleString());
+  });
+});
+
+describe("volumeUpdate", () => {
+  const v = (...t: number[]) => t.map((time) => ({ time, value: 1, up: true }));
+  it("sends only bars at or after the last volume bar shown, never older ones", () => {
+    expect(volumeUpdate(v(1, 2, 3), v(1, 2, 3, 4))).toEqual({ set: false, bars: v(3, 4) });
+    expect(volumeUpdate(v(1, 2), v(1, 2, 3, 4, 5))).toEqual({ set: false, bars: v(2, 3, 4, 5) });
+  });
+  it("sets the whole series when no volume was shown yet", () => {
+    expect(volumeUpdate([], v(1, 2))).toEqual({ set: true, bars: v(1, 2) });
   });
 });
