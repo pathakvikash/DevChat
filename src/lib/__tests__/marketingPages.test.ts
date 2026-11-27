@@ -1,3 +1,5 @@
+import fs from "node:fs";
+import path from "node:path";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
@@ -48,6 +50,21 @@ describe("marketing pages data", () => {
         expect(graph[1].mainEntity).toHaveLength(page.faq.length);
       });
 
+      it("has a real screenshot on disk under 150 KB, with alt text, rendered with explicit size", () => {
+        const { src, alt, width, height } = page.screenshot;
+        expect(src).toBe(`/marketing/${page.slug}.webp`);
+        const file = path.join(process.cwd(), "public", src);
+        expect(fs.existsSync(file), file).toBe(true);
+        expect(fs.statSync(file).size).toBeLessThan(150 * 1024);
+        expect(alt.length).toBeGreaterThan(30);
+        expect(alt).not.toMatch(/mock|test|sanity|e2e/i);
+        const html = renderToStaticMarkup(createElement(MarketingPageView, { page }));
+        expect(html).toContain(`src="${src}"`);
+        expect(html).toContain(`width="${width}"`);
+        expect(html).toContain(`height="${height}"`);
+        expect(html).toContain('loading="lazy"');
+      });
+
       it("is in the sitemap and open to signed-out visitors, with its share images", () => {
         expect(sitemap().map((e) => e.url)).toContain(new URL(pagePath(page), siteUrl()!).href);
         expect(isPublicPath(pagePath(page))).toBe(true);
@@ -77,6 +94,16 @@ describe("marketing pages data", () => {
     expect(isPublicPath("/welcome")).toBe(true);
     expect(isPublicPath("/settings/opengraph-image")).toBe(false);
     expect(isPublicPath("/features/agents/opengraph-image-1a2b")).toBe(true);
+  });
+
+  it("the middleware lets signed-out visitors fetch /marketing/ images", async () => {
+    // The middleware module needs next-auth at import time, so read the matcher out of the source.
+    const src = fs.readFileSync(path.join(process.cwd(), "src/middleware.ts"), "utf8");
+    const literal = /matcher: \[\s*(?:\/\/[^\n]*\n\s*)*"((?:[^"\\]|\\.)*)"/.exec(src)![1];
+    const re = new RegExp(`^${JSON.parse(`"${literal}"`)}$`);
+    expect(re.test("/marketing/agents.webp")).toBe(false); // not matched, so not sent to login
+    expect(re.test("/settings")).toBe(true);
+    expect(re.test("/marketingx")).toBe(true);
   });
 
   it("is not covered by robots.txt or the noindex header", async () => {

@@ -99,16 +99,16 @@ export default function MarketingPageView({ page }: { page: Page }) {
           </Link>
         </div>
 
-        {/* SCREENSHOT SLOT: renders when `screenshot` is set on the page in src/lib/marketing/pages.ts. */}
-        {page.screenshot && (
-          <Image
-            src={page.screenshot.src}
-            alt={page.screenshot.alt}
-            width={page.screenshot.width}
-            height={page.screenshot.height}
-            className="mt-10 h-auto w-full rounded-[var(--glass-radius-xl)] border border-[var(--foreground)]/10"
-          />
-        )}
+        {/* Already a sized WebP, so it is served as is (unoptimized): no /_next/image round trip for a signed-out visitor. Lazy by default. */}
+        <Image
+          src={page.screenshot.src}
+          alt={page.screenshot.alt}
+          width={page.screenshot.width}
+          height={page.screenshot.height}
+          unoptimized
+          className="mt-10 h-auto w-full rounded-[var(--glass-radius-xl)] border border-[var(--foreground)]/10"
+        />
+
 
         <div className="mt-12 space-y-4">
           {page.sections.map((s) => (
