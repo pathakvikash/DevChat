@@ -58,6 +58,7 @@ export function useConversationMode(conversationId: string | null): { mode: Chat
         localStorage.setItem(storageKey, next);
       } catch {}
       window.dispatchEvent(new CustomEvent(MODE_CHANGED, { detail: { id: conversationId, mode: next } }));
+      window.dispatchEvent(new Event("vas:pane-info-changed"));
     },
     [storageKey, conversationId],
   );

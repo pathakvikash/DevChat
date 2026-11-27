@@ -9,6 +9,8 @@ import QuoteCards from "./QuoteCards";
 import QueuedMessages, { type QueuedItem } from "./QueuedMessages";
 import DragOverlay from "./DragOverlay";
 import ContextUsageCircle from "./ContextUsageCircle";
+import ModeToggle from "./ModeToggle";
+import { useChatModeOptional } from "@/app/contexts/ChatModeContext";
 import ModelSelector from "./conversation/ModelSelector";
 import WorkingFolderPicker from "./conversation/WorkingFolderPicker";
 import { isCliModelId } from "@/lib/providers";
@@ -132,6 +134,7 @@ export default function ChatInput({
   onQueueRetry = () => {},
   toolsAvailable = true,
 }: ChatInputProps) {
+  const modeCtx = useChatModeOptional();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const [expanded, setExpanded] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
@@ -592,12 +595,12 @@ export default function ChatInput({
                   : temporary
                     ? "Temporary chat. Not saved after you leave."
                     : mode === "agent"
-                    ? "Agent mode: can make changes without asking"
+                    ? "Agent: can make changes without asking"
                     : mode === "ask"
-                      ? isCliModelId(model) && !model.startsWith("claude-code/") ? "Ask mode: OpenCode and Codex can't ask before editing; read-only here" : "Ask mode: changes need your OK"
+                      ? isCliModelId(model) && !model.startsWith("claude-code/") ? "Agent: OpenCode and Codex can't ask before editing; read-only here" : "Agent: changes need your OK"
                       : mode === "plan"
                         ? "Describe the task. You'll get a plan to approve."
-                        : "Type a message, / for commands, or drop files..."
+                        : "Ask: type a message, / for commands, or drop files..."
               }
               className={`w-full resize-none bg-transparent text-sm text-[var(--foreground)] outline-none placeholder:text-zinc-500 placeholder:truncate disabled:opacity-50 py-1.5 overflow-y-auto ${showSuggestion ? "pr-7" : ""}`}
               rows={1}
@@ -786,6 +789,7 @@ export default function ChatInput({
           />
 
           <div className="order-3 ml-auto flex items-center gap-1.5">
+            {modeCtx && <ModeToggle mode={mode} onModeChange={modeCtx.setMode} toolsAvailable={modeCtx.modelCaps.toolsAvailable} />}
             {/* Reads like a second placeholder when the box is empty. */}
             {input.length > 0 && (
               <span className="text-[11px] text-zinc-400 hidden md:block mr-1 whitespace-nowrap">
