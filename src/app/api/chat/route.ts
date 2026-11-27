@@ -422,16 +422,20 @@ export async function POST(req: Request) {
     const fallbacks = candidateModels.slice(candidateModels.indexOf(servedModel) + 1).flatMap((id) => {
       try {
         const cfg = getModel(id, resolution.creds, hostTools);
-        return [{ id, model: cfg.model, providerOptions: optionsFor(id, cfg, reasoningPlan(id, reasoningEffort)) }];
+        return [{ id, model: cfg.model, supportsTools: cfg.supportsTools, providerOptions: optionsFor(id, cfg, reasoningPlan(id, reasoningEffort)) }];
       } catch {
         return [];
       }
     });
-    const streamModel =
-      isOllama || fallbacks.length
-        ? withFallback(modelConfig.model, {
+    // Which candidate actually produced the stream: trace, cost and the saved message record this one.
+    let actualModel = servedModel;
+    // Always wrapped: a single candidate still gets the transient-error retry.
+    const streamModel = withFallback(modelConfig.model, {
             primaryId: servedModel,
             fallbacks,
+            onServed: (id) => {
+              actualModel = id;
+            },
             // Ollama rejected the prompt as bigger than num_ctx: move up a tier, as the pre-request check does.
             onContextOverflow: async (id) => {
               const nextCtx = id === servedModel && conversationId
@@ -444,8 +448,7 @@ export async function POST(req: Request) {
               await prisma.conversation.update({ where: { id: conversationId }, data: { contextLength: nextCtx } });
               return nextCtx;
             },
-          })
-        : modelConfig.model;
+          });
     const partialToolOutputs = new Map<string, { name: string; input: any; start: number }>();
     // Per-tool observations (name/input/output/latency) collected during streaming.
     const toolCallsSeen: { toolName: string; input?: any; output?: any; ok: boolean; latencyMs?: number }[] = [];
@@ -559,7 +562,7 @@ export async function POST(req: Request) {
           recordTrace({
             conversationId,
             userId,
-            model: servedModel,
+            model: actualModel,
             promptTokens: inTok,
             completionTokens: outTok,
             latencyMs: Date.now() - requestStartedAt,
@@ -632,7 +635,7 @@ export async function POST(req: Request) {
                   !nothingToSave &&
                   (await safePersistAssistantMessage(event, {
                     conversationId,
-                    model: servedModel,
+                    model: actualModel,
                     systemPrompt: finalSystemPrompt,
                     messageId: assistantMessageId,
                     updateExisting: !!continuing,
@@ -675,7 +678,7 @@ export async function POST(req: Request) {
             recordTrace({
               conversationId,
               userId,
-              model: servedModel,
+              model: actualModel,
               promptTokens: 0,
               completionTokens: 0,
               latencyMs: Date.now() - requestStartedAt,
@@ -698,6 +701,12 @@ export async function POST(req: Request) {
     const debugHeaders = new Headers(response.headers);
     debugHeaders.set("X-Debug-Model", servedModel);
     debugHeaders.set("X-Debug-Tool-Mode", toolMode);
+    // The tool list is internal detail: dev and test only.
+    if (process.env.NODE_ENV !== "production") {
+      debugHeaders.set("X-Debug-Supports-Tools", String(modelConfig.supportsTools));
+      debugHeaders.set("X-Debug-Use-Tools", String(useTools));
+      debugHeaders.set("X-Debug-Tools", Object.keys(aiTools).join(",") || "none");
+    }
 
     return new Response(response.body, {
       status: response.status,

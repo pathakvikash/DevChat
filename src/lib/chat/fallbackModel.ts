@@ -5,6 +5,8 @@ export interface FallbackCandidate {
   id: string;
   model: any;
   providerOptions?: any;
+  /** False strips tools/toolChoice from the call: the primary's tool set must not reach a model that can't use it. */
+  supportsTools?: boolean;
 }
 
 export interface FallbackOptions {
@@ -13,6 +15,8 @@ export interface FallbackOptions {
   fallbacks: FallbackCandidate[];
   /** Ollama said the prompt overflows num_ctx: returns the larger window it switched to, or null when there is none. */
   onContextOverflow?: (modelId: string) => Promise<number | null>;
+  /** Called with the id of the candidate whose stream is being returned, before the first chunk is read. */
+  onServed?: (id: string) => void;
   retriesPerModel?: number;
   baseDelayMs?: number;
 }
@@ -45,7 +49,11 @@ export function withFallback(model: any, opts: FallbackOptions) {
           ...opts.fallbacks.map((c) => ({
             id: c.id,
             call: (p: any) => c.model.doStream(p),
-            params: { ...params, providerOptions: c.providerOptions },
+            params: {
+              ...params,
+              providerOptions: c.providerOptions,
+              ...(c.supportsTools === false ? { tools: undefined, toolChoice: undefined } : {}),
+            },
           })),
         ];
         for (const [i, cand] of chain.entries()) {
@@ -53,7 +61,9 @@ export function withFallback(model: any, opts: FallbackOptions) {
           let bumped = false;
           for (let attempt = 0; attempt < retries; attempt++) {
             try {
-              return await cand.call(p);
+              const res = await cand.call(p);
+              opts.onServed?.(cand.id);
+              return res;
             } catch (err) {
               firstError ??= err;
               if (params.abortSignal?.aborted) throw err;
