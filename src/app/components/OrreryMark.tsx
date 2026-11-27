@@ -1,3 +1,5 @@
+"use client";
+
 /**
  * The Orrery mark: an orbit with one body on its rim. The orbit uses currentColor, the body the accent var.
  * The body circles the orbit (CSS keyframes in globals.css). `fast` speeds it up for busy states.
