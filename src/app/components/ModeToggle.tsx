@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
+import { motion, useReducedMotion } from "framer-motion";
 import { MoreHorizontal } from "lucide-react";
 import { modeSegment, segmentToMode, toggleConfirm, togglePlan, type ChatMode, type ModeSegment } from "@/lib/chat/modes";
 import { useToast } from "@/app/components/Toast";
@@ -27,6 +28,8 @@ export default function ModeToggle({
   toolsAvailable?: boolean;
 }) {
   const { toast } = useToast();
+  const pillId = useId();
+  const reduceMotion = useReducedMotion();
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
@@ -85,11 +88,19 @@ export default function ModeToggle({
               onClick={() => (isBlocked ? toast(NEEDS_TOOLS, "info") : onModeChange(segmentToMode(id, mode)))}
               disabled={disabled}
               title={isBlocked ? NEEDS_TOOLS : hint}
-              className={`h-7 px-2.5 text-xs font-medium rounded-[calc(var(--glass-radius-md)-2px)] transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--glass-accent-strong)] disabled:opacity-50 disabled:cursor-not-allowed ${
+              className={`relative h-7 px-2.5 text-xs font-medium rounded-[calc(var(--glass-radius-md)-2px)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--glass-accent-strong)] disabled:opacity-50 disabled:cursor-not-allowed ${
                 isBlocked ? "opacity-50 cursor-not-allowed" : ""
-              } ${active === id ? "glass-button-primary text-white" : "text-zinc-400 hover:text-zinc-200"}`}
+              } ${active === id ? "text-white" : "text-zinc-400 hover:text-zinc-200"}`}
             >
-              {label}
+              {active === id && (
+                <motion.span
+                  layoutId={pillId}
+                  aria-hidden="true"
+                  className="glass-button-primary absolute inset-0 rounded-[inherit]"
+                  transition={reduceMotion ? { duration: 0 } : { duration: 0.18, ease: "easeOut" }}
+                />
+              )}
+              <span className="relative">{label}</span>
             </button>
           );
         })}

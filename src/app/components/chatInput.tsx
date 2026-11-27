@@ -3,7 +3,7 @@
 import type { ChatMode } from "@/app/components/conversation/types";
 import { useEffect, useRef, useState, useCallback } from "react";
 import { Plus, Upload, Globe, BookOpen, Settings, X, Slash, Mic, MicOff, ArrowRight, ArrowUp, Square, Loader2, Paperclip, AtSign, FileText } from "lucide-react";
-import { AnimatePresence, motion } from "framer-motion";
+import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import AttachmentChip from "./AttachmentChip";
 import QuoteCards from "./QuoteCards";
 import QueuedMessages, { type QueuedItem } from "./QueuedMessages";
@@ -138,6 +138,14 @@ export default function ChatInput({
   const dragCounter = useRef(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [plusOpen, setPlusOpen] = useState(false);
+  const reduceMotion = useReducedMotion();
+  // False until the first paint is done, so nothing animates on load.
+  const [settled, setSettled] = useState(false);
+  useEffect(() => {
+    const t = setTimeout(() => setSettled(true), 0);
+    return () => clearTimeout(t);
+  }, []);
+  const popIn = !settled || reduceMotion ? false : { opacity: 0, scale: 0.6 };
   const [compressedDismissed, setCompressedDismissed] = useState(false);
   const plusRef = useRef<HTMLDivElement>(null);
 
@@ -375,8 +383,19 @@ export default function ChatInput({
   useEffect(() => {
     const el = textareaRef.current;
     if (!el) return;
+    const prev = el.offsetHeight;
+    el.style.transition = "none";
     el.style.height = "auto";
-    el.style.height = `${Math.min(el.scrollHeight, MAX_INPUT_HEIGHT)}px`;
+    const next = Math.min(el.scrollHeight, MAX_INPUT_HEIGHT);
+    if (settled && !reduceMotion && prev && prev !== next) {
+      // Start from the old height, then let the new one ease in.
+      el.style.height = `${prev}px`;
+      void el.offsetHeight;
+      el.style.transition = "height 120ms ease-out";
+    }
+    el.style.height = `${next}px`;
+    // settled is read, not a trigger: only a change of text resizes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [input]);
 
   return (
@@ -452,18 +471,16 @@ export default function ChatInput({
                 </div>
                 <div role="list" aria-label="Files" className="flex flex-wrap gap-2">
                   {files.map((file, index) => (
-                    <AttachmentChip
-                      key={`${file.name}-${file.size}-${index}`}
-                      file={file}
-                      onRemove={() => removeFile(index)}
-                    />
+                    <ChipIn key={`${file.name}-${file.size}-${index}`} animate={settled && !reduceMotion}>
+                      <AttachmentChip file={file} onRemove={() => removeFile(index)} />
+                    </ChipIn>
                   ))}
                   {mentions.map((path) => {
                     const cut = mentionCuts[path];
                     const modelName = model.split("/").pop() || model;
                     return (
+                      <ChipIn key={`@${path}`} animate={settled && !reduceMotion}>
                       <AttachmentChip
-                        key={`@${path}`}
                         file={{ name: path }}
                         note={
                           cut && {
@@ -473,6 +490,7 @@ export default function ChatInput({
                         }
                         onRemove={() => setMentions((prev) => prev.filter((p) => p !== path))}
                       />
+                      </ChipIn>
                     );
                   })}
                 </div>
@@ -703,8 +721,15 @@ export default function ChatInput({
             >
               <Plus size={18} />
             </button>
+            <AnimatePresence>
             {plusOpen && (
-              <div className="absolute bottom-full left-0 mb-2 w-52 glass-panel rounded-[var(--glass-radius-md)] shadow-lg border border-[var(--glass-border)] z-50 overflow-hidden">
+              <motion.div
+                initial={reduceMotion ? false : { opacity: 0, scale: 0.96 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={reduceMotion ? undefined : { opacity: 0, transition: { duration: 0.1 } }}
+                transition={{ duration: 0.15, ease: "easeOut" }}
+                style={{ transformOrigin: "bottom left" }}
+                className="absolute bottom-full left-0 mb-2 w-52 glass-panel rounded-[var(--glass-radius-md)] shadow-lg border border-[var(--glass-border)] z-50 overflow-hidden">
                 <button
                   type="button"
                   onClick={handleFileSelect}
@@ -767,8 +792,9 @@ export default function ChatInput({
                     <span className="ml-auto text-xs text-zinc-500">Off</span>
                   )}
                 </button>
-              </div>
+              </motion.div>
             )}
+            </AnimatePresence>
           </div>
 
           <input
@@ -847,13 +873,16 @@ export default function ChatInput({
             {isLoading ? (
               <>
                 {input.trim() && (
-                  <button
+                  <motion.button
                     type="button"
                     onClick={onQueue}
+                    initial={popIn}
+                    animate={{ opacity: 1, scale: 1 }}
+                    transition={{ duration: 0.15, ease: "easeOut" }}
                     className="flex h-8 items-center justify-center rounded-full glass-button px-3 text-xs font-medium text-[var(--foreground)]"
                   >
                     Queue
-                  </button>
+                  </motion.button>
                 )}
                 <button
                   type="button"
@@ -865,7 +894,9 @@ export default function ChatInput({
                   aria-label="Stop"
                   className="flex h-8 w-8 items-center justify-center rounded-full glass-button-danger text-red-200"
                 >
-                  <Square size={12} fill="currentColor" aria-hidden />
+                  <motion.span initial={popIn} animate={{ opacity: 1, scale: 1 }} transition={{ duration: 0.15, ease: "easeOut" }} className="flex">
+                    <Square size={12} fill="currentColor" aria-hidden />
+                  </motion.span>
                 </button>
               </>
             ) : (
@@ -875,7 +906,9 @@ export default function ChatInput({
                 aria-label="Send"
                 className="flex h-8 w-8 items-center justify-center rounded-full glass-button-primary text-white disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                <ArrowUp size={16} aria-hidden />
+                <motion.span initial={popIn} animate={{ opacity: 1, scale: 1 }} transition={{ duration: 0.15, ease: "easeOut" }} className="flex">
+                  <ArrowUp size={16} aria-hidden />
+                </motion.span>
               </button>
             )}
           </div>
@@ -883,5 +916,19 @@ export default function ChatInput({
         </form>
       </div>
     </>
+  );
+}
+
+/** An attached file's chip fades and scales in; the wrapper is presentational so the list keeps its items. */
+function ChipIn({ animate, children }: { animate: boolean; children: React.ReactNode }) {
+  return (
+    <motion.div
+      role="presentation"
+      initial={animate ? { opacity: 0, scale: 0.9 } : false}
+      animate={{ opacity: 1, scale: 1 }}
+      transition={{ duration: 0.15, ease: "easeOut" }}
+    >
+      {children}
+    </motion.div>
   );
 }

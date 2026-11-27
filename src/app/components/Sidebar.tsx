@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { usePathname } from "next/navigation";
 import { Search, Trash2, Edit2, Sparkles, Loader2, Pin, Archive, X, MoreHorizontal, CheckSquare, Square, User as UserIcon, Columns2, Workflow, Table2, SquarePen, FileCode, BookOpen, Brain, PanelLeftClose, ListFilter, Check } from "lucide-react";
 import { useSession } from "next-auth/react";
@@ -96,6 +97,7 @@ export default function Sidebar() {
   const pathname = usePathname();
   const { toast } = useToast();
   const split = useSplitViewOptional();
+  const reduceMotion = useReducedMotion();
 
   const {
     data: conversationsData,
@@ -108,6 +110,15 @@ export default function Sidebar() {
     { onError: (e) => console.error("Failed to fetch conversations:", e) },
   );
   const conversations = conversationsData ?? [];
+
+  // Rows that are there when the list first loads (or while searching) appear without animation; later ones fade in.
+  const [hasLoaded, setHasLoaded] = useState(false);
+  useEffect(() => {
+    if (loading) return;
+    const t = setTimeout(() => setHasLoaded(true), 0);
+    return () => clearTimeout(t);
+  }, [loading]);
+  const animateRows = hasLoaded && !reduceMotion && searchInput === "";
 
   // A chat marked temporary drops out of the list at once; un-marking brings it back.
   useEffect(() => {
@@ -386,7 +397,6 @@ export default function Sidebar() {
   function renderRow({ item: conv, depth, isLastChild, through }: TreeRow<ConversationItem>) {
     return (
       <div
-        key={conv.id}
         data-depth={depth}
         data-active={activeConvId === conv.id}
         style={depth ? { marginLeft: depth * INDENT_PX } : undefined}
@@ -522,6 +532,23 @@ export default function Sidebar() {
     );
   }
 
+  /** One list row. The motion wrapper is separate from the row: motion props swallow native onDragStart/onDragEnd. */
+  function renderAnimatedRow(row: TreeRow<ConversationItem>, first: boolean) {
+    const gap = first ? 0 : 2; // the 0.5 spacing between rows
+    return (
+      <motion.div
+        key={row.item.id}
+        layout={reduceMotion ? false : "position"}
+        initial={animateRows ? { opacity: 0, y: -8 } : false}
+        animate={{ opacity: 1, y: 0, height: "auto", marginTop: gap }}
+        exit={animateRows ? { opacity: 0, height: 0, marginTop: 0, overflow: "hidden" } : undefined}
+        transition={{ duration: 0.16, ease: "easeOut" }}
+      >
+        {renderRow(row)}
+      </motion.div>
+    );
+  }
+
   return (
     <div className="flex h-screen w-64 flex-col border-r border-[var(--glass-border)] bg-[var(--background)]">
       {/* Top row */}
@@ -557,7 +584,12 @@ export default function Sidebar() {
           New chat
         </button>
         {searchOpen ? (
-          <div className="nav-row">
+          <motion.div
+            className="nav-row"
+            initial={reduceMotion ? false : { opacity: 0, x: -8 }}
+            animate={{ opacity: 1, x: 0 }}
+            transition={{ duration: 0.15, ease: "easeOut" }}
+          >
             <Search size={16} className="shrink-0" />
             <input
               type="text"
@@ -569,7 +601,7 @@ export default function Sidebar() {
               onKeyDown={(e) => { if (e.key === "Escape") { e.preventDefault(); closeSearch(); } }}
               className="min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-zinc-500"
             />
-          </div>
+          </motion.div>
         ) : (
           <button onClick={() => setSearchOpen(true)} className="nav-row">
             <Search size={16} />
@@ -609,23 +641,31 @@ export default function Sidebar() {
 
       {/* Conversations List */}
       <div className="flex-1 overflow-y-auto px-2 pb-2">
-        {pinnedRows.length > 0 && (
-          <>
-            <div className="nav-section">Pinned</div>
-            <div className="space-y-0.5">{pinnedRows.map(renderRow)}</div>
-          </>
-        )}
-        <div className="nav-section flex items-center justify-between">
-          <span>{view === "archived" ? "Archived" : "Recent"}</span>
-          {filterButton}
-        </div>
+        <AnimatePresence initial={false}>
+          {pinnedRows.length > 0 && (
+            <motion.div
+              key="pinned-header"
+              className="nav-section"
+              initial={animateRows ? { opacity: 0 } : false}
+              animate={{ opacity: 1 }}
+              exit={animateRows ? { opacity: 0 } : undefined}
+              transition={{ duration: 0.15 }}
+            >
+              Pinned
+            </motion.div>
+          )}
+          {pinnedRows.map((row, i) => renderAnimatedRow(row, i === 0))}
+          <div key="recent-header" className="nav-section flex items-center justify-between">
+            <span>{view === "archived" ? "Archived" : "Recent"}</span>
+            {filterButton}
+          </div>
+          {!loading && recentRows.map((row, i) => renderAnimatedRow(row, i === 0))}
+        </AnimatePresence>
         {loading ? (
           <div className="p-2 text-zinc-400 text-sm">Loading...</div>
         ) : filteredConversations.length === 0 ? (
           <div className="p-2 text-zinc-400 text-sm">No conversations yet</div>
-        ) : (
-          <div className="space-y-0.5">{recentRows.map(renderRow)}</div>
-        )}
+        ) : null}
       </div>
 
       {/* Footer: user */}
