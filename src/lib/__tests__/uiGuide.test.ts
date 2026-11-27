@@ -105,6 +105,23 @@ describe("honest replies", () => {
     }
   });
 
+  it("link clause: opens with fetchUrl when present, otherwise says it cannot open links", async () => {
+    const withTool = (await buildSystemPrompt(opts({ useTools: true, activeToolIds: new Set(["fetchUrl"]) }))).text;
+    expect(withTool).toContain("open it with fetchUrl before answering");
+    expect(withTool).not.toContain("ask them to paste the content");
+    const noTool = (await buildSystemPrompt(opts({ useTools: true, activeToolIds: new Set(["webSearch"]) }))).text;
+    expect(noTool).toContain("no tool in this request can open it");
+    expect(noTool).toContain("never describe a page from its URL or name");
+    const chatOnly = (await buildSystemPrompt(opts())).text;
+    expect(chatOnly).toContain("say you can't open links here and ask them to paste the content");
+    expect(chatOnly).not.toContain("fetchUrl");
+  });
+
+  it("persona wording says Orrery, not VAS", async () => {
+    expect((await buildSystemPrompt(opts({ useTools: true }))).text).not.toContain("You are VAS");
+    expect((await buildSystemPrompt(opts())).text).not.toContain("You are VAS");
+  });
+
   it("sample-data rule is in the stub, the full guide and the artifact tool", () => {
     expect(GENERATIVE_UI_STUB).toContain("Sample data");
     expect(uiGuideText()).toContain("Sample data");
