@@ -674,7 +674,7 @@ export default function Sidebar() {
       {/* Footer: user */}
       <div className="border-t border-[var(--glass-border)] p-2">
         {session?.user && (
-          <button onClick={() => setProfileOpen(true)} className="nav-row" aria-label="Open profile">
+          <button onClick={() => setProfileOpen(true)} className="nav-row" title="Open profile">
             {session.user.image ? (
               // eslint-disable-next-line @next/next/no-img-element
               <img src={session.user.image} alt="" className="size-6 rounded-full shrink-0" />
