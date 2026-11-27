@@ -98,6 +98,28 @@ describe("previewApp with a token-protected app", () => {
     const r = await previewApp("https://pp.example.com", "o@x.co");
     expect(r.toolsUnavailable).toBe(true);
     expect(r.tools).toEqual([]);
+    expect(r.warnings).toContain("Could not list tools: 401 Unauthorized");
+    expect(mcp.lastHeaders).toEqual({});
+  });
+
+  it.each([["timeout", "The operation was aborted due to timeout"], ["server error", "Streamable HTTP error: 500 Internal Server Error"]])(
+    "a %s is shown as a warning, not as 'requires a signed request'",
+    async (_n, msg) => {
+      fetchManifest.mockResolvedValue({ manifest, origin: manifest.baseUrl });
+      app.findUnique.mockResolvedValue(null);
+      mcp({ list: () => new Error(msg) });
+      const r = await previewApp("https://pp.example.com", "o@x.co");
+      expect(r.toolsUnavailable).toBe(false);
+      expect(r.warnings).toContain(`Could not list tools: ${msg}`);
+    },
+  );
+
+  it("falls back to the unsigned preview when the stored secret cannot be decrypted", async () => {
+    fetchManifest.mockResolvedValue({ manifest, origin: manifest.baseUrl });
+    app.findUnique.mockResolvedValue(row({ secretEnc: `enc:v1:${Buffer.alloc(40, 1).toString("base64")}` }));
+    mcp({ list: () => ({ tools: wireTools }) });
+    const r = await previewApp("https://pp.example.com", "o@x.co");
+    expect(r.tools).toHaveLength(2);
     expect(mcp.lastHeaders).toEqual({});
   });
 

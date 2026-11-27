@@ -116,6 +116,12 @@ export function toolWarnings(m: Pick<AppManifest, "permission" | "auth">, tools:
   return w;
 }
 
+const isAuthRefusal = (e: unknown): boolean => {
+  const code = (e as { code?: unknown })?.code;
+  const msg = e instanceof Error ? e.message : String(e);
+  return code === 401 || code === 403 || (e as Error)?.name === "UnauthorizedError" || /unauthori[sz]ed|forbidden|\b40[13]\b/i.test(msg);
+};
+
 /**
  * Fetch the manifest and list tools; stores nothing. A new app has no secret yet, so its tools are listed unsigned and
  * `toolsUnavailable` is set when it refuses. An app already registered at the same origin is listed signed, so
@@ -127,12 +133,21 @@ export async function previewApp(url: string, ownerEmail: string) {
   let tools: AppTool[] = [];
   let toolsUnavailable = false;
   const existing: AppRow | null = manifest.auth === "orrery-jwt" ? await db.app.findUnique({ where: { id: manifest.id } }) : null;
-  const headers = existing && new URL(existing.baseUrl).origin === new URL(manifest.baseUrl).origin ? await authHeaders(manifest, ownerEmail, decryptValue(existing.secretEnc)) : {};
+  let headers: Record<string, string> = {};
+  if (existing && new URL(existing.baseUrl).origin === new URL(manifest.baseUrl).origin) {
+    // A secret that cannot be decrypted falls back to the unsigned preview instead of failing the whole preview.
+    try {
+      headers = await authHeaders(manifest, ownerEmail, decryptValue(existing.secretEnc));
+    } catch {
+      headers = {};
+    }
+  }
   try {
     tools = await listLive(manifest.mcp.url, headers);
   } catch (e) {
-    if (manifest.auth === "orrery-jwt") toolsUnavailable = true;
-    else warnings.push(`Could not list tools: ${e instanceof Error ? e.message : String(e)}`);
+    warnings.push(`Could not list tools: ${e instanceof Error ? e.message : String(e)}`);
+    // Only an auth refusal means "needs a signed request"; a timeout or a 500 is shown as the warning alone.
+    toolsUnavailable = manifest.auth === "orrery-jwt" && isAuthRefusal(e);
   }
   return { manifest, origin, tools, toolsUnavailable, warnings: [...warnings, ...(tools.length ? toolWarnings(manifest, tools) : [])] };
 }

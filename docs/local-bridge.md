@@ -189,7 +189,7 @@ While it checks, the settings page shows "Checking the bridge…".
 - Use Chrome or Firefox. Other browsers may block the page from reaching the bridge.
 - Bridge chats use Claude Code's own tools. They do not use Orrery's memory, knowledge bases, or generated interfaces (`BridgeSettings.tsx`).
 - Files attached to a message are not sent to Claude Code, and they are not saved in the chat. Only the text of your messages is sent and saved (`scripts/bridge.ts`, `src/lib/chat/saveBridgeTurn.ts`, `src/lib/bridge/client.ts`).
-- Bridge chats do not get an automatic title. The chat is saved without one, so it keeps the name "New Chat" until you rename it or use Generate title in the sidebar menu (`src/lib/chat/saveBridgeTurn.ts`).
+- No chat gets an automatic title. Like every chat, a bridge chat keeps the name New Chat until you rename it, run /title, or use Generate title in the sidebar menu (`src/lib/chat/saveBridgeTurn.ts` saves no title).
 - The bridge handles up to 4 chats at the same time. A fifth gets "Too many chats are running. Wait for one to finish."
 - A request can be at most 2 MB, and at most 1000 messages.
 - Bridge runs do not use user-level MCP servers or connectors.

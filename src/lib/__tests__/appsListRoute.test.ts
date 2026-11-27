@@ -46,7 +46,10 @@ describe("GET /api/apps", () => {
     h.canUseHostTools.mockResolvedValue(false);
     const body = await (await get("?all=1")).json();
     expect(body.map((a: any) => a.id)).toEqual(["empty", "broken"]);
-    expect(body[0]).not.toHaveProperty("approved");
+    for (const a of body) {
+      expect(a).not.toHaveProperty("approved");
+      expect(a).not.toHaveProperty("tools");
+    }
     expect(JSON.stringify(body)).not.toMatch(/SECRET|secretEnc/);
   });
 });

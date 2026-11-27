@@ -122,19 +122,21 @@ test("real /api/apps routes: a registered app lists with its tool count and the 
     await page.reload();
     await expect(page.getByTestId("app-row-e2e-real-app")).toContainText("1 tool");
   } finally {
-    await request.delete("/api/apps/e2e-real-app");
+    // Runs even when the test fails, so the app cannot stay registered for later specs.
+    const del = await request.delete("/api/apps/e2e-real-app");
+    expect(del.ok()).toBe(true);
     upstream.server.close();
   }
 });
 
-test("real preview: an app that needs a signed request says tools are listed after approval, not Tools (0)", async ({ page }) => {
+test("real preview: an app that needs a signed request explains how its tools get listed, not Tools (0)", async ({ page }) => {
   const upstream = await startApp("e2e-signed-app", true);
   try {
     await page.goto("/settings/apps");
     await page.getByLabel("App URL").fill(upstream.url);
     await page.getByRole("button", { name: "Check app" }).click();
     const review = page.getByTestId("app-review");
-    await expect(review.getByTestId("tools-unavailable")).toHaveText("Tools are listed after you approve the app (this app requires a signed request).");
+    await expect(review.getByTestId("tools-unavailable")).toHaveText("This app requires a signed request. Its tools are listed after you register it, set its secret in the app, and press Refresh; you then approve the list.");
     await expect(review.getByText("Tools (0)")).toHaveCount(0);
   } finally {
     upstream.server.close();

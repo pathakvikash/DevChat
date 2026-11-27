@@ -271,7 +271,7 @@ function AppsContent() {
                 </div>
                 <div>
                   {preview.toolsUnavailable ? (
-                    <p className="text-sm text-amber-400" data-testid="tools-unavailable">Tools are listed after you approve the app (this app requires a signed request).</p>
+                    <p className="text-sm text-amber-400" data-testid="tools-unavailable">This app requires a signed request. Its tools are listed after you register it, set its secret in the app, and press Refresh; you then approve the list.</p>
                   ) : (
                     <>
                       <h4 className="text-sm font-medium mb-2">Tools ({preview.tools.length})</h4>
