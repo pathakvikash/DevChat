@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/db";
 import { NextRequest, NextResponse } from "next/server";
-import { requireUserId } from "@/lib/auth";
+import { requireUserId, UnauthorizedError } from "@/lib/auth";
+import { saveBridgeTurn, MAX_BODY_BYTES } from "@/lib/chat/saveBridgeTurn";
 import { keepReadFilesMarker } from "@/lib/files/folderTools";
 
 /**
@@ -145,7 +146,36 @@ export async function POST(
   try {
     const userId = await requireUserId();
     const { id: conversationId } = await params;
-    const body = await req.json();
+
+    const conversation = await prisma.conversation.findUnique({
+      where: { id: conversationId },
+      select: { id: true, userId: true },
+    });
+    if (!conversation || conversation.userId !== userId) {
+      return NextResponse.json({ error: "Conversation not found" }, { status: 404 });
+    }
+
+    const declared = Number(req.headers.get("content-length"));
+    if (declared > MAX_BODY_BYTES) {
+      return NextResponse.json({ error: "Request too large" }, { status: 413 });
+    }
+    const rawText = await req.text();
+    if (rawText.length > MAX_BODY_BYTES) {
+      return NextResponse.json({ error: "Request too large" }, { status: 413 });
+    }
+    let body: any;
+    try {
+      body = JSON.parse(rawText);
+    } catch {
+      return NextResponse.json({ error: "Body must be JSON" }, { status: 400 });
+    }
+
+    // A finished local-bridge turn (it ran on the user's machine): strict schema, own handler.
+    if (body && typeof body === "object" && "assistant" in body) {
+      const r = await saveBridgeTurn(conversationId, body);
+      return NextResponse.json(r.body, { status: r.status });
+    }
+
     const {
       id: clientId,
       role,
@@ -163,15 +193,6 @@ export async function POST(
 
     if (typeof content !== "string") {
       return NextResponse.json({ error: "content must be a string" }, { status: 400 });
-    }
-
-    const conversation = await prisma.conversation.findUnique({
-      where: { id: conversationId },
-      select: { id: true, userId: true },
-    });
-
-    if (!conversation || conversation.userId !== userId) {
-      return NextResponse.json({ error: "Conversation not found" }, { status: 404 });
     }
 
     const partsJson = Array.isArray(parts) ? JSON.stringify(parts) : null;
@@ -236,6 +257,9 @@ export async function POST(
       createdAt: saved.createdAt,
     });
   } catch (error) {
+    if (error instanceof UnauthorizedError) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
     console.error("Failed to save message:", error);
     return NextResponse.json({ error: "Failed to save message" }, { status: 500 });
   }
