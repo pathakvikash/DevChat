@@ -2,6 +2,8 @@
 
 import { useState } from "react";
 import { ShieldQuestion } from "lucide-react";
+import { motion } from "framer-motion";
+import { FADE } from "@/lib/motion";
 import { useToolAnswers } from "./ToolAnswers";
 import { approvalDetails, approvalTitle, CHAT_ALLOWABLE_TOOLS, hiddenRuns, showHidden } from "@/lib/utils/messageParts";
 
@@ -54,7 +56,10 @@ export default function ApprovalCard({
   const focus = "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--glass-accent-strong)]";
 
   return (
-    <div
+    <motion.div
+      initial={{ opacity: 0, y: 6 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={FADE}
       role="group"
       aria-label={`Needs your OK: ${title}`}
       className="my-2 glass-card rounded-[var(--glass-radius-md)] border border-amber-900/50 overflow-hidden"
@@ -134,6 +139,6 @@ export default function ApprovalCard({
           Allow
         </button>
       </div>
-    </div>
+    </motion.div>
   );
 }

@@ -1,6 +1,8 @@
 "use client";
 
 import { useState } from "react";
+import { AnimatePresence, motion } from "framer-motion";
+import { FADE } from "@/lib/motion";
 import { Brain, ChevronDown, ChevronRight } from "lucide-react";
 
 interface ThinkingBlockProps {
@@ -31,11 +33,21 @@ export default function ThinkingBlock({ text, streaming = false }: ThinkingBlock
           {open ? "(hide)" : `(${text.length} chars)`}
         </span>
       </button>
-      {open && (
-        <div className="px-3 pb-3 pt-1 text-xs text-zinc-400 whitespace-pre-wrap border-t border-[var(--glass-border)]">
-          {text}
-        </div>
-      )}
+      <AnimatePresence initial={false}>
+        {open && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: "auto", opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={FADE}
+            className="overflow-hidden"
+          >
+            <div className="px-3 pb-3 pt-1 text-xs text-zinc-400 whitespace-pre-wrap border-t border-[var(--glass-border)]">
+              {text}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

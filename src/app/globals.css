@@ -528,3 +528,23 @@ html:has(#tour) {
 @media (prefers-reduced-motion: reduce) {
   .orrery-orbit { animation: none; }
 }
+
+/* Reduced motion: no looping or decorative animation at all (final state shown). */
+@media (prefers-reduced-motion: reduce) {
+  .animate-pulse,
+  .animate-spin,
+  .animate-bounce,
+  .orrery-orbit,
+  [style*="shimmer"],
+  [style*="float"],
+  [style*="pulse-glow"],
+  [style*="waveform-bar"],
+  [style*="mic-pulse"] {
+    animation: none !important;
+  }
+}
+
+/* Streaming markdown: blocks that appear while a reply streams fade in once (existing blocks are not remounted). */
+@keyframes md-in { from { opacity: 0; } to { opacity: 1; } }
+.md-stream > * { animation: md-in 150ms ease-out; }
+@media (prefers-reduced-motion: reduce) { .md-stream > * { animation: none !important; } }

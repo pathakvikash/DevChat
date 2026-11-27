@@ -3,17 +3,22 @@
  * The body circles the orbit (CSS keyframes in globals.css). `fast` speeds it up for busy states.
  * Reduced motion: no animation, the body rests at the upper right.
  */
+import { useIsStreaming } from "@/lib/streamingState";
+
 export function OrreryMark({
   size = 22,
   className = "",
   spinning = true,
-  fast = false,
+  fast,
 }: {
   size?: number;
   className?: string;
   spinning?: boolean;
+  /** Defaults to true while any reply streams. */
   fast?: boolean;
 }) {
+  const streaming = useIsStreaming();
+  const quick = fast ?? streaming;
   return (
     <svg
       width={size}
@@ -24,7 +29,7 @@ export function OrreryMark({
       className={`shrink-0 rounded-md bg-zinc-900 text-zinc-100 ${className}`}
     >
       <circle cx="11" cy="11" r="6" fill="none" stroke="currentColor" strokeWidth="1.5" />
-      <g className={spinning ? `orrery-orbit${fast ? " orrery-orbit-fast" : ""}` : undefined}>
+      <g className={spinning ? `orrery-orbit${quick ? " orrery-orbit-fast" : ""}` : undefined}>
         <circle cx="15.24" cy="6.76" r="1.8" fill="var(--glass-accent, #3b82f6)" />
       </g>
     </svg>
