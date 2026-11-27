@@ -404,3 +404,22 @@ model DataTableRow {
   @@unique([tableId, key])
   @@index([tableId, status])
 }
+
+// A registered sibling app (Orrery apps integration). Global and owner-managed; every signed-in user may use approved apps.
+model App {
+  id            String    @id // the manifest id, e.g. "printpro3d"
+  name          String
+  baseUrl       String
+  mcpUrl        String
+  manifestJson  String // the validated manifest as JSON
+  auth          String // none | orrery-jwt
+  permission    String // read | actions
+  approved      Boolean   @default(false)
+  toolsJson     String    @default("[]") // cached tool list, used when the app is unreachable
+  status        String    @default("ok") // ok | unreachable
+  toolsCachedAt DateTime?
+  secretEnc     String // per-app HS256 secret, AES-256-GCM encrypted (see lib/settings.ts)
+  createdBy     String // owner's user id
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+}

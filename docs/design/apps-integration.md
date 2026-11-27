@@ -76,6 +76,19 @@ Large data (table/timeseries/ohlc over ~12 values) is saved by Orrery once as a 
 
 `Chart` (multi-series, time axis), `CandleChart` (lightweight-charts), `Model3D` (three STLLoader + OrbitControls, lazy via `next/dynamic`, WebGL-less fallback to a download link), `JobCard` (polls the jobs route, progress bar, then renders `result`).
 
+## Files
+
+Apps serve files (STL) at `GET {baseUrl}/api/orrery/file?name=<file>` with the same `Authorization: Bearer <jwt>` as tool calls (no header for `auth: "none"`); the `file` in a `model3d` result is that `name`. Orrery's `/api/apps/[id]/file` only accepts names matching `[A-Za-z0-9._-]{1,128}` (not starting with `.`), does not follow redirects, streams the bytes (never decodes them), caps at 25 MB, and always answers `model/stl` + `Content-Disposition: inline`. Anything wrong, including an unapproved app, is a 404.
+
+## Decisions made while building the backend
+
+- `permission: "read"` is enforced: `callAppTool` refuses a tool not marked `readOnly` on a read app (preview only warns). Tool names must be in the cached tool list.
+- `POST /api/apps` for an existing id re-approves and keeps the secret (`secret: null`); a new id returns the secret once. `GET /api/apps` includes `approved` only for the owner, who also sees unapproved apps so they can re-approve after a refresh.
+- Preview of an `orrery-jwt` app lists tools unsigned (no secret exists yet) and warns if the app refuses; register then lists with the new secret, falling back to unsigned, and the owner presses Refresh after setting `ORRERY_APP_SECRET`.
+- `/jobs/[jobId]?tool=<statusTool>`: the tool must be one of the app's tools; it is called with `{ jobId }`.
+- Owner = `canUseHostTools` (OWNER_EMAILS; unset means everyone in development, no one in production).
+- Localhost apps (http, dev only) skip safeFetch's private-address block for the manifest; MCP and file calls use plain fetch against the origin pinned at registration.
+
 ## Sidebar
 
 An "Apps" group lists approved apps (icon + name, opens `/go` in a new tab) with an unreachable dot; also CommandPalette entries; Settings > Apps registers and removes apps (owner).

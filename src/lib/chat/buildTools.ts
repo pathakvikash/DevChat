@@ -87,7 +87,7 @@ export interface BuildToolsOptions {
 }
 
 /** Convert a JSON Schema object to a Zod schema (supports basic types). */
-function jsonSchemaToZod(schema: any): z.ZodTypeAny {
+export function jsonSchemaToZod(schema: any): z.ZodTypeAny {
   if (!schema) return z.any();
 
   if (schema.type === "string") {
@@ -103,8 +103,10 @@ function jsonSchemaToZod(schema: any): z.ZodTypeAny {
   }
   if (schema.type === "object" || schema.properties) {
     const shape: Record<string, z.ZodTypeAny> = {};
+    const required = new Set<string>(Array.isArray(schema.required) ? schema.required : []);
     for (const [key, val] of Object.entries(schema.properties || {})) {
-      shape[key] = jsonSchemaToZod(val);
+      const z0 = jsonSchemaToZod(val);
+      shape[key] = required.has(key) ? z0 : z0.optional();
     }
     return z.object(shape);
   }
@@ -153,10 +155,11 @@ export async function buildTools({
             needsApproval: needsApproval(mode, id, allowed),
             execute: async (args: Record<string, unknown>, options?: { abortSignal?: AbortSignal }) => {
               const result = await callServerTool(server.id, mcpTool.name, args, { signal: options?.abortSignal });
-              const texts = result.content
-                .filter((c: any) => c.type === "text")
-                .map((c: any) => c.text)
-                .join("\n");
+              const texts =
+                result.content
+                  .filter((c: any) => c.type === "text")
+                  .map((c: any) => c.text)
+                  .join("\n") || (result.structuredContent !== undefined ? JSON.stringify(result.structuredContent) : "");
               if (result.isError) return `Error: ${texts || "Tool call failed"}`;
               return texts || "(no output)";
             },
