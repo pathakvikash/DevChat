@@ -14,7 +14,7 @@ const FEATURES = [
   },
   {
     title: "Workflows",
-    text: "Turn a repeatable job into a workflow, such as a daily news digest, and run it on a schedule or on demand.",
+    text: "Turn a repeatable job into a workflow, such as a daily news digest, and run it whenever you need it.",
   },
   {
     title: "Artifacts",
