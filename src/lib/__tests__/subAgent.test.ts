@@ -356,7 +356,7 @@ describe("helper prompt", () => {
 
 describe("helperTools", () => {
   const mk = (...names: string[]) => Object.fromEntries(names.map((n) => [n, tool({ description: n, inputSchema: z.object({}), execute: async () => "" })]));
-  const priv = ["searchChats", "readChat", "rememberFact", "forgetFact", "sendToChat", "mcp_srv_go", "app_x_y", "loadAppTools"];
+  const priv = ["searchChats", "readChat", "rememberFact", "forgetFact", "sendToChat", "searchKnowledgeBase", "mcp_srv_go", "app_x_y", "loadAppTools"];
 
   it("a helper with fetchUrl or webSearch gets none of the private-data tools", () => {
     for (const web of ["fetchUrl", "webSearch"]) {

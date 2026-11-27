@@ -116,7 +116,7 @@ export function helperProviderOptions(options: ProviderOptions | undefined, mode
 /** Tools that read or change the user's private data or reach outside. A helper that can fetch a page or search the web
  *  gets none of them: its fetches are ungated (no card can be answered), so page text could steer them. */
 const isPrivateTool = (name: string) =>
-  name.startsWith("mcp_") || isAppToolId(name) || name === LOAD_APP_TOOLS || ["searchChats", "readChat", "rememberFact", "forgetFact", "sendToChat"].includes(name);
+  name.startsWith("mcp_") || isAppToolId(name) || name === LOAD_APP_TOOLS || ["searchChats", "readChat", "rememberFact", "forgetFact", "sendToChat", "searchKnowledgeBase"].includes(name);
 
 export function helperTools(tools: Record<string, Tool>, keepPrivateWithWeb = false): Record<string, Tool> {
   const webHelper = !keepPrivateWithWeb && ("fetchUrl" in tools || "webSearch" in tools);

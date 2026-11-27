@@ -334,7 +334,8 @@ export async function POST(req: Request) {
     }
 
     // External text in the STORED history (compression drops those results from the prompt, not their text from the summary).
-    const tainted = useTools && (await storedTaint(conversationId));
+    // A side chat carries its parent's transcript in its prompt, so the parent's outside text counts too.
+  const tainted = useTools && ((await storedTaint(conversationId)) || (!!parentId && (await storedTaint(parentId))));
     // A tool answered in this request keeps needing approval for it (see toolsWithAnsweredApproval).
     const answeredNow = new Set(toolsWithAnsweredApproval(sanitizedMessages));
     const aiTools: ToolSet = useTools
