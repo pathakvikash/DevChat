@@ -41,6 +41,22 @@ describe("fetchManifest", () => {
     await expect(fetchManifest("http://pp.example.com")).rejects.toThrow(/https/);
   });
 
+  it("sends https loopback URLs through safeFetch in production (no plain-fetch bypass)", async () => {
+    vi.stubEnv("NODE_ENV", "production");
+    const plain = vi.spyOn(globalThis, "fetch");
+    mock.mockRejectedValue(new Error("That address is private and cannot be fetched"));
+    try {
+      for (const u of ["https://127.0.0.1:8443", "https://localhost:8443"]) {
+        await expect(fetchManifest(u)).rejects.toThrow(/private/);
+      }
+      expect(plain).not.toHaveBeenCalled();
+      expect(mock).toHaveBeenCalledTimes(2);
+    } finally {
+      plain.mockRestore();
+      vi.unstubAllEnvs();
+    }
+  });
+
   it.each([
     ["baseUrl", { baseUrl: "https://evil.example.com" }],
     ["mcp.url", { mcp: { url: "https://evil.example.com/mcp" } }],
