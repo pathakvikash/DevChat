@@ -447,7 +447,7 @@ export default function ConversationPane({ conversationId, focused, initialPromp
 
           {p.messages.length > 0 && (
             <AgentSendContext.Provider value={agentSend}>
-            <ToolAnswersProvider value={{ answerApproval: p.answerApproval, answerPlan: p.answerPlan }}>
+            <ToolAnswersProvider value={{ answerApproval: p.answerApproval, answerPlan: p.answerPlan, model: p.conversation.model }}>
             <ChatMessages
               messages={p.messages}
               isLoading={p.isLoading}

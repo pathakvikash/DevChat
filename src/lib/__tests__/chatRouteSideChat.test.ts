@@ -9,6 +9,7 @@ vi.mock("@/lib/db", () => ({
   },
 }));
 vi.mock("@/lib/auth", () => ({ requireUserId: vi.fn().mockResolvedValue("u1") }));
+vi.mock("@/lib/providerDetect", () => ({ detectionAvailable: vi.fn(() => true) }));
 vi.mock("@/lib/settings", () => ({ getSettingsKey: vi.fn() }));
 vi.mock("@/lib/models", () => ({
   getModel: vi.fn(() => ({ supportsTools: true, model: {}, contextWindow: 8192 })),

@@ -2,7 +2,7 @@
 import { BRIDGE_MODEL_PREFIX, BRIDGE_PROTOCOL, HOST_TOOLS_REFUSED, VERCEL_FOLDERS_REFUSED } from "./constants";
 import { isChatMode, type ChatMode } from "@/lib/chat/modes";
 
-export type BridgeStatus = "unpaired" | "offline" | "mismatch" | "ready" | "blocked";
+export type BridgeStatus = "unpaired" | "offline" | "mismatch" | "no-claude" | "ready" | "blocked";
 
 /** What the /health probe did: the browser refused or failed it, or the bridge (or something else) answered. */
 export type ProbeOutcome =
@@ -33,6 +33,7 @@ export function bridgeStatus(hasToken: boolean, outcome: ProbeOutcome | null): B
   const version = typeof body.version === "string" ? body.version : null;
   if (body.protocol !== BRIDGE_PROTOCOL) return { status: "mismatch", protocol: body.protocol, version };
   if (!version) return { status: "unpaired", protocol: body.protocol, version: null };
+  if ((outcome.body as { claude?: unknown }).claude === false) return { status: "no-claude", protocol: body.protocol, version };
   return { status: "ready", protocol: body.protocol, version };
 }
 
@@ -42,6 +43,7 @@ export function bridgeProblemText(status: BridgeStatus, protocol: number | null 
     case "unpaired": return "Pair this browser with the bridge: paste its token in Settings > Local bridge.";
     case "offline": return "Start the bridge on this computer: npm run bridge";
     case "mismatch": return `Bridge is version ${protocol ?? "?"}, this Orrery needs ${BRIDGE_PROTOCOL}: git pull, then npm run bridge`;
+    case "no-claude": return "Claude Code is not installed on this computer (or not on PATH)";
     case "blocked": return "Your browser blocked access to this computer. Allow local network access for this site, or use Chrome or Firefox";
     default: return null;
   }
@@ -63,11 +65,13 @@ export function serverHostToolsMissing(folders: FoldersAnswer): boolean | null {
 export type Route = { to: "server" } | { to: "bridge" } | { to: "blocked"; status: BridgeStatus };
 
 /**
- * One turn goes to the bridge only for a claude-code/ model, when the server cannot run it itself (deployed), and the bridge
- * is ready. Anything else stays on the server path, and a bridge model that cannot be reached is blocked: never another model.
+ * A claude-code/ model goes to the bridge when the server cannot run it itself (deployed) and the bridge is ready. It stays on
+ * the server only when the server says it can. Anything unknown or unreachable is blocked: never another model.
  */
 export function routeTurn(i: { model: string | null | undefined; noHostTools: boolean | null; status: BridgeStatus }): Route {
-  if (!isBridgeModel(i.model) || i.noHostTools !== true) return { to: "server" };
+  if (!isBridgeModel(i.model) || i.noHostTools === false) return { to: "server" };
+  // Unknown (the folder answer never came): never guess "server" for a claude-code model, which would answer with another one.
+  if (i.noHostTools === null) return { to: "blocked", status: i.status };
   return i.status === "ready" ? { to: "bridge" } : { to: "blocked", status: i.status };
 }
 

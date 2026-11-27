@@ -5,6 +5,9 @@
  *   npm run bridge                     start (first start creates ~/.orrery-bridge/config.json and prints the token once)
  *   npm run bridge -- --add <path>     allow a working folder        (--remove <path> to drop it)
  *   npm run bridge -- --origin <url>   allow another page origin
+ *   npm run bridge -- --max-mode <chat|plan|agent|ask>   the most the page may do (default plan: read-only; agent edits; ask also runs commands)
+ *   npm run bridge -- --no-confirm-shell | --confirm-shell   confirm each command in this terminal (default on)
+ *   npm run bridge -- --allow-chat-wide-edits   let the page pre-approve edits for a whole chat (default off)
  *   npm run bridge -- --print-token    show the token again
  *
  * Folders are only ever added here, never over HTTP. The client sends no argv, env, binary path or permission strings:
@@ -19,7 +22,8 @@ import { isAbsolute, join } from "node:path";
 import { convertToModelMessages, streamText } from "ai";
 import { z } from "zod";
 import { BRIDGE_PORT, BRIDGE_PROTOCOL, checkBridgeRequest, corsHeaders } from "@/lib/bridge/protocol";
-import { CLI_PROVIDERS, createCliModel, findCliBins } from "@/lib/cliProviders";
+import { createInterface } from "node:readline";
+import { CLI_PROVIDERS, createCliModel, findCliBins, killAllCliRuns, setShellConfirm } from "@/lib/cliProviders";
 import { CHAT_MODES, MODE_POLICY, type ChatMode } from "@/lib/chat/modes";
 import { normalizeMessageToolParts } from "@/lib/chat/normalizeToolParts";
 import { refuseReason } from "@/lib/files/folderRules";
@@ -38,6 +42,10 @@ const ConfigSchema = z.object({
   origins: z.array(z.string()),
   folders: z.array(z.string()),
   maxMode: z.enum(CHAT_MODES),
+  /** A command Claude Code wants to run is also confirmed (y/N) in this terminal, not just in the page. */
+  confirmShell: z.boolean().default(true),
+  /** Lets the page pre-approve edits for a whole chat ("Allow for this chat"); off, every edit asks. */
+  allowChatWideEdits: z.boolean().default(false),
 });
 export type BridgeConfig = z.infer<typeof ConfigSchema>;
 
@@ -56,7 +64,7 @@ export function ensureConfig(dir = defaultConfigDir()): { config: BridgeConfig; 
   chmodSync(dir, 0o700);
   const file = configFile(dir);
   if (!existsSync(file)) {
-    const config: BridgeConfig = { token: randomBytes(32).toString("base64url"), origins: [DEFAULT_ORIGIN], folders: [], maxMode: "ask" };
+    const config: BridgeConfig = { token: randomBytes(32).toString("base64url"), origins: [DEFAULT_ORIGIN], folders: [], maxMode: "plan", confirmShell: true, allowChatWideEdits: false };
     writeConfig(dir, config);
     return { config, created: true };
   }
@@ -93,6 +101,8 @@ const Body = z.object({
 
 export interface BridgeDeps {
   port?: number;
+  /** Asks the person at the terminal about one command: true = yes, "no-tty" = nobody to ask. Defaults to `terminalConfirm()`. */
+  confirm?: ConfirmShell;
   /** Ids of installed CLI providers; defaults to a PATH search. */
   findBins?: () => Promise<Set<string>>;
   log?: (line: string) => void;
@@ -100,7 +110,52 @@ export interface BridgeDeps {
 
 const claudeDef = CLI_PROVIDERS.find((d) => d.id === PROVIDER_ID)!;
 const modelList = () => claudeDef.models === "discover" ? [] : claudeDef.models.map((m) => ({ id: `${PROVIDER_ID}/${m.id}`, name: m.name, provider: claudeDef.label, contextWindow: claudeDef.contextWindow }));
-const MODE_RANK: Record<ChatMode, number> = { chat: 0, plan: 1, ask: 2, agent: 3 };
+// By risk, lowest first: ask is the only mode that can run shell commands, so it ranks above agent (edits only).
+const MODE_RANK: Record<ChatMode, number> = { chat: 0, plan: 1, agent: 2, ask: 3 };
+
+/** One line for `--max-mode`: what that mode lets the page do. */
+export function modeNote(mode: ChatMode): string {
+  const what: Record<ChatMode, string> = {
+    chat: "Claude Code answers without tools.",
+    plan: "read-only: Claude Code can read and search the allowed folders and change nothing.",
+    agent: "Claude Code can also create and edit files in the allowed folders without asking. It cannot run commands.",
+    ask: "Claude Code can also run shell commands in the allowed folders; every edit or command needs approval in the page, and every command is confirmed here in this terminal.",
+  };
+  return `Max mode ${mode}: ${what[mode]}`;
+}
+
+export type ConfirmShell = (q: { tool: string; command: string; folder: string }) => Promise<boolean | "no-tty">;
+
+/** y/N on the daemon's own stdin, one question at a time. No answer within `timeoutMs` (60 s) is a no; no TTY is "no-tty". */
+export function terminalConfirm(io: { stdin?: NodeJS.ReadStream; stdout?: NodeJS.WriteStream; timeoutMs?: number } = {}): ConfirmShell {
+  const stdin = io.stdin ?? process.stdin;
+  const stdout = io.stdout ?? process.stdout;
+  let queue: Promise<unknown> = Promise.resolve();
+  const ask: ConfirmShell = async ({ tool, command, folder }) => {
+    if (!stdin.isTTY) return "no-tty";
+    // The command is the model's text: control characters (escape sequences) must not redraw this prompt.
+    const clean = (s: string) => s.replace(/[\u0000-\u0008\u000b-\u001f\u007f]/g, "?");
+    stdout.write(`\nClaude Code wants to run (${tool}) in ${clean(folder)}:\n  ${clean(command).split("\n").join("\n  ")}\n`);
+    const rl = createInterface({ input: stdin, output: stdout });
+    return new Promise<boolean>((resolve) => {
+      const timer = setTimeout(() => {
+        stdout.write("\nNo answer in 60 s: denied.\n");
+        rl.close();
+        resolve(false);
+      }, io.timeoutMs ?? 60_000);
+      rl.question("Run it? [y/N] ", (a) => {
+        clearTimeout(timer);
+        rl.close();
+        resolve(/^y(es)?$/i.test(a.trim()));
+      });
+    });
+  };
+  return (q) => {
+    const next = queue.then(() => ask(q));
+    queue = next.catch(() => undefined);
+    return next;
+  };
+}
 
 class HttpError extends Error {
   constructor(public status: number, message: string) {
@@ -128,8 +183,27 @@ export function createBridgeServer(config: BridgeConfig | (() => BridgeConfig), 
   const getConfig = typeof config === "function" ? config : () => config;
   const log = deps.log ?? ((l: string) => console.log(l));
   const findBins = deps.findBins ?? findCliBins;
-  // Signs approval requests so the browser cannot change an approved tool's input. New on every start.
-  const approvalSecret = randomBytes(32).toString("hex");
+  const confirm = deps.confirm ?? terminalConfirm();
+  // Config problems are logged without the file's content (it holds the token).
+  const originsOf = new WeakMap<IncomingMessage, readonly string[]>();
+  // A shell approval from the page is not enough: the person at this terminal confirms the command too.
+  setShellConfirm(async ({ toolName, input, cwd }) => {
+    try {
+      if (!getConfig().confirmShell) return { ok: true };
+    } catch {
+      return { ok: false, message: "The bridge's config could not be read, so the command was not run." };
+    }
+    const i = (input ?? {}) as { command?: unknown };
+    const answer = await confirm({ tool: toolName, command: typeof i.command === "string" ? i.command : JSON.stringify(input), folder: cwd });
+    if (answer === true) return { ok: true };
+    return {
+      ok: false,
+      message:
+        answer === "no-tty"
+          ? "This command needs confirmation in the bridge's terminal, but the bridge has no terminal. Start it from a terminal, or run `npm run bridge -- --no-confirm-shell`."
+          : "The command was not confirmed in the bridge's terminal.",
+    };
+  });
   let chats = 0;
 
   const send = (res: ServerResponse, status: number, body: unknown, headers: Record<string, string> = {}) => {
@@ -139,6 +213,14 @@ export function createBridgeServer(config: BridgeConfig | (() => BridgeConfig), 
 
   async function chat(req: IncomingMessage, res: ServerResponse, cfg: BridgeConfig, cors: Record<string, string>) {
     if (chats >= MAX_CHATS) return send(res, 429, { error: "Too many chats are running. Wait for one to finish." }, cors);
+    // The slot is taken before the first await, so parallel slow-body requests cannot get past the cap, and the first
+    // close of the connection (also during the body read) frees it and aborts the run.
+    chats++;
+    const abort = new AbortController();
+    res.once("close", () => {
+      chats--;
+      if (!res.writableFinished) abort.abort();
+    });
     const parsed = Body.safeParse(await readBody(req));
     if (!parsed.success) return send(res, 400, { error: "Invalid request", issues: parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`) }, cors);
     const b = parsed.data;
@@ -153,14 +235,18 @@ export function createBridgeServer(config: BridgeConfig | (() => BridgeConfig), 
     }
     const mode: ChatMode = MODE_RANK[b.mode] > MODE_RANK[cfg.maxMode] ? cfg.maxMode : b.mode;
 
-    const abort = new AbortController();
-    const messages = normalizeMessageToolParts(b.messages.filter((m) => m.role !== ("compression" as string)));
+    // Only text is taken from a user message: a file or URL part would make the daemon fetch it.
+    const stripped = b.messages.map((m) => ({
+      ...m,
+      parts: m.parts.filter((p) => (m.role === "user" ? p.type === "text" : !["file", "source-url", "source-document"].includes(String(p.type)))),
+    }));
+    const messages = normalizeMessageToolParts(stripped);
     const modelMessages = await convertToModelMessages(messages as never);
+    if (res.destroyed) return;
     const result = streamText({
       model: createCliModel(claudeDef, known.id.slice(PROVIDER_ID.length + 1)),
       system: b.system,
       messages: modelMessages,
-      experimental_toolApprovalSecret: approvalSecret,
       maxRetries: 0,
       abortSignal: abort.signal,
       // Same keys as providerOptionsFor() in src/lib/chat/providerOptions.ts. The userId only lets the parked-run cap apply.
@@ -171,15 +257,12 @@ export function createBridgeServer(config: BridgeConfig | (() => BridgeConfig), 
           access: MODE_POLICY[mode].cli,
           conversationId: b.conversationId ?? "",
           userId: "bridge",
-          allowedTools: b.allowedTools.filter((t) => CHAT_ALLOWABLE_TOOLS.has(t)),
+          // Chat-wide pre-approval of edits is off unless the owner turned it on here.
+          allowedTools: cfg.allowChatWideEdits ? b.allowedTools.filter((t) => CHAT_ALLOWABLE_TOOLS.has(t)) : [],
+          // No user-scope MCP servers or connectors in a bridge run.
+          strictMcp: true,
         },
       },
-    });
-    chats++;
-    // A closed connection before the reply finished is a Stop: abort the run. A parked approval run stays parked.
-    res.on("close", () => {
-      chats--;
-      if (!res.writableFinished) abort.abort();
     });
     result.pipeUIMessageStreamToResponse(res, {
       headers: cors,
@@ -188,7 +271,15 @@ export function createBridgeServer(config: BridgeConfig | (() => BridgeConfig), 
   }
 
   async function handle(req: IncomingMessage, res: ServerResponse) {
-    const cfg = getConfig();
+    let cfg: BridgeConfig;
+    try {
+      cfg = getConfig();
+    } catch (e) {
+      // A half-written or broken config.json: answer 500 (no CORS headers, no config content) and keep serving.
+      log(`error: config.json is unreadable (${e instanceof Error ? e.name : "error"}): fix or delete it`);
+      return send(res, 500, { error: "Bridge config is unreadable" });
+    }
+    originsOf.set(req, cfg.origins);
     const port = (res.socket?.localPort ?? deps.port ?? BRIDGE_PORT) as number;
     const origin = req.headers.origin;
     const url = new URL(req.url ?? "/", "http://127.0.0.1");
@@ -220,7 +311,7 @@ export function createBridgeServer(config: BridgeConfig | (() => BridgeConfig), 
       .catch((e) => {
         const status = e instanceof HttpError ? e.status : 500;
         if (status === 500) log(`error: ${e instanceof Error ? e.message : "unknown"}`);
-        if (!res.headersSent) send(res, status, { error: status === 500 ? "Bridge error" : (e as Error).message }, corsHeaders(req.headers.origin, getConfig().origins));
+        if (!res.headersSent) send(res, status, { error: status === 500 ? "Bridge error" : (e as Error).message }, corsHeaders(req.headers.origin, originsOf.get(req) ?? []));
         else res.end();
       })
       .finally(() => log(`${req.method} ${(req.url ?? "").split("?")[0]} ${res.statusCode}`));
@@ -250,7 +341,25 @@ export async function main(argv = process.argv.slice(2), dir = defaultConfigDir(
   const add = arg("--add");
   const remove = arg("--remove");
   const origin = arg("--origin");
-  if (add || remove || origin) {
+  const maxMode = arg("--max-mode");
+  const confirmFlag = argv.includes("--confirm-shell");
+  const noConfirmFlag = argv.includes("--no-confirm-shell");
+  const chatEditsFlag = argv.includes("--allow-chat-wide-edits");
+  if (add || remove || origin || maxMode || confirmFlag || noConfirmFlag || chatEditsFlag) {
+    if (maxMode) {
+      if (!(CHAT_MODES as readonly string[]).includes(maxMode)) throw new Error(`--max-mode must be one of: ${CHAT_MODES.join(", ")}`);
+      config.maxMode = maxMode as ChatMode;
+      console.log(modeNote(config.maxMode));
+    }
+    if (confirmFlag) config.confirmShell = true;
+    if (noConfirmFlag) {
+      config.confirmShell = false;
+      console.log("Shell commands are no longer confirmed in this terminal: the page's approval alone runs them.");
+    }
+    if (chatEditsFlag) {
+      config.allowChatWideEdits = true;
+      console.log("The page may now pre-approve edits for a whole chat.");
+    }
     if (add) {
       const real = await resolveFolderArg(add);
       if (!config.folders.includes(real)) config.folders.push(real);
@@ -275,6 +384,15 @@ export async function main(argv = process.argv.slice(2), dir = defaultConfigDir(
     console.error(`Could not listen on 127.0.0.1:${BRIDGE_PORT}: ${e.message}`);
     process.exit(1);
   });
+  // Claude Code processes (running or waiting on a card) must not outlive the daemon.
+  process.once("exit", killAllCliRuns);
+  for (const sig of ["SIGINT", "SIGTERM"] as const) {
+    process.once(sig, () => {
+      killAllCliRuns();
+      server.close();
+      process.exit(0);
+    });
+  }
   server.listen(BRIDGE_PORT, "127.0.0.1", () => console.log(`Orrery bridge listening on http://127.0.0.1:${BRIDGE_PORT} (${config.folders.length} folder(s), max mode ${config.maxMode})`));
 }
 

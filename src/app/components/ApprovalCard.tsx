@@ -5,6 +5,9 @@ import { ShieldQuestion } from "lucide-react";
 import { motion } from "framer-motion";
 import { FADE } from "@/lib/motion";
 import { useToolAnswers } from "./ToolAnswers";
+import { useFolders } from "@/app/hooks/useFolders";
+import { isBridgeModel } from "@/lib/bridge/client";
+import { isShellTool } from "@/lib/bridge/shellTools";
 import { approvalDetails, approvalTitle, CHAT_ALLOWABLE_TOOLS, hiddenRuns, showHidden } from "@/lib/utils/messageParts";
 
 /** Past this many lines the block says how long it is. */
@@ -43,6 +46,9 @@ export default function ApprovalCard({
   sendsOut?: { sendsOut?: boolean; folder?: string };
 }) {
   const answers = useToolAnswers();
+  // Reads the shared folder answer; the chat's own picker already fetched it.
+  const { noHostTools } = useFolders(false);
+  const bridgeShell = approvalId.startsWith("cli-") && isShellTool(toolName) && isBridgeModel(answers?.model) && noHostTools === true;
   const [showAll, setShowAll] = useState(false);
   // One answer per card: a double click, or a second click while the reply resumes, does nothing.
   const [answered, setAnswered] = useState(false);
@@ -76,6 +82,7 @@ export default function ApprovalCard({
             {sendsOut.folder ? `This chat can read ${sendsOut.folder}.` : "This chat has read files from a working folder."} Check what is being sent before you allow it.
           </p>
         )}
+        {bridgeShell && <p className="mt-0.5 text-xs text-amber-300">Confirm this command in the bridge&apos;s terminal.</p>}
         {block.length > 0 && lines > LONG_BLOCK && <p className="mt-1.5 text-xs text-zinc-400">{lines} lines</p>}
         {block.length > 0 && (
           <pre className="mt-1.5 max-h-64 overflow-auto rounded-sm text-xs font-mono text-zinc-200 whitespace-pre-wrap break-all">

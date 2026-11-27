@@ -3,11 +3,11 @@ import { EventEmitter } from "events";
 import { PassThrough, Writable } from "stream";
 import { spawn } from "child_process";
 import { request, type Server } from "node:http";
-import { mkdtempSync, mkdirSync, realpathSync, statSync, readFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, realpathSync, statSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir, homedir } from "node:os";
 import { join } from "node:path";
-import { controlResponse } from "@/lib/cliProviders";
-import { createBridgeServer, ensureConfig, main, type BridgeConfig } from "../../../scripts/bridge";
+import { controlResponse, killAllCliRuns, setShellConfirm } from "@/lib/cliProviders";
+import { createBridgeServer, ensureConfig, main, modeNote, terminalConfirm, type BridgeConfig } from "../../../scripts/bridge";
 
 vi.mock("child_process", async (importOriginal) => ({ ...(await importOriginal<typeof import("child_process")>()), spawn: vi.fn() }));
 
@@ -50,6 +50,7 @@ let port = 0;
 let logs: string[] = [];
 let folder = "";
 let cfg: BridgeConfig;
+let confirmImpl = vi.fn(async (_q: { tool: string; command: string; folder: string }): Promise<boolean | "no-tty"> => true);
 
 beforeEach(async () => {
   spawned = [];
@@ -63,12 +64,14 @@ beforeEach(async () => {
     return c as never;
   }) as never);
   folder = realpathSync(mkdtempSync(join(tmpdir(), "bridge-folder-")));
-  cfg = { token: TOKEN, origins: [ORIGIN], folders: [folder], maxMode: "ask" };
-  server = createBridgeServer(() => cfg, { log: (l) => logs.push(l), findBins: async () => new Set(["claude-code"]) });
+  cfg = { token: TOKEN, origins: [ORIGIN], folders: [folder], maxMode: "ask", confirmShell: true, allowChatWideEdits: false };
+  confirmImpl = vi.fn(async () => true);
+  server = createBridgeServer(() => cfg, { log: (l) => logs.push(l), findBins: async () => new Set(["claude-code"]), confirm: (q) => confirmImpl(q) });
   await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
   port = (server.address() as { port: number }).port;
 });
 afterEach(async () => {
+  setShellConfirm(null);
   for (const c of spawned) c.exit(null);
   await new Promise((r) => server.close(r));
   server.closeAllConnections?.();
@@ -143,16 +146,174 @@ describe("bridge server", () => {
     expect(spawned).toHaveLength(0);
   });
 
-  it("caps mode agent to ask when maxMode is ask", async () => {
-    const r = await call("POST", "/chat", { body: chatBody({ mode: "agent" }) });
-    expect(r.status).toBe(200);
-    const argv = vi.mocked(spawn).mock.calls[0][1] as string[];
-    expect(argv).toContain("--permission-prompt-tool");
-    expect(argv).not.toContain("acceptEdits");
-    // With maxMode agent the same request does get acceptEdits.
+  it("ranks modes by risk: ask (the only one with a shell) is above agent, which is above plan", async () => {
+    // maxMode agent: an ask request is lowered to agent (edits, no permission bridge, no shell).
     cfg = { ...cfg, maxMode: "agent" };
+    await call("POST", "/chat", { body: chatBody({ mode: "ask" }) });
+    const agentArgv = vi.mocked(spawn).mock.calls[0][1] as string[];
+    expect(agentArgv).toContain("acceptEdits");
+    expect(agentArgv).not.toContain("--permission-prompt-tool");
+    // maxMode plan: an agent request is lowered to plan.
+    cfg = { ...cfg, maxMode: "plan" };
     await call("POST", "/chat", { body: chatBody({ mode: "agent" }) });
-    expect(vi.mocked(spawn).mock.calls[1][1] as string[]).toContain("acceptEdits");
+    const planArgv = vi.mocked(spawn).mock.calls[1][1] as string[];
+    expect(planArgv).not.toContain("acceptEdits");
+    expect(planArgv[planArgv.lastIndexOf("--permission-mode") + 1]).toBe("plan");
+    // maxMode ask lets ask through.
+    cfg = { ...cfg, maxMode: "ask" };
+    await call("POST", "/chat", { body: chatBody({ mode: "ask" }) });
+    expect(vi.mocked(spawn).mock.calls[2][1] as string[]).toContain("--permission-prompt-tool");
+  });
+
+  it("runs Claude Code with --strict-mcp-config", async () => {
+    await call("POST", "/chat", { body: chatBody({ mode: "ask" }) });
+    expect(vi.mocked(spawn).mock.calls[0][1] as string[]).toContain("--strict-mcp-config");
+    await call("POST", "/chat", { body: chatBody({ mode: "chat", folder: undefined }) });
+    expect(vi.mocked(spawn).mock.calls[1][1] as string[]).toContain("--strict-mcp-config");
+  });
+
+  it("ignores the page's allowedTools unless allowChatWideEdits is on", async () => {
+    const ask = async () => {
+      autoReply = null;
+      spawned = [];
+      const first = call("POST", "/chat", { body: chatBody({ mode: "ask", allowedTools: ["Edit"] }) });
+      await until(() => spawned.length === 1);
+      const c = spawned[0];
+      const input = { file_path: `${folder}/a.txt` };
+      c.say({ type: "control_request", request_id: "req_e", request: { subtype: "can_use_tool", tool_name: "Edit", input, tool_use_id: "toolu_e" } });
+      return { c, first };
+    };
+    // Off (default): the edit still asks.
+    const off = await ask();
+    expect(chunks((await off.first).text).some((x) => x.type === "tool-approval-request")).toBe(true);
+    // On: the same request is allowed without a card.
+    cfg = { ...cfg, allowChatWideEdits: true };
+    const on = await ask();
+    await until(() => on.c.written.length >= 2);
+    expect(on.c.written[1]).toBe(controlResponse("req_e", { behavior: "allow" }));
+    on.c.reply("ok");
+    expect(chunks((await on.first).text).some((x) => x.type === "tool-approval-request")).toBe(false);
+  });
+
+  describe("shell approvals are confirmed in the terminal", () => {
+    /** Parks a request for `tool`, answers it as approved from the page, and returns what the daemon wrote to claude. */
+    async function approveFromPage(tool: string, input: Record<string, unknown>) {
+      autoReply = null;
+      const first = call("POST", "/chat", { body: chatBody({ mode: "ask" }) });
+      await until(() => spawned.length === 1);
+      const c = spawned[0];
+      c.say({ type: "control_request", request_id: "req_s", request: { subtype: "can_use_tool", tool_name: tool, input, tool_use_id: "toolu_s" } });
+      const asked = chunks((await first).text).find((x) => x.type === "tool-approval-request");
+      const assistant = { id: "a1", role: "assistant", parts: [{ type: "dynamic-tool", toolName: tool, toolCallId: "toolu_s", providerExecuted: true, state: "approval-responded", input, approval: { id: asked.approvalId, approved: true } }] };
+      const second = call("POST", "/chat", { body: chatBody({ mode: "ask", messages: [user("Hi"), assistant] }) });
+      await until(() => c.written.length >= 2);
+      c.reply("done");
+      await second;
+      return c.written[1];
+    }
+
+    it("asks about the command and folder, and runs it only on yes", async () => {
+      expect(await approveFromPage("Bash", { command: "ls -la" })).toBe(controlResponse("req_s", { behavior: "allow" }));
+      expect(confirmImpl).toHaveBeenCalledWith({ tool: "Bash", command: "ls -la", folder });
+    });
+    it("denies when the terminal says no", async () => {
+      confirmImpl = vi.fn(async () => false);
+      const w = JSON.parse(await approveFromPage("Bash", { command: "rm -rf x" }));
+      expect(w.response.response).toMatchObject({ behavior: "deny", message: expect.stringContaining("not confirmed") });
+    });
+    it("denies with a clear message when there is no terminal", async () => {
+      confirmImpl = vi.fn(async () => "no-tty" as const);
+      const w = JSON.parse(await approveFromPage("Bash", { command: "ls" }));
+      expect(w.response.response.behavior).toBe("deny");
+      expect(w.response.response.message).toMatch(/no terminal/);
+    });
+    it("does not ask when confirmShell is off, or for an edit", async () => {
+      cfg = { ...cfg, confirmShell: false };
+      expect(await approveFromPage("Bash", { command: "ls" })).toBe(controlResponse("req_s", { behavior: "allow" }));
+      cfg = { ...cfg, confirmShell: true };
+      spawned = [];
+      expect(await approveFromPage("Edit", { file_path: `${folder}/a.txt` })).toBe(controlResponse("req_s", { behavior: "allow" }));
+      expect(confirmImpl).not.toHaveBeenCalled();
+    });
+  });
+
+  it("kills live and parked runs on shutdown", async () => {
+    autoReply = null;
+    const parked = call("POST", "/chat", { body: chatBody({ mode: "ask" }) });
+    await until(() => spawned.length === 1);
+    spawned[0].say({ type: "control_request", request_id: "req_k", request: { subtype: "can_use_tool", tool_name: "Edit", input: { file_path: `${folder}/a.txt` }, tool_use_id: "toolu_k" } });
+    await parked;
+    const live = call("POST", "/chat", { body: chatBody({ conversationId: "other" }) });
+    await until(() => spawned.length === 2);
+    killAllCliRuns();
+    expect(spawned[0].kill).toHaveBeenCalled();
+    expect(spawned[1].kill).toHaveBeenCalled();
+    await live.catch(() => undefined);
+  });
+
+  it("takes only text from a user message (a file or URL part is never passed on)", async () => {
+    const msg = { id: "u1", role: "user", parts: [{ type: "text", text: "look" }, { type: "file", mediaType: "image/png", url: "https://evil.example/x.png" }] };
+    await call("POST", "/chat", { body: chatBody({ mode: "ask", messages: [msg] }) });
+    expect(spawned[0].written.join("")).toContain("look");
+    expect(spawned[0].written.join("")).not.toContain("evil.example");
+  });
+
+  it("claims its slot before reading the body: slow bodies cannot exceed the cap, and a disconnect frees the slot", async () => {
+    autoReply = null;
+    const slow = [1, 2, 3, 4].map(() => {
+      const req = request({ host: "127.0.0.1", port, method: "POST", path: "/chat", headers: { Origin: ORIGIN, Authorization: `Bearer ${TOKEN}`, "Content-Type": "application/json" } });
+      req.on("error", () => undefined);
+      req.write('{"messages":');
+      return req;
+    });
+    // A bad body answers 400 while a slot is free and 429 once all four are held.
+    const probe = async () => (await call("POST", "/chat", { raw: "{x" })).status;
+    let status = 0;
+    for (let i = 0; i < 200 && status !== 429; i++) {
+      status = await probe();
+      if (status !== 429) await pause();
+    }
+    expect(status).toBe(429);
+    expect(spawned).toHaveLength(0);
+    slow[0].destroy();
+    let freed = 0;
+    for (let i = 0; i < 200 && freed !== 400; i++) {
+      freed = await probe();
+      if (freed !== 400) await pause();
+    }
+    expect(freed).toBe(400);
+    for (const r of slow) r.destroy();
+  });
+
+  it("survives a broken config.json: 500 with no CORS headers and one log line, then serves again", async () => {
+    let broken = true;
+    const lines: string[] = [];
+    const s2 = createBridgeServer(
+      () => {
+        if (broken) throw new SyntaxError(`Unexpected token in {"token":"${TOKEN}"`);
+        return cfg;
+      },
+      { log: (l) => lines.push(l), findBins: async () => new Set(["claude-code"]), confirm: async () => true },
+    );
+    await new Promise<void>((r) => s2.listen(0, "127.0.0.1", r));
+    const p2 = (s2.address() as { port: number }).port;
+    const get = () =>
+      new Promise<{ status: number; headers: Record<string, unknown> }>((resolve, reject) => {
+        const req = request({ host: "127.0.0.1", port: p2, path: "/health", headers: { Origin: ORIGIN, Authorization: `Bearer ${TOKEN}` } }, (res) => {
+          res.resume();
+          res.on("end", () => resolve({ status: res.statusCode!, headers: res.headers }));
+        });
+        req.on("error", reject);
+        req.end();
+      });
+    const bad = await get();
+    expect(bad.status).toBe(500);
+    expect(bad.headers["access-control-allow-origin"]).toBeUndefined();
+    expect(lines.filter((l) => l.startsWith("error:"))).toHaveLength(1);
+    expect(lines.join("\n")).not.toContain(TOKEN);
+    broken = false;
+    expect((await get()).status).toBe(200);
+    await new Promise((r) => s2.close(r));
   });
 
   it("ignores args, env, bin and other extra body fields", async () => {
@@ -258,10 +419,53 @@ describe("bridge config", () => {
     expect(statSync(join(dir, "config.json")).mode & 0o777).toBe(0o600);
     expect(statSync(dir).mode & 0o777).toBe(0o700);
     expect(Buffer.from(a.config.token, "base64url")).toHaveLength(32);
-    expect(a.config).toMatchObject({ origins: [ORIGIN], folders: [], maxMode: "ask" });
+    expect(a.config).toMatchObject({ origins: [ORIGIN], folders: [], maxMode: "plan", confirmShell: true, allowChatWideEdits: false });
     const b = ensureConfig(dir);
     expect(b.created).toBe(false);
     expect(b.config.token).toBe(a.config.token);
+  });
+
+  it("--max-mode, --no-confirm-shell and --allow-chat-wide-edits are stored, and --max-mode prints what it allows", async () => {
+    const dir = join(mkdtempSync(join(tmpdir(), "bridge-cfg-")), ".orrery-bridge");
+    const out: string[] = [];
+    const spy = vi.spyOn(console, "log").mockImplementation((...a) => void out.push(a.join(" ")));
+    try {
+      await main(["--max-mode", "agent", "--no-confirm-shell", "--allow-chat-wide-edits"], dir);
+      expect(ensureConfig(dir).config).toMatchObject({ maxMode: "agent", confirmShell: false, allowChatWideEdits: true });
+      expect(out).toContain(modeNote("agent"));
+      await main(["--confirm-shell"], dir);
+      expect(ensureConfig(dir).config.confirmShell).toBe(true);
+      await expect(main(["--max-mode", "root"], dir)).rejects.toThrow(/must be one of/);
+    } finally {
+      spy.mockRestore();
+    }
+    expect(modeNote("plan")).toMatch(/read-only/);
+    expect(modeNote("ask")).toMatch(/terminal/);
+  });
+
+  it("an older config without the new keys keeps its mode and gets safe defaults", () => {
+    const dir = join(mkdtempSync(join(tmpdir(), "bridge-cfg-")), ".orrery-bridge");
+    ensureConfig(dir);
+    const file = join(dir, "config.json");
+    const old = { ...JSON.parse(readFileSync(file, "utf8")), maxMode: "ask" };
+    delete old.confirmShell;
+    delete old.allowChatWideEdits;
+    writeFileSync(file, JSON.stringify(old));
+    expect(ensureConfig(dir).config).toMatchObject({ maxMode: "ask", confirmShell: true, allowChatWideEdits: false });
+  });
+
+  it("terminalConfirm: no TTY is no-tty; y is yes; anything else and a timeout are no", async () => {
+    const tty = (answer?: string) => {
+      const stdin = Object.assign(new PassThrough(), { isTTY: true }) as never;
+      const stdout = new PassThrough() as never;
+      if (answer !== undefined) setTimeout(() => (stdin as PassThrough).write(answer + "\n"), 5);
+      return { stdin, stdout };
+    };
+    const q = { tool: "Bash", command: "ls\u001b[2J", folder: "/p" };
+    expect(await terminalConfirm({ stdin: new PassThrough() as never, stdout: new PassThrough() as never })(q)).toBe("no-tty");
+    expect(await terminalConfirm(tty("y"))(q)).toBe(true);
+    expect(await terminalConfirm(tty("n"))(q)).toBe(false);
+    expect(await terminalConfirm({ ...tty(), timeoutMs: 20 })(q)).toBe(false);
   });
 
   it("--add stores the real path, refuses home, --remove drops it, and the token prints only on request", async () => {

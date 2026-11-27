@@ -180,14 +180,14 @@ export async function POST(
       id: clientId,
       role,
       content,
-      parts,
-      attachments,
       model,
       inputTokens = 0,
       outputTokens = 0,
     } = body || {};
 
-    if (!role || !["user", "assistant", "system"].includes(role)) {
+    // Text only: a client-supplied `system` message or stored `parts` would reach the model (or render as cards) unvalidated.
+    // Structured turns go through the strict bridge handler above.
+    if (role !== "user" && role !== "assistant") {
       return NextResponse.json({ error: "Invalid role" }, { status: 400 });
     }
 
@@ -195,11 +195,8 @@ export async function POST(
       return NextResponse.json({ error: "content must be a string" }, { status: 400 });
     }
 
-    const partsJson = Array.isArray(parts) ? JSON.stringify(parts) : null;
-    const attachmentsJson =
-      Array.isArray(attachments) && attachments.length > 0
-        ? JSON.stringify(attachments)
-        : null;
+    const partsJson = null;
+    const attachmentsJson = null;
 
     let saved;
     if (clientId) {

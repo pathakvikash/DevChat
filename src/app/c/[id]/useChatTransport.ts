@@ -9,7 +9,8 @@ import { parseDataArtifact } from "@/lib/generativeUi/data";
 import { shouldAutoContinue, waitsForApproval, type AnyPart } from "@/lib/utils/messageParts";
 import type { ChatMode } from "@/lib/chat/modes";
 import type { AgentPane } from "@/lib/chat/agentMessages";
-import { buildSavePayload, type SavePayload } from "@/lib/bridge/client";
+import { buildSavePayload } from "@/lib/bridge/client";
+import { createSaveQueue } from "@/lib/bridge/saveQueue";
 import { createRoutingTransport, type BridgeTurn } from "@/app/hooks/bridgeTransport";
 
 /** Python tracebacks and our sandbox's own failures both start this way. */
@@ -166,42 +167,38 @@ export function useChatTransport(opts: ChatTransportOptions) {
     [serverTransport, getBridgeContext, onBridgeTurn],
   );
 
-  // A bridge turn never passes through this server, so the page saves the finished turn. The ids of user messages already
-  // saved are kept, so a resume after an approval (or a retry) does not send the question twice.
+  // A bridge turn never passes through this server, so the page saves the finished turn, in order (see saveQueue). The ids
+  // of user messages already saved are kept, so a resume after an approval (or a retry) does not send the question twice.
   const [bridgeSaveFailed, setBridgeSaveFailed] = useState(false);
-  const savedUserIds = useRef(new Set<string>());
-  const unsavedRef = useRef<SavePayload | null>(null);
-  const postBridgeTurn = useCallback(async () => {
-    const payload = unsavedRef.current;
-    if (!payload) return;
-    try {
-      const res = await fetch(`/api/conversations/${conversationId}/messages`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      if (payload.user) savedUserIds.current.add(payload.user.id);
-      if (unsavedRef.current === payload) unsavedRef.current = null;
-      setBridgeSaveFailed(false);
-    } catch {
-      setBridgeSaveFailed(true);
-    }
-  }, [conversationId]);
+  const [savedUserIds] = useState(() => new Set<string>());
+  const [saveQueue] = useState(() =>
+    createSaveQueue({
+      onFailed: setBridgeSaveFailed,
+      post: async ({ conversationId: id, payload }) => {
+        // The question may have been saved by an earlier job since this one was built.
+        const body = payload.user && savedUserIds.has(payload.user.id) ? { ...payload, user: undefined } : payload;
+        const res = await fetch(`/api/conversations/${id}/messages`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        if (payload.user) savedUserIds.add(payload.user.id);
+      },
+    }),
+  );
+  const retryBridgeSave = useCallback(() => saveQueue.retry(), [saveQueue]);
   /** Called from onFinish: saves the turn when it ran on the bridge. True when it did. */
   const persistBridgeTurn = useCallback(
     (finish: ChatFinish): boolean => {
       const turn = bridgeTurnRef.current;
       if (!turn) return false;
       bridgeTurnRef.current = null;
-      const payload = buildSavePayload({ messages: finish.messages ?? [], model: turn.model, continuing: turn.continuing, savedUserIds: savedUserIds.current });
-      if (payload) {
-        unsavedRef.current = payload;
-        void postBridgeTurn();
-      }
+      const payload = buildSavePayload({ messages: finish.messages ?? [], model: turn.model, continuing: turn.continuing, savedUserIds });
+      if (payload) void saveQueue.push({ conversationId, payload });
       return true;
     },
-    [postBridgeTurn],
+    [conversationId, saveQueue, savedUserIds],
   );
   // useChat keeps the callbacks it was created with, so onFinish goes through this ref.
   const persistBridgeRef = useRef(persistBridgeTurn);
@@ -270,5 +267,5 @@ export function useChatTransport(opts: ChatTransportOptions) {
     Object.assign(transportBodyRef.current, patch);
   }, []);
 
-  return { ...chat, isLoading, setRequestBody, runExecuteCode, bridgeSaveFailed, retryBridgeSave: postBridgeTurn };
+  return { ...chat, isLoading, setRequestBody, runExecuteCode, bridgeSaveFailed, retryBridgeSave };
 }

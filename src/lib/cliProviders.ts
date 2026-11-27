@@ -10,6 +10,9 @@ import type { LanguageModel } from "ai";
 import { PROVIDERS, ENV_ALIASES, providerOf } from "./providers";
 import { editInsideCwd } from "./editScope";
 import { CHAT_ALLOWABLE_TOOLS } from "./utils/messageParts";
+import { isShellTool } from "./bridge/shellTools";
+
+export { isShellTool };
 
 // `ai` only exports the `LanguageModel` union publicly; carve the v3 provider
 // interface out of it rather than depending on `@ai-sdk/provider` directly.
@@ -69,6 +72,8 @@ export interface CliInvocation {
   access?: "chat" | "plan" | "agent" | "ask";
   /** false = switch off the tool's own web search and fetch (workflow cards). Default true. */
   web?: boolean;
+  /** Only the local bridge sets this: adds --strict-mcp-config so no user-scope MCP server or connector loads. */
+  strictMcp?: boolean;
 }
 
 export interface CliProviderDef {
@@ -328,6 +333,10 @@ export function claudeAccessFlags(o: { cwd?: string; access?: string; bridged: b
   return ["--tools", "Read", "Glob", "Grep", ...(offline ? ["--strict-mcp-config"] : ["WebSearch", "WebFetch"]), ...(access === "plan" ? [] : ["--permission-mode", "manual"])];
 }
 
+/** `flags` plus --strict-mcp-config when asked for and not already there. Without the option the flags are returned as they are. */
+export const withStrictMcp = (flags: string[], strictMcp?: boolean): string[] =>
+  strictMcp && !flags.includes("--strict-mcp-config") ? [...flags, "--strict-mcp-config"] : flags;
+
 export const CLI_PROVIDERS: readonly CliProviderDef[] = [
   {
     id: "claude-code",
@@ -342,7 +351,7 @@ export const CLI_PROVIDERS: readonly CliProviderDef[] = [
     ],
     // --setting-sources "" skips the user's hooks/settings; --system-prompt replaces the
     // coding-agent prompt. Tool access widens with the working folder and mode.
-    invoke: ({ model, system, user, effort, cwd, access, web }) => {
+    invoke: ({ model, system, user, effort, cwd, access, web, strictMcp }) => {
       // Ask with a folder: every edit or command is a permission request on stdin/stdout (see `runCli`).
       const bridged = !!cwd && access === "ask";
       // Workflow cards (web === false): no network at all. `--tools default` would still carry Task (sub-agents, including a
@@ -362,7 +371,7 @@ export const CLI_PROVIDERS: readonly CliProviderDef[] = [
           "--disable-slash-commands",
           // Nobody answers prompts, so anything not pre-approved is denied. Ask mode is the exception: the bridge below answers.
           ...(bridged ? [] : ["--permission-prompts", "none"]),
-          ...claudeAccessFlags({ cwd, access, bridged, offline, allow }),
+          ...withStrictMcp(claudeAccessFlags({ cwd, access, bridged, offline, allow }), strictMcp),
           ...(access === "plan" ? ["--permission-mode", "plan"] : []),
           ...(system ? ["--system-prompt", defuseMentions(system, cwd || CLI_SCRATCH)] : []),
           ...(model !== "default" ? ["--model", model] : []),
@@ -947,7 +956,7 @@ interface LiveRun {
   spawnError?: string;
   stderr: string;
   lastActivity: number;
-  pending?: { approvalId: string; requestId: string; ttl: ReturnType<typeof setTimeout> };
+  pending?: { approvalId: string; requestId: string; toolName: string; input: unknown; ttl: ReturnType<typeof setTimeout> };
 }
 
 /** Parked runs by approval id (`cli-<tool_use id>`), oldest first. Lives in this server process only, on
@@ -956,6 +965,25 @@ const parkedRuns: Map<string, LiveRun> = ((globalThis as { __devchatParkedRuns?:
 /** A parked process is a live `claude` waiting on a card: bounded, so cards left open cannot pile them up. */
 const MAX_PARKED_PER_USER = 2;
 const MAX_PARKED = 8;
+
+export type ShellConfirm = (req: { toolName: string; input: unknown; cwd: string }) => Promise<{ ok: true } | { ok: false; message: string }>;
+/** Set by the local bridge only: a shell approval from the page is not enough until this says yes. Unset on the server. */
+let shellConfirm: ShellConfirm | null = null;
+export const setShellConfirm = (f: ShellConfirm | null) => {
+  shellConfirm = f;
+};
+
+/** Every process this module started and has not seen exit, so a daemon can kill them all on shutdown. */
+const liveProcs = new Set<ChildProcess>();
+/** Kills every live run, attached or parked (SIGTERM). */
+export function killAllCliRuns() {
+  for (const p of liveProcs) p.kill("SIGTERM");
+  for (const run of [...parkedRuns.values()]) {
+    if (run.pending) clearTimeout(run.pending.ttl);
+    run.pending = undefined;
+  }
+  parkedRuns.clear();
+}
 
 /** Denies the card and closes the process. Used on timeout and when the chat moves on. */
 function dropRun(run: LiveRun) {
@@ -1101,10 +1129,18 @@ function runCli(
         clearTimeout(p.ttl);
         parkedRuns.delete(p.approvalId);
         run.pending = undefined;
-        run.proc.stdin?.write(
-          controlResponse(p.requestId, resume.approved ? { behavior: "allow" } : { behavior: "deny", message: DENY_MESSAGE }),
-        );
         child = run.proc;
+        let decision: PermissionDecision = resume.approved ? { behavior: "allow" } : { behavior: "deny", message: DENY_MESSAGE };
+        // The bridge asks in its own terminal before a command runs: the page's Allow alone does not run it.
+        if (resume.approved && shellConfirm && isShellTool(p.toolName)) {
+          const c = await shellConfirm({ toolName: p.toolName, input: p.input, cwd: run.cwd });
+          if (!c.ok) decision = { behavior: "deny", message: c.message };
+        }
+        run.proc.stdin?.write(controlResponse(p.requestId, decision));
+        if (signal?.aborted) {
+          run.proc.kill("SIGTERM");
+          return controller.error(signal.reason ?? new Error("Aborted"));
+        }
       } else {
         const scratch = CLI_SCRATCH;
         await mkdir(scratch, { recursive: true });
@@ -1128,6 +1164,9 @@ function runCli(
           stderr: "",
           lastActivity: Date.now(),
         };
+        liveProcs.add(child);
+        child.once("close", () => liveProcs.delete(child!));
+        child.once("error", () => liveProcs.delete(child!));
         wireRun(run, child);
         if (spec!.holdStdin) child.stdin!.write(spec!.stdin ?? "");
         else child.stdin!.end(spec!.stdin ?? "");
@@ -1260,6 +1299,8 @@ function runCli(
         run.pending = {
           approvalId,
           requestId: ev.requestId,
+          toolName: ev.toolName,
+          input: ev.input,
           ttl: setTimeout(() => dropRun(run), PARK_MS),
         };
         evictParkedRuns(run.userId);
@@ -1380,7 +1421,7 @@ export function createCliModel(def: CliProviderDef, modelArg: string): LanguageM
         ),
       };
     }
-    const spec = def.invoke({ model: modelArg, system, user: flat.user, effort, cwd, access, web: po.web === false ? false : undefined });
+    const spec = def.invoke({ model: modelArg, system, user: flat.user, effort, cwd, access, web: po.web === false ? false : undefined, strictMcp: po.strictMcp === true ? true : undefined });
     const toolNames = new Set(tools.map((t) => t.name));
     // Only the tools that may be allowed for a chat, and only in Ask: Chat and Plan are read-only, whatever the list says.
     const allowed = new Set(

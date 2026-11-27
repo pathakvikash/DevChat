@@ -26,6 +26,12 @@ export default function BridgeSettings() {
         run goes through this server. Bridge chats use Claude Code&apos;s own tools (no Orrery memory, knowledge bases or generated interfaces), and bridge models work only on the
         computer running the bridge.
       </p>
+      <p className="text-sm text-zinc-400">
+        By default the bridge is read-only (Plan): Claude Code can read the folders you add and change nothing. To allow edits, run{" "}
+        <code className="font-mono text-zinc-200">npm run bridge -- --max-mode agent</code>. To allow commands, run{" "}
+        <code className="font-mono text-zinc-200">npm run bridge -- --max-mode ask</code>: each edit then needs your OK in the page, and each command is also confirmed in the
+        bridge&apos;s terminal.
+      </p>
       <pre className="glass-input overflow-x-auto rounded-[var(--glass-radius-md)] px-3 py-2 text-xs font-mono text-zinc-200 select-all">
         {"npm run bridge\nnpm run bridge -- --add /path/to/project"}
       </pre>

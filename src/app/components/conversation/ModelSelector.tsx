@@ -118,7 +118,8 @@ export default function ModelSelector({
   );
   // Deployed with a bridge token stored: the bridge's models join the list, disabled while it cannot be reached.
   const bridge = useBridge();
-  const { noHostTools } = useFolders(true, { bridge: true });
+  // Reads the folder answer (and fetches it) only when a bridge token is stored: no /api/folders call for everyone else.
+  const { noHostTools } = useFolders(bridge.hasToken, { bridge: true });
   const bridgeModels: ModelInfo[] =
     noHostTools === true && bridge.hasToken
       ? bridge.models.map((m) => ({

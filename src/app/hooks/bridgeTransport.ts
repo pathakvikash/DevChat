@@ -60,12 +60,11 @@ export function createRoutingTransport(opts: {
 
       if (!foldersSnapshot().loaded) await loadFolders();
       const noHostTools = serverHostToolsMissing(foldersSnapshot().data);
-      if (noHostTools !== true) return opts.server.sendMessages(options);
 
       await checkBridge(5_000);
       const s = bridgeSnapshot();
       const route = routeTurn({ model, noHostTools, status: s.status });
-      if (route.to === "blocked") throw new Error(bridgeProblemText(route.status, s.protocol) ?? "The local bridge is not ready.");
+      if (route.to === "blocked") throw new Error(bridgeProblemText(route.status, s.protocol) ?? "Could not check whether this server can run Claude Code. Reload the page and try again.");
       if (route.to === "server") return opts.server.sendMessages(options);
 
       // A resume after an approval ends with the assistant message: the same row is rewritten when saved.

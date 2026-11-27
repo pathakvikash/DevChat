@@ -34,6 +34,11 @@ describe("bridgeStatus", () => {
     expect(bridgeStatus(true, { kind: "rejected", errorName: "TypeError", safariOnHttps: true }).status).toBe("blocked");
     expect(bridgeStatus(true, { kind: "rejected", errorName: "NotAllowedError" }).status).toBe("blocked");
   });
+  it("is no-claude (not ready) when the bridge says Claude Code is missing", () => {
+    expect(bridgeStatus(true, answer({ protocol: BRIDGE_PROTOCOL, version: "0.1.0", claude: false })).status).toBe("no-claude");
+    expect(bridgeProblemText("no-claude")).toBe("Claude Code is not installed on this computer (or not on PATH)");
+    expect(routeTurn({ model: "claude-code/sonnet", noHostTools: true, status: "no-claude" })).toEqual({ to: "blocked", status: "no-claude" });
+  });
   it("has the agreed failure texts", () => {
     expect(bridgeProblemText("offline")).toBe("Start the bridge on this computer: npm run bridge");
     expect(bridgeProblemText("blocked")).toBe("Your browser blocked access to this computer. Allow local network access for this site, or use Chrome or Firefox");
@@ -52,9 +57,13 @@ describe("routeTurn", () => {
   it("goes to the bridge for a claude-code model on a deployment with the bridge ready", () => {
     expect(routeTurn({ model: "claude-code/sonnet", noHostTools: true, status: "ready" })).toEqual({ to: "bridge" });
   });
-  it("keeps the server path when Orrery runs locally, for other models, or while unknown", () => {
+  it("never sends a claude-code model to the server while the server's answer is unknown (it would answer with another model)", () => {
+    expect(routeTurn({ model: "claude-code/sonnet", noHostTools: null, status: "ready" })).toEqual({ to: "blocked", status: "ready" });
+    expect(routeTurn({ model: "claude-code/sonnet", noHostTools: null, status: "offline" })).toEqual({ to: "blocked", status: "offline" });
+    expect(routeTurn({ model: "mock/echo", noHostTools: null, status: "offline" })).toEqual({ to: "server" });
+  });
+  it("keeps the server path when Orrery runs locally or for other models", () => {
     expect(routeTurn({ model: "claude-code/sonnet", noHostTools: false, status: "ready" })).toEqual({ to: "server" });
-    expect(routeTurn({ model: "claude-code/sonnet", noHostTools: null, status: "ready" })).toEqual({ to: "server" });
     expect(routeTurn({ model: "mock/echo", noHostTools: true, status: "ready" })).toEqual({ to: "server" });
     expect(routeTurn({ model: "anthropic/claude-opus-5-5", noHostTools: true, status: "offline" })).toEqual({ to: "server" });
   });
