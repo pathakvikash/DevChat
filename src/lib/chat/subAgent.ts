@@ -111,7 +111,13 @@ export function helperProviderOptions(options: ProviderOptions | undefined, mode
 }
 
 function helperTools(tools: Record<string, Tool>): Record<string, Tool> {
-  return Object.fromEntries(Object.entries(tools).filter(([name]) => !STRIPPED_TOOLS.has(name)));
+  // The chat's URL and taint gates (buildTools gateUntrusted) need a person to answer a card; a helper has none, so they would stall it.
+  const gated = (name: string) => name === "fetchUrl" || name.startsWith("mcp_") || ["rememberFact", "forgetFact", "searchChats", "readChat"].includes(name);
+  return Object.fromEntries(
+    Object.entries(tools)
+      .filter(([name]) => !STRIPPED_TOOLS.has(name))
+      .map(([name, t]) => [name, gated(name) && typeof t.needsApproval === "function" ? ({ ...t, needsApproval: undefined } as Tool) : t]),
+  );
 }
 
 /** The report cap: a report, or a saved turn that is resent to a resumed helper, is cut to REPORT_MAX_CHARS. */

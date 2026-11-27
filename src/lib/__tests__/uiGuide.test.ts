@@ -72,3 +72,81 @@ describe("loadUiGuide tool", () => {
     }
   });
 });
+
+describe("honest replies", () => {
+  const BASE = "You are an assistant inside Orrery";
+
+  it("base prompt comes first with no user prompt, naming the real model", async () => {
+    const r = await buildSystemPrompt(opts({ modelId: "gpt-test-9" }));
+    expect(r.text.startsWith(BASE)).toBe(true);
+    expect(r.text).toContain('"gpt-test-9"');
+    expect(r.text).toContain("Never invent numbers, quotes, sources, URLs or results");
+  });
+
+  it("base prompt goes before the user's system prompt", async () => {
+    const r = await buildSystemPrompt(opts({ systemPrompt: "Talk like a pirate", useTools: true, modelId: "m1" }));
+    expect(r.text.startsWith(BASE)).toBe(true);
+    expect(r.text.indexOf(BASE)).toBeLessThan(r.text.indexOf("Talk like a pirate"));
+  });
+
+  it("tool claims follow the request: none without tools", async () => {
+    const none = (await buildSystemPrompt(opts())).text;
+    expect(none).toContain("no tools in this request");
+    expect(none).toContain("attached files and saved memory shown here");
+    expect(none).not.toContain("the tools defined in this request");
+    const some = (await buildSystemPrompt(opts({ useTools: true }))).text;
+    expect(some).toContain("the tools defined in this request");
+    expect(some).not.toContain("no tools in this request");
+  });
+
+  it("names no specific model when a fallback may serve, and does not promise fetchUrl", async () => {
+    const t = (await buildSystemPrompt(opts({ useTools: true, modelId: "primary-1", mayFallBack: true, activeToolIds: new Set(["fetchUrl"]) }))).text;
+    expect(t).not.toContain("primary-1");
+    expect(t).not.toContain("open it with fetchUrl before answering");
+    expect(t).toContain("if you have one; otherwise say you can't open links");
+  });
+
+  it("a CLI provider prompt does not list this request's tools", async () => {
+    const t = (await buildSystemPrompt(opts({ useTools: true, cli: true, modelId: "cli/x" }))).text;
+    expect(t).not.toContain("the tools defined in this request");
+    expect(t).not.toContain("no tools in this request");
+    expect(t).toContain('"cli/x"');
+  });
+
+  it("non-tool models still get honesty lines with or without the inlined guide", async () => {
+    for (const messages of [[user("hi")], [user("make a chart")]]) {
+      const t = (await buildSystemPrompt(opts({ messages }))).text;
+      expect(t).toContain("I can't check that");
+    }
+  });
+
+  it("link clause: opens with fetchUrl when present, otherwise says it cannot open links", async () => {
+    const withTool = (await buildSystemPrompt(opts({ useTools: true, activeToolIds: new Set(["fetchUrl"]) }))).text;
+    expect(withTool).toContain("open it with fetchUrl before answering");
+    expect(withTool).not.toContain("ask them to paste the content");
+    const noTool = (await buildSystemPrompt(opts({ useTools: true, activeToolIds: new Set(["webSearch"]) }))).text;
+    expect(noTool).toContain("if you have one; otherwise say you can't open links");
+    expect(noTool).toContain("never describe a page from its URL or name");
+    const chatOnly = (await buildSystemPrompt(opts())).text;
+    expect(chatOnly).toContain("say you can't open links here and ask them to paste the content");
+    expect(chatOnly).not.toContain("fetchUrl");
+  });
+
+  it("a default tool-model chat includes fetchUrl and the 'open it with fetchUrl' line", async () => {
+    const active = resolveActiveToolIds([], []);
+    expect(active.has("fetchUrl")).toBe(true);
+    const t = (await buildSystemPrompt(opts({ useTools: true, activeToolIds: active }))).text;
+    expect(t).toContain("open it with fetchUrl before answering");
+  });
+
+  it("persona wording says Orrery, not VAS", async () => {
+    expect((await buildSystemPrompt(opts({ useTools: true }))).text).not.toContain("You are VAS");
+    expect((await buildSystemPrompt(opts())).text).not.toContain("You are VAS");
+  });
+
+  it("sample-data rule is in the stub, the full guide and the artifact tool", () => {
+    expect(GENERATIVE_UI_STUB).toContain("Sample data");
+    expect(uiGuideText()).toContain("Sample data");
+    expect(TOOL_REGISTRY.createArtifact.modelDescription).toContain("Sample data");
+  });
+});

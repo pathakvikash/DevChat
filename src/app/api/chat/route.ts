@@ -20,7 +20,7 @@ import {
   type ToolSet,
   type ToolMode,
 } from "@/lib/chat/buildTools";
-import { canStartSubAgents, messageAgentTool, runAgentTool, type SubAgentToolOptions } from "@/lib/chat/buildTools";
+import { askAfterExternalText, canStartSubAgents, messageAgentTool, runAgentTool, type SubAgentToolOptions } from "@/lib/chat/buildTools";
 import {
   agentMessageModelText,
   agentPartRefused,
@@ -291,6 +291,9 @@ export async function POST(req: Request) {
     const agentTargets = sendToChatTargets(openPanes, conversationId ?? "", useTools && !sendsOutGate);
     const { text: finalSystemPrompt, sections } = await buildSystemPrompt({
       useTools,
+      modelId: servedModel,
+      mayFallBack: candidateModels.indexOf(servedModel) < candidateModels.length - 1,
+      cli: !!cliProvider,
       systemPrompt,
       skillIds,
       activeToolIds,
@@ -340,6 +343,7 @@ export async function POST(req: Request) {
           mode: toolMode,
           memoryDisabled,
           agentTargets,
+          gateUntrusted: true,
           allowedTools: Array.isArray(bodyAllowedTools)
             ? bodyAllowedTools.filter((t: unknown): t is string => typeof t === "string" && !answeredNow.has(t))
             : [],
@@ -416,8 +420,8 @@ export async function POST(req: Request) {
         maxParallel: cliProvider ? 1 : 3,
         activeChildren: new Set<string>(),
       };
-      aiTools.runAgent = runAgentTool(aiTools, subAgents);
-      aiTools.messageAgent = messageAgentTool(aiTools, subAgents);
+      aiTools.runAgent = askAfterExternalText(runAgentTool(aiTools, subAgents));
+      aiTools.messageAgent = askAfterExternalText(messageAgentTool(aiTools, subAgents));
     }
 
     // Built after the tools, so a sub-agent's toModelOutput applies to saved history too.

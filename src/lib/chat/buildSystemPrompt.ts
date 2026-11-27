@@ -18,7 +18,7 @@ import type { AppRecord } from "@/lib/apps/types";
 const VAS_TODO_SECTION = `TASK TRACKING — \`createTodos\` / \`createTodo\` / \`updateTodo\`
 You MUST use todos for ANY request with multiple steps. Call \`createTodos\` ONCE at the start with ALL steps listed, then update each with \`updateTodo\` as you complete it. This gives the user real-time progress — they can see exactly what you're doing. \`createTodo\` (singular) is for adding one-off items mid-task. This is mandatory.`;
 
-const VAS_SYSTEM_PROMPT_WITH_TOOLS_BASE = `You are VAS, an AI assistant with real tools. Use them — never claim you "cannot".
+const VAS_SYSTEM_PROMPT_WITH_TOOLS_BASE = `You are Orrery's AI assistant, with real tools. Use them instead of saying you cannot, but only when the tool is actually available.
 
 WEB SEARCH — \`webSearch({ query })\`
 Call for real-time or current data — news, prices, recent events, anything beyond your training. Returns top 5 results with title, URL, snippet. Cite URLs in your answer.
@@ -42,7 +42,7 @@ If the request is even slightly ambiguous, call this BEFORE any other tool. Ask 
 const VAS_KB_SECTION = `KNOWLEDGE BASE — \`searchKnowledgeBase({ query, topK })\`
 You have two data sources: (a) this tool for on-demand queries returning \`[source: filename#chunkN | score=X.XXX]\` excerpts, and (b) an auto-injected KB context block later in this prompt with top chunks already matched to the latest message. Call this tool when the user asks about their documents, says "find in the docs", or asks a domain question the KB likely covers. If it returns "No knowledge base attached", ask them to pick a KB in Model Settings.`;
 
-const VAS_SYSTEM_PROMPT_CHAT_ONLY = `You are VAS (chat-only, no tools). You can answer questions, write code in markdown blocks, analyze file attachments, and use KB context if attached. You cannot execute code or search the web.`;
+const VAS_SYSTEM_PROMPT_CHAT_ONLY = `This is chat-only mode (no tools). You can answer questions, write code in markdown blocks, analyze file attachments, and use KB context if attached. You cannot execute code or search the web.`;
 
 const VAS_ASK_SECTION = `--- Ask mode ---
 Some actions ask the user first. If one is denied, do not retry it; say what you would have done and ask how to go on.`;
@@ -58,6 +58,46 @@ servers right now.
 
 Never claim to have done any of those things. If the user asks for one, say it
 needs Agent mode and offer to do the read-only part now.`;
+
+export interface HonestyOptions {
+  modelId?: string;
+  useTools: boolean;
+  /** fetchUrl is among this request's tools. */
+  fetchUrl?: boolean;
+  /** A fallback model may serve this request, possibly without tools. */
+  mayFallBack?: boolean;
+  /** A CLI provider: it brings its own tools. */
+  cli?: boolean;
+}
+
+/** Always-on honesty rules, first in every prompt (before any user text), for every provider and model. */
+export function honestyBase({ modelId, useTools, fetchUrl, mayFallBack, cli }: HonestyOptions): string {
+  // With a fallback the serving model is not known yet, so none is named and tools are not promised.
+  const model = modelId && !mayFallBack ? `"${modelId}"` : "whichever serves this request, and you may not know which";
+  const known = "You can use only what is in this conversation and prompt (including any attached files and saved memory shown here)";
+  // A CLI provider brings its own tools, so this request's list says nothing about it.
+  const tools = cli
+    ? null
+    : useTools
+      ? `${known} and the tools defined in this request; never name or claim a tool you don't have. No browsing or app access unless a tool for it is present.`
+      : `You have no tools in this request: no browsing, code execution or app access. ${known}.`;
+  const asks = "When the user asks about a linked page,";
+  const cannot = "say you can't open links here and ask them to paste the content; never describe a page from its URL or name.";
+  const links =
+    fetchUrl && !mayFallBack && !cli
+      ? `${asks} open it with fetchUrl before answering.`
+      : useTools || cli
+        ? `${asks} open it with fetchUrl or another tool if you have one; otherwise ${cannot}`
+        : `${asks} ${cannot}`;
+  return [
+    `You are an assistant inside Orrery, a chat app. The underlying model is ${model}; never claim to be a model you are not sure of.`,
+    tools,
+    links,
+    'Say "I don\'t know" or "I can\'t check that" instead of guessing. Never invent numbers, quotes, sources, URLs or results.',
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
 
 /** The chats a model can message with sendToChat. Empty when none is open or the model has no tools. */
 export function openChatsSection(targets: AgentTarget[]): string | null {
@@ -93,6 +133,12 @@ export interface BuildSystemPromptOptions {
   sendsOutGate?: boolean;
   /** A CLI model's side chat sees the main chat's folder line. */
   showFolder?: boolean;
+  /** The model id actually served for this request, named in the base prompt. */
+  modelId?: string;
+  /** A fallback model may serve: the prompt names no specific model and does not promise tools. */
+  mayFallBack?: boolean;
+  /** A CLI provider brings its own tools: the prompt does not list this request's. */
+  cli?: boolean;
   /** Approved apps for this chat (none for side chats). Only used with tools. */
   apps?: AppRecord[];
 }
@@ -156,9 +202,12 @@ export async function buildSystemPrompt(
   const openChats = useTools ? openChatsSection(opts.agentTargets ?? []) : null;
   if (openChats) baseSections.push(openChats);
   // Without tools Ask is Chat; Plan still needs its instructions.
-  const base = useTools
-    ? baseSections.join("\n\n")
-    : [VAS_SYSTEM_PROMPT_CHAT_ONLY, planNote].filter(Boolean).join("\n\n");
+  const base = [
+    honestyBase({ modelId: opts.modelId, useTools, fetchUrl: useTools && activeToolIds.has("fetchUrl"), mayFallBack: opts.mayFallBack, cli: opts.cli }),
+    ...(useTools ? baseSections : [VAS_SYSTEM_PROMPT_CHAT_ONLY, planNote]),
+  ]
+    .filter(Boolean)
+    .join("\n\n");
 
   const customInstructions = await getSettingsKey(opts.userId, "customInstructions");
   const instructions =
