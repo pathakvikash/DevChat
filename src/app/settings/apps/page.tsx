@@ -89,8 +89,9 @@ function AppsContent() {
   const load = useCallback(async () => {
     try {
       // `all=1` asks for apps waiting for approval too; the list for ordinary users only has approved ones.
-      const data = await call<AppRecord[] | { apps: AppRecord[] }>("/api/apps?all=1");
+      const data = await call<AppRecord[] | { apps: AppRecord[]; owner?: boolean }>("/api/apps?all=1");
       setApps(Array.isArray(data) ? data : data.apps);
+      if (!Array.isArray(data) && data.owner === false) setReadOnlyMode(true);
       setLoadError(null);
     } catch (e) {
       setLoadError(e instanceof Error ? e.message : "Failed to load apps");
@@ -100,8 +101,8 @@ function AppsContent() {
   // First load: state is set from the promise callbacks (not in the effect body), `load` is for refreshes.
   useEffect(() => {
     let alive = true;
-    call<AppRecord[] | { apps: AppRecord[] }>("/api/apps?all=1")
-      .then((data) => { if (alive) { setApps(Array.isArray(data) ? data : data.apps); setLoadError(null); } })
+    call<AppRecord[] | { apps: AppRecord[]; owner?: boolean }>("/api/apps?all=1")
+      .then((data) => { if (alive) { setApps(Array.isArray(data) ? data : data.apps); if (!Array.isArray(data) && data.owner === false) setReadOnlyMode(true); setLoadError(null); } })
       .catch((e) => { if (alive) setLoadError(e instanceof Error ? e.message : "Failed to load apps"); })
       .finally(() => { if (alive) setLoading(false); });
     return () => { alive = false; };
@@ -240,7 +241,7 @@ function AppsContent() {
           </ul>
         )}
 
-        {!readOnlyMode && (
+        {!readOnlyMode && !loading && (
           <section className="glass-card rounded-[var(--glass-radius-xl)] p-5 sm:p-6 space-y-4" aria-labelledby="add-app-h">
             <h2 id="add-app-h" className="text-xl font-bold">Add app</h2>
             <form onSubmit={(e) => { e.preventDefault(); void runPreview(); }} className="flex gap-2 flex-wrap sm:flex-nowrap">
