@@ -8,7 +8,9 @@ import {
   type AnyPart,
   type ToolPart,
 } from "@/lib/utils/messageParts";
-import { useJsonRenderMessage, Renderer } from "@json-render/react";
+import { useEffect, useMemo, useRef } from "react";
+import { useJsonRenderMessage, Renderer, StateProvider, ActionProvider } from "@json-render/react";
+import { composeUiSubmit } from "@/lib/generativeUi/composeSubmit";
 import { registry } from "@/lib/generativeUi/registry";
 import { splitQuoteBlocks } from "@/lib/utils/quoteReply";
 import { cutNotesIn } from "@/lib/utils/fileMentions";
@@ -22,6 +24,8 @@ interface MessageContentProps {
   isStreaming: boolean;
   onOpenArtifact?: (id: string) => void;
   onClarificationAnswer?: (toolCallId: string, answer: string) => void;
+  /** Generative-UI form submit; set only on the last assistant message while idle. */
+  onUiSubmit?: (text: string) => void;
   /** Side chat: tool calls fold to one line, and prose has no width cap. */
   compact?: boolean;
   /** A user-role message that is formatted text (a workflow's "Post to a chat"): drawn as markdown, with diagrams. */
@@ -36,6 +40,7 @@ export default function MessageContent({
   isStreaming,
   onOpenArtifact,
   onClarificationAnswer,
+  onUiSubmit,
   compact = false,
   markdown = false,
 }: MessageContentProps) {
@@ -46,6 +51,20 @@ export default function MessageContent({
   // below, so they just fall through and render nothing — this hook is only
   // for reconstructing the spec for the Renderer, not for text extraction.
   const { spec, hasSpec } = useJsonRenderMessage(allParts as any);
+  // ActionProvider keeps only its first `handlers`, so route through a ref.
+  const submitRef = useRef(onUiSubmit);
+  useEffect(() => {
+    submitRef.current = onUiSubmit;
+  });
+  const handlers = useMemo(
+    () => ({
+      submit: (params: unknown) => {
+        const text = composeUiSubmit((params as { values?: unknown } | undefined)?.values);
+        if (text) submitRef.current?.(text);
+      },
+    }),
+    [],
+  );
 
   return (
     <>
@@ -112,7 +131,11 @@ export default function MessageContent({
       })}
       {isAssistant && hasSpec && spec && (
         <div className="max-w-2xl">
-          <Renderer spec={spec} registry={registry} loading={isStreaming} />
+          <StateProvider>
+            <ActionProvider handlers={handlers}>
+              <Renderer spec={spec} registry={registry} loading={isStreaming} />
+            </ActionProvider>
+          </StateProvider>
         </div>
       )}
       {isStreaming && !toolParts?.length && (

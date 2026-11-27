@@ -591,6 +591,7 @@ export function useChatPane(conversationId: string, { focused, kind, searchProvi
       if (run === compressRunRef.current) setIsCompressing(false);
     });
     fetchContextUsage();
+    window.dispatchEvent(new Event("vas:todos-updated"));
     // `finish.messages` is the chat store's live array; the `messages` closure
     // is from the last render, which has not happened yet when onFinish runs.
     const all = finish?.messages ?? messages;
@@ -838,7 +839,7 @@ export function useChatPane(conversationId: string, { focused, kind, searchProvi
 
   const {
     regenModal, setRegenModal,
-    handleClarificationAnswer, handleEditMessage, handleDeleteMessage, handleCopyMessage, handleForkMessage,
+    handleClarificationAnswer, handleUiSubmit, handleEditMessage, handleDeleteMessage, handleCopyMessage, handleForkMessage,
     handleRegenExecute,
   } = msgActions;
 
@@ -1119,7 +1120,7 @@ export function useChatPane(conversationId: string, { focused, kind, searchProvi
     isLoading, currentModelName,
     fetchConversation, refreshConversation, refreshConversationAndMessages,
     fetchContextUsage, handleModelSettingsSave, handleModelChange, handleWorkingFolderChange, handleKbToggle,
-    handleClarificationAnswer, handleEditMessage, handleDeleteMessage, handleCopyMessage, handleForkMessage,
+    handleClarificationAnswer, handleUiSubmit, handleEditMessage, handleDeleteMessage, handleCopyMessage, handleForkMessage,
     handleRegenerateMessage, handleRegenExecute, regenModal, setRegenModal,
     queued, queueMessage, editQueued, removeQueued, retryQueued,
     handleSubmit, isSubagent, sendToPane,

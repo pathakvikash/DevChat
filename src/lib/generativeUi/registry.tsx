@@ -254,4 +254,6 @@ export const { registry } = defineRegistry(catalog, {
       return <Chart type={props.type} title={props.title} data={data} />;
     },
   },
+  // Real handler is supplied by MessageContent's ActionProvider (per message).
+  actions: { submit: async () => {} },
 });
