@@ -266,7 +266,7 @@ export const MARKETING_PAGES: readonly MarketingPage[] = [
       },
     ],
     related: ["/features/visuals", "/use-cases/research", "/features/local-models"],
-    screenshot: { src: "/marketing/study.webp", alt: "An Orrery chat where a student asks how cells divide and gets a flowchart of the cell cycle from G1 to cytokinesis", width: 1280, height: 800 },
+    screenshot: { src: "/marketing/study.webp", alt: "An Orrery chat where a student asks how cells divide and gets a flowchart of the cell cycle: Grow, Copy DNA, Check, Split the DNA, Split the cell, and back to Grow", width: 1280, height: 800 },
   },
   {
     section: "use-cases",
@@ -448,7 +448,7 @@ export const MARKETING_PAGES: readonly MarketingPage[] = [
       },
     ],
     related: ["/features/visuals", "/features/agents", "/features/workflows"],
-    screenshot: { src: "/marketing/apps.webp", alt: "Orrery's Settings > Apps page listing two connected apps, Trade MVP with 3 tools and Print Pro 3D with 2 tools, both marked Read only and Reachable, above the Add app form", width: 1280, height: 800 },
+    screenshot: { src: "/marketing/apps.webp", alt: "An Orrery chat where the answer to "what's btc at right now?" comes from the connected Trade MVP app's get_ticker tool, with Print Pro 3D and Trade MVP listed under Apps in the sidebar", width: 1280, height: 800 },
   },
 ];
 

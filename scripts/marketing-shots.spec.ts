@@ -224,7 +224,7 @@ test("study", async ({ page }) => {
   await earlierChats(request);
   const reply = [
     "Cells divide in a loop called the cell cycle. Most of it is preparation, and the actual split is short.",
-    "```mermaid\nflowchart LR\n  G1[G1: grow] --> S[S: copy DNA]\n  S --> G2[G2: check]\n  G2 --> M[Mitosis: split DNA]\n  M --> C[Cytokinesis: split cell]\n  C --> G1\n```",
+    "```mermaid\nflowchart LR\n  G1[Grow] --> S[Copy DNA]\n  S --> G2[Check]\n  G2 --> M[Split the DNA]\n  M --> C[Split the cell]\n  C --> G1\n```",
     "Each daughter cell ends up with the same DNA as the original, then starts the loop again.",
   ].join("\n\n");
   const id = await seedChat(page, request, "cell division", HAIKU, [{ user: "explain how cells divide, with a diagram", assistant: reply }]);
@@ -280,8 +280,14 @@ test("apps", async ({ page }) => {
   const request = page.request;
   await stubModels(page);
   await earlierChats(request);
+  // Real price or no shot, as in "visuals".
+  const res = await fetch("https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT");
+  if (!res.ok) throw new Error(`Binance ticker answered ${res.status}: not showing an invented price`);
+  const ticker = (await res.json()) as { symbol: string; price: string };
+  if (!(+ticker.price > 0)) throw new Error("Binance returned no price");
   // Two small upstream apps on localhost (a manifest plus a stateless MCP endpoint, as in e2e/apps-settings.spec.ts),
-  // registered through the real routes, so Settings > Apps shows what a real registration shows.
+  // registered through the real routes, so the sidebar lists what a real registration lists. The shot is the chat
+  // (no app address shows), not Settings > Apps, whose rows show the localhost URLs.
   const upstreams = [
     await startApp(4101, "trade", "Trade MVP", "Public market data", "Looking up prices and candles", [
       ["get_klines", "Candlestick data for a symbol"],
@@ -301,11 +307,21 @@ test("apps", async ({ page }) => {
       await page.getByTestId("app-review").getByRole("button", { name: "Approve and add" }).click();
       await page.getByTestId("app-secret-box").getByRole("button", { name: "I have saved it" }).click();
     }
-    await page.goto("/settings/apps");
-    await expect(page.getByTestId("app-row-trade")).toContainText("3 tools");
-    await expect(page.getByTestId("app-row-printpro3d")).toContainText("2 tools");
-    await page.waitForLoadState("networkidle");
-    await page.waitForTimeout(1000);
+    const price = (+ticker.price).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    const text = `BTC/USDT is at ${price} right now, from Trade MVP's public market data.`;
+    const call = {
+      type: "tool-app_trade_get_ticker",
+      toolCallId: "call-ticker",
+      state: "output-available",
+      input: { symbol: "BTCUSDT" },
+      output: JSON.stringify(ticker),
+    };
+    const id = await seedChat(page, request, "btc price check", HAIKU, [
+      { user: "what's btc at right now?", assistant: text, parts: [call, { type: "text", text }] },
+    ]);
+    await open(page, id);
+    await expect(page.getByTestId("sidebar-apps").getByText("Trade MVP")).toBeVisible();
+    await expect(page.getByText("Tool: app_trade_get_ticker")).toBeVisible();
     await shoot(page, "apps");
   } finally {
     for (const u of upstreams) {
