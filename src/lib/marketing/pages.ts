@@ -387,7 +387,7 @@ export const MARKETING_PAGES: readonly MarketingPage[] = [
       },
     ],
     related: ["/features/agents", "/features/apps", "/use-cases/study"],
-    screenshot: { src: "/marketing/local-models.webp", alt: "The Orrery model picker open on the Ollama tab, listing llama3.2, qwen2.5-coder, mistral and gemma2 next to Anthropic, OpenAI and LM Studio", width: 1280, height: 800 },
+    screenshot: { src: "/marketing/local-models.webp", alt: "The Orrery model picker open on the Ollama tab, listing llama3.2:3b, qwen2.5-coder:7b, mistral:7b and gemma2:9b, with Anthropic and LM Studio tabs beside it", width: 1280, height: 800 },
   },
   {
     section: "features",
