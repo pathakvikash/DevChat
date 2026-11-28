@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { friendlyProviderErrorMessage, MODEL_UNAVAILABLE_MESSAGE } from "@/lib/chat/providerErrors";
+import { CREDITS_MESSAGE, friendlyProviderErrorMessage, MODEL_UNAVAILABLE_MESSAGE } from "@/lib/chat/providerErrors";
 
 const served = "openrouter/some-lab/some-model:free";
 
@@ -11,6 +11,7 @@ describe("friendlyProviderErrorMessage: a model the provider no longer serves", 
     "model_not_found",
     "some-model is not a valid model ID",
     '404 {"error":{"message":"model gpt-9 not found"}}',
+    '[GoogleGenerativeAI Error]: 404 models/gemini-pro is not found for API version v1beta, or is not supported for generateContent.',
   ])("tells the user to pick another model: %s", (raw) => {
     expect(friendlyProviderErrorMessage(raw, { servedModel: served, isOllama: false })).toBe(MODEL_UNAVAILABLE_MESSAGE);
   });
@@ -28,6 +29,15 @@ describe("friendlyProviderErrorMessage: a model the provider no longer serves", 
 
   it("passes a CLI login error through unchanged", () => {
     const raw = "Not logged in. Please run /login. (model not found in session, 401)";
+    expect(friendlyProviderErrorMessage(raw, { servedModel: "claude-code/default", isOllama: false })).toBeNull();
+  });
+
+  it.each([
+    '402 Payment Required',
+    '{"error":{"message":"Insufficient credits. Add more using https://openrouter.ai/credits","code":402}}',
+    "This request requires more credits, or fewer max_tokens.",
+  ])("says the account needs credits: %s", (raw) => {
+    expect(friendlyProviderErrorMessage(raw, { servedModel: served, isOllama: false })).toBe(CREDITS_MESSAGE);
     expect(friendlyProviderErrorMessage(raw, { servedModel: "claude-code/default", isOllama: false })).toBeNull();
   });
 });
