@@ -10,6 +10,7 @@ describe("friendlyProviderErrorMessage: a model the provider no longer serves", 
     "The model `x` does not exist or you do not have access to it.",
     "model_not_found",
     "some-model is not a valid model ID",
+    '404 {"error":{"message":"model gpt-9 not found"}}',
   ])("tells the user to pick another model: %s", (raw) => {
     expect(friendlyProviderErrorMessage(raw, { servedModel: served, isOllama: false })).toBe(MODEL_UNAVAILABLE_MESSAGE);
   });
@@ -18,5 +19,15 @@ describe("friendlyProviderErrorMessage: a model the provider no longer serves", 
     expect(friendlyProviderErrorMessage("401 Unauthorized", { servedModel: served, isOllama: false })).toMatch(/API key/);
     expect(friendlyProviderErrorMessage("socket hang up", { servedModel: served, isOllama: false })).toBeNull();
     expect(friendlyProviderErrorMessage("model not found", { servedModel: "ollama/x", isOllama: true })).toBeNull();
+  });
+
+  it("does not treat an unrelated 400 that mentions the model as the model being unavailable", () => {
+    const raw = '400 {"error":{"message":"Request for model claude-x failed: tool get_weather not found"}}';
+    expect(friendlyProviderErrorMessage(raw, { servedModel: "anthropic/claude-x", isOllama: false })).toBeNull();
+  });
+
+  it("passes a CLI login error through unchanged", () => {
+    const raw = "Not logged in. Please run /login. (model not found in session, 401)";
+    expect(friendlyProviderErrorMessage(raw, { servedModel: "claude-code/default", isOllama: false })).toBeNull();
   });
 });

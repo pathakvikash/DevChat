@@ -1,12 +1,14 @@
-import { providerForModel } from "@/lib/providers";
+import { isCliModelId, providerForModel } from "@/lib/providers";
 
 const AUTH_ERROR_PATTERN = /401|403|unauthorized|api.key|incorrect|invalid|no api key|auth/i;
 const TRANSIENT_ERROR_PATTERN =
   /rate.?limit|429|too many requests|timeout|timed? out|etimedout|econnreset|econnrefused|503|502|500 |temporarily unavailable|overloaded|fetch failed|network|socket|upstream/i;
 
 // A model the provider no longer serves (a free tier ended, an id was retired): another model fixes it, a retry does not.
+// Only real provider signals: an error code, OpenRouter's messages, OpenAI's "The model `x` does not exist", or a 404 about the model.
+// Not a loose "model ... not found": a 400 about a missing tool or file can mention the model too.
 const MODEL_UNAVAILABLE_PATTERN =
-  /unavailable for free|model_not_found|model[^.\n]{0,80}\b(is unavailable|not available|no longer available|not found|does not exist|has been (deprecated|retired|removed)|is not a valid model)|not a valid model/i;
+  /model_not_found|unavailable for free|no endpoints found|is not a valid model id|the model [`'"]?[\w./:@-]+[`'"]? does not exist|\b404\b[\s\S]{0,120}\bmodel\b|\bmodel\b[\s\S]{0,120}\b404\b/i;
 export const MODEL_UNAVAILABLE_MESSAGE = "This model is not available from its provider right now. Pick another model from the model picker and send again.";
 
 export function isTransientProviderError(msg: string): boolean {
@@ -26,7 +28,8 @@ export function friendlyProviderErrorMessage(
   rawMsg: string,
   opts: { servedModel: string; isOllama: boolean },
 ): string | null {
-  if (opts.isOllama) return null;
+  // CLI-backed models (claude-code/…, opencode/…) report their own login and model problems verbatim.
+  if (opts.isOllama || isCliModelId(opts.servedModel)) return null;
   // Before the auth check: "not a valid model" would otherwise read as a bad key.
   if (MODEL_UNAVAILABLE_PATTERN.test(rawMsg)) return MODEL_UNAVAILABLE_MESSAGE;
   if (!AUTH_ERROR_PATTERN.test(rawMsg)) return null;
