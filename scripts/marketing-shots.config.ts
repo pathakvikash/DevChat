@@ -11,8 +11,9 @@ export default defineConfig({
   retries: 0,
   reporter: [["list"]],
   grepInvert: undefined,
-  // Next must start from the repo root, not from this folder.
-  webServer: { ...(base.webServer as object), cwd: path.join(__dirname, "..") } as typeof base.webServer,
+  // Next must start from the repo root, not from this folder. Always its own server (never one already on the port):
+  // the script deletes chats, workflows, tables and apps, so it must only ever talk to the sanity server it started.
+  webServer: { ...(base.webServer as object), cwd: path.join(__dirname, ".."), reuseExistingServer: false } as typeof base.webServer,
   use: { baseURL: base.use?.baseURL, locale: "en-US", timezoneId: "UTC" },
   projects: [
     { name: "shots", use: { ...devices["Desktop Chrome"], viewport: { width: 1280, height: 800 }, deviceScaleFactor: 2, colorScheme: "light" } },

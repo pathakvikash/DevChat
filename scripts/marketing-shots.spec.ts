@@ -34,6 +34,9 @@ const LLAMA = MODELS.find((m) => m.id === "ollama/llama3.2:3b")!;
 async function signIn(page: Page) {
   expect(DB.endsWith("sanity.db")).toBe(true);
   await page.addInitScript(() => localStorage.setItem("vas:theme", "light"));
+  // Refuse to run, before any delete, unless this server is in sanity test-auth mode (the button exists only then).
+  await page.goto("/login");
+  await expect(page.getByRole("button", { name: "Sign in as test user" }), "not a sanity test-auth server: refusing to delete anything").toBeVisible({ timeout: 15_000 });
   const login = async () => {
     await page.goto("/login");
     await page.getByRole("button", { name: "Sign in as test user" }).click();
