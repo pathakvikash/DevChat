@@ -30,6 +30,16 @@ test("a feature page is public, with one h1, a canonical link and FAQ JSON-LD", 
   await expect(page.getByRole("link", { name: "Sign in to Orrery" }).first()).toHaveAttribute("href", "/login");
 });
 
+test("a feature page shows its screenshot, and signed-out visitors can fetch the image", async ({ page }) => {
+  await page.goto("/features/agents");
+  const img = page.getByRole("img", { name: /^Orrery in Agent mode/ });
+  await expect(img).toHaveAttribute("width", "1280");
+  const src = (await img.getAttribute("src"))!;
+  const res = await page.request.get(src, { maxRedirects: 0 });
+  expect(res.status()).toBe(200);
+  expect(res.headers()["content-type"]).toContain("image/webp");
+});
+
 test("marketing pages arrive as static HTML with no skeleton", async ({ request }) => {
   const html = await (await request.get("/features/agents")).text();
   expect(html).toContain("<h1");

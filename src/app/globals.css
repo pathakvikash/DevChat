@@ -55,6 +55,14 @@
   /* Accent glow */
   --glass-accent: rgba(59, 130, 246, 0.3);
   --glass-accent-strong: rgba(59, 130, 246, 0.5);
+
+  /* Status text and its tint (Settings > Apps): the dark values are Tailwind's emerald/amber/red shades. */
+  --ok-text: #6ee7b7;
+  --ok-bg: rgba(6, 78, 59, 0.4);
+  --warn-text: #fcd34d;
+  --warn-bg: rgba(120, 53, 15, 0.4);
+  --danger-text: #f87171;
+  --danger-btn-text: #fecaca;
 }
 
 [data-theme="light"] {
@@ -92,6 +100,14 @@
   --color-zinc-300: #3f3f46;
   --color-zinc-200: #27272a;
   --color-zinc-100: #18181b;
+
+  /* Light values: at least 4.5:1 on the page and on their own tint (checked in src/lib/__tests__/themeContrast.test.ts). */
+  --ok-text: #065f46;
+  --ok-bg: #d1fae5;
+  --warn-text: #92400e;
+  --warn-bg: #fef3c7;
+  --danger-text: #b91c1c;
+  --danger-btn-text: #991b1b;
 }
 
 /* ─── Glass utility classes ──────────────────────────── */

@@ -18,6 +18,7 @@
     "test:watch": "vitest",
     "sanity": "node scripts/sanity.mjs",
     "sanity:ui": "playwright show-report",
+    "marketing:shots": "SANITY_PORT=3381 SANITY_DIST_DIR_OVERRIDE=.next-sanity-3381 playwright test -c scripts/marketing-shots.config.ts",
     "bridge": "tsx scripts/bridge.ts",
     "db:seed": "npx tsx scripts/seed.ts",
     "vercel-build": "prisma generate --schema=prisma/postgres/schema.prisma && prisma migrate deploy --schema=prisma/postgres/schema.prisma && next build"

@@ -21,12 +21,8 @@ export interface MarketingPage {
   faq: { q: string; a: string }[];
   /** Paths of 2-3 related pages. */
   related: string[];
-  /**
-   * SCREENSHOT SLOT: drop a real capture into /public and set this, e.g.
-   * { src: "/marketing/agents.png", alt: "Orrery Agent mode asking to confirm a change", width: 1280, height: 800 }.
-   * Nothing renders until it is set. No screenshots are faked.
-   */
-  screenshot?: { src: string; alt: string; width: number; height: number };
+  /** A capture of the real app made by `npm run marketing:shots` (scripts/marketing-shots.spec.ts), saved in /public/marketing. */
+  screenshot: { src: string; alt: string; width: number; height: number };
 }
 
 export const MARKETING_PAGES: readonly MarketingPage[] = [
@@ -88,6 +84,7 @@ export const MARKETING_PAGES: readonly MarketingPage[] = [
       },
     ],
     related: ["/features/workflows", "/features/apps", "/use-cases/research"],
+    screenshot: { src: "/marketing/agents.webp", alt: "Orrery in Agent mode with Confirm each change on: a card asks to create a document called Offsite checklist, with Deny, Allow for this chat and Allow buttons", width: 1280, height: 800 },
   },
   {
     section: "features",
@@ -148,6 +145,7 @@ export const MARKETING_PAGES: readonly MarketingPage[] = [
       },
     ],
     related: ["/features/agents", "/features/apps", "/use-cases/research"],
+    screenshot: { src: "/marketing/workflows.webp", alt: "The News digest workflow in Orrery: cards from Run manually through Search the news and Write the digest to Post to a chat, each marked Done", width: 1280, height: 800 },
   },
   {
     section: "features",
@@ -212,6 +210,7 @@ export const MARKETING_PAGES: readonly MarketingPage[] = [
       },
     ],
     related: ["/use-cases/study", "/features/apps", "/features/agents"],
+    screenshot: { src: "/marketing/visuals.webp", alt: "An Orrery chat that answers btc 1m candles with a candlestick chart of 60 one-minute BTC/USDT candles", width: 1280, height: 800 },
   },
   {
     section: "use-cases",
@@ -267,6 +266,7 @@ export const MARKETING_PAGES: readonly MarketingPage[] = [
       },
     ],
     related: ["/features/visuals", "/use-cases/research", "/features/local-models"],
+    screenshot: { src: "/marketing/study.webp", alt: "An Orrery chat where a student asks how cells divide and gets a flowchart of the cell cycle: Grow, Copy DNA, Check, Split the DNA, Split the cell, and back to Grow", width: 1280, height: 800 },
   },
   {
     section: "use-cases",
@@ -326,6 +326,7 @@ export const MARKETING_PAGES: readonly MarketingPage[] = [
       },
     ],
     related: ["/features/agents", "/use-cases/study", "/features/workflows"],
+    screenshot: { src: "/marketing/research.webp", alt: "An Orrery chat that read a web page with the fetch URL tool and answered with good-fit and bad-idea lists for SQLite, plus a source link", width: 1280, height: 800 },
   },
   {
     section: "features",
@@ -386,6 +387,7 @@ export const MARKETING_PAGES: readonly MarketingPage[] = [
       },
     ],
     related: ["/features/agents", "/features/apps", "/use-cases/study"],
+    screenshot: { src: "/marketing/local-models.webp", alt: "The Orrery model picker open on the Ollama tab, listing llama3.2:3b, qwen2.5-coder:7b, mistral:7b and gemma2:9b, with Anthropic and LM Studio tabs beside it", width: 1280, height: 800 },
   },
   {
     section: "features",
@@ -446,6 +448,7 @@ export const MARKETING_PAGES: readonly MarketingPage[] = [
       },
     ],
     related: ["/features/visuals", "/features/agents", "/features/workflows"],
+    screenshot: { src: "/marketing/apps.webp", alt: "An Orrery chat where the answer to a question about the current BTC price comes from the connected Trade MVP app's get_ticker tool, with Print Pro 3D and Trade MVP listed under Apps in the sidebar", width: 1280, height: 800 },
   },
 ];
 

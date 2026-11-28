@@ -38,6 +38,6 @@ export const config = {
   // pairing code is their auth (see src/lib/providerPair.ts).
   matcher: [
     // Anchored: a folder is excluded with what is under it, a file only by its exact name.
-    "/((?!(?:api/auth|api/providers/pair/redeem|api/providers/pair/script|login|_next/static|_next/image)(?:/|$)|(?:robots\\.txt|sitemap\\.xml|opengraph-image(?:-[a-z0-9]+)?|twitter-image(?:-[a-z0-9]+)?|icon\\.svg|apple-icon\\.png|favicon\\.ico)$).*)",
+    "/((?!(?:api/auth|api/providers/pair/redeem|api/providers/pair/script|login|marketing|_next/static|_next/image)(?:/|$)|(?:robots\\.txt|sitemap\\.xml|opengraph-image(?:-[a-z0-9]+)?|twitter-image(?:-[a-z0-9]+)?|icon\\.svg|apple-icon\\.png|favicon\\.ico)$).*)",
   ],
 };

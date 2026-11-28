@@ -30,7 +30,8 @@ beforeEach(() => {
 
 describe("GET /api/apps", () => {
   it("owner with all=1 gets unapproved apps and a tools array on every record, never the secret", async () => {
-    const body = await (await get("?all=1")).json();
+    const { apps: body, owner } = await (await get("?all=1")).json();
+    expect(owner).toBe(true);
     expect(body.map((a: any) => a.id)).toEqual(["empty", "broken", "tools"]);
     for (const a of body) expect(Array.isArray(a.tools)).toBe(true);
     expect(body[2]).toMatchObject({ approved: false, tools: [{ name: "t", readOnly: true }] });
@@ -44,7 +45,8 @@ describe("GET /api/apps", () => {
 
   it("non-owner gets approved apps only, with no approved flag and no secret", async () => {
     h.canUseHostTools.mockResolvedValue(false);
-    const body = await (await get("?all=1")).json();
+    const { apps: body, owner } = await (await get("?all=1")).json();
+    expect(owner).toBe(false); // the Settings page hides Add app from the first paint
     expect(body.map((a: any) => a.id)).toEqual(["empty", "broken"]);
     for (const a of body) {
       expect(a).not.toHaveProperty("approved");

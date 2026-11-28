@@ -1,6 +1,6 @@
 import { prisma } from "@/lib/db";
 import { NextRequest, NextResponse } from "next/server";
-import { getSettingsKey } from "@/lib/settings";
+import { resolveNewChatModel } from "@/lib/resolveNewChatModel";
 import { requireUserId } from "@/lib/auth";
 import { deleteExpiredTemporaryChats } from "@/lib/temporaryChat";
 
@@ -62,7 +62,8 @@ export async function POST(req: NextRequest) {
       temporary,
     } = await req.json();
 
-    const model = bodyModel || await getSettingsKey(userId, "defaultModel") || undefined;
+    const picked = bodyModel ? { id: bodyModel as string, replaced: null, auto: false, name: undefined } : await resolveNewChatModel(userId);
+    const model = picked.id;
 
     const conversation = await prisma.conversation.create({
       data: {
@@ -79,7 +80,8 @@ export async function POST(req: NextRequest) {
       },
     });
 
-    return NextResponse.json(conversation, { status: 201 });
+    // modelReplaced: the server picked `to` (the saved default was gone, `from`, or none was saved); the page says so.
+    return NextResponse.json(picked.auto ? { ...conversation, modelReplaced: { from: picked.replaced, to: model, name: picked.name } } : conversation, { status: 201 });
   } catch (error) {
     console.error("Failed to create conversation:", error);
     return NextResponse.json(

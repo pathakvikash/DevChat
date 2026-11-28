@@ -50,6 +50,26 @@ test("owner adds an app: review card, then the secret is shown once", async ({ p
   await expect(page.getByText("test-secret-123")).toHaveCount(0);
 });
 
+test("a non-owner never sees the Add app form: the list response says so before anything is pressed", async ({ page }) => {
+  await page.route("**/api/apps?all=1", async (r) => {
+    await new Promise((done) => setTimeout(done, 600)); // the form must not flash in while the list loads
+    await r.fulfill({ json: { apps: [{ ...app, approved: undefined, tools: undefined }], owner: false } });
+  });
+  await page.goto("/settings/apps");
+  await expect(page.getByLabel("App URL")).toHaveCount(0);
+  await expect(page.getByTestId("app-row-printpro3d")).toBeVisible();
+  await expect(page.getByRole("note")).toContainText("Only the server owner");
+  await expect(page.getByLabel("App URL")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Check app" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Refresh Print Pro 3D" })).toHaveCount(0);
+});
+
+test("the real list route tells the signed-in owner they are the owner", async ({ request }) => {
+  const body = await (await request.get("/api/apps?all=1")).json();
+  expect(body.owner).toBe(true);
+  expect(Array.isArray(body.apps)).toBe(true);
+});
+
 test("a 403 on management calls turns the page read-only", async ({ page }) => {
   await page.route("**/api/apps?all=1", (r) => r.fulfill({ json: [app] }));
   await page.route("**/api/apps/preview", (r) => r.fulfill({ status: 403, json: { error: "Owner only" } }));

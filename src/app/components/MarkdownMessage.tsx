@@ -2,6 +2,7 @@
 
 import { createContext, useContext } from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
+import { remarkSoftBreaks } from "@/lib/markdownBreaks";
 import CodeBlock from "./CodeBlock";
 import MermaidBlock from "./MermaidBlock";
 import { linkTarget, tooDeeplyNested } from "@/lib/markdownGuard";
@@ -52,6 +53,8 @@ const components: Components = {
   h3: ({ children }) => (
     <h3 className="text-lg font-bold mt-2 mb-1">{children}</h3>
   ),
+  // pre-line: a single newline inside a paragraph (a soft break) shows as a line break, as models other than
+  // Claude often write lists and addresses that way. Code blocks and tables are not <p>, so they are unaffected.
   p: ({ children }) => <p className="mb-2 leading-relaxed">{children}</p>,
   ul: ({ children }) => (
     <ul className="list-disc list-inside mb-2 space-y-1">{children}</ul>
@@ -118,7 +121,7 @@ export default function MarkdownMessage({ content, streaming = false, fromWorkfl
   return (
     <div className={`prose prose-invert max-w-none min-w-0 overflow-hidden${streaming ? " md-stream" : ""}`}>
       <OpenFence.Provider value={streaming ? openFenceBody(content) : null}>
-        <ReactMarkdown components={fromWorkflow ? workflowComponents : components}>{content}</ReactMarkdown>
+        <ReactMarkdown remarkPlugins={[remarkSoftBreaks]} components={fromWorkflow ? workflowComponents : components}>{content}</ReactMarkdown>
       </OpenFence.Provider>
     </div>
   );

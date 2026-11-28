@@ -36,6 +36,18 @@ describe("withFallback", () => {
     expect(second.mock.calls[0][0].providerOptions).toEqual({ y: 2 });
   });
 
+  it.each([
+    "404 models/gemini-pro is not found for API version v1beta, or is not supported for generateContent.",
+    '402 {"error":{"message":"Insufficient credits"}}',
+  ])("tries the next candidate when the first is gone or needs credits: %s", async (msg) => {
+    const first = vi.fn().mockRejectedValue(new Error(msg));
+    const second = vi.fn().mockResolvedValue(ok("hi"));
+    const model = withFallback(mock(first), { primaryId: "openai/a", fallbacks: [{ id: "groq/b", model: mock(second) }], baseDelayMs: 0 });
+    await call(model);
+    expect(first).toHaveBeenCalledTimes(1);
+    expect(second).toHaveBeenCalledTimes(1);
+  });
+
   it("retries a transient error on the same model before falling back", async () => {
     const first = vi.fn().mockRejectedValueOnce(new Error("503 overloaded")).mockResolvedValueOnce(ok("again"));
     const second = vi.fn();

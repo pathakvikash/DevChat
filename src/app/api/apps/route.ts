@@ -9,8 +9,7 @@ export async function GET(req: NextRequest) {
     // `all=1` (Settings > Apps) adds apps waiting for approval, for the owner only; everyone else gets approved apps.
     const includeUnapproved = owner && req.nextUrl.searchParams.get("all") === "1";
     const apps = await listApps(userId, { includeUnapproved });
-    return NextResponse.json(
-      apps.map((a) => ({
+    const rows = apps.map((a) => ({
         id: a.id,
         name: a.name,
         icon: a.icon,
@@ -21,8 +20,10 @@ export async function GET(req: NextRequest) {
         status: a.status,
         // Owner view: the review state and the tool list the Settings page shows (names and schemas, never the secret).
         ...(owner ? { approved: a.approved, tools: a.tools ?? [] } : {}),
-      })),
-    );
+      }));
+    // Settings > Apps (`all=1`) also needs to know up front whether to show the Add app form: { apps, owner }.
+    // The sidebar and chat read the plain array.
+    return NextResponse.json(req.nextUrl.searchParams.get("all") === "1" ? { apps: rows, owner } : rows);
   });
 }
 
