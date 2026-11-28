@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { pickDefaultModel, PREFERRED_MODEL_ID, rankDefaultModels } from "@/lib/defaultModel";
-import { MODEL_NOTE_KEY, takeModelNote } from "@/app/hooks/useConversationsApi";
+import { MODEL_NOTE_KEY, shouldNoteModel, takeModelNote } from "@/app/hooks/useConversationsApi";
 
 const m = (id: string, disabledReason?: string) => ({ id, disabledReason });
 const OPENROUTER_HAIKU = "openrouter/anthropic/claude-haiku-5.5";
@@ -87,5 +87,17 @@ describe("takeModelNote", () => {
     const store = new Map<string, string>([[`${MODEL_NOTE_KEY}c2`, JSON.stringify({ from: null, to: "anthropic/claude-haiku-5-5", name: "Claude Haiku 5.5" })]]);
     vi.stubGlobal("sessionStorage", { getItem: (k: string) => store.get(k) ?? null, removeItem: (k: string) => store.delete(k) });
     expect(takeModelNote("c2")).toBe("Using Claude Haiku 5.5. Change it in the model picker or set a default in Settings.");
+  });
+});
+
+describe("shouldNoteModel", () => {
+  it("notes an auto-picked model once, and again only when it changes", () => {
+    expect(shouldNoteModel({ from: null, to: "a/x" }, null)).toBe(true);
+    expect(shouldNoteModel({ from: null, to: "a/x" }, "a/x")).toBe(false);
+    expect(shouldNoteModel({ from: null, to: "a/y" }, "a/x")).toBe(true);
+  });
+
+  it("always notes a saved default that is no longer available", () => {
+    expect(shouldNoteModel({ from: "o/gone", to: "a/x" }, "a/x")).toBe(true);
   });
 });
