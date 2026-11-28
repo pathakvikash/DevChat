@@ -1,5 +1,5 @@
 import { initializeOllamaModels, listModels, type ProviderCreds } from "@/lib/models";
-import { pickDefaultModel } from "@/lib/defaultModel";
+import { rankDefaultModels } from "@/lib/defaultModel";
 import { getSettingsKey } from "@/lib/settings";
 import { providerForModel } from "@/lib/providers";
 import { resolveProviderCreds } from "@/lib/apiKeys";
@@ -23,11 +23,13 @@ export async function resolveModelCandidates(
   const creds = await resolveProviderCreds(opts.userId);
 
   let model = opts.requestedModel;
+  const defaults: string[] = [];
   if (!model) {
     const { models } = await listModels(creds, await canUseHostTools(opts.userId));
-    const picked = pickDefaultModel(await getSettingsKey(opts.userId, "defaultModel"), models);
-    if (!picked.id) throw new Error("No models available");
-    model = picked.id;
+    // The server's own list only: a saved bridge model is the browser's, not ours to call.
+    defaults.push(...rankDefaultModels(await getSettingsKey(opts.userId, "defaultModel"), models, false).slice(0, 3).map((m) => m.id));
+    if (!defaults[0]) throw new Error("No models available");
+    model = defaults[0];
   } else {
     // getModel() for an Ollama id needs the tag cache warm.
     await initializeOllamaModels();
@@ -47,6 +49,7 @@ export async function resolveModelCandidates(
     if (m && !candidateModels.includes(m)) candidateModels.push(m);
   };
   pushCandidate(model);
+  defaults.forEach(pushCandidate); // no model asked for: the next best ones, in case the first is rejected
   pushCandidate(opts.fallbackModel);
   pushCandidate(process.env.VAS_FALLBACK_MODEL);
 

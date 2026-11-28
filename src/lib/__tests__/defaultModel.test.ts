@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { pickDefaultModel, PREFERRED_MODEL_ID } from "@/lib/defaultModel";
+import { pickDefaultModel, PREFERRED_MODEL_ID, rankDefaultModels } from "@/lib/defaultModel";
 import { MODEL_NOTE_KEY, takeModelNote } from "@/app/hooks/useConversationsApi";
 
 const m = (id: string, disabledReason?: string) => ({ id, disabledReason });
@@ -25,10 +25,35 @@ describe("pickDefaultModel", () => {
     const list = [m("openai/gpt-x"), m(OPENROUTER_HAIKU), local("ollama/a", false), local("ollama/b", true)];
     expect(pickDefaultModel(null, list).id).toBe("ollama/b");
     expect(pickDefaultModel(null, [m("openai/gpt-x"), m("lmstudio/q")]).id).toBe("lmstudio/q");
-    expect(pickDefaultModel(null, [m("openai/gpt-x"), m("openrouter/a/b:free")]).id).toBe("openrouter/a/b:free");
     expect(pickDefaultModel(null, [m("openai/gpt-x"), m(PREFERRED_MODEL_ID), m("ollama/b")]).id).toBe(PREFERRED_MODEL_ID);
     // A saved default that is listed still wins over all of it, and is not "auto".
     expect(pickDefaultModel("openai/gpt-x", list)).toEqual({ id: "openai/gpt-x", replaced: null, auto: false });
+  });
+
+  it("ranks: saved, Haiku (Anthropic), local, Haiku (OpenRouter), free with tools, then the rest", () => {
+    const list = [
+      m("openai/gpt-x"),
+      { id: "openrouter/a/notools:free", supportsTools: false },
+      { id: "openrouter/a/tools:free", supportsTools: true },
+      m(OPENROUTER_HAIKU),
+      m("ollama/l"),
+      m(PREFERRED_MODEL_ID),
+      m("openai/saved"),
+    ];
+    const ids = (saved: string | null) => rankDefaultModels(saved, list, false).map((x) => x.id);
+    expect(ids("openai/saved")).toEqual(["openai/saved", PREFERRED_MODEL_ID, "ollama/l", OPENROUTER_HAIKU, "openrouter/a/tools:free", "openai/gpt-x", "openrouter/a/notools:free"]);
+    expect(ids(null).slice(0, 2)).toEqual([PREFERRED_MODEL_ID, "ollama/l"]);
+    // Only OpenRouter listed: Haiku, not the arbitrary first free model.
+    expect(pickDefaultModel(null, [{ id: "openrouter/a/tools:free", supportsTools: true }, m(OPENROUTER_HAIKU)]).id).toBe(OPENROUTER_HAIKU);
+    expect(pickDefaultModel(null, [m("openai/gpt-x"), { id: "openrouter/a/b:free", supportsTools: true }]).id).toBe("openrouter/a/b:free");
+  });
+
+  it("on the server path a saved bridge model that the server does not list is not used", () => {
+    const list = [m("openai/gpt-x")];
+    for (const saved of ["ollama/llama3.2:3b", "claude-code/default"]) {
+      expect(pickDefaultModel(saved, list, false)).toMatchObject({ id: "openai/gpt-x", replaced: saved, auto: true });
+      expect(pickDefaultModel(saved, list).id).toBe(saved); // the picker still keeps it
+    }
   });
 
   it("3. otherwise the first usable listed model, and never an id that is not listed", () => {
