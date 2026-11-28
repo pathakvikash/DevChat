@@ -448,7 +448,7 @@ export const MARKETING_PAGES: readonly MarketingPage[] = [
       },
     ],
     related: ["/features/visuals", "/features/agents", "/features/workflows"],
-    screenshot: { src: "/marketing/apps.webp", alt: "An Orrery chat where the answer to "what's btc at right now?" comes from the connected Trade MVP app's get_ticker tool, with Print Pro 3D and Trade MVP listed under Apps in the sidebar", width: 1280, height: 800 },
+    screenshot: { src: "/marketing/apps.webp", alt: "An Orrery chat where the answer to a question about the current BTC price comes from the connected Trade MVP app's get_ticker tool, with Print Pro 3D and Trade MVP listed under Apps in the sidebar", width: 1280, height: 800 },
   },
 ];
 

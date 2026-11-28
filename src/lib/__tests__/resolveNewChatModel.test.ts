@@ -21,7 +21,7 @@ describe("resolveNewChatModel", () => {
       models: [model("anthropic/claude-haiku-5-5")],
       status: [{ id: "openai", label: "OpenAI", configured: true, modelCount: 0, error: "Could not reach this provider" }],
     });
-    expect(await resolveNewChatModel("u1")).toEqual({ id: "openai/gpt-x", replaced: null });
+    expect(await resolveNewChatModel("u1")).toEqual({ id: "openai/gpt-x", replaced: null, auto: false });
   });
 
   it("still replaces a saved model that is gone while its provider answers", async () => {
