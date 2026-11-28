@@ -27,7 +27,10 @@ export async function resolveModelCandidates(
   if (!model) {
     const { models } = await listModels(creds, await canUseHostTools(opts.userId));
     // The server's own list only: a saved bridge model is the browser's, not ours to call.
-    defaults.push(...rankDefaultModels(await getSettingsKey(opts.userId, "defaultModel"), models, false).slice(0, 3).map((m) => m.id));
+    const saved = await getSettingsKey(opts.userId, "defaultModel");
+    // The first may be any listed model; the extra candidates only a named rung, so a fallback never lands on an unknown model.
+    const ids = [rankDefaultModels(saved, models, false)[0], ...rankDefaultModels(saved, models, false, true)].filter(Boolean).map((m) => m.id);
+    defaults.push(...ids.filter((id, i) => ids.indexOf(id) === i).slice(0, 3));
     if (!defaults[0]) throw new Error("No models available");
     model = defaults[0];
   } else {

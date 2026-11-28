@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { pickDefaultModel, PREFERRED_MODEL_ID, rankDefaultModels } from "@/lib/defaultModel";
-import { MODEL_NOTE_KEY, shouldNoteModel, takeModelNote } from "@/app/hooks/useConversationsApi";
+import { createConversation, MODEL_NOTE_KEY, shouldNoteModel, takeModelNote } from "@/app/hooks/useConversationsApi";
 
 const m = (id: string, disabledReason?: string) => ({ id, disabledReason });
 const OPENROUTER_HAIKU = "openrouter/anthropic/claude-haiku-5.5";
@@ -99,5 +99,16 @@ describe("shouldNoteModel", () => {
 
   it("always notes a saved default that is no longer available", () => {
     expect(shouldNoteModel({ from: "o/gone", to: "a/x" }, "a/x")).toBe(true);
+  });
+});
+
+describe("createConversation model note", () => {
+  it("stores the note even when localStorage cannot be read", async () => {
+    const session = new Map<string, string>();
+    vi.stubGlobal("localStorage", { getItem: () => { throw new Error("blocked"); }, setItem: () => { throw new Error("blocked"); } });
+    vi.stubGlobal("sessionStorage", { setItem: (k: string, v: string) => session.set(k, v) });
+    vi.stubGlobal("fetch", vi.fn(async () => ({ ok: true, json: async () => ({ id: "c9", modelReplaced: { from: null, to: "a/x" } }) })));
+    await createConversation();
+    expect(session.get(`${MODEL_NOTE_KEY}c9`)).toContain("a/x");
   });
 });

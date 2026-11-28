@@ -29,13 +29,14 @@ export async function createConversation(payload?: { title?: string; model?: str
   // The saved default model was not listed any more, so the server picked another. The chat page shows the note
   // when it opens (a toast from here would be gone before the page changes).
   if (conv.modelReplaced) {
-    try {
-      const last = localStorage.getItem(LAST_NOTED_MODEL_KEY);
-      if (shouldNoteModel(conv.modelReplaced, last)) {
+    let last: string | null = null;
+    try { last = localStorage.getItem(LAST_NOTED_MODEL_KEY); } catch {} // unreadable: nothing noted yet
+    if (shouldNoteModel(conv.modelReplaced, last)) {
+      try {
         sessionStorage.setItem(`${MODEL_NOTE_KEY}${conv.id}`, JSON.stringify(conv.modelReplaced));
         localStorage.setItem(LAST_NOTED_MODEL_KEY, conv.modelReplaced.to);
-      }
-    } catch {}
+      } catch {}
+    }
   }
   return conv;
 }

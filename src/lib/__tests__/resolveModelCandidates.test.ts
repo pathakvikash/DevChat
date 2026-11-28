@@ -39,4 +39,10 @@ describe("resolveModelCandidates default model", () => {
       expect(r.ok && r.candidateModels).toEqual(["openai/gpt-x"]);
     }
   });
+
+  it("never adds an unnamed listed model as an extra candidate, but may use it as the first", async () => {
+    models.list = [{ id: "openai/gpt-big" }, { id: "openai/gpt-pricey" }];
+    const r = await run();
+    expect(r.ok && r.candidateModels).toEqual(["openai/gpt-big"]);
+  });
 });

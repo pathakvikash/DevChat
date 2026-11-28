@@ -40,4 +40,16 @@ describe("friendlyProviderErrorMessage: a model the provider no longer serves", 
     expect(friendlyProviderErrorMessage(raw, { servedModel: served, isOllama: false })).toBe(CREDITS_MESSAGE);
     expect(friendlyProviderErrorMessage(raw, { servedModel: "claude-code/default", isOllama: false })).toBeNull();
   });
+
+  it.each([
+    "400 {\"error\":{\"message\":\"prompt is 402 tokens too long\"}}",
+    "400 prompt is 402 tokens",
+    "This request has more credits than expected",
+  ])("does not read a plain error as credits: %s", (raw) => {
+    expect(friendlyProviderErrorMessage(raw, { servedModel: served, isOllama: false })).not.toBe(CREDITS_MESSAGE);
+  });
+
+  it.each(["401 Unauthorized: invalid x-api-key (trace 402)", "403 Forbidden: Payment Required"])("treats a 401/403 as auth, not credits: %s", (raw) => {
+    expect(friendlyProviderErrorMessage(raw, { servedModel: served, isOllama: false })).toMatch(/API key/);
+  });
 });

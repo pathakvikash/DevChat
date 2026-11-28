@@ -23,9 +23,9 @@ const isFree = (id: string) => id.startsWith("openrouter/") && id.endsWith(":fre
  * 3. a local model the list has (Ollama, LM Studio), one with tools first;
  * 4. Haiku 5.5 through OpenRouter;
  * 5. a free model known to support tools;
- * 6. any other usable listed model.
+ * 6. any other usable listed model (left out with `namedOnly`, for fallbacks that must not pick an unknown, maybe costly, model).
  */
-export function rankDefaultModels(saved: string | null | undefined, models: Listed[], keepBridge = true): Listed[] {
+export function rankDefaultModels(saved: string | null | undefined, models: Listed[], keepBridge = true, namedOnly = false): Listed[] {
   const usable = models.filter((m) => !m.disabledReason);
   const local = usable.filter((m) => isLocal(m.id));
   const ranked = [
@@ -35,7 +35,7 @@ export function rankDefaultModels(saved: string | null | undefined, models: List
     ...local,
     ...usable.filter((m) => m.id.startsWith("openrouter/") && m.id.endsWith(`/${PREFERRED_OPENROUTER_SUFFIX}`)),
     ...usable.filter((m) => isFree(m.id) && m.supportsTools === true),
-    ...usable,
+    ...(namedOnly ? [] : usable),
   ];
   const out = ranked.filter((m, i) => ranked.findIndex((x) => x.id === m.id) === i);
   if (keepBridge && saved && !out.some((m) => m.id === saved) && (isBridgeModel(saved) || isBridgeLocalModel(saved))) out.unshift({ id: saved });

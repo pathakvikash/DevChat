@@ -12,7 +12,7 @@ const MODEL_UNAVAILABLE_PATTERN =
 export const MODEL_UNAVAILABLE_MESSAGE = "This model is not available from its provider right now. Pick another model from the model picker and send again.";
 
 // The provider account has no credits (HTTP 402, OpenRouter): another model may be cheaper or free, a retry is not.
-const CREDITS_PATTERN = /\b402\b|payment required|insufficient credits|requires more credits|more credits/i;
+const CREDITS_PATTERN = /^\s*402\b|"code":\s*402\b|\bstatus(?: code)?:?\s*402\b|payment required|insufficient credits|requires more credits/i;
 export const CREDITS_MESSAGE = "This model needs credits on your provider account. Add credits, or pick another model from the model picker and send again.";
 
 export function isTransientProviderError(msg: string): boolean {
@@ -36,7 +36,8 @@ export function friendlyProviderErrorMessage(
   if (opts.isOllama || isCliModelId(opts.servedModel)) return null;
   // Before the auth check: "not a valid model" would otherwise read as a bad key.
   if (MODEL_UNAVAILABLE_PATTERN.test(rawMsg)) return MODEL_UNAVAILABLE_MESSAGE;
-  if (CREDITS_PATTERN.test(rawMsg)) return CREDITS_MESSAGE;
+  // A 401/403 is an auth failure even if its text also says "Payment Required" or carries a stray 402.
+  if (!/\b40[13]\b/.test(rawMsg) && CREDITS_PATTERN.test(rawMsg)) return CREDITS_MESSAGE;
   if (!AUTH_ERROR_PATTERN.test(rawMsg)) return null;
   // Only keyed (hosted) providers have a key to add; CLI-backed models
   // (claude-code/…, opencode/…) report their own login problems verbatim.
