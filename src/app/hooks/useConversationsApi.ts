@@ -42,8 +42,9 @@ export function takeModelNote(id: string): string | null {
     const raw = sessionStorage.getItem(`${MODEL_NOTE_KEY}${id}`);
     if (!raw) return null;
     sessionStorage.removeItem(`${MODEL_NOTE_KEY}${id}`);
-    const { from, to } = JSON.parse(raw) as { from: string; to: string };
+    const { from, to, name } = JSON.parse(raw) as { from: string | null; to: string; name?: string };
     const label = (m: string) => m.split("/").pop() || m;
+    if (!from) return `Using ${name || label(to)}. Change it in the model picker or set a default in Settings.`;
     return `Your default model ${label(from)} is not available any more, so this chat uses ${label(to)}. You can change it in Settings.`;
   } catch {
     return null;

@@ -8,21 +8,32 @@ const OPENROUTER_HAIKU = "openrouter/anthropic/claude-haiku-5.5";
 describe("pickDefaultModel", () => {
   it("1. keeps the saved default when it is listed", () => {
     const list = [m("openai/gpt-x"), m(PREFERRED_MODEL_ID), m("openrouter/a/b:free")];
-    expect(pickDefaultModel("openrouter/a/b:free", list)).toEqual({ id: "openrouter/a/b:free", replaced: null });
+    expect(pickDefaultModel("openrouter/a/b:free", list)).toEqual({ id: "openrouter/a/b:free", replaced: null, auto: false });
   });
 
   it("2. otherwise prefers Haiku 5.5 from Anthropic, then from OpenRouter, when listed", () => {
     const gone = "openrouter/some-lab/ling-flash:free";
     expect(PREFERRED_MODEL_ID).toBe("anthropic/claude-haiku-5-5");
-    expect(pickDefaultModel(gone, [m("openai/gpt-x"), m(OPENROUTER_HAIKU), m(PREFERRED_MODEL_ID)])).toEqual({ id: PREFERRED_MODEL_ID, replaced: gone });
-    expect(pickDefaultModel(gone, [m("openai/gpt-x"), m(OPENROUTER_HAIKU)])).toEqual({ id: OPENROUTER_HAIKU, replaced: gone });
+    expect(pickDefaultModel(gone, [m("openai/gpt-x"), m(OPENROUTER_HAIKU), m(PREFERRED_MODEL_ID)])).toMatchObject({ id: PREFERRED_MODEL_ID, replaced: gone });
+    expect(pickDefaultModel(gone, [m("openai/gpt-x"), m(OPENROUTER_HAIKU)])).toMatchObject({ id: OPENROUTER_HAIKU, replaced: gone });
     // Nothing saved: Haiku is still the choice, and there is nothing to say was replaced.
-    expect(pickDefaultModel(null, [m("openai/gpt-x"), m(PREFERRED_MODEL_ID)])).toEqual({ id: PREFERRED_MODEL_ID, replaced: null });
+    expect(pickDefaultModel(null, [m("openai/gpt-x"), m(PREFERRED_MODEL_ID)])).toEqual({ id: PREFERRED_MODEL_ID, name: undefined, replaced: null, auto: true });
+  });
+
+  it("2b. without Haiku on Anthropic: a local or free model (tools first) beats OpenRouter Haiku and any other", () => {
+    const local = (id: string, supportsTools?: boolean) => ({ id, supportsTools });
+    const list = [m("openai/gpt-x"), m(OPENROUTER_HAIKU), local("ollama/a", false), local("ollama/b", true)];
+    expect(pickDefaultModel(null, list).id).toBe("ollama/b");
+    expect(pickDefaultModel(null, [m("openai/gpt-x"), m("lmstudio/q")]).id).toBe("lmstudio/q");
+    expect(pickDefaultModel(null, [m("openai/gpt-x"), m("openrouter/a/b:free")]).id).toBe("openrouter/a/b:free");
+    expect(pickDefaultModel(null, [m("openai/gpt-x"), m(PREFERRED_MODEL_ID), m("ollama/b")]).id).toBe(PREFERRED_MODEL_ID);
+    // A saved default that is listed still wins over all of it, and is not "auto".
+    expect(pickDefaultModel("openai/gpt-x", list)).toEqual({ id: "openai/gpt-x", replaced: null, auto: false });
   });
 
   it("3. otherwise the first usable listed model, and never an id that is not listed", () => {
     const gone = "openrouter/some-lab/ling-flash:free";
-    expect(pickDefaultModel(gone, [m("x/disabled", "offline"), m("openai/gpt-x"), m("openai/gpt-y")])).toEqual({ id: "openai/gpt-x", replaced: gone });
+    expect(pickDefaultModel(gone, [m("x/disabled", "offline"), m("openai/gpt-x"), m("openai/gpt-y")])).toMatchObject({ id: "openai/gpt-x", replaced: gone });
     // A model that sounds like Haiku but is not exactly the preferred id does not count.
     expect(pickDefaultModel(gone, [m("anthropic/claude-haiku-4-5"), m("openai/gpt-x")]).id).toBe("anthropic/claude-haiku-4-5");
     // Haiku disabled: skipped.
@@ -30,10 +41,10 @@ describe("pickDefaultModel", () => {
   });
 
   it("leaves the saved value alone when nothing is listed, and keeps a saved bridge model", () => {
-    expect(pickDefaultModel("openai/gpt-x", [])).toEqual({ id: "openai/gpt-x", replaced: null });
-    expect(pickDefaultModel(null, [])).toEqual({ id: undefined, replaced: null });
-    expect(pickDefaultModel("claude-code/default", [m("openai/gpt-x")])).toEqual({ id: "claude-code/default", replaced: null });
-    expect(pickDefaultModel("ollama/llama3.2:3b", [m("openai/gpt-x")])).toEqual({ id: "ollama/llama3.2:3b", replaced: null });
+    expect(pickDefaultModel("openai/gpt-x", [])).toEqual({ id: "openai/gpt-x", replaced: null, auto: false });
+    expect(pickDefaultModel(null, [])).toEqual({ id: undefined, replaced: null, auto: false });
+    expect(pickDefaultModel("claude-code/default", [m("openai/gpt-x")])).toEqual({ id: "claude-code/default", replaced: null, auto: false });
+    expect(pickDefaultModel("ollama/llama3.2:3b", [m("openai/gpt-x")])).toEqual({ id: "ollama/llama3.2:3b", replaced: null, auto: false });
   });
 });
 
@@ -45,5 +56,11 @@ describe("takeModelNote", () => {
     vi.stubGlobal("sessionStorage", { getItem: (k: string) => store.get(k) ?? null, removeItem: (k: string) => store.delete(k) });
     expect(takeModelNote("c1")).toBe("Your default model ling-flash:free is not available any more, so this chat uses claude-haiku-5-5. You can change it in Settings.");
     expect(takeModelNote("c1")).toBeNull();
+  });
+
+  it("names the automatically picked model when nothing was saved", () => {
+    const store = new Map<string, string>([[`${MODEL_NOTE_KEY}c2`, JSON.stringify({ from: null, to: "anthropic/claude-haiku-5-5", name: "Claude Haiku 5.5" })]]);
+    vi.stubGlobal("sessionStorage", { getItem: (k: string) => store.get(k) ?? null, removeItem: (k: string) => store.delete(k) });
+    expect(takeModelNote("c2")).toBe("Using Claude Haiku 5.5. Change it in the model picker or set a default in Settings.");
   });
 });

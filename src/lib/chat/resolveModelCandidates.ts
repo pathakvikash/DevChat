@@ -1,4 +1,6 @@
 import { initializeOllamaModels, listModels, type ProviderCreds } from "@/lib/models";
+import { pickDefaultModel } from "@/lib/defaultModel";
+import { getSettingsKey } from "@/lib/settings";
 import { providerForModel } from "@/lib/providers";
 import { resolveProviderCreds } from "@/lib/apiKeys";
 import { canUseHostTools } from "@/lib/hostAccess";
@@ -23,14 +25,9 @@ export async function resolveModelCandidates(
   let model = opts.requestedModel;
   if (!model) {
     const { models } = await listModels(creds, await canUseHostTools(opts.userId));
-    const ollamaModels = models.filter((m) => m.id.startsWith("ollama/"));
-    if (ollamaModels.length > 0) {
-      model = (ollamaModels.find((m) => m.supportsTools) || ollamaModels[0]).id;
-    } else if (models.length > 0) {
-      model = models[0].id;
-    } else {
-      throw new Error("No models available");
-    }
+    const picked = pickDefaultModel(await getSettingsKey(opts.userId, "defaultModel"), models);
+    if (!picked.id) throw new Error("No models available");
+    model = picked.id;
   } else {
     // getModel() for an Ollama id needs the tag cache warm.
     await initializeOllamaModels();

@@ -62,7 +62,7 @@ export async function POST(req: NextRequest) {
       temporary,
     } = await req.json();
 
-    const picked = bodyModel ? { id: bodyModel as string, replaced: null } : await resolveNewChatModel(userId);
+    const picked = bodyModel ? { id: bodyModel as string, replaced: null, auto: false, name: undefined } : await resolveNewChatModel(userId);
     const model = picked.id;
 
     const conversation = await prisma.conversation.create({
@@ -80,8 +80,8 @@ export async function POST(req: NextRequest) {
       },
     });
 
-    // modelReplaced: the saved default was no longer listed, so the chat uses `to` (the page says so).
-    return NextResponse.json(picked.replaced ? { ...conversation, modelReplaced: { from: picked.replaced, to: model } } : conversation, { status: 201 });
+    // modelReplaced: the server picked `to` (the saved default was gone, `from`, or none was saved); the page says so.
+    return NextResponse.json(picked.auto ? { ...conversation, modelReplaced: { from: picked.replaced, to: model, name: picked.name } } : conversation, { status: 201 });
   } catch (error) {
     console.error("Failed to create conversation:", error);
     return NextResponse.json(

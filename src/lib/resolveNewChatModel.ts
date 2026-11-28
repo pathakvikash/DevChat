@@ -12,10 +12,10 @@ export async function resolveNewChatModel(userId: string) {
   try {
     const { models, status } = await listModels(await resolveProviderCreds(userId), await canUseHostTools(userId));
     // A provider that errored lists no models, so the saved one would look gone: keep it, the send explains.
-    if (saved && status.some((s) => s.id === providerOf(saved) && s.error)) return { id: saved, replaced: null };
+    if (saved && status.some((s) => s.id === providerOf(saved) && s.error)) return { id: saved, replaced: null, auto: false };
     return pickDefaultModel(saved, [...mockModelCatalog(), ...models]);
   } catch (e) {
     console.error("Could not list models to pick a default:", e);
-    return { id: saved || undefined, replaced: null };
+    return { id: saved || undefined, replaced: null, auto: false };
   }
 }

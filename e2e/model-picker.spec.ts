@@ -63,7 +63,7 @@ test("a new chat never starts on a saved default model that is no longer listed"
     const chat = await res.json();
     expect(chat.model).not.toBe(stale);
     expect(chat.model).toMatch(/^mock\//); // the first listed usable model here
-    expect(chat.modelReplaced).toEqual({ from: stale, to: chat.model });
+    expect(chat.modelReplaced).toMatchObject({ from: stale, to: chat.model });
   } finally {
     await request.put("/api/settings/keys", { data: { defaultModel: "mock/echo" } });
   }
