@@ -448,7 +448,7 @@ export const MARKETING_PAGES: readonly MarketingPage[] = [
       },
     ],
     related: ["/features/visuals", "/features/agents", "/features/workflows"],
-    screenshot: { src: "/marketing/apps.webp", alt: "An Orrery chat that called a connected app's tool to get the BTC price, with the connected apps Trade MVP and Print Pro 3D listed in the sidebar", width: 1280, height: 800 },
+    screenshot: { src: "/marketing/apps.webp", alt: "Orrery's Settings > Apps page listing two connected apps, Trade MVP with 3 tools and Print Pro 3D with 2 tools, both marked Read only and Reachable, above the Add app form", width: 1280, height: 800 },
   },
 ];
 
