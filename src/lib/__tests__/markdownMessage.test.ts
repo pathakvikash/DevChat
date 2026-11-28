@@ -21,7 +21,6 @@ describe("MarkdownMessage soft line breaks", () => {
     expect(html).toContain('data-code="ts">a\nb');
   });
 });
-});
 
 describe("MarkdownMessage mermaid fences", () => {
   it("draws a closed fence", async () => {
